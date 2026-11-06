@@ -33,6 +33,7 @@ var hints = map[string]struct {
 }{
 	"list_pages":     {"List Pages", true, false},
 	"search_pages":   {"Search Pages", true, false},
+	"current_page":   {"Current Page", true, false},
 	"read_page":      {"Read Page", true, false},
 	"write_markdown": {"Write Markdown", false, false},
 	"insert_blocks":  {"Insert Blocks", false, false},
@@ -76,6 +77,7 @@ func toolList() []map[string]any {
 	add("list_pages", "List the user's pages (IDs, titles, tags, the page or folder each is in) and folders.", object(map[string]any{}))
 	add("search_pages", "Find pages by title, tag or text, recordings by transcript, and comments. Words starting with # (as #work) keep to the pages with those tags; alone they list them.",
 		object(map[string]any{"query": map[string]any{"type": "string"}}, "query"))
+	add("current_page", "Find what the user has in front of them in the Leaflet app: the open page, and its selection or caret, with the selected text, its blocks and offsets, and its text color and highlight as hex. open is false when no page is open now, with the page opened last, if any, and no selection.", object(map[string]any{}))
 	for _, name := range pageToolNames {
 		fn := defs[name]
 		params := fn["parameters"].(map[string]any)
@@ -214,6 +216,8 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 			out = append(out, hit)
 		}
 		return map[string]any{"results": out}, nil
+	case "current_page":
+		return t.currentPage()
 	case "create_page":
 		return t.createPage(args)
 	case "rename_page":
@@ -279,6 +283,31 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 		return t.onPage(name, args)
 	}
 	return nil, toolErr("Unknown tool " + name + ".")
+}
+
+// currentPage is the page open in the app, with its selection, or else the
+// page opened last. A page agents can't reach is left out, as they would
+// read of it through the selection.
+func (t *pageTools) currentPage() (map[string]any, error) {
+	st := t.s.st
+	view, err := st.OpenView()
+	if err != nil {
+		return nil, err
+	}
+	id, _ := st.Value(store.LastPageKey)
+	if view != nil {
+		id = view.PageID
+	}
+	p, err := t.page(map[string]any{"page_id": id}, false)
+	if err != nil {
+		return map[string]any{"open": false}, nil
+	}
+	out := map[string]any{"open": view != nil, "page_id": p.ID, "title": p.DisplayTitle()}
+	if view != nil {
+		out["selection"] = view.Selection
+		out["updated_at"] = view.At
+	}
+	return out, nil
 }
 
 func (t *pageTools) listPages() (map[string]any, error) {

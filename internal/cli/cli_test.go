@@ -674,3 +674,48 @@ func TestParts(t *testing.T) {
 		t.Errorf("one long table: %d parts", len(got))
 	}
 }
+
+func TestCurrent(t *testing.T) {
+	dir := pages(t)
+	if _, errOut, code := run(t, dir, "", "current"); code == 0 || !strings.Contains(errOut, "no page is open") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	id := strings.TrimSpace(ok(t, dir, "", "new", "Roadmap"))
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue(store.LastPageKey, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out := ok(t, dir, "", "current"); out != id[:8]+"  Roadmap  (opened last, not open now)\n" {
+		t.Fatalf("closed: %q", out)
+	}
+
+	st, err = store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	view := &store.OpenView{PageID: id, Selection: store.ViewSelection{Text: "ship it", Color: "#ef4444ff", Highlight: "#eab30840"}}
+	if err := st.SetOpenView(view); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, want := ok(t, dir, "", "current"), id[:8]+"  Roadmap\nColor: #ef4444ff\nHighlight: #eab30840\nSelected:\nship it\n"; out != want {
+		t.Fatalf("open: %q, want %q", out, want)
+	}
+	if out := ok(t, dir, "", "--json", "current"); !strings.Contains(out, `"text": "ship it"`) {
+		t.Fatalf("json: %s", out)
+	}
+}

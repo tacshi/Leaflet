@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
@@ -95,7 +96,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
+	for _, n := range []string{"list_pages", "search_pages", "current_page", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}
@@ -999,5 +1000,66 @@ func TestReadsKeptAreTheLatest(t *testing.T) {
 	s.pages.call("read_page", map[string]any{"page_id": ids[4]})
 	if s.pages.order[len(s.pages.order)-1] != ids[4] || len(s.pages.order) != keptReads {
 		t.Errorf("order %v", s.pages.order)
+	}
+}
+
+// current_page gives what the app's window shows, and without it the page
+// opened last, with no selection.
+func TestCurrentPage(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "1.0.0")
+	current := func() map[string]any {
+		t.Helper()
+		out, isErr := result(t, session(t, s, initialize, call(2, "current_page", nil))[2])
+		if isErr {
+			t.Fatalf("current_page: %v", out)
+		}
+		return out
+	}
+	if got := current(); got["open"] != false || got["page_id"] != nil {
+		t.Fatalf("no page ever opened: %v", got)
+	}
+
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Roadmap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue(store.LastPageKey, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := current(); got["open"] != false || got["page_id"] != p.ID || got["title"] != "Roadmap" || got["selection"] != nil {
+		t.Fatalf("app closed: %v", got)
+	}
+
+	view := store.OpenView{PageID: p.ID, At: time.Now(), Selection: store.ViewSelection{
+		StartBlock: "b1", StartOffset: 2, EndBlock: "b1", EndOffset: 4, Text: "it", Color: "#ef4444ff", MixedColors: true,
+	}}
+	if err := st.SetOpenView(&view); err != nil {
+		t.Fatal(err)
+	}
+	got := current()
+	sel, _ := got["selection"].(map[string]any)
+	if got["open"] != true || got["page_id"] != p.ID || sel["text"] != "it" || sel["color"] != "#ef4444ff" || sel["mixed_colors"] != true || sel["start_block"] != "b1" || sel["end_offset"] != 4.0 {
+		t.Fatalf("app open: %v", got)
+	}
+
+	// A template stays out of reach, its selection with it.
+	tpl, err := st.CreatePage(store.NewPageOptions{Title: "Weekly", Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view.PageID = tpl.ID
+	if err := st.SetOpenView(&view); err != nil {
+		t.Fatal(err)
+	}
+	if got := current(); got["open"] != false || got["selection"] != nil || got["page_id"] != nil {
+		t.Fatalf("template: %v", got)
+	}
+
+	if err := st.SetOpenView(nil); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := st.OpenView(); v != nil || err != nil {
+		t.Fatalf("view after it ended: %v, %v", v, err)
 	}
 }

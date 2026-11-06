@@ -233,6 +233,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | ツール | 内容 |
 | --- | --- |
 | `list_pages`、`search_pages` | タイトル、タグ、本文でページを、また録音やコメントを探す |
+| `current_page` | アプリで開いているページと、選択中のテキストとその文字色を見る |
 | `read_page` | ページのブロックを ID 付きで読む |
 | `create_page`、`rename_page` | ページの作成と名前の変更 |
 | `set_page_tags` | ページのタグを設定する |
@@ -244,7 +245,9 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 いても動作します。閲覧のみで共有されたページは読み取り専用です。エージェントが
 あるページを初めて編集する前に履歴のスナップショットを 1 つ保存し、その後は
 編集 10 分ごとに 1 つ保存し、ほかの変更と同じように同期します。開いている
-アプリは 1 秒以内にその内容を取り込み、入力中の内容とマージします。
+アプリは 1 秒以内にその内容を取り込み、入力中の内容とマージします。アプリが
+閉じているかページが開いていないとき、`current_page` はこのデバイスで最後に
+開いたページを返し、選択範囲は含みません。
 
 開発ビルドで試すには、開発版アプリのデータフォルダをバイナリに渡します：
 
@@ -261,6 +264,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | --- | --- |
 | `leaflet ls` | フォルダとページを ID とタグ付きで一覧する |
 | `leaflet search QUERY` | タイトル、タグ、本文でページを、また録音やコメントを探す |
+| `leaflet current` | アプリで開いているページと、選択中のテキストとその文字色を表示する |
 | `leaflet cat PAGE` | ページを Markdown で出力する |
 | `leaflet new [TITLE]` | ページを作成し、その ID を出力する。`--stdin` でパイプで渡した Markdown を内容にする |
 | `leaflet append PAGE [TEXT...]` | ページの末尾に Markdown を追加する：指定した文字列、またはパイプで渡した内容 |

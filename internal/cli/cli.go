@@ -156,6 +156,15 @@ comment.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: r.with(r.search),
 	}
+	current := &cobra.Command{
+		Use:   "current",
+		Short: "Show the page open in the app, with its selection and text color",
+		Long: `Show the page open in the app, with the selected text and its text color and
+highlight. With the app closed, or no page open, it names the page opened
+last, if any.`,
+		Args: cobra.NoArgs,
+		RunE: r.with(r.current),
+	}
 	cat := &cobra.Command{
 		Use:               "cat PAGE",
 		Short:             "Print a page as Markdown",
@@ -252,7 +261,7 @@ given. --clear takes them all off.`,
 		},
 		RunE: r.with(r.renameFolder),
 	})
-	for _, c := range []*cobra.Command{ls, search, cat, newPage, appendTo, rename, mv, tag, folders} {
+	for _, c := range []*cobra.Command{ls, search, current, cat, newPage, appendTo, rename, mv, tag, folders} {
 		c.GroupID = "pages"
 		r.root.AddCommand(c)
 	}
@@ -522,6 +531,57 @@ func (r *runner) search(args []string) error {
 		if h.Snippet != "" {
 			b.WriteString(strings.Repeat(" ", idLen+2) + strings.Join(strings.Fields(h.Snippet), " ") + "\n")
 		}
+	}
+	return r.print(b.String())
+}
+
+func (r *runner) current(_ []string) error {
+	out, err := r.call("current_page", map[string]any{})
+	if err != nil {
+		return err
+	}
+	if r.json {
+		return r.printJSON(out)
+	}
+	var at struct {
+		Open      bool   `json:"open"`
+		PageID    string `json:"page_id"`
+		Title     string `json:"title"`
+		Selection struct {
+			Text        string `json:"text"`
+			Truncated   bool   `json:"truncated"`
+			Color       string `json:"color"`
+			Highlight   string `json:"highlight"`
+			MixedColors bool   `json:"mixed_colors"`
+		} `json:"selection"`
+	}
+	if err := decode(out, &at); err != nil {
+		return err
+	}
+	if at.PageID == "" {
+		return errors.New("no page is open")
+	}
+	s := at.Selection
+	var b strings.Builder
+	b.WriteString(shortID(at.PageID) + "  " + at.Title)
+	if !at.Open {
+		b.WriteString("  (opened last, not open now)")
+	}
+	b.WriteString("\n")
+	if s.Color != "" {
+		b.WriteString("Color: " + s.Color + "\n")
+	}
+	if s.Highlight != "" {
+		b.WriteString("Highlight: " + s.Highlight + "\n")
+	}
+	if s.MixedColors {
+		b.WriteString("Colors differ across the selection\n")
+	}
+	if s.Text != "" {
+		b.WriteString("Selected:\n" + s.Text + "\n")
+	}
+	if s.Truncated {
+		b.WriteString("(the selection goes on)\n")
 	}
 	return r.print(b.String())
 }

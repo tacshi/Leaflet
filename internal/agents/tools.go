@@ -50,7 +50,7 @@ var blockSchema = map[string]any{
 	"description": "A block to write.",
 	"properties": map[string]any{
 		"type":      map[string]any{"type": "string", "enum": doc.AgentTypes},
-		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, [text](url). No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
+		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, [text](url), and text color and highlight as <span style=\"color:#ef4444;background:#fde68a\">text</span>, either alone, in hex, not nested. Keep the spans read_page shows when rewriting text. No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
 		"language":  map[string]any{"type": "string", "description": "A code block's language, such as go, python or typescript."},
 		"tone":      map[string]any{"type": "string", "enum": []string{"info", "tip", "warning", "danger"}, "description": "A callout's tone."},
 		"collapsed": map[string]any{"type": "boolean", "description": "Whether a toggle_list starts folded, its children hidden."},

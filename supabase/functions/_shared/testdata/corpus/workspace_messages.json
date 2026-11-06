@@ -1,102 +1,102 @@
 [
-{"open":null,"instruction":"]<42 __\u0001字。=","message":"Request:\n]<42 __\u0001字。="},
-{"open":{"id":"p-3","title":"__$ \\*"},"instruction":"@\n4242日本語:","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"__\\u0085$ \\\\*\"}\n\nRequest:\n@\n4242日本語:"},
-{"open":null,"instruction":"﻿\"","message":"Request:\n﻿\""},
-{"open":null,"instruction":"#@&%>","message":"Request:\n#@&%>"},
-{"open":{"id":"p-8","title":"ß|)!**"},"instruction":"\f @K[\n","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"ß|)!**\"}\n\nRequest:\n\f @K[\n"},
+{"open":null,"instruction":"~ +42{<span style=\"color:red\">\rKé:","message":"Request:\n~ +42{<span style=\"color:red\">\rKé:"},
+{"open":{"id":"p-3","title":"<span style=\"color:red\"> .{)**"},"instruction":"'\n\u00014242日本語<","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"<span style=\\\"color:red\\\"> .{)**\"}\n\nRequest:\n'\n\u00014242日本語<"},
+{"open":null,"instruction":"​$","message":"Request:\n​$"},
+{"open":null,"instruction":"!\"=@\\","message":"Request:\n!\"=@\\"},
+{"open":{"id":"p-8","title":"İ-[]<span style=\"color:#ff0000\">"},"instruction":"\u000b%\"Σ`*","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"İ-[]<span style=\\\"color:#ff0000\\\">\"}\n\nRequest:\n\u000b%\"Σ`*"},
 {"open":null,"instruction":"","message":"Request:\n"},
-{"open":null,"instruction":"！=&  ","message":"Request:\n！=&  "},
-{"open":{"id":"p-3","title":"«42|~~\""},"instruction":"+42 ","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"«42|~~\\\"\"}\n\nRequest:\n+42 "},
-{"open":{"id":"p-6","title":"　"},"instruction":"ß\"𝔸0\u0001Σ]!\\(","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"　\"}\n\nRequest:\nß\"𝔸0\u0001Σ]!\\("},
-{"open":null,"instruction":"𝔸\u00010é字","message":"Request:\n𝔸\u00010é字"},
-{"open":null,"instruction":"<","message":"Request:\n<"},
-{"open":null,"instruction":"/Kx","message":"Request:\n/Kx"},
-{"open":{"id":"p-8","title":"Σ","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"Σ\",\"shared\":true}\n\nRequest:\n"},
-{"open":{"id":"p-4","title":"-.>+日本語x"},"instruction":"|日本語@","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"-.>+日本語x\"}\n\nRequest:\n|日本語@"},
-{"open":{"id":"p-8","title":"日本語**","shared":true},"instruction":"é*`[~x\t","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"日本語**\",\"shared\":true}\n\nRequest:\né*`[~x\t"},
-{"open":{"id":"p-3","title":"~)","shared":true},"instruction":"=","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"~)\",\"shared\":true}\n\nRequest:\n="},
-{"open":null,"instruction":"«\f]#字(","message":"Request:\n«\f]#字("},
-{"open":null,"instruction":"\\b","message":"Request:\n\\b"},
-{"open":{"id":"p-4","title":"««. ！0"},"instruction":"/\"Σ|PlanßΣ>","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"««.\\u2029！0\"}\n\nRequest:\n/\"Σ|PlanßΣ>"},
-{"open":{"id":"p-1","title":">Plan b)"},"instruction":"？　.","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\">Plan b)\"}\n\nRequest:\n？　."},
-{"open":{"id":"p-6","title":"&","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"&\",\"shared\":true}\n\nRequest:\n"},
-{"open":{"id":"p-7","title":"/"},"instruction":"):﻿","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"/\"}\n\nRequest:\n):﻿"},
-{"open":{"id":"p-5","title":" ​`","shared":true},"instruction":"-","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\" ​`\",\"shared\":true}\n\nRequest:\n-"},
+{"open":null,"instruction":"！:= ","message":"Request:\n！:= "},
+{"open":{"id":"p-3","title":"！42-__&"},"instruction":"#   ","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"！42-__&\"}\n\nRequest:\n#   "},
+{"open":{"id":"p-6","title":" "},"instruction":"İ$𝔸42\rß~()~~","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\\u2029\"}\n\nRequest:\nİ$𝔸42\rß~()~~"},
+{"open":null,"instruction":"😀\u00010字","message":"Request:\n😀\u00010字"},
+{"open":null,"instruction":"+","message":"Request:\n+"},
+{"open":null,"instruction":"|Σ0","message":"Request:\n|Σ0"},
+{"open":{"id":"p-8","title":"ß","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"ß\",\"shared\":true}\n\nRequest:\n"},
+{"open":{"id":"p-4","title":"#/\\#日本語x"},"instruction":"-字\"","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"#/\\\\#日本語x\"}\n\nRequest:\n-字\""},
+{"open":{"id":"p-8","title":"字<span style=\"color:#ff0000\">","shared":true},"instruction":"é*</span>`_x\t","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"字<span style=\\\"color:#ff0000\\\">\",\"shared\":true}\n\nRequest:\né*</span>`_x\t"},
+{"open":{"id":"p-3","title":"_]","shared":true},"instruction":":","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"_]\",\"shared\":true}\n\nRequest:\n:"},
+{"open":null,"instruction":"«\u000b~!字~~","message":"Request:\n«\u000b~!字~~"},
+{"open":null,"instruction":"(Plan","message":"Request:\n(Plan"},
+{"open":{"id":"p-4","title":"««/！0"},"instruction":"|&Σ>PlanßΣ\\","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"««/\\u0085！0\"}\n\nRequest:\n|&Σ>PlanßΣ\\"},
+{"open":{"id":"p-1","title":"!Plan%b]"},"instruction":"？ /","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"!Plan%b]\"}\n\nRequest:\n？ /"},
+{"open":{"id":"p-6","title":"$","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"$\",\"shared\":true}\n\nRequest:\n"},
+{"open":{"id":"p-7","title":"|"},"instruction":"[<​","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"|\"}\n\nRequest:\n[<​"},
+{"open":{"id":"p-5","title":"  　</span>","shared":true},"instruction":"#","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"  　</span>\",\"shared\":true}\n\nRequest:\n#"},
 {"open":{"id":"p-6","title":""},"instruction":"","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\"}\n\nRequest:\n"},
-{"open":null,"instruction":">a%)\f/x\\_«","message":"Request:\n>a%)\f/x\\_«"},
-{"open":{"id":"p-7","title":":","shared":true},"instruction":"xx","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"\\u0085:\",\"shared\":true}\n\nRequest:\nxx"},
-{"open":null,"instruction":"Plan# ~~","message":"Request:\nPlan# ~~"},
-{"open":{"id":"p-2","title":"`字𝔸\f"},"instruction":"#\u000bé \f**>K__？","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"`字𝔸\\f\"}\n\nRequest:\n#\u000bé \f**>K__？"},
-{"open":null,"instruction":"+)　@$😀x  ","message":"Request:\n+)　@$😀x  "},
-{"open":{"id":"p-4","title":"  \u000b\u0001😀","shared":true},"instruction":"​0|! \n(字","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\" \\u2028\\u000b\\u0001😀\",\"shared\":true}\n\nRequest:\n​0|! \n(字"},
-{"open":{"id":"p-6","title":"","shared":true},"instruction":"!\f","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\",\"shared\":true}\n\nRequest:\n!\f"},
-{"open":{"id":"p-1","title":"","shared":true},"instruction":"ß！K\fß!/ ","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"\",\"shared\":true}\n\nRequest:\nß！K\fß!/ "},
-{"open":{"id":"p-1","title":"{"},"instruction":"{[é~%","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"{\"}\n\nRequest:\n{[é~%"},
+{"open":null,"instruction":"\\a@]﻿|0(<span style=\"background:#00ff00;color:#FF000080\">«","message":"Request:\n\\a@]﻿|0(<span style=\"background:#00ff00;color:#FF000080\">«"},
+{"open":{"id":"p-7","title":" |","shared":true},"instruction":"xx","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\" |\",\"shared\":true}\n\nRequest:\nxx"},
+{"open":null,"instruction":"\u0001Plan! __","message":"Request:\n\u0001Plan! __"},
+{"open":{"id":"p-2","title":"</span>K𝔸\u000b"},"instruction":")​%\u000b<span style=\"color:#ff0000\">\\K<span style=\"color:red\">？","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"</span>K𝔸\\u000b\"}\n\nRequest:\n)​%\u000b<span style=\"color:#ff0000\">\\K<span style=\"color:red\">？"},
+{"open":null,"instruction":">[ '.😀x  ","message":"Request:\n>[ '.😀x  "},
+{"open":{"id":"p-4","title":"%​\r😀","shared":true},"instruction":"\u0001　42-] \u0001*~~K","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"%\\u0085​\\r😀\",\"shared\":true}\n\nRequest:\n\u0001　42-] \u0001*~~K"},
+{"open":{"id":"p-6","title":"","shared":true},"instruction":"]\u000b","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\",\"shared\":true}\n\nRequest:\n]\u000b"},
+{"open":{"id":"p-1","title":"","shared":true},"instruction":"İ！\u0001Σ﻿İ(|%","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"\",\"shared\":true}\n\nRequest:\nİ！\u0001Σ﻿İ(|%"},
+{"open":{"id":"p-1","title":"%"},"instruction":"%`é_@","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"%\"}\n\nRequest:\n%`é_@"},
 {"open":{"id":"p-3","title":""},"instruction":"«","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"\"}\n\nRequest:\n«"},
-{"open":{"id":"p-6","title":"","shared":true},"instruction":"\n𝔸'\"(!:","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\",\"shared\":true}\n\nRequest:\n\n𝔸'\"(!:"},
-{"open":{"id":"p-8","title":" 　K"},"instruction":"ßΣ #😀​？ß字","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\" 　K\"}\n\nRequest:\nßΣ #😀​？ß字"},
-{"open":{"id":"p-1","title":"\u0001`"},"instruction":" ba\n 00","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"\\u0001`\"}\n\nRequest:\n ba\n 00"},
-{"open":{"id":"p-0","title":"(** b-'"},"instruction":"😀Plan«  日本語'﻿","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"(** b-'\"}\n\nRequest:\n😀Plan«  日本語'﻿"},
-{"open":{"id":"p-8","title":"{𝔸é","shared":true},"instruction":"@`","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"{𝔸é\",\"shared\":true}\n\nRequest:\n@`"},
-{"open":{"id":"p-4","title":"`","shared":true},"instruction":"__日本語-​？","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"`\",\"shared\":true}\n\nRequest:\n__日本語-​？"},
-{"open":{"id":"p-4","title":"«**"},"instruction":"\n","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"«**\"}\n\nRequest:\n\n"},
-{"open":null,"instruction":"#​","message":"Request:\n#​"},
-{"open":{"id":"p-2","title":"   "},"instruction":" \f\t","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"  \\u2029\"}\n\nRequest:\n \f\t"},
-{"open":null,"instruction":"b﻿﻿ ​ ​é","message":"Request:\nb﻿﻿ ​ ​é"},
+{"open":{"id":"p-6","title":"","shared":true},"instruction":"\n😀 &$[]<","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"\",\"shared\":true}\n\nRequest:\n\n😀 &$[]<"},
+{"open":{"id":"p-8","title":"% Σ"},"instruction":"İΣ  )日本語　？İK","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"%\\u2029Σ\"}\n\nRequest:\nİΣ  )日本語　？İK"},
+{"open":{"id":"p-1","title":"\r</span>"},"instruction":"%ba* 00","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"\\r</span>\"}\n\nRequest:\n%ba* 00"},
+{"open":{"id":"p-0","title":"[<span style=\"color:#ff0000\">{b#&"},"instruction":"😀Plan！   {日本語&　","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"[<span style=\\\"color:#ff0000\\\">{b#&\"}\n\nRequest:\n😀Plan！   {日本語&　"},
+{"open":{"id":"p-8","title":"@𝔸é","shared":true},"instruction":"\"</span>","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"@𝔸é\",\"shared\":true}\n\nRequest:\n\"</span>"},
+{"open":{"id":"p-4","title":"\u0001</span>","shared":true},"instruction":"<span style=\"color:red\">字# ？","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"\\u0001</span>\",\"shared\":true}\n\nRequest:\n<span style=\"color:red\">字# ？"},
+{"open":{"id":"p-4","title":"«<span style=\"color:#ff0000\">"},"instruction":"\n","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"«<span style=\\\"color:#ff0000\\\">\"}\n\nRequest:\n\n"},
+{"open":null,"instruction":"!　","message":"Request:\n!　"},
+{"open":{"id":"p-2","title":"   "},"instruction":"\u000b\n","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"  \\u2028\"}\n\nRequest:\n\u000b\n"},
+{"open":null,"instruction":"b​​ 　%　","message":"Request:\nb​​ 　%　"},
 {"open":null,"instruction":"","message":"Request:\n"},
-{"open":null,"instruction":"﻿#","message":"Request:\n﻿#"},
-{"open":null,"instruction":"**","message":"Request:\n**"},
-{"open":{"id":"p-8","title":"\\-{\u000b"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"\\\\-{\\u000b\"}\n\nRequest:\n"},
-{"open":{"id":"p-4","title":"é"},"instruction":"0|\r\fİ\f\"\u0001{\r","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"é\"}\n\nRequest:\n0|\r\fİ\f\"\u0001{\r"},
-{"open":{"id":"p-2","title":"Plan>İ=","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"Plan>İ=\",\"shared\":true}\n\nRequest:\n"},
-{"open":null,"instruction":")& «*","message":"Request:\n)& «*"},
-{"open":null,"instruction":"[\u000b","message":"Request:\n[\u000b"},
-{"open":{"id":"p-4","title":"_= 😀","shared":true},"instruction":"{0","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"_=\\u2028😀\",\"shared\":true}\n\nRequest:\n{0"},
-{"open":{"id":"p-7","title":"","shared":true},"instruction":" ~~Σ!\n[","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"\",\"shared\":true}\n\nRequest:\n ~~Σ!\n["},
-{"open":{"id":"p-0","title":"]日本語​ @"},"instruction":"　","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"]日本語​ @\"}\n\nRequest:\n　"},
-{"open":null,"instruction":" \"!\n𝔸\f|%`​","message":"Request:\n \"!\n𝔸\f|%`​"},
-{"open":{"id":"p-8","title":""},"instruction":"\u000bİ @>\"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"\"}\n\nRequest:\n\u000bİ @>\""},
-{"open":null,"instruction":" ~\\","message":"Request:\n ~\\"},
-{"open":null,"instruction":"\r\u000b-{","message":"Request:\n\r\u000b-{"},
-{"open":{"id":"p-1","title":"日本語\r+字 ","shared":true},"instruction":"]Σ\t﻿","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"日本語\\r+字 \",\"shared\":true}\n\nRequest:\n]Σ\t﻿"},
-{"open":{"id":"p-0","title":"__"},"instruction":"@\n &~~","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"__\"}\n\nRequest:\n@\n &~~"},
-{"open":{"id":"p-6","title":"K\t+\r","shared":true},"instruction":"。😀字日本語a{","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"K\\t+\\r\",\"shared\":true}\n\nRequest:\n。😀字日本語a{"},
-{"open":{"id":"p-1","title":": "},"instruction":"|%>%Σ","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\": \"}\n\nRequest:\n|%>%Σ"},
-{"open":{"id":"p-2","title":"\né +"},"instruction":"@ ​","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"\\né +\"}\n\nRequest:\n@ ​"},
-{"open":{"id":"p-5","title":"日本語x+ß/","shared":true},"instruction":"K> **éK<İ","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"日本語x+ß/\",\"shared\":true}\n\nRequest:\nK> **éK<İ"},
-{"open":{"id":"p-7","title":"Σ","shared":true},"instruction":"\f。。b﻿","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"Σ\",\"shared\":true}\n\nRequest:\n\f。。b﻿"},
-{"open":{"id":"p-2","title":"'"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"'\"}\n\nRequest:\n"},
-{"open":null,"instruction":" ß|/\"[*﻿","message":"Request:\n ß|/\"[*﻿"},
-{"open":{"id":"p-8","title":"{:","shared":true},"instruction":"Σ {b\"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"{:\",\"shared\":true}\n\nRequest:\nΣ {b\""},
+{"open":null,"instruction":"​)","message":"Request:\n​)"},
+{"open":null,"instruction":"<span style=\"color:#ff0000\">","message":"Request:\n<span style=\"color:#ff0000\">"},
+{"open":{"id":"p-8","title":"(#%﻿"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"(#%﻿\"}\n\nRequest:\n"},
+{"open":{"id":"p-4","title":"é"},"instruction":"0>\f﻿é\u000b$\r@\f","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"é\"}\n\nRequest:\n0>\f﻿é\u000b$\r@\f"},
+{"open":{"id":"p-2","title":"Plan!é:","shared":true},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"Plan!é:\",\"shared\":true}\n\nRequest:\n"},
+{"open":null,"instruction":"[=«**","message":"Request:\n[=«**"},
+{"open":null,"instruction":"`﻿","message":"Request:\n`﻿"},
+{"open":{"id":"p-4","title":"<span style=\"background:#00ff00;color:#FF000080\">:😀","shared":true},"instruction":"%0","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"<span style=\\\"background:#00ff00;color:#FF000080\\\">:\\u0085😀\",\"shared\":true}\n\nRequest:\n%0"},
+{"open":{"id":"p-7","title":"","shared":true},"instruction":" `ß]*`{","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"\",\"shared\":true}\n\nRequest:\n `ß]*`{"},
+{"open":{"id":"p-0","title":"~日本語 {'"},"instruction":" ","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"~日本語\\u2029{'\"}\n\nRequest:\n "},
+{"open":null,"instruction":" $]*😀\u000b>'<span style=\"color:red\"> ","message":"Request:\n $]*😀\u000b>'<span style=\"color:red\"> "},
+{"open":{"id":"p-8","title":""},"instruction":"﻿é \"!$","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"\"}\n\nRequest:\n﻿é \"!$"},
+{"open":null,"instruction":"{_)","message":"Request:\n{_)"},
+{"open":null,"instruction":"\f﻿#@","message":"Request:\n\f﻿#@"},
+{"open":{"id":"p-1","title":"日本語\f#字 ","shared":true},"instruction":"~{Σ\n​","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"日本語\\f#字 \",\"shared\":true}\n\nRequest:\n~{Σ\n​"},
+{"open":{"id":"p-0","title":"<span style=\"color:red\">"},"instruction":"\"*{=__","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"<span style=\\\"color:red\\\">\"}\n\nRequest:\n\"*{=__"},
+{"open":{"id":"p-6","title":"Σ\n>\f","shared":true},"instruction":"\u0001。😀K字a%","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"Σ\\n>\\f\",\"shared\":true}\n\nRequest:\n\u0001。😀K字a%"},
+{"open":{"id":"p-1","title":"<{"},"instruction":"-'\\'ß","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"<{\"}\n\nRequest:\n-'\\'ß"},
+{"open":{"id":"p-2","title":"\n\u0001{#"},"instruction":"\"%　","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"\\n\\u0001{#\"}\n\nRequest:\n\"%　"},
+{"open":{"id":"p-5","title":"日本語x>İ+","shared":true},"instruction":"K\\ <span style=\"color:#ff0000\">éK+é","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"日本語x>İ+\",\"shared\":true}\n\nRequest:\nK\\ <span style=\"color:#ff0000\">éK+é"},
+{"open":{"id":"p-7","title":"ß","shared":true},"instruction":"\u000b。。b​","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"ß\",\"shared\":true}\n\nRequest:\n\u000b。。b​"},
+{"open":{"id":"p-2","title":"&"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"&\"}\n\nRequest:\n"},
+{"open":null,"instruction":"  İ-|&`**​ ","message":"Request:\n  İ-|&`**​ "},
+{"open":{"id":"p-8","title":"@<","shared":true},"instruction":"ß@b$","message":"Open page (JSON): {\"id\":\"p-8\",\"title\":\"@<\",\"shared\":true}\n\nRequest:\nß@b$"},
 {"open":null,"instruction":"","message":"Request:\n"},
-{"open":null,"instruction":"]42: 。？？:　","message":"Request:\n]42: 。？？:　"},
-{"open":null,"instruction":"é𝔸(﻿=0(İ　","message":"Request:\né𝔸(﻿=0(İ　"},
-{"open":null,"instruction":"~","message":"Request:\n~"},
-{"open":{"id":"p-5","title":"x\n。 Plan","shared":true},"instruction":"\u0001(**\r  　﻿ß$","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"x\\n。 Plan\",\"shared\":true}\n\nRequest:\n\u0001(**\r  　﻿ß$"},
-{"open":null,"instruction":"​\n！。'İ！__","message":"Request:\n​\n！。'İ！__"},
-{"open":{"id":"p-0","title":":<"},"instruction":"  +","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"\\u0085:<\"}\n\nRequest:\n  +"},
-{"open":{"id":"p-6","title":"字(ß","shared":true},"instruction":"$\"","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"字(ß\",\"shared\":true}\n\nRequest:\n$\""},
-{"open":{"id":"p-3","title":"\u000b$-"},"instruction":"<@'","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"\\u000b$-\\u0085\"}\n\nRequest:\n<@'"},
-{"open":null,"instruction":"！a\\","message":"Request:\n！a\\"},
-{"open":null,"instruction":"<'  42@(？>​","message":"Request:\n<'  42@(？>​"},
-{"open":{"id":"p-3","title":"K！"},"instruction":"\\","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"K！\"}\n\nRequest:\n\\"},
-{"open":null,"instruction":"Plan>﻿é","message":"Request:\nPlan>﻿é"},
-{"open":null,"instruction":"0！","message":"Request:\n0！"},
-{"open":{"id":"p-7","title":"😀","shared":true},"instruction":"x日本語﻿？　","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"😀\",\"shared\":true}\n\nRequest:\nx日本語﻿？　"},
-{"open":{"id":"p-4","title":"﻿=+","shared":true},"instruction":"​","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"﻿=+\",\"shared\":true}\n\nRequest:\n​"},
+{"open":null,"instruction":"~42< 。？。| ","message":"Request:\n~42< 。？。| "},
+{"open":null,"instruction":"é😀~~​:0~~é ","message":"Request:\né😀~~​:0~~é "},
+{"open":null,"instruction":"_","message":"Request:\n_"},
+{"open":{"id":"p-5","title":"x\n。{Plan","shared":true},"instruction":"\r~~<span style=\"color:#ff0000\">\f\t ​İ.","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"x\\n。{Plan\",\"shared\":true}\n\nRequest:\n\r~~<span style=\"color:#ff0000\">\f\t ​İ."},
+{"open":null,"instruction":"　*！。&é！<span style=\"color:red\">","message":"Request:\n　*！。&é！<span style=\"color:red\">"},
+{"open":{"id":"p-0","title":" <+"},"instruction":"   >","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\" <+\"}\n\nRequest:\n   >"},
+{"open":{"id":"p-6","title":"字~~İ","shared":true},"instruction":".$","message":"Open page (JSON): {\"id\":\"p-6\",\"title\":\"字~~İ\",\"shared\":true}\n\nRequest:\n.$"},
+{"open":{"id":"p-3","title":"﻿=# "},"instruction":"+\"\"","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"﻿=# \"}\n\nRequest:\n+\"\""},
+{"open":null,"instruction":"！a)","message":"Request:\n！a)"},
+{"open":null,"instruction":"-\"    \"~~？!　","message":"Request:\n-\"    \"~~？!　"},
+{"open":{"id":"p-3","title":"Σ！"},"instruction":"(","message":"Open page (JSON): {\"id\":\"p-3\",\"title\":\"Σ！\"}\n\nRequest:\n("},
+{"open":null,"instruction":"Plan\\​","message":"Request:\nPlan\\​"},
+{"open":null,"instruction":"42！","message":"Request:\n42！"},
+{"open":{"id":"p-7","title":"日本語","shared":true},"instruction":"0日本語​。 ","message":"Open page (JSON): {\"id\":\"p-7\",\"title\":\"日本語\",\"shared\":true}\n\nRequest:\n0日本語​。 "},
+{"open":{"id":"p-4","title":"​:>","shared":true},"instruction":"　","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"​:>\",\"shared\":true}\n\nRequest:\n　"},
 {"open":null,"instruction":"","message":"Request:\n"},
-{"open":null,"instruction":"**！~~~","message":"Request:\n**！~~~"},
+{"open":null,"instruction":"<span style=\"color:#ff0000\">！___","message":"Request:\n<span style=\"color:#ff0000\">！___"},
 {"open":null,"instruction":"","message":"Request:\n"},
-{"open":null,"instruction":"\\~~*'0@</a~~","message":"Request:\n\\~~*'0@</a~~"},
-{"open":null,"instruction":"=|+ « ","message":"Request:\n=|+ « "},
-{"open":null,"instruction":"=​\f)%*","message":"Request:\n=​\f)%*"},
-{"open":{"id":"p-5","title":"﻿  \r#𝔸**"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"﻿  \\r#𝔸**\"}\n\nRequest:\n"},
-{"open":{"id":"p-4","title":"。"},"instruction":" !\f42","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"。\"}\n\nRequest:\n !\f42"},
-{"open":{"id":"p-1","title":"`字"},"instruction":"  ﻿]Planéß​&(","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"`字\"}\n\nRequest:\n  ﻿]Planéß​&("},
-{"open":null,"instruction":"éx`é ","message":"Request:\néx`é "},
-{"open":{"id":"p-0","title":"K~{"},"instruction":"!\u0001{\"ß[]_ !","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"K~{\"}\n\nRequest:\n!\u0001{\"ß[]_ !"},
-{"open":null,"instruction":">'字字","message":"Request:\n>'字字"},
-{"open":{"id":"p-4","title":"İ%~~!"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"İ%~~!\"}\n\nRequest:\n"},
-{"open":null,"instruction":"\"","message":"Request:\n\""},
-{"open":{"id":"p-2","title":"é)"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"é)\"}\n\nRequest:\n"}
+{"open":null,"instruction":"(__**&42\"+|a__","message":"Request:\n(__**&42\"+|a__"},
+{"open":null,"instruction":":-#« ","message":"Request:\n:-#« "},
+{"open":null,"instruction":"\u0001:　\u000b['**","message":"Request:\n\u0001:　\u000b['**"},
+{"open":{"id":"p-5","title":"　  \f)𝔸**"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-5\",\"title\":\"　  \\f)𝔸**\"}\n\nRequest:\n"},
+{"open":{"id":"p-4","title":"é"},"instruction":"]\u0001\u000b  ","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"é\"}\n\nRequest:\n]\u0001\u000b  "},
+{"open":{"id":"p-1","title":"<span style=\"color:red\">字"},"instruction":"\t　~~Planéİ =~~","message":"Open page (JSON): {\"id\":\"p-1\",\"title\":\"<span style=\\\"color:red\\\">字\"}\n\nRequest:\n\t　~~Planéİ =~~"},
+{"open":null,"instruction":"0</span>é ","message":"Request:\n0</span>é "},
+{"open":{"id":"p-0","title":"Σ_@"},"instruction":"]\r@$ß`~<span style=\"background:#00ff00;color:#FF000080\"> ]","message":"Open page (JSON): {\"id\":\"p-0\",\"title\":\"Σ_@\"}\n\nRequest:\n]\r@$ß`~<span style=\"background:#00ff00;color:#FF000080\"> ]"},
+{"open":null,"instruction":"\\&K字","message":"Request:\n\\&K字"},
+{"open":{"id":"p-4","title":"İ'__]"},"instruction":"","message":"Open page (JSON): {\"id\":\"p-4\",\"title\":\"İ'__]\"}\n\nRequest:\n"},
+{"open":null,"instruction":"&","message":"Request:\n&"},
+{"open":{"id":"p-2","title":"\u0001é["},"instruction":"","message":"Open page (JSON): {\"id\":\"p-2\",\"title\":\"\\u0001é[\"}\n\nRequest:\n"}
 ]

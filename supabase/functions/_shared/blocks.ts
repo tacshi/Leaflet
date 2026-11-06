@@ -439,6 +439,7 @@ interface MdRun {
   strike: boolean;
   code: boolean;
   href: string;
+  style: string;
   mention?: MentionAttr;
   rest: string;
 }
@@ -452,6 +453,7 @@ function mdRun(text: string, a: Attrs): MdRun {
     strike: strikethrough === true,
     code: code === true,
     href: typeof href === "string" ? href : "",
+    style: colorStyle(a),
     mention: mention && typeof mention === "object" ? (mention as MentionAttr) : undefined,
     rest: attrsKey(rest),
   };
@@ -522,7 +524,7 @@ function trimSpans(runs: MdRun[]): MdRun[] {
 
 /** A format Markdown writes around text: a link to href, bold ("*"), italic ("i") or strike ("~"). */
 interface MdMark {
-  kind: "[" | "*" | "i" | "~";
+  kind: "[" | "c" | "*" | "i" | "~";
   href: string;
 }
 
@@ -539,10 +541,14 @@ function sameMark(a?: MdMark, b?: MdMark): boolean {
   return !!a && !!b && a.kind === b.kind && a.href === b.href;
 }
 
-/** The marks of a run, outermost first when they open together: a link holds the others. */
+/**
+ * The marks of a run, outermost first when they open together: a link
+ * holds the others, and a color the formats.
+ */
 function marksOf(r: MdRun): MdMark[] {
   const out: MdMark[] = [];
   if (r.href) out.push({ kind: "[", href: r.href });
+  if (r.style) out.push({ kind: "c", href: r.style });
   if (r.bold) out.push({ kind: "*", href: "" });
   if (r.italic) out.push({ kind: "i", href: "" });
   if (r.strike) out.push({ kind: "~", href: "" });
@@ -559,7 +565,7 @@ const isMarker = (t: MdToken) => !!(t.open || t.close);
  */
 function spacesOutside(toks: MdToken[]): MdToken[] {
   const plain = (t: MdToken) => !t.open && !t.close && !t.code;
-  const emphasis = (t: MdToken) => isMarker(t) && t.mark!.kind !== "[";
+  const emphasis = (t: MdToken) => isMarker(t) && t.mark!.kind !== "[" && t.mark!.kind !== "c";
   const out: MdToken[] = [];
   for (let i = 0; i < toks.length;) {
     if (!isMarker(toks[i])) {
@@ -626,12 +632,76 @@ function boldTouchesItalic(toks: MdToken[], i: number): boolean {
   return at(i - 1) || at(i + 1) || at(j - 1) || at(j + 1);
 }
 
-/** Escapes the characters that would read as markup: all the markers but a _ inside a word. */
+/** The tags a color is written between (deltaToMarkdown). */
+const COLOR_OPEN = '<span style="';
+const COLOR_CLOSE = "</span>";
+
+/**
+ * The longest style a color's tag is read with: a text of tags that end
+ * nowhere is not looked through to its end from each (doc.maxColorStyle).
+ */
+const MAX_COLOR_STYLE = 64;
+
+const colorRe = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/** Whether v is a color as runs keep one (doc.ValidColor). */
+function validColor(v: unknown): v is string {
+  return typeof v === "string" && colorRe.test(v);
+}
+
+/** How a run's color and highlight are written in a tag, "" without them (doc.colorStyle). */
+function colorStyle(a: Attrs): string {
+  const parts: string[] = [];
+  if (validColor(a.color)) parts.push(`color:${a.color}`);
+  if (validColor(a.background)) parts.push(`background:${a.background}`);
+  return parts.join(";");
+}
+
+/** Whether the characters of s at i spell text. */
+function hasChars(s: string[], i: number, text: string): boolean {
+  const t = [...text];
+  return t.every((c, k) => s[i + k] === c);
+}
+
+/**
+ * Reads a color's opening tag at s[i], before hi: the formats it sets on
+ * attrs and how many characters it takes, or null when there is none, as a
+ * style of anything but hex colors, which reads as the text it is
+ * (doc.colorTagAt).
+ */
+function colorTagAt(s: string[], i: number, hi: number, attrs: Attrs): { attrs: Attrs; n: number } | null {
+  if (!hasChars(s, i, COLOR_OPEN)) return null;
+  const start = i + COLOR_OPEN.length;
+  const limit = Math.min(hi, start + MAX_COLOR_STYLE);
+  let end = start;
+  while (end < limit && s[end] !== '"') end++;
+  if (end >= limit || end + 1 >= hi || s[end + 1] !== ">") return null;
+  const out = { ...attrs };
+  let found = false;
+  for (const part of s.slice(start, end).join("").split(";")) {
+    if (trimSpace(part) === "") continue;
+    const at = part.indexOf(":");
+    const name = trimSpace(at < 0 ? part : part.slice(0, at));
+    const value = at < 0 ? "" : trimSpace(part.slice(at + 1));
+    if (!validColor(value)) return null;
+    if (name === "color") out.color = value;
+    else if (name === "background" || name === "background-color") out.background = value;
+    else return null;
+    found = true;
+  }
+  return found ? { attrs: out, n: end + 2 - i } : null;
+}
+
+/**
+ * Escapes the characters that would read as markup: all the markers but a
+ * _ inside a word, and the < of a color's tags.
+ */
 function escapeText(s: string): string {
   const chars = [...s];
   let out = "";
   chars.forEach((c, i) => {
     if ("\\*`~[]".includes(c)) out += "\\";
+    else if (c === "<" && (hasChars(chars, i, COLOR_OPEN) || hasChars(chars, i, COLOR_CLOSE))) out += "\\";
     else if (
       c === "_" && (i === 0 || i + 1 === chars.length || !isWordChar(chars[i - 1]) || !isWordChar(chars[i + 1]))
     ) out += "\\";
@@ -730,6 +800,7 @@ export function deltaToMarkdown(delta: DeltaOp[]): string {
     if (t.code) out += codeSpan(t.text);
     else if (!isMarker(t)) out += t.text;
     else if (t.mark!.kind === "[") out += t.open ? "[" : `](${linkDestination(t.mark!.href)})`;
+    else if (t.mark!.kind === "c") out += t.open ? `${COLOR_OPEN}${t.mark!.href}">` : COLOR_CLOSE;
     // Bold beside an italic's * is __, as *** reads either way.
     else if (t.mark!.kind === "*") out += boldTouchesItalic(toks, i) ? "__" : "**";
     else if (t.mark!.kind === "i") out += "*";
@@ -1121,6 +1192,16 @@ function parseInline(span: Span, attrs: Attrs, out: DeltaOp[], depth = 0): void 
         continue;
       }
     }
+    if (c === "<") {
+      const tag = colorTagAt(s, i, hi, attrs);
+      const end = tag ? span.indexOf(COLOR_CLOSE, i + tag.n) : -1;
+      if (tag && end > i + tag.n) {
+        flush();
+        parseInline(inner(i + tag.n, end), tag.attrs, out, depth + 1);
+        i = end + COLOR_CLOSE.length;
+        continue;
+      }
+    }
     // ***both*** is bold and italic, as agents write it.
     if (i + 2 < hi && (c === "*" || c === "_") && s[i + 1] === c && s[i + 2] === c) {
       const end = span.indexOf(c.repeat(3), i + 3);
@@ -1158,7 +1239,8 @@ function parseInline(span: Span, attrs: Attrs, out: DeltaOp[], depth = 0): void 
 
 /**
  * Reads the inline markdown dialect (doc.FromMarkdown): **bold** or
- * __bold__, *italic* or _italic_, `code`, ~~strike~~, [text](url), page
+ * __bold__, *italic* or _italic_, `code`, ~~strike~~, colors in
+ * <span style="color:#rrggbb;background:#rrggbb">, [text](url), page
  * mentions [Title](leaflet://page/<id>) and person or agent mentions
  * [@Name](mention:user|agent:<id>).
  */

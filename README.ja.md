@@ -249,6 +249,10 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 閉じているかページが開いていないとき、`current_page` はこのデバイスで最後に
 開いたページを返し、選択範囲は含みません。
 
+エージェントはテキストフィールドで文字色とハイライトを
+`<span style="color:#ef4444;background:#fde68a">テキスト</span>` のように 16 進数で
+読み書きします。`leaflet cat` とエクスポートには色は含まれません。
+
 開発ビルドで試すには、開発版アプリのデータフォルダをバイナリに渡します：
 
 ```bash

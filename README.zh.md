@@ -220,6 +220,9 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 读到这些修改，并与正在输入的内容合并。应用关闭或没有打开页面时，`current_page`
 给出这台设备上最后打开的页面，不含选区。
 
+智能体在文本字段中用 `<span style="color:#ef4444;background:#fde68a">文字</span>`
+读写文字颜色和高亮，颜色为十六进制。`leaflet cat` 和导出不包含颜色。
+
 要在开发构建上试用，把开发版应用的数据文件夹交给一个二进制文件：
 
 ```bash

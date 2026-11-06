@@ -9,8 +9,10 @@ import (
 
 // ToMarkdown writes rich text in the small inline markdown dialect agents
 // read and write: **bold** or __bold__, *italic* or _italic_, `code`,
-// ~~strike~~, and [text](url); a page mention is [Title](leaflet://page/<id>),
-// and a person or an agent [@Name](mention:user:<id>) or mention:agent:<id>.
+// ~~strike~~, <span style="color:#ef4444ff;background:#eab30840">text color
+// and highlight</span>, and [text](url); a page mention is
+// [Title](leaflet://page/<id>), and a person or an agent
+// [@Name](mention:user:<id>) or mention:agent:<id>.
 // Text that would read as markup is escaped with backslashes, so it reads
 // back as written. A format over several runs is
 // one span, the others nested in it, so runs side by side read back as
@@ -99,6 +101,10 @@ func (d Delta) ToMarkdown() string {
 			b.WriteString("[")
 		case t.mark.kind == '[':
 			b.WriteString("](" + LinkDestination(t.mark.href) + ")")
+		case t.mark.kind == 'c' && t.open:
+			b.WriteString(colorOpen + t.mark.href + `">`)
+		case t.mark.kind == 'c':
+			b.WriteString(colorClose)
 		case t.mark.kind == '*' && boldTouchesItalic(toks, i):
 			// Bold beside an italic's * is __, as *** reads either way.
 			b.WriteString("__")
@@ -114,7 +120,7 @@ func (d Delta) ToMarkdown() string {
 }
 
 // mdMark is a format Markdown writes around text: a link to href, bold
-// ('*'), italic ('i') or strike ('~').
+// ('*'), italic ('i'), strike ('~') or a color ('c'), href its style.
 type mdMark struct {
 	kind byte
 	href string
@@ -132,11 +138,14 @@ type mdToken struct {
 func plainToken(t mdToken) bool { return !t.open && !t.close && !t.code }
 
 // marksOf are the marks of a run, outermost first when they open
-// together: a link holds the others.
+// together: a link holds the others, and a color the formats.
 func marksOf(a Attrs) []mdMark {
 	var out []mdMark
 	if a.Href != "" {
 		out = append(out, mdMark{kind: '[', href: a.Href})
+	}
+	if style := colorStyle(a); style != "" {
+		out = append(out, mdMark{kind: 'c', href: style})
 	}
 	if a.Bold {
 		out = append(out, mdMark{kind: '*'})
@@ -156,10 +165,11 @@ func marksOf(a Attrs) []mdMark {
 // keeps a format's own ends clear, but a format closed at a link's end
 // and opened again past it, as in "[read *this *](u)*and that*", gets new
 // ends. The spaces lose the format there, which they can't show; they
-// never cross a link's brackets, so a link keeps its text.
+// never cross a link's brackets or a color's tags, so a link keeps its
+// text and a color its spaces.
 func spacesOutside(toks []mdToken) []mdToken {
 	plain := plainToken
-	emphasis := func(t mdToken) bool { return (t.open || t.close) && t.mark.kind != '[' }
+	emphasis := func(t mdToken) bool { return (t.open || t.close) && t.mark.kind != '[' && t.mark.kind != 'c' }
 	var out []mdToken
 	for i := 0; i < len(toks); {
 		if !toks[i].open && !toks[i].close {
@@ -333,8 +343,77 @@ func trimSpans(d Delta) Delta {
 	return out.Compact()
 }
 
+// The tags a color is written between (ToMarkdown).
+const (
+	colorOpen  = `<span style="`
+	colorClose = `</span>`
+)
+
+// maxColorStyle is the longest style a color's tag is read with: a text of
+// tags that end nowhere is not looked through to its end from each.
+const maxColorStyle = 64
+
+// colorStyle is how a run's color and highlight are written in a tag, ""
+// without them.
+func colorStyle(a Attrs) string {
+	var parts []string
+	if ValidColor(a.Color) {
+		parts = append(parts, "color:"+a.Color)
+	}
+	if ValidColor(a.Background) {
+		parts = append(parts, "background:"+a.Background)
+	}
+	return strings.Join(parts, ";")
+}
+
+// colorTagAt reads a color's opening tag at the start of s: the formats it
+// sets on attrs, and how many runes it takes; 0 when there is none, as a
+// style of anything but hex colors, which reads as the text it is.
+func colorTagAt(s []rune, attrs Attrs) (Attrs, int) {
+	if !hasRunes(s, colorOpen) {
+		return attrs, 0
+	}
+	start := len(colorOpen)
+	rest := s[start:min(len(s), start+maxColorStyle)]
+	end := slices.Index(rest, '"')
+	if end < 0 || !hasRunes(s[start+end:], `">`) {
+		return attrs, 0
+	}
+	found := false
+	for _, part := range strings.Split(string(rest[:end]), ";") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		name, value, _ := strings.Cut(part, ":")
+		value = strings.TrimSpace(value)
+		if !ValidColor(value) {
+			return attrs, 0
+		}
+		switch strings.TrimSpace(name) {
+		case "color":
+			attrs.Color = value
+		case "background", "background-color":
+			attrs.Background = value
+		default:
+			return attrs, 0
+		}
+		found = true
+	}
+	if !found {
+		return attrs, 0
+	}
+	return attrs, start + end + 2
+}
+
+// hasRunes reports whether s starts with prefix.
+func hasRunes(s []rune, prefix string) bool {
+	p := []rune(prefix)
+	return len(s) >= len(p) && slices.Equal(s[:len(p)], p)
+}
+
 // escapeText escapes the characters that would read as markup: all the
-// markers but a _ inside a word, which can't start or end italics.
+// markers but a _ inside a word, which can't start or end italics, and the
+// < of a color's tags.
 func escapeText(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
@@ -344,6 +423,10 @@ func escapeText(s string) string {
 			b.WriteByte('\\')
 		case '_':
 			if i == 0 || i+1 == len(runes) || !isWord(runes[i-1]) || !isWord(runes[i+1]) {
+				b.WriteByte('\\')
+			}
+		case '<':
+			if hasRunes(runes[i:], colorOpen) || hasRunes(runes[i:], colorClose) {
 				b.WriteByte('\\')
 			}
 		}
@@ -375,7 +458,8 @@ func codeSpan(s string) string {
 
 // ReadableMarkdown is ToMarkdown for people to read, in an export or a
 // copy for another app: a person or an agent mentioned is the name the
-// page shows, as mention links mean something only to Leaflet's agents.
+// page shows, as mention links mean something only to Leaflet's agents,
+// and colors stay out, as Markdown has none.
 func (d Delta) ReadableMarkdown() string {
 	out := make(Delta, len(d))
 	for i, r := range d {
@@ -385,6 +469,7 @@ func (d Delta) ReadableMarkdown() string {
 			}
 			r.Attrs.Mention = nil
 		}
+		r.Attrs.Color, r.Attrs.Background = "", ""
 		out[i] = r
 	}
 	// Text can read back other than it was where Markdown can't say it, as
@@ -683,6 +768,16 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 				parseInline(text, a, out, depth+1)
 				i += n
 				continue
+			}
+		}
+		if c == '<' {
+			if a, n := colorTagAt(s[i:], attrs); n > 0 {
+				if end := indexString(links, colorClose, i+n); end > i+n {
+					flush()
+					parseInline(s[i+n:end], a, out, depth+1)
+					i = end + len(colorClose)
+					continue
+				}
 			}
 		}
 		// ***both*** is bold and italic, as agents write it.

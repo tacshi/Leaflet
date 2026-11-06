@@ -1,402 +1,402 @@
 [
-{"markdown":"\u000b[a](https://x.com/(b)) ","delta":[{"insert":"\u000b"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":" "}]},
-{"markdown":"`[](leaflet://page/p3)\n[](leaflet://page/p3)42@<`code`a<[x](leaflet://page/p2#b1)Plan\\%","delta":[{"insert":"[](leaflet://page/p3)\n[](leaflet://page/p3)42@<","attributes":{"code":true}},{"insert":"code`a<"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"Plan%"}]},
-{"markdown":"\n\t日本語\\:~~gone~~**a*​","delta":[{"insert":"\n\t日本語:"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"​"}]},
-{"markdown":"日本語https://example.com/x?y=1[﻿**bold**😀)\n[x](leaflet://page/p2#b1)\\[ ","delta":[{"insert":"日本語https://example.com/x?y=1[﻿"},{"insert":"bold","attributes":{"bold":true}},{"insert":"😀)\n"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"[ "}]},
-{"markdown":"a&[a](https://x.com/(b))0\\\\\f$*Plan\"\f","delta":[{"insert":"a&"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"0\\\f$*Plan\"\f"}]},
-{"markdown":"[a](<https://x.com/a b>)[a](<https://x.com/a b>)","delta":[{"insert":"aa","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":":\t\r\"","delta":[{"insert":":\t\r\""}]},
-{"markdown":"﻿字`x","delta":[{"insert":"﻿字`x"}]},
-{"markdown":"-a+","delta":[{"insert":"-a+"}]},
-{"markdown":"​Plan\\`+_< [1:23](leaflet://page/p2#b1?t=83)","delta":[{"insert":"​Plan`+_< "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}}]},
-{"markdown":"[link](https://example.com/a)/snake_case>* [1:23](leaflet://page/p2#b1?t=83)*a**~~   𝔸！https://example.com/x?y=1","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"/snake_case>"},{"insert":" ","attributes":{"italic":true}},{"insert":"1:23","attributes":{"italic":true,"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a**~~   𝔸！https://example.com/x?y=1"}]},
-{"markdown":"  [1:23](leaflet://page/p2#b1?t=83):_it_İ)字#=！","delta":[{"insert":"  "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":":_it_İ)字#=！"}]},
-{"markdown":"_a_b_\u000b__[\\`\\\\: 42x","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"\u000b__[`\\: 42x"}]},
-{"markdown":"\\[.ß`code`>__ * >。* '$","delta":[{"insert":"[.ß"},{"insert":"code","attributes":{"code":true}},{"insert":">__ "},{"insert":" >。","attributes":{"italic":true}},{"insert":" '$"}]},
+{"markdown":"​[a](<https://x.com/a b>) ","delta":[{"insert":"​"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":" "}]},
+{"markdown":"</span>[](leaflet://page/p3)\n[1:23](leaflet://page/p2#b1?t=83)42&-~~gone~~a-[Plan](leaflet://page/p1)Plan(\"","delta":[{"insert":"</span>[](leaflet://page/p3)\n"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"42&-"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"a-"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Plan(\""}]},
+{"markdown":"\n\nK(<_it_**a* ","delta":[{"insert":"\n\nK(<"},{"insert":"it","attributes":{"italic":true}},{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":" "}]},
+{"markdown":"字https://example.com/x?y=1`　snake_case字~~*[Plan](leaflet://page/p1)\\[ ","delta":[{"insert":"字https://example.com/x?y=1`　snake_case字~~*"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"[ "}]},
+{"markdown":"a.[a](<https://x.com/a b>)0\\\\﻿{:**Plan=﻿","delta":[{"insert":"a."},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"0\\﻿{:**Plan=﻿"}]},
+{"markdown":"[link](https://example.com/a)[link](https://example.com/a)","delta":[{"insert":"linklink","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"<\t\u000b$","delta":[{"insert":"<\t\u000b$"}]},
+{"markdown":"　Σ</span>{x","delta":[{"insert":"　Σ</span>{x"}]},
+{"markdown":"\\a#","delta":[{"insert":"\\a#"}]},
+{"markdown":" Plan\\_#<span style=\"color:#ff0000\">- [x](leaflet://page/p2#b1)","delta":[{"insert":" Plan_#<span style=\"color:#ff0000\">- "},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}}]},
+{"markdown":"``a`b``+word!* [x](leaflet://page/p2#b1)*a**__@  😀？[](leaflet://page/p3)","delta":[{"insert":"a`b","attributes":{"code":true}},{"insert":"+word!"},{"insert":" ","attributes":{"italic":true}},{"insert":"x","attributes":{"italic":true,"href":"leaflet://page/p2#b1"}},{"insert":"a**__@  😀？[](leaflet://page/p3)"}]},
+{"markdown":"  [x](leaflet://page/p2#b1)|*it*[K)/？","delta":[{"insert":"  "},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"|"},{"insert":"it","attributes":{"italic":true}},{"insert":"[K)/？"}]},
+{"markdown":"_a_b_​<span style=\"color:red\">__\\_\\\\< 42x","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"​<span style=\"color:red\">___\\< 42x"}]},
+{"markdown":"(__<İ~~gone~~!<span style=\"background:#00ff00;color:#FF000080\"> * \\𝔸* $:","delta":[{"insert":"(__<İ"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"!<span style=\"background:#00ff00;color:#FF000080\"> "},{"insert":" \\𝔸","attributes":{"italic":true}},{"insert":" $:"}]},
 {"markdown":"**a*","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}}]},
-{"markdown":")　(bword","delta":[{"insert":")　(bword"}]},
-{"markdown":"ß*a**\rΣ\\","delta":[{"insert":"ß*a**\rΣ\\"}]},
-{"markdown":"<br>[@Bot](mention:agent:a1)  [a](<https://x.com/a b>)\n 字 ","delta":[{"insert":"<br>"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"  "},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"\n 字 "}]},
-{"markdown":"«\\\\\f42[@Ann](mention:user:u1)Plan\n**bold**","delta":[{"insert":"«\\\f42"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Plan\n"},{"insert":"bold","attributes":{"bold":true}}]},
-{"markdown":"****a** https://example.com/x?y=1","delta":[{"insert":"**","attributes":{"italic":true}},{"insert":"a** https://example.com/x?y=1"}]},
-{"markdown":"[x](leaflet://page/p2#b1)**a*  `\\*`code`$字%~~!wordPlan","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"  "},{"insert":"\\*","attributes":{"code":true}},{"insert":"code`$字%~~!wordPlan"}]},
-{"markdown":"<br>snake_case","delta":[{"insert":"<br>snake_case"}]},
-{"markdown":"  日本語","delta":[{"insert":"  日本語"}]},
-{"markdown":"[x](leaflet://page/p2#b1)  [link](https://example.com/a) snake_case*it*'https://example.com/x?y=1\u000b\\\\","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"  "},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":" snake_case"},{"insert":"it","attributes":{"italic":true}},{"insert":"'https://example.com/x?y=1\u000b\\"}]},
-{"markdown":"？[x](leaflet://page/p2#b1)|**a* \tK","delta":[{"insert":"？"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"|*"},{"insert":"a","attributes":{"italic":true}},{"insert":" \tK"}]},
-{"markdown":"**a*:😀!#>~~**bold**x\n<\\*_it_","delta":[{"insert":"a*:😀!#>~~","attributes":{"bold":true}},{"insert":"bold**x\n<*"},{"insert":"it","attributes":{"italic":true}}]},
-{"markdown":"\\~~gone~~é","delta":[{"insert":"~~gone~~é"}]},
-{"markdown":"[](leaflet://page/p3) ","delta":[{"insert":"[](leaflet://page/p3) "}]},
-{"markdown":"\"","delta":[{"insert":"\""}]},
-{"markdown":" ","delta":[{"insert":" "}]},
-{"markdown":"0~~。\\[？[a](https://x.com/(b))﻿[Plan](leaflet://page/p1)snake_caseİ𝔸","delta":[{"insert":"0~~。[？"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"﻿"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"snake_caseİ𝔸"}]},
-{"markdown":"[@Ann](mention:user:u1)__\\*K","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"__*K"}]},
-{"markdown":"~Σ\\\\***[Plan](leaflet://page/p1)","delta":[{"insert":"~Σ\\***"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
-{"markdown":"{'!|/(*it*]﻿~~gone~~ß*it*\\*K","delta":[{"insert":"{'!|/("},{"insert":"it","attributes":{"italic":true}},{"insert":"]﻿"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"ß"},{"insert":"it","attributes":{"italic":true}},{"insert":"*K"}]},
-{"markdown":"*é\\`Σ　é' é[link](https://example.com/a)\\0«\\`","delta":[{"insert":"*é`Σ　é' é"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"\\0«`"}]},
-{"markdown":"&","delta":[{"insert":"&"}]},
-{"markdown":"`https://example.com/x?y=1\\[","delta":[{"insert":"`https://example.com/x?y=1["}]},
-{"markdown":"KK%|!«*İ(\u000b_it_[a](https://x.com/(b))_a_b_","delta":[{"insert":"KK%|!«*İ(\u000b"},{"insert":"it","attributes":{"italic":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a_b","attributes":{"italic":true}}]},
-{"markdown":"\\*﻿","delta":[{"insert":"*﻿"}]},
-{"markdown":"*it*.b``a`b``ß[a](https://x.com/(b))>![pic](https://x.com/a.png)_it__it_***'\\`","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":".b"},{"insert":"a`b","attributes":{"code":true}},{"insert":"ß"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":">!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"it__it","attributes":{"italic":true}},{"insert":"***'`"}]},
-{"markdown":"​ ","delta":[{"insert":"​ "}]},
+{"markdown":"[ %~~Plan{«","delta":[{"insert":"[ %~~Plan{«"}]},
+{"markdown":"é*a**\fİ(","delta":[{"insert":"é*a**\fİ("}]},
+{"markdown":"<br>[@Ann](mention:user:u1)  [link](https://example.com/a)\n K","delta":[{"insert":"<br>"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"  "},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"\n K"}]},
+{"markdown":"？\\\\﻿ [@Ann](mention:user:u1)Plan\nsnake_case","delta":[{"insert":"？\\﻿ "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Plan\nsnake_case"}]},
+{"markdown":"****a**  https://example.com/x?y=1","delta":[{"insert":"**","attributes":{"italic":true}},{"insert":"a**  https://example.com/x?y=1"}]},
+{"markdown":"[x](leaflet://page/p2#b1)**a*\t</span>\\*~~gone~~:Σ\"_]%«Plan","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"\t</span>*"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":":Σ\"_]%«Plan"}]},
+{"markdown":"\\\\word","delta":[{"insert":"\\word"}]},
+{"markdown":"   K","delta":[{"insert":"   K"}]},
+{"markdown":"[Plan](leaflet://page/p1)  ``a`b`` word**bold**$[](leaflet://page/p3)​\\\\","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"  "},{"insert":"a`b","attributes":{"code":true}},{"insert":" word"},{"insert":"bold","attributes":{"bold":true}},{"insert":"$[](leaflet://page/p3)​\\"}]},
+{"markdown":"é[Plan](leaflet://page/p1)\r>**a*{ \tΣ","delta":[{"insert":"é"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\r>*"},{"insert":"a","attributes":{"italic":true}},{"insert":"{ \tΣ"}]},
+{"markdown":"**a*|字])!_wordx\n-https://example.com/x?y=1*it*","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"|字])!_wordx\n-https://example.com/x?y=1"},{"insert":"it","attributes":{"italic":true}}]},
+{"markdown":"(_it_𝔸","delta":[{"insert":"(_it_𝔸"}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83) ","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":" "}]},
+{"markdown":"=","delta":[{"insert":"="}]},
+{"markdown":"@","delta":[{"insert":"@"}]},
+{"markdown":"42__𝔸\\`。[a](https://x.com/(b))　[Plan](leaflet://page/p1)«😀","delta":[{"insert":"42__𝔸`。"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"　"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"«😀"}]},
+{"markdown":"![pic](https://x.com/a.png)<span style=\"color:red\">\\*ß","delta":[{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"<span style=\"color:red\">*ß"}]},
+{"markdown":"_İ\\\\***[Plan](leaflet://page/p1)","delta":[{"insert":"_İ\\***"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
+{"markdown":"@&]>+~~**bold**~　_it_é**bold**\\*Σ","delta":[{"insert":"@&]>+~~"},{"insert":"bold","attributes":{"bold":true}},{"insert":"~　_it_é"},{"insert":"bold","attributes":{"bold":true}},{"insert":"*Σ"}]},
+{"markdown":"*\u0001\\`ß \u0001${\u0001``a`b``(42！\\`","delta":[{"insert":"*\u0001`ß \u0001${\u0001"},{"insert":"a`b","attributes":{"code":true}},{"insert":"(42！`"}]},
+{"markdown":".","delta":[{"insert":"."}]},
+{"markdown":"<span style=\"color:red\">[](leaflet://page/p3)\\`","delta":[{"insert":"<span style=\"color:red\">[](leaflet://page/p3)`"}]},
+{"markdown":"ßß'>[！*é~~​*it*[a](<https://x.com/a b>)_a_b_","delta":[{"insert":"ßß'>[！"},{"insert":"é~~​","attributes":{"italic":true}},{"insert":"it*"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"a_b","attributes":{"italic":true}}]},
+{"markdown":"https://example.com/x?y=1　","delta":[{"insert":"https://example.com/x?y=1　"}]},
+{"markdown":"**bold**<b`code`é[a](<https://x.com/a b>)![a](https://x.com/(b))*it**it****&\\`","delta":[{"insert":"bold","attributes":{"bold":true}},{"insert":"<b"},{"insert":"code","attributes":{"code":true}},{"insert":"é"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"!"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"*it"},{"insert":"it","attributes":{"bold":true}},{"insert":"**&`"}]},
+{"markdown":" ","delta":[{"insert":" "}]},
 {"markdown":"","delta":[]},
-{"markdown":"！","delta":[{"insert":"！"}]},
-{"markdown":"[a](<https://x.com/a b>)﻿@.***it*😀)* 。日本語https://example.com/x?y=1é","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"﻿@."},{"insert":"**it","attributes":{"italic":true}},{"insert":"😀)* 。日本語https://example.com/x?y=1é"}]},
-{"markdown":" K**a*-__.Plan~","delta":[{"insert":" K*"},{"insert":"a","attributes":{"italic":true}},{"insert":"-__.Plan~"}]},
-{"markdown":"[@Bot](mention:agent:a1)[a](https://x.com/(b)) `b![pic](https://x.com/a.png)[link](https://example.com/a)[a](https://x.com/(b))[a](https://x.com/(b))","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":" `b!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"aa","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":"K#{\f   Σ.​ ** ","delta":[{"insert":"K#{\f   Σ.​ ** "}]},
-{"markdown":"日本語.İ[@Ann](mention:user:u1)Plan　[link](https://example.com/a)_a_b_[Plan](leaflet://page/p1)Σ[1:23](leaflet://page/p2#b1?t=83)é","delta":[{"insert":"日本語.İ"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Plan　"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"a_b","attributes":{"italic":true}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Σ"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"é"}]},
-{"markdown":"\r","delta":[{"insert":"\r"}]},
+{"markdown":"。","delta":[{"insert":"。"}]},
+{"markdown":"[link](https://example.com/a)　\"/<span style=\"color:#ff0000\">**bold**字[***𝔸K[](leaflet://page/p3)😀","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"　\"/<span style=\"color:#ff0000\">"},{"insert":"bold","attributes":{"bold":true}},{"insert":"字[***𝔸K[](leaflet://page/p3)😀"}]},
+{"markdown":" ß**a*\\<span style=\"background:#00ff00;color:#FF000080\"><Plan</span>","delta":[{"insert":" ß*"},{"insert":"a","attributes":{"italic":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\"><Plan</span>"}]},
+{"markdown":"[@Ann](mention:user:u1)[a](<https://x.com/a b>){<span style=\"color:red\">b[a](https://x.com/(b))``a`b``[a](<https://x.com/a b>)[a](<https://x.com/a b>)","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"{<span style=\"color:red\">b"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a`b","attributes":{"code":true}},{"insert":"aa","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"Σ!@﻿   İ<  ** ","delta":[{"insert":"Σ!@﻿   İ<  ** "}]},
+{"markdown":"K<![pic](https://x.com/a.png)Plan ``a`b``_a_b_[Plan](leaflet://page/p1)İ[1:23](leaflet://page/p2#b1?t=83)\u0001","delta":[{"insert":"K<!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"Plan "},{"insert":"a`b","attributes":{"code":true}},{"insert":"a_b","attributes":{"italic":true}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"İ"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"\u0001"}]},
+{"markdown":"\u000b","delta":[{"insert":"\u000b"}]},
 {"markdown":"","delta":[]},
-{"markdown":"@[link](https://example.com/a)~~![pic](https://x.com/a.png)é**bold**__ 字","delta":[{"insert":"@"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"~~!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"é"},{"insert":"bold","attributes":{"bold":true}},{"insert":"__ 字"}]},
-{"markdown":" é\r","delta":[{"insert":" é\r"}]},
-{"markdown":"\\\u0001。**a*~~gone~~~~gone~~`[","delta":[{"insert":"\\\u0001。*"},{"insert":"a","attributes":{"italic":true}},{"insert":"gonegone","attributes":{"strikethrough":true}},{"insert":"`["}]},
-{"markdown":" [é__<br>[a](https://x.com/(b))  [](leaflet://page/p3)","delta":[{"insert":" [é__<br>"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"  [](leaflet://page/p3)"}]},
-{"markdown":"~~gone~~﻿bßΣ*a**%b","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"﻿bßΣ*a**%b"}]},
-{"markdown":"\f:！[Plan](leaflet://page/p1)Plan\"[@Bot](mention:agent:a1)b[`code`>","delta":[{"insert":"\f:！"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Plan\""},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"b["},{"insert":"code","attributes":{"code":true}},{"insert":">"}]},
-{"markdown":"#|_**bold**","delta":[{"insert":"#|_"},{"insert":"bold","attributes":{"bold":true}}]},
-{"markdown":"日本語 **a*wordPlan [@Ann](mention:user:u1)``a`b``\\`_a_b_***`code`","delta":[{"insert":"日本語 "},{"insert":"a*wordPlan ","attributes":{"bold":true}},{"insert":"@Ann","attributes":{"bold":true,"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a`b","attributes":{"bold":true,"code":true}},{"insert":"`","attributes":{"bold":true}},{"insert":"a_b","attributes":{"bold":true,"italic":true}},{"insert":"*"},{"insert":"code","attributes":{"code":true}}]},
-{"markdown":" é字[link](https://example.com/a)　/","delta":[{"insert":" é字"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"　/"}]},
-{"markdown":"`code`\r","delta":[{"insert":"code","attributes":{"code":true}},{"insert":"\r"}]},
-{"markdown":"\\*42a«42éß\n$~~gone~~*a**😀:","delta":[{"insert":"*42a«42éß\n$"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"*a**😀:"}]},
-{"markdown":"[[x](leaflet://page/p2#b1)Σ​İ\f*it***bold**%~~gone~~\u000b~~gone~~é","delta":[{"insert":"["},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"Σ​İ\f"},{"insert":"it**","attributes":{"italic":true}},{"insert":"bold**%"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"\u000b"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"é"}]},
-{"markdown":"*\f？日本語 Plan","delta":[{"insert":"*\f？日本語 Plan"}]},
-{"markdown":"[a](https://x.com/(b))~日本語~~< ？ ","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"~日本語~~< ？ "}]},
-{"markdown":"\\`\u000b\f+\\_\u0001~~gone~~~~*it*[a](https://x.com/(b))","delta":[{"insert":"`\u000b\f+_\u0001"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"~~"},{"insert":"it","attributes":{"italic":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
+{"markdown":"\"``a`b``__![pic](https://x.com/a.png)\u0001snake_case<span style=\"background:#00ff00;color:#FF000080\">%{K","delta":[{"insert":"\""},{"insert":"a`b","attributes":{"code":true}},{"insert":"__!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"\u0001snake_case<span style=\"background:#00ff00;color:#FF000080\">%{K"}]},
+{"markdown":"{\u0001\u000b","delta":[{"insert":"{\u0001\u000b"}]},
+{"markdown":"(\fé *_it__it_</span>`","delta":[{"insert":"(\fé *"},{"insert":"it__it","attributes":{"italic":true}},{"insert":"</span>`"}]},
+{"markdown":" `😀<span style=\"color:red\"><br>[a](<https://x.com/a b>){  [](leaflet://page/p3)","delta":[{"insert":" `😀<span style=\"color:red\"><br>"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"{  [](leaflet://page/p3)"}]},
+{"markdown":"_it_　béİ*a**'b","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"　béİ*a**'b"}]},
+{"markdown":"﻿|？[Plan](leaflet://page/p1)Plan$[@Bot](mention:agent:a1)Plan`~~gone~~!","delta":[{"insert":"﻿|？"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Plan$"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"Plan`"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"!"}]},
+{"markdown":"%)><span style=\"color:#ff0000\">snake_case","delta":[{"insert":"%)><span style=\"color:#ff0000\">snake_case"}]},
+{"markdown":"K **a*«Plan ![pic](https://x.com/a.png)`code`\\__a_b_***~~gone~~","delta":[{"insert":"K "},{"insert":"a*«Plan !","attributes":{"bold":true}},{"insert":"pic","attributes":{"bold":true,"href":"https://x.com/a.png"}},{"insert":"code","attributes":{"bold":true,"code":true}},{"insert":"_","attributes":{"bold":true}},{"insert":"a_b","attributes":{"bold":true,"italic":true}},{"insert":"*"},{"insert":"gone","attributes":{"strikethrough":true}}]},
+{"markdown":"%\u0001Σ``a`b`` +","delta":[{"insert":"%\u0001Σ"},{"insert":"a`b","attributes":{"code":true}},{"insert":" +"}]},
+{"markdown":"~~gone~~{\u000b","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"{\u000b"}]},
+{"markdown":"\\* a！ 😀İ\n._it_*a**字<","delta":[{"insert":"* a！ 😀İ\n."},{"insert":"it","attributes":{"italic":true}},{"insert":"*a**字<"}]},
+{"markdown":"`[Plan](leaflet://page/p1)ß é﻿{snake_casesnake_case\"_it_​_it_\u0001","delta":[{"insert":"`"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"ß é﻿{snake_casesnake_case\""},{"insert":"it","attributes":{"italic":true}},{"insert":"​"},{"insert":"it","attributes":{"italic":true}},{"insert":"\u0001"}]},
+{"markdown":"*﻿é字 Plan","delta":[{"insert":"*﻿é字 Plan"}]},
+{"markdown":"[a](<https://x.com/a b>)_字__-%。 ","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"_字__-%。 "}]},
+{"markdown":"\\_​﻿#\\_\f_it__**bold**[a](https://x.com/(b))","delta":[{"insert":"_​﻿#_\f_it__"},{"insert":"bold","attributes":{"bold":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
 {"markdown":"","delta":[]},
 {"markdown":"","delta":[]},
-{"markdown":"**a*_ß[1:23](leaflet://page/p2#b1?t=83)>İPlan\"https://example.com/x?y=1[x](leaflet://page/p2#b1))* [link](https://example.com/a)","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"_ß"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":">İPlan\"https://example.com/x?y=1"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":")* "},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
-{"markdown":"。ß-  x~~* [@Ann](mention:user:u1)\\`？#","delta":[{"insert":"。ß-  x~~* "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"`？#"}]},
-{"markdown":"日本語\\_$日本語 $","delta":[{"insert":"日本語_$日本語 $"}]},
-{"markdown":"字﻿![pic](https://x.com/a.png):[@Bot](mention:agent:a1)![pic](https://x.com/a.png)","delta":[{"insert":"字﻿!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":":"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
+{"markdown":"**a*<span style=\"background:#00ff00;color:#FF000080\">é[x](leaflet://page/p2#b1)!Plan{=[](leaflet://page/p3)[Plan](leaflet://page/p1)~~* [link](https://example.com/a)","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">é"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"!Plan{=[](leaflet://page/p3)"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"~~* "},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"𝔸é\\\tx__* ![pic](https://x.com/a.png)\\_。)","delta":[{"insert":"𝔸é\\\tx__* !"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"_。)"}]},
+{"markdown":"字\\*:K :","delta":[{"insert":"字*:K :"}]},
+{"markdown":"K　[a](https://x.com/(b))|[@Ann](mention:user:u1)[a](https://x.com/(b))","delta":[{"insert":"K　"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"|"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
 {"markdown":"*","delta":[{"insert":"*"}]},
-{"markdown":"https://example.com/x?y=1[Plan](leaflet://page/p1)___𝔸__[](leaflet://page/p3)\f","delta":[{"insert":"https://example.com/x?y=1"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"_𝔸","attributes":{"bold":true}},{"insert":"[](leaflet://page/p3)\f"}]},
-{"markdown":"？_[@Ann](mention:user:u1)[link](https://example.com/a)**x","delta":[{"insert":"？_"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"**x"}]},
-{"markdown":"*a**![pic](https://x.com/a.png)","delta":[{"insert":"*a**!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
-{"markdown":"[Plan](leaflet://page/p1)**bold**_xΣ&/\n\\*","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"bold","attributes":{"bold":true}},{"insert":"_xΣ&/\n*"}]},
-{"markdown":" *𝔸+<br>﻿\n　[a](<https://x.com/a b>)_it_ '𝔸","delta":[{"insert":" *𝔸+<br>﻿\n　"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"it","attributes":{"italic":true}},{"insert":" '𝔸"}]},
-{"markdown":"~(\f![pic](https://x.com/a.png)[@Ann](mention:user:u1)!","delta":[{"insert":"~(\f!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"!"}]},
-{"markdown":"bİ  é#\r","delta":[{"insert":"bİ  é#\r"}]},
-{"markdown":"[Plan](leaflet://page/p1)\t/+snake_case snake_case$\rΣ*it*_a_b_[@Bot](mention:agent:a1)[a](<https://x.com/a b>)","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\t/+snake_case snake_case$\rΣ"},{"insert":"ita_b","attributes":{"italic":true}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"Plan ","delta":[{"insert":"Plan "}]},
-{"markdown":"/！**bold**\"**a*_a_b_","delta":[{"insert":"/！"},{"insert":"bold","attributes":{"bold":true}},{"insert":"\"*"},{"insert":"aa_b","attributes":{"italic":true}}]},
-{"markdown":"Σa ","delta":[{"insert":"Σa "}]},
-{"markdown":"\\[`","delta":[{"insert":"[`"}]},
-{"markdown":"'日本語)","delta":[{"insert":"'日本語)"}]},
-{"markdown":"é\\\\$İ! >' _it_``a`b``字!字","delta":[{"insert":"é\\$İ! >' "},{"insert":"it","attributes":{"italic":true}},{"insert":"a`b","attributes":{"code":true}},{"insert":"字!字"}]},
-{"markdown":"**a* é«[Plan](leaflet://page/p1)x","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":" é«"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"x"}]},
-{"markdown":"[](leaflet://page/p3)𝔸[a](https://x.com/(b))+\f*****bold**:[@Ann](mention:user:u1)！\\*！  [@Ann](mention:user:u1)","delta":[{"insert":"[](leaflet://page/p3)𝔸"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"+\f*"},{"insert":"**","attributes":{"italic":true}},{"insert":"bold**:"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"！*！  "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
-{"markdown":"-​.","delta":[{"insert":"-​."}]},
-{"markdown":"\\[a](<https://x.com/a b>)+\\`","delta":[{"insert":"[a](<https://x.com/a b>)+`"}]},
-{"markdown":"K *>@[[[a](<https://x.com/a b>)']","delta":[{"insert":"K *>@[["},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"']"}]},
+{"markdown":"https://example.com/x?y=1[@Bot](mention:agent:a1)<span style=\"color:#ff0000\"><span style=\"color:red\">😀<span style=\"color:red\">[1:23](leaflet://page/p2#b1?t=83)﻿","delta":[{"insert":"https://example.com/x?y=1"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"<span style=\"color:#ff0000\"><span style=\"color:red\">😀<span style=\"color:red\">"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"﻿"}]},
+{"markdown":"。<span style=\"color:#ff0000\">![pic](https://x.com/a.png)[link](https://example.com/a)<span style=\"color:#ff0000\">x","delta":[{"insert":"。<span style=\"color:#ff0000\">!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"<span style=\"color:#ff0000\">x"}]},
+{"markdown":"*a**[a](https://x.com/(b))","delta":[{"insert":"*a**"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
+{"markdown":"[@Bot](mention:agent:a1)snake_case<span style=\"color:#ff0000\">xİ.|*https://example.com/x?y=1","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"snake_case<span style=\"color:#ff0000\">xİ.|*https://example.com/x?y=1"}]},
+{"markdown":"* 日本語#<br>　\n [link](https://example.com/a)*it*%  &日本語","delta":[{"insert":" 日本語#<br>　\n ","attributes":{"italic":true}},{"insert":"link","attributes":{"italic":true,"href":"https://example.com/a"}},{"insert":"it*%  &日本語"}]},
+{"markdown":"_~~﻿[a](https://x.com/(b))[@Ann](mention:user:u1)]","delta":[{"insert":"_~~﻿"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"]"}]},
+{"markdown":"b  𝔸)\u000b","delta":[{"insert":"b  𝔸)\u000b"}]},
+{"markdown":"[@Bot](mention:agent:a1)\t+#word{word:\u000bİ**bold**_a_b_[@Ann](mention:user:u1)[link](https://example.com/a)","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"\t+#word{word:\u000bİ"},{"insert":"bold","attributes":{"bold":true}},{"insert":"a_b","attributes":{"italic":true}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"Plan","delta":[{"insert":"Plan"}]},
+{"markdown":"+？snake_case=**a*_a_b_","delta":[{"insert":"+？snake_case=*"},{"insert":"aa_b","attributes":{"italic":true}}]},
+{"markdown":"ßa%","delta":[{"insert":"ßa%"}]},
+{"markdown":"\\[<span style=\"color:red\">","delta":[{"insert":"[<span style=\"color:red\">"}]},
+{"markdown":"&K~~","delta":[{"insert":"&K~~"}]},
+{"markdown":"𝔸\\\\.] !$ *it*`code`Σ]Σ","delta":[{"insert":"𝔸\\.] !$ "},{"insert":"it","attributes":{"italic":true}},{"insert":"code","attributes":{"code":true}},{"insert":"Σ]Σ"}]},
+{"markdown":"**a*{😀！[@Bot](mention:agent:a1)x","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"{😀！"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"x"}]},
+{"markdown":"[](leaflet://page/p3)😀[a](<https://x.com/a b>)#﻿***word<![pic](https://x.com/a.png)。https://example.com/x?y=1？  ![pic](https://x.com/a.png)","delta":[{"insert":"[](leaflet://page/p3)😀"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"#﻿***word<!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"。https://example.com/x?y=1？  !"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
+{"markdown":"\\ \r<","delta":[{"insert":"\\ \r<"}]},
+{"markdown":"([link](https://example.com/a)#\\_","delta":[{"insert":"("},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"#_"}]},
+{"markdown":"Σ *!\"``[link](https://example.com/a)$~","delta":[{"insert":"Σ *!\"``"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"$~"}]},
 {"markdown":"\\\\","delta":[{"insert":"\\"}]},
-{"markdown":"\t>|**a**a**_it_😀**bold**$_a_b_","delta":[{"insert":"\t>|"},{"insert":"a","attributes":{"bold":true}},{"insert":"a"},{"insert":"it","attributes":{"bold":true,"italic":true}},{"insert":"😀","attributes":{"bold":true}},{"insert":"bold**$"},{"insert":"a_b","attributes":{"italic":true}}]},
-{"markdown":"#***&https://example.com/x?y=1***bold**[1:23](leaflet://page/p2#b1?t=83)字","delta":[{"insert":"#"},{"insert":"&https://example.com/x?y=1","attributes":{"bold":true,"italic":true}},{"insert":"bold**"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"字"}]},
-{"markdown":"&**bold**  \\[word<br>_\u0001  '","delta":[{"insert":"&"},{"insert":"bold","attributes":{"bold":true}},{"insert":"  [word<br>_\u0001  '"}]},
-{"markdown":"[a](https://x.com/(b)).ß>\u0001ß　[Plan](leaflet://page/p1)𝔸`","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":".ß>\u0001ß　"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"𝔸`"}]},
-{"markdown":" snake_case  日本語![pic](https://x.com/a.png)","delta":[{"insert":" snake_case  日本語!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
-{"markdown":"\ré\n=)/","delta":[{"insert":"\ré\n=)/"}]},
-{"markdown":"İ|: =$ **a**  **a*😀","delta":[{"insert":"İ|: =$ "},{"insert":"a","attributes":{"bold":true}},{"insert":"  *"},{"insert":"a","attributes":{"italic":true}},{"insert":"😀"}]},
-{"markdown":"] **","delta":[{"insert":"] **"}]},
-{"markdown":"😀   snake_case**bold**__it_","delta":[{"insert":"😀   snake_case"},{"insert":"bold","attributes":{"bold":true}},{"insert":"_it","attributes":{"italic":true}}]},
-{"markdown":"  。word","delta":[{"insert":"  。word"}]},
-{"markdown":"\\[`code`\\\\_[link](https://example.com/a)![pic](https://x.com/a.png)﻿é[[@Bot](mention:agent:a1)x=","delta":[{"insert":"["},{"insert":"code","attributes":{"code":true}},{"insert":"\\_"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"﻿é["},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"x="}]},
-{"markdown":"]~\u000b[x](leaflet://page/p2#b1)b __x[link](https://example.com/a)\\\\ 042`","delta":[{"insert":"]~\u000b"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"b __x"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"\\ 042`"}]},
-{"markdown":"~~ ``a`b``","delta":[{"insert":"~~ "},{"insert":"a`b","attributes":{"code":true}}]},
-{"markdown":"\u000b*****#)\\\u000b\\\n{","delta":[{"insert":"\u000b*"},{"insert":"**","attributes":{"italic":true}},{"insert":"#)\\\u000b\\\n{"}]},
-{"markdown":"~&ß**a*-\\`!-K\"𝔸 *","delta":[{"insert":"~&ß*"},{"insert":"a","attributes":{"italic":true}},{"insert":"-`!-K\"𝔸 *"}]},
-{"markdown":"[@Ann](mention:user:u1)a** _x-　K\\*it*　|","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a*"},{"insert":" _x-　K*it","attributes":{"italic":true}},{"insert":"　|"}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)[@Bot](mention:agent:a1)= *\r**Σ_","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"= *\r**Σ_"}]},
-{"markdown":"　snake_case=<","delta":[{"insert":"　snake_case=<"}]},
-{"markdown":"字(","delta":[{"insert":"字("}]},
-{"markdown":"~~%。`*it*snake_case[1:23](leaflet://page/p2#b1?t=83)\f& *a？=[@Bot](mention:agent:a1)","delta":[{"insert":"~~%。`"},{"insert":"it","attributes":{"italic":true}},{"insert":"snake_case"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"\f& *a？="},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"aΣ&42","delta":[{"insert":"aΣ&42"}]},
-{"markdown":"_it_*\\*  \\_ ]<br>é__\n42x","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"**  _ ]<br>é__\n42x"}]},
-{"markdown":"=#𝔸 0　| 0","delta":[{"insert":"=#𝔸 0　| 0"}]},
-{"markdown":"bß​\u0001﻿","delta":[{"insert":"bß​\u0001﻿"}]},
-{"markdown":" !Σ` 。ΣΣ\n_it_\\a\\*","delta":[{"insert":" !Σ` 。ΣΣ\n"},{"insert":"it","attributes":{"italic":true}},{"insert":"\\a*"}]},
-{"markdown":"b#42\\word[a](<https://x.com/a b>)/**a*\\[[ ","delta":[{"insert":"b#42\\word"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"/*"},{"insert":"a","attributes":{"italic":true}},{"insert":"[[ "}]},
-{"markdown":" ~~![pic](https://x.com/a.png)(\"[@Bot](mention:agent:a1)*a**#","delta":[{"insert":" ~~!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"(\""},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"*a**#"}]},
-{"markdown":"+ _\n|![pic](https://x.com/a.png)[link](https://example.com/a)\\***[@Ann](mention:user:u1)snake_caseb","delta":[{"insert":"+ _\n|!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"***"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"snake_caseb"}]},
-{"markdown":"\\[/|`code`>**bold**\\[","delta":[{"insert":"[/|"},{"insert":"code","attributes":{"code":true}},{"insert":">"},{"insert":"bold","attributes":{"bold":true}},{"insert":"["}]},
+{"markdown":"\u0001\t!>**a**a****bold**字word:_a_b_","delta":[{"insert":"\u0001\t!>"},{"insert":"a","attributes":{"bold":true}},{"insert":"a"},{"insert":"**","attributes":{"italic":true}},{"insert":"bold**字word:"},{"insert":"a_b","attributes":{"italic":true}}]},
+{"markdown":"!<br>.https://example.com/x?y=1**word[x](leaflet://page/p2#b1)Σ","delta":[{"insert":"!<br>.https://example.com/x?y=1**word"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"Σ"}]},
+{"markdown":".snake_case  \\`！\\\\<span style=\"background:#00ff00;color:#FF000080\">\f  {&","delta":[{"insert":".snake_case  `！\\<span style=\"background:#00ff00;color:#FF000080\">\f  {&"}]},
+{"markdown":"[a](<https://x.com/a b>)<é!\fé [@Bot](mention:agent:a1)😀</span>","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"<é!\fé "},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"😀</span>"}]},
+{"markdown":" word\tK[a](https://x.com/(b))","delta":[{"insert":" word\tK"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
+{"markdown":"\u000b\u0001\n:[+","delta":[{"insert":"\u000b\u0001\n:[+"}]},
+{"markdown":">< :: **a**\t *字","delta":[{"insert":">< :: "},{"insert":"a","attributes":{"bold":true}},{"insert":"\t *字"}]},
+{"markdown":"` **","delta":[{"insert":"` **"}]},
+{"markdown":"字   «snake_case<span style=\"color:#ff0000\">*it*","delta":[{"insert":"字   «snake_case<span style=\"color:#ff0000\">"},{"insert":"it","attributes":{"italic":true}}]},
+{"markdown":"\té«","delta":[{"insert":"\té«"}]},
+{"markdown":"\\[~~gone~~(\\*``a`b``![pic](https://x.com/a.png)　\u0001`[@Ann](mention:user:u1)0/","delta":[{"insert":"["},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"(*"},{"insert":"a`b","attributes":{"code":true}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"　\u0001`"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"0/"}]},
+{"markdown":"~</span>​[x](leaflet://page/p2#b1)b <span style=\"color:red\">x``a`b``\\[ 042<span style=\"color:red\">","delta":[{"insert":"~</span>​"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"b <span style=\"color:red\">x"},{"insert":"a`b","attributes":{"code":true}},{"insert":"[ 042<span style=\"color:red\">"}]},
+{"markdown":"__{`code`","delta":[{"insert":"__{"},{"insert":"code","attributes":{"code":true}}]},
+{"markdown":"​<br>**)[(​(*@","delta":[{"insert":"​<br>*"},{"insert":")[(​(","attributes":{"italic":true}},{"insert":"@"}]},
+{"markdown":"_=İ**a*\\\\`]\\Σ$日本語 *","delta":[{"insert":"_=İ*"},{"insert":"a","attributes":{"italic":true}},{"insert":"\\`]\\Σ$日本語 *"}]},
+{"markdown":"[@Ann](mention:user:u1)a** <span style=\"color:#ff0000\">0\\Σ(**bold** -","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a"},{"insert":" <span style=\"color:#ff0000\">0\\Σ(","attributes":{"bold":true}},{"insert":"bold** -"}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83)[@Ann](mention:user:u1): *\u000b**ß<span style=\"color:#ff0000\">","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":": *\u000b**ß<span style=\"color:#ff0000\">"}]},
+{"markdown":" word:-","delta":[{"insert":" word:-"}]},
+{"markdown":"K~~","delta":[{"insert":"K~~"}]},
+{"markdown":"__'é</span>**bold**«[x](leaflet://page/p2#b1)﻿=* a。/[@Ann](mention:user:u1)","delta":[{"insert":"__'é</span>"},{"insert":"bold","attributes":{"bold":true}},{"insert":"«"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"﻿=* a。/"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":"aİ=42","delta":[{"insert":"aİ=42"}]},
+{"markdown":"*it**\\*\t\\_~<br><span style=\"background:#00ff00;color:#FF000080\">\n x","delta":[{"insert":"*it***\t_~<br><span style=\"background:#00ff00;color:#FF000080\">\n x"}]},
+{"markdown":":)😀  0 -0","delta":[{"insert":":)😀  0 -0"}]},
+{"markdown":"bé \f　","delta":[{"insert":"bé \f　"}]},
+{"markdown":"%]İ</span> éİß\n*it*(a\\*%","delta":[{"insert":"%]İ</span> éİß\n"},{"insert":"it","attributes":{"italic":true}},{"insert":"(a*%"}]},
+{"markdown":"b)42(«[link](https://example.com/a)+**a*\\[` ","delta":[{"insert":"b)42(«"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"+*"},{"insert":"a","attributes":{"italic":true}},{"insert":"[` "}]},
+{"markdown":"%__![pic](https://x.com/a.png)~~$[@Ann](mention:user:u1)*a**)","delta":[{"insert":"%__!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"~~$"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"*a**)"}]},
+{"markdown":"#<span style=\"background:#00ff00;color:#FF000080\">\n>[a](https://x.com/(b))``a`b``(<br>![pic](https://x.com/a.png)wordb","delta":[{"insert":"#<span style=\"background:#00ff00;color:#FF000080\">\n>"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a`b","attributes":{"code":true}},{"insert":"(<br>!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"wordb"}]},
+{"markdown":"\\[+-\r~~gone~~!word\\[","delta":[{"insert":"[+-\r"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"!word["}]},
 {"markdown":"","delta":[]},
-{"markdown":"\u0001_a_b_\r&[1:23](leaflet://page/p2#b1?t=83)@[x](leaflet://page/p2#b1)\\`&/=[a](https://x.com/(b))","delta":[{"insert":"\u0001"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"\r&"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"@"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"`&/="},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":"*it*_😀\nhttps://example.com/x?y=1`code`[@Ann](mention:user:u1)[@Bot](mention:agent:a1)a\r+\"  𝔸","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"_😀\nhttps://example.com/x?y=1"},{"insert":"code","attributes":{"code":true}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"a\r+\"  𝔸"}]},
-{"markdown":"\u0001b[a](<https://x.com/a b>)[Plan](leaflet://page/p1)\n ","delta":[{"insert":"\u0001b"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\n "}]},
+{"markdown":"\f_a_b_\u000b=[1:23](leaflet://page/p2#b1?t=83)&[x](leaflet://page/p2#b1)\\_.+/[a](<https://x.com/a b>)","delta":[{"insert":"\f"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"\u000b="},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"&"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"_.+/"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"**bold**<span style=\"background:#00ff00;color:#FF000080\">字\n[](leaflet://page/p3)~~gone~~![pic](https://x.com/a.png)[@Ann](mention:user:u1)a\f#$  日本語","delta":[{"insert":"bold","attributes":{"bold":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">字\n[](leaflet://page/p3)"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a\f#$  日本語"}]},
+{"markdown":"\fb[link](https://example.com/a)[@Bot](mention:agent:a1)\n ","delta":[{"insert":"\fb"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"\n "}]},
 {"markdown":"","delta":[]},
-{"markdown":"!**bold**<","delta":[{"insert":"!"},{"insert":"bold","attributes":{"bold":true}},{"insert":"<"}]},
-{"markdown":"İ xßΣ。*a**snake_case=[@Ann](mention:user:u1)\\İ！é","delta":[{"insert":"İ xßΣ。*a**snake_case="},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"\\İ！é"}]},
-{"markdown":"\\***[1:23](leaflet://page/p2#b1?t=83)![1:23](leaflet://page/p2#b1?t=83)\"~~gone~~|[1:23](leaflet://page/p2#b1?t=83)​[1:23](leaflet://page/p2#b1?t=83){`code`","delta":[{"insert":"***"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"!"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"\""},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"|"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"​"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"{"},{"insert":"code","attributes":{"code":true}}]},
-{"markdown":" 　~~gone~~\"ΣK\\*　﻿ß  *","delta":[{"insert":" 　"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"\"ΣK*　﻿ß  *"}]},
-{"markdown":"ßİ","delta":[{"insert":"ßİ"}]},
-{"markdown":"**bold**\\\\42`code` /__！(Plan","delta":[{"insert":"bold","attributes":{"bold":true}},{"insert":"\\42"},{"insert":"code","attributes":{"code":true}},{"insert":" /__！(Plan"}]},
-{"markdown":"_a_b_Σ\u000b​","delta":[{"insert":"_a_b_Σ\u000b​"}]},
-{"markdown":"\u0001{#_","delta":[{"insert":"\u0001{#_"}]},
-{"markdown":" \\*«$  {https://example.com/x?y=14242*　\\\\/42","delta":[{"insert":" *«$  {https://example.com/x?y=14242*　\\/42"}]},
-{"markdown":" 😀< ~~İ'[x](leaflet://page/p2#b1)<br>__|","delta":[{"insert":" 😀< ~~İ'"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"<br>__|"}]},
-{"markdown":"=~~gone~~``a`b``é**0word [@Bot](mention:agent:a1) _a_b_","delta":[{"insert":"="},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"a`b","attributes":{"code":true}},{"insert":"é**0word "},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":" "},{"insert":"a_b","attributes":{"italic":true}}]},
-{"markdown":"__","delta":[{"insert":"__"}]},
-{"markdown":"\t!Σ' `[a](https://x.com/(b))[Plan](leaflet://page/p1).İ","delta":[{"insert":"\t!Σ' `"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":".İ"}]},
-{"markdown":"\u0001日本語\\[[@Bot](mention:agent:a1)![pic](https://x.com/a.png)[~~é𝔸(<br>","delta":[{"insert":"\u0001日本語["},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"[~~é𝔸(<br>"}]},
-{"markdown":"~word\u0001* ~","delta":[{"insert":"~word\u0001* ~"}]},
-{"markdown":"_[](leaflet://page/p3)ß`","delta":[{"insert":"_[](leaflet://page/p3)ß`"}]},
+{"markdown":"[snake_case-","delta":[{"insert":"[snake_case-"}]},
+{"markdown":" xİİé*a**word/![pic](https://x.com/a.png)(。😀","delta":[{"insert":" xİİé*a**word/!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"(。😀"}]},
+{"markdown":"https://example.com/x?y=1**[1:23](leaflet://page/p2#b1?t=83)][1:23](leaflet://page/p2#b1?t=83)=_it_>[x](leaflet://page/p2#b1)% [x](leaflet://page/p2#b1)'~~gone~~","delta":[{"insert":"https://example.com/x?y=1**"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"]"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"="},{"insert":"it","attributes":{"italic":true}},{"insert":">"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"% "},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"'"},{"insert":"gone","attributes":{"strikethrough":true}}]},
+{"markdown":"@ _it_$İΣhttps://example.com/x?y=1 　İ  **","delta":[{"insert":"@ "},{"insert":"it","attributes":{"italic":true}},{"insert":"$İΣhttps://example.com/x?y=1 　İ  **"}]},
+{"markdown":"İ","delta":[{"insert":"İ"}]},
+{"markdown":"word%\\\\42~~gone~~%+<span style=\"color:red\">？~~Plan","delta":[{"insert":"word%\\42"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"%+<span style=\"color:red\">？~~Plan"}]},
+{"markdown":"_a_b_İ​ ","delta":[{"insert":"_a_b_İ​ "}]},
+{"markdown":"\f@)<span style=\"background:#00ff00;color:#FF000080\">","delta":[{"insert":"\f@)<span style=\"background:#00ff00;color:#FF000080\">"}]},
+{"markdown":" \\*！:  @https://example.com/x?y=14242** \\\\+ ","delta":[{"insert":" *！:  @https://example.com/x?y=14242** \\+ "}]},
+{"markdown":" 字-  \r__$[Plan](leaflet://page/p1)<br><span style=\"color:red\">\r>","delta":[{"insert":" 字-  \r__$"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"<br><span style=\"color:red\">\r>"}]},
+{"markdown":"/_it_`code`𝔸**0\u0001« [@Ann](mention:user:u1)@_a_b_","delta":[{"insert":"/"},{"insert":"it","attributes":{"italic":true}},{"insert":"code","attributes":{"code":true}},{"insert":"𝔸**0\u0001« "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"@"},{"insert":"a_b","attributes":{"italic":true}}]},
+{"markdown":"<span style=\"background:#00ff00;color:#FF000080\">","delta":[{"insert":"<span style=\"background:#00ff00;color:#FF000080\">"}]},
+{"markdown":"\t]İ$ <span style=\"color:red\">[a](<https://x.com/a b>)[@Bot](mention:agent:a1)<","delta":[{"insert":"\t]İ$ <span style=\"color:red\">"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"<"}]},
+{"markdown":"\r字\\[[@Ann](mention:user:u1)[a](https://x.com/(b))____😀日本語~~<br>","delta":[{"insert":"\r字["},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"__","attributes":{"italic":true}},{"insert":"😀日本語~~<br>"}]},
+{"markdown":"</span>«\f**%_","delta":[{"insert":"</span>«\f**%_"}]},
+{"markdown":"<span style=\"background:#00ff00;color:#FF000080\">[1:23](leaflet://page/p2#b1?t=83)é<span style=\"color:red\">","delta":[{"insert":"<span style=\"background:#00ff00;color:#FF000080\">"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"é<span style=\"color:red\">"}]},
 {"markdown":"","delta":[]},
-{"markdown":"[@Ann](mention:user:u1)K_~é","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"K_~é"}]},
+{"markdown":"![pic](https://x.com/a.png)Σ<span style=\"background:#00ff00;color:#FF000080\">_\u0001","delta":[{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"Σ<span style=\"background:#00ff00;color:#FF000080\">_\u0001"}]},
 {"markdown":"","delta":[]},
 {"markdown":"","delta":[]},
-{"markdown":"0<#_K","delta":[{"insert":"0<#_K"}]},
-{"markdown":"\\_\\　。İ　\rß[link](https://example.com/a)　","delta":[{"insert":"_\\　。İ　\rß"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"　"}]},
-{"markdown":"* 字+\u0001","delta":[{"insert":"* 字+\u0001"}]},
-{"markdown":"'([@Bot](mention:agent:a1)","delta":[{"insert":"'("},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"~~`<~[](leaflet://page/p3)\\_\u0001![pic](https://x.com/a.png) _it_﻿","delta":[{"insert":"~~`<~[](leaflet://page/p3)_\u0001!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":" "},{"insert":"it","attributes":{"italic":true}},{"insert":"﻿"}]},
-{"markdown":"ß|* _it_'![pic](https://x.com/a.png)","delta":[{"insert":"ß|* "},{"insert":"it","attributes":{"italic":true}},{"insert":"'!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
-{"markdown":"42> ","delta":[{"insert":"42> "}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)\t_it_K<br>x","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"\t_it_K<br>x"}]},
-{"markdown":"[x](leaflet://page/p2#b1)~~gone~~[a](<https://x.com/a b>)@\\[\u000b","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"@[\u000b"}]},
-{"markdown":"~","delta":[{"insert":"~"}]},
-{"markdown":"Σ42https://example.com/x?y=1","delta":[{"insert":"Σ42https://example.com/x?y=1"}]},
-{"markdown":"* _(+\f\f\t𝔸","delta":[{"insert":"* _(+\f\f\t𝔸"}]},
-{"markdown":"$~~**a*_a_b_{`\f​(𝔸![1:23](leaflet://page/p2#b1?t=83)a","delta":[{"insert":"$~~*"},{"insert":"aa_b","attributes":{"italic":true}},{"insert":"{`\f​(𝔸!"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a"}]},
-{"markdown":"*a**字=/","delta":[{"insert":"*a**字=/"}]},
-{"markdown":"#[](leaflet://page/p3).","delta":[{"insert":"#[](leaflet://page/p3)."}]},
-{"markdown":"[a](<https://x.com/a b>)\f**a*42- *[link](https://example.com/a) *https://example.com/x?y=1<é[1:23](leaflet://page/p2#b1?t=83)**«","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"\f"},{"insert":"a*42- *","attributes":{"bold":true}},{"insert":"link","attributes":{"bold":true,"href":"https://example.com/a"}},{"insert":" *https://example.com/x?y=1<é","attributes":{"bold":true}},{"insert":"1:23","attributes":{"bold":true,"href":"leaflet://page/p2#b1?t=83"}},{"insert":"«"}]},
-{"markdown":"\\","delta":[{"insert":"\\"}]},
-{"markdown":"@é<","delta":[{"insert":"@é<"}]},
-{"markdown":"\u0001","delta":[{"insert":"\u0001"}]},
-{"markdown":" \u000bß😀\r　\u000b日本語<","delta":[{"insert":" \u000bß😀\r　\u000b日本語<"}]},
-{"markdown":" ﻿]","delta":[{"insert":" ﻿]"}]},
-{"markdown":"\n","delta":[{"insert":"\n"}]},
-{"markdown":"﻿\\_ * `_it_ *it***a*[a](https://x.com/(b))42\\`é","delta":[{"insert":"﻿_ * "},{"insert":"_it_ *it***a*[a](https://x.com/(b))42\\","attributes":{"code":true}},{"insert":"é"}]},
-{"markdown":"{[Plan](leaflet://page/p1)https://example.com/x?y=1_a_b_'@\u0001 \\_snake_case\fé\u000b","delta":[{"insert":"{"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"https://example.com/x?y=1_a_b_'@\u0001 _snake_case\fé\u000b"}]},
-{"markdown":"\\[\\`\r[Plan](leaflet://page/p1)","delta":[{"insert":"[`\r"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
-{"markdown":"!**bold**​[a](<https://x.com/a b>)","delta":[{"insert":"!"},{"insert":"bold","attributes":{"bold":true}},{"insert":"​"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"=[1:23](leaflet://page/p2#b1?t=83)word[a](https://x.com/(b))$[@Ann](mention:user:u1)","delta":[{"insert":"="},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"word"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"$"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
-{"markdown":"/[@Bot](mention:agent:a1)","delta":[{"insert":"/"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"<br>\\\\","delta":[{"insert":"<br>\\"}]},
-{"markdown":"[a](<https://x.com/a b>)","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"**snake_case($a😀*a**_a_b_b[1:23](leaflet://page/p2#b1?t=83){'[@Bot](mention:agent:a1)","delta":[{"insert":"snake_case($a😀*a","attributes":{"bold":true}},{"insert":"_a_b_b"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"{'"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"。Plan[a](https://x.com/(b))Plan[Plan](leaflet://page/p1)[Plan](leaflet://page/p1)~\r[](leaflet://page/p3)","delta":[{"insert":"。Plan"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"Plan"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"~\r[](leaflet://page/p3)"}]},
-{"markdown":"$: **a*a%","delta":[{"insert":"$: *"},{"insert":"a","attributes":{"italic":true}},{"insert":"a%"}]},
-{"markdown":"«|\r","delta":[{"insert":"«|\r"}]},
-{"markdown":"$ *\\`.\n`code`","delta":[{"insert":"$ *`.\n"},{"insert":"code","attributes":{"code":true}}]},
-{"markdown":"*a**a\"[@Bot](mention:agent:a1)\\`snake_case　%","delta":[{"insert":"*a**a\""},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"`snake_case　%"}]},
-{"markdown":"x𝔸 [1:23](leaflet://page/p2#b1?t=83)42[a](https://x.com/(b))ß)","delta":[{"insert":"x𝔸 "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"42"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"ß)"}]},
-{"markdown":"\\[__？ [link](https://example.com/a)>。![pic](https://x.com/a.png)？(\\_","delta":[{"insert":"[__？ "},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":">。!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"？(_"}]},
+{"markdown":"0-)<span style=\"background:#00ff00;color:#FF000080\">ß","delta":[{"insert":"0-)<span style=\"background:#00ff00;color:#FF000080\">ß"}]},
+{"markdown":"\\*(𝔸\u000bé``a`b``","delta":[{"insert":"*(𝔸\u000bé"},{"insert":"a`b","attributes":{"code":true}},{"insert":""}]},
+{"markdown":"* Σ#\r\u0001","delta":[{"insert":"* Σ#\r\u0001"}]},
+{"markdown":"&~~[@Bot](mention:agent:a1)","delta":[{"insert":"&~~"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
+{"markdown":"_<span style=\"color:red\">+_[](leaflet://page/p3)\\_\f[a](https://x.com/(b)) *it*　","delta":[{"insert":"<span style=\"color:red\">+","attributes":{"italic":true}},{"insert":"[](leaflet://page/p3)_\f"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":" "},{"insert":"it","attributes":{"italic":true}},{"insert":"　"}]},
+{"markdown":"é>* *it*&![pic](https://x.com/a.png)","delta":[{"insert":"é>"},{"insert":" *it","attributes":{"italic":true}},{"insert":"&!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
+{"markdown":" !","delta":[{"insert":" !"}]},
+{"markdown":"[x](leaflet://page/p2#b1)\t*it*ß\\\\0","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"\t"},{"insert":"it","attributes":{"italic":true}},{"insert":"ß\\0"}]},
+{"markdown":"[x](leaflet://page/p2#b1)*it*[a](<https://x.com/a b>)\"\\`​","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"it","attributes":{"italic":true}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"\"`​"}]},
+{"markdown":"_","delta":[{"insert":"_"}]},
+{"markdown":"İ [](leaflet://page/p3)","delta":[{"insert":"İ [](leaflet://page/p3)"}]},
+{"markdown":"***<span style=\"color:#ff0000\">~~#﻿﻿\n日本語","delta":[{"insert":"***<span style=\"color:#ff0000\">~~#﻿﻿\n日本語"}]},
+{"markdown":".__**a*_a_b_@<span style=\"color:red\">﻿ ~~日本語\r][x](leaflet://page/p2#b1)a","delta":[{"insert":"._"},{"insert":"*a_a_b","attributes":{"italic":true}},{"insert":"@<span style=\"color:red\">﻿ ~~日本語\r]"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"a"}]},
+{"markdown":"*a**K/+","delta":[{"insert":"*a**K/+"}]},
+{"markdown":")[1:23](leaflet://page/p2#b1?t=83)<","delta":[{"insert":")"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"<"}]},
+{"markdown":"[a](<https://x.com/a b>)﻿**a* \\ *``a`b`` *https://example.com/x?y=1-\u0001[x](leaflet://page/p2#b1)<span style=\"color:#ff0000\">！","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"﻿*"},{"insert":"a","attributes":{"italic":true}},{"insert":" \\ *"},{"insert":"a`b","attributes":{"code":true}},{"insert":" *https://example.com/x?y=1-\u0001"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"<span style=\"color:#ff0000\">！"}]},
+{"markdown":"(","delta":[{"insert":"("}]},
+{"markdown":"&-{","delta":[{"insert":"&-{"}]},
+{"markdown":"\f","delta":[{"insert":"\f"}]},
+{"markdown":"​é%日本語\u000b\u0001 ​字-","delta":[{"insert":"​é%日本語\u000b\u0001 ​字-"}]},
+{"markdown":"%　`","delta":[{"insert":"%　`"}]},
+{"markdown":"*","delta":[{"insert":"*"}]},
+{"markdown":"　\\_ *  </span>**bold**  **bold****a*[a](<https://x.com/a b>)42\\_\u0001","delta":[{"insert":"　_ "},{"insert":"  </span>","attributes":{"italic":true}},{"insert":"bold","attributes":{"italic":true,"bold":true}},{"insert":"  ","attributes":{"italic":true}},{"insert":"bold","attributes":{"italic":true,"bold":true}},{"insert":"**a","attributes":{"italic":true}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"42_\u0001"}]},
+{"markdown":"@[@Bot](mention:agent:a1)\r[](leaflet://page/p3)_a_b_&&\f \\_«﻿\u0001​","delta":[{"insert":"@"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"\r[](leaflet://page/p3)"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"&&\f _«﻿\u0001​"}]},
+{"markdown":"\\`\\_\f[@Bot](mention:agent:a1)","delta":[{"insert":"`_\f"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
+{"markdown":"]snake_case [link](https://example.com/a)","delta":[{"insert":"]snake_case "},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"/[x](leaflet://page/p2#b1)«[a](<https://x.com/a b>).![pic](https://x.com/a.png)","delta":[{"insert":"/"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"«"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":".!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
+{"markdown":"+[@Ann](mention:user:u1)","delta":[{"insert":"+"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":"\\\\\\[","delta":[{"insert":"\\["}]},
+{"markdown":"[link](https://example.com/a)","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"**«~~.a字*a**_a_b_b[1:23](leaflet://page/p2#b1?t=83)'$[@Ann](mention:user:u1)","delta":[{"insert":"«~~.a字*a","attributes":{"bold":true}},{"insert":"_a_b_b"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"'$"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":"éPlan[a](<https://x.com/a b>)x[Plan](leaflet://page/p1)[@Bot](mention:agent:a1)</span>\u000b[](leaflet://page/p3)","delta":[{"insert":"éPlan"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"x"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"</span>\u000b[](leaflet://page/p3)"}]},
+{"markdown":":|  *a'","delta":[{"insert":":|  *a'"}]},
+{"markdown":"！>\u000b","delta":[{"insert":"！>\u000b"}]},
+{"markdown":": *\\_<*~~gone~~","delta":[{"insert":": "},{"insert":"_<","attributes":{"italic":true}},{"insert":"gone","attributes":{"strikethrough":true}}]},
+{"markdown":"*a**a$[@Ann](mention:user:u1)\\_« '","delta":[{"insert":"*a**a$"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"_« '"}]},
+{"markdown":"x日本語@[1:23](leaflet://page/p2#b1?t=83)42[a](https://x.com/(b))é[","delta":[{"insert":"x日本語@"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"42"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"é["}]},
+{"markdown":"\\`<span style=\"background:#00ff00;color:#FF000080\">。%``a`b``!𝔸[a](https://x.com/(b))。~~\\_","delta":[{"insert":"`<span style=\"background:#00ff00;color:#FF000080\">。%"},{"insert":"a`b","attributes":{"code":true}},{"insert":"!𝔸"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"。~~_"}]},
 {"markdown":"","delta":[]},
-{"markdown":"\\```a`b``\\*","delta":[{"insert":"`"},{"insert":"a`b","attributes":{"code":true}},{"insert":"*"}]},
-{"markdown":"&[@Ann](mention:user:u1)？ 𝔸","delta":[{"insert":"&"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"？ 𝔸"}]},
-{"markdown":"_it_@=*[@Bot](mention:agent:a1)  * ","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"@=*"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"  * "}]},
-{"markdown":"aword字>0``a`b``_!😀**é","delta":[{"insert":"aword字>0"},{"insert":"a`b","attributes":{"code":true}},{"insert":"_!😀**é"}]},
-{"markdown":"[a](https://x.com/(b))=https://example.com/x?y=1[link](https://example.com/a)'？😀~~42","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"=https://example.com/x?y=1"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"'？😀~~42"}]},
-{"markdown":"<\\[﻿word`𝔸`code`[1:23](leaflet://page/p2#b1?t=83) ","delta":[{"insert":"<[﻿word"},{"insert":"𝔸","attributes":{"code":true}},{"insert":"code`"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":" "}]},
-{"markdown":"***é+[Plan](leaflet://page/p1)[a](https://x.com/(b))ß***(İ`","delta":[{"insert":"é+","attributes":{"bold":true,"italic":true}},{"insert":"Plan","attributes":{"bold":true,"italic":true,"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"a","attributes":{"bold":true,"italic":true,"href":"https://x.com/(b)"}},{"insert":"ß","attributes":{"bold":true,"italic":true}},{"insert":"(İ`"}]},
-{"markdown":" *$​42","delta":[{"insert":" *$​42"}]},
-{"markdown":"!``a`b```code`[a](https://x.com/(b))😀)Σ\r\\`'_&","delta":[{"insert":"!`"},{"insert":"a","attributes":{"code":true}},{"insert":"b``"},{"insert":"code","attributes":{"code":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"😀)Σ\r`'_&"}]},
-{"markdown":"_it_a{\\[~~$[Plan](leaflet://page/p1){**K``a`b``","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"a{[~~$"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"{**K"},{"insert":"a`b","attributes":{"code":true}}]},
-{"markdown":"|&**﻿日本語\"日本語","delta":[{"insert":"|&**﻿日本語\"日本語"}]},
-{"markdown":"= \"_a_b_%\"é\\.%​Σ","delta":[{"insert":"= \""},{"insert":"a_b","attributes":{"italic":true}},{"insert":"%\"é.%​Σ"}]},
-{"markdown":"_a_b_>-]\\`****bold**[@Ann](mention:user:u1)![1:23](leaflet://page/p2#b1?t=83)[](leaflet://page/p3)\u000bPlan","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":">-]`"},{"insert":"**","attributes":{"italic":true}},{"insert":"bold**"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"!"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"[](leaflet://page/p3)\u000bPlan"}]},
+{"markdown":"\\``code`\\*","delta":[{"insert":"`"},{"insert":"code","attributes":{"code":true}},{"insert":"*"}]},
+{"markdown":"=[@Ann](mention:user:u1)é%日本語","delta":[{"insert":"="},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"é%日本語"}]},
+{"markdown":"*it*&/*[@Ann](mention:user:u1)@ * ","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"&/*"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"@ * "}]},
+{"markdown":"a！Σ!42`code`<span style=\"background:#00ff00;color:#FF000080\">]日本語<span style=\"color:#ff0000\">\u0001{","delta":[{"insert":"a！Σ!42"},{"insert":"code","attributes":{"code":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">]日本語<span style=\"color:#ff0000\">\u0001{"}]},
+{"markdown":"[a](<https://x.com/a b>)/https://example.com/x?y=1``a`b``$\r。字_42","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"/https://example.com/x?y=1"},{"insert":"a`b","attributes":{"code":true}},{"insert":"$\r。字_42"}]},
+{"markdown":"-\\[　！</span>😀~~gone~~[x](leaflet://page/p2#b1)@","delta":[{"insert":"-[　！</span>😀"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"@"}]},
+{"markdown":"***\u0001#[@Bot](mention:agent:a1)[a](<https://x.com/a b>)é<br>~~<span style=\"color:red\">","delta":[{"insert":"***\u0001#"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"é<br>~~<span style=\"color:red\">"}]},
+{"markdown":" *: 42","delta":[{"insert":" *: 42"}]},
+{"markdown":"]`code`~~gone~~[a](<https://x.com/a b>)日本語[{İ\u000b\\_&<span style=\"background:#00ff00;color:#FF000080\">.","delta":[{"insert":"]"},{"insert":"code","attributes":{"code":true}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"日本語[{İ\u000b_&<span style=\"background:#00ff00;color:#FF000080\">."}]},
+{"markdown":"*it*%a@\\`__:[@Bot](mention:agent:a1)'**Σ`code`","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"%a@`__:"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"'**Σ"},{"insert":"code","attributes":{"code":true}}]},
+{"markdown":"-.**　字=K","delta":[{"insert":"-.**　字=K"}]},
+{"markdown":"/{=_a_b_'$😀]<' ß","delta":[{"insert":"/{="},{"insert":"a_b","attributes":{"italic":true}},{"insert":"'$😀]<' ß"}]},
+{"markdown":"_a_b_!\\~\\`<span style=\"color:#ff0000\">snake_case![pic](https://x.com/a.png)][x](leaflet://page/p2#b1)[1:23](leaflet://page/p2#b1?t=83)​Plan","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"!~`<span style=\"color:#ff0000\">snake_case!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"]"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"​Plan"}]},
 {"markdown":"","delta":[]},
-{"markdown":"*a**`~~gone~~é*\"|K .\u000b[a](https://x.com/(b))","delta":[{"insert":"a**`","attributes":{"italic":true}},{"insert":"gone","attributes":{"italic":true,"strikethrough":true}},{"insert":"é","attributes":{"italic":true}},{"insert":"\"|K .\u000b"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":"\ra «é* ``a`b```code`https://example.com/x?y=1\n__![pic](https://x.com/a.png) [a](https://x.com/(b))","delta":[{"insert":"\ra «é* `"},{"insert":"a","attributes":{"code":true}},{"insert":"b``"},{"insert":"code","attributes":{"code":true}},{"insert":"https://example.com/x?y=1\n__!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":" "},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":"[a](<https://x.com/a b>)__字 __)`？[@Ann](mention:user:u1)ß[0snake_case[link](https://example.com/a)","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"字 ","attributes":{"bold":true}},{"insert":")`？"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"ß[0snake_case"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
-{"markdown":"K\\\\'","delta":[{"insert":"K\\'"}]},
-{"markdown":"snake_case42[a](<https://x.com/a b>)**bold**[@Ann](mention:user:u1)\\_　","delta":[{"insert":"snake_case42"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"bold","attributes":{"bold":true}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"_　"}]},
-{"markdown":"\u000142日本語éİ`( 𝔸`code`b[Plan](leaflet://page/p1)","delta":[{"insert":"\u000142日本語éİ"},{"insert":"( 𝔸","attributes":{"code":true}},{"insert":"code`b"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)+=(0***[](leaflet://page/p3)~[](leaflet://page/p3)\f\\日本語+。","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"+=(0***[](leaflet://page/p3)~[](leaflet://page/p3)\f\\日本語+。"}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)\n[](leaflet://page/p3)Σ* _\\[","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"\n[](leaflet://page/p3)Σ* _["}]},
-{"markdown":"*\u0001é ","delta":[{"insert":"*\u0001é "}]},
-{"markdown":"&\\**bold**(<+~Σ@","delta":[{"insert":"&**bold**(<+~Σ@"}]},
+{"markdown":"*a**</span>_it_\u0001*=>Σ <​[a](<https://x.com/a b>)","delta":[{"insert":"a**</span>it\u0001","attributes":{"italic":true}},{"insert":"=>Σ <​"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"\u000ba ！\u0001* `code`~~gone~~https://example.com/x?y=1\n<span style=\"background:#00ff00;color:#FF000080\">[a](https://x.com/(b))%[a](<https://x.com/a b>)","delta":[{"insert":"\u000ba ！\u0001* "},{"insert":"code","attributes":{"code":true}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"https://example.com/x?y=1\n<span style=\"background:#00ff00;color:#FF000080\">"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"%"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"[a](<https://x.com/a b>)<span style=\"background:#00ff00;color:#FF000080\">Σ@<span style=\"background:#00ff00;color:#FF000080\">[</span>。![pic](https://x.com/a.png)İ`0word``a`b``","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"Σ@<span style=\"background:#00ff00;color:#FF000080\">[","attributes":{"background":"#00ff00","color":"#FF000080"}},{"insert":"。!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"İ"},{"insert":"0word``a","attributes":{"code":true}},{"insert":"b``"}]},
+{"markdown":"Σ\\[&","delta":[{"insert":"Σ[&"}]},
+{"markdown":"« [link](https://example.com/a)snake_case![pic](https://x.com/a.png)\\_ ","delta":[{"insert":"« "},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"snake_case!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"_ "}]},
+{"markdown":"\f42K😀</span>~~@日本語~~gone~~b[@Bot](mention:agent:a1)","delta":[{"insert":"\f42K😀</span>"},{"insert":"@日本語","attributes":{"strikethrough":true}},{"insert":"gone~~b"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83)>/~0***[1:23](leaflet://page/p2#b1?t=83)_[1:23](leaflet://page/p2#b1?t=83)﻿(字#é","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":">/~0***"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"_"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"﻿(字#é"}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83)*[](leaflet://page/p3)İ* <span style=\"color:#ff0000\">\\`","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"[](leaflet://page/p3)İ","attributes":{"italic":true}},{"insert":" <span style=\"color:#ff0000\">`"}]},
+{"markdown":"*\f\u0001 ","delta":[{"insert":"*\f\u0001 "}]},
+{"markdown":"=\r(snake_case~~-#_İ&","delta":[{"insert":"=\r(snake_case~~-#_İ&"}]},
 {"markdown":"","delta":[]},
-{"markdown":"\\Σb　İ)ß","delta":[{"insert":"\\Σb　İ)ß"}]},
-{"markdown":"bß。<br>.","delta":[{"insert":"bß。<br>."}]},
-{"markdown":"0[x](leaflet://page/p2#b1)##***\u0001\\' *[Plan](leaflet://page/p1)word","delta":[{"insert":"0"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"##***\u0001' *"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"word"}]},
-{"markdown":"/__","delta":[{"insert":"/__"}]},
-{"markdown":"\\[0+.[@Ann](mention:user:u1)Plan-[bword0[](leaflet://page/p3)![pic](https://x.com/a.png)]","delta":[{"insert":"[0+."},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Plan-[bword0[](leaflet://page/p3)!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"]"}]},
+{"markdown":"]ßb [İ","delta":[{"insert":"]ßb [İ"}]},
+{"markdown":"bİé<br><","delta":[{"insert":"bİé<br><"}]},
+{"markdown":"42[Plan](leaflet://page/p1)))***\f($* [Plan](leaflet://page/p1)«","delta":[{"insert":"42"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"))"},{"insert":"**\f($","attributes":{"italic":true}},{"insert":" "},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"«"}]},
+{"markdown":"+<span style=\"background:#00ff00;color:#FF000080\">","delta":[{"insert":"+<span style=\"background:#00ff00;color:#FF000080\">"}]},
+{"markdown":"\\`42#/[@Ann](mention:user:u1)Plan#__b«42[](leaflet://page/p3)[a](https://x.com/(b))~","delta":[{"insert":"`42#/"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Plan#__b«42[](leaflet://page/p3)"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"~"}]},
 {"markdown":"Plan_a_b_","delta":[{"insert":"Plan_a_b_"}]},
-{"markdown":"_a_b_[","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"["}]},
-{"markdown":"https://example.com/x?y=1[a](<https://x.com/a b>)b\" (**a*字\u000b　**a*","delta":[{"insert":"https://example.com/x?y=1"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"b\" ("},{"insert":"a*字\u000b　","attributes":{"bold":true}},{"insert":"a*"}]},
-{"markdown":"𝔸'\\*x* ","delta":[{"insert":"𝔸'*x* "}]},
-{"markdown":"{``a`b``***","delta":[{"insert":"{"},{"insert":"a`b","attributes":{"code":true}},{"insert":"***"}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)_it_ß42 [x](leaflet://page/p2#b1)&a？？%/[x](leaflet://page/p2#b1)","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"_it_ß42 "},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"&a？？%/"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}}]},
-{"markdown":"*a**\f​","delta":[{"insert":"*a**\f​"}]},
-{"markdown":" 日本語 *.İ\f\nİ<br>[a](https://x.com/(b))[link](https://example.com/a)\\_ ","delta":[{"insert":" 日本語 *.İ\f\nİ<br>"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"_ "}]},
-{"markdown":"[a](https://x.com/(b))K***[@Ann](mention:user:u1)！\\_！","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"K***"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"！_！"}]},
-{"markdown":"*a**\"[字﻿𝔸","delta":[{"insert":"*a**\"[字﻿𝔸"}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)* a　ß[Plan](leaflet://page/p1)\\İ","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"* a　ß"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\\İ"}]},
-{"markdown":"#`.","delta":[{"insert":"#`."}]},
-{"markdown":"​>﻿&  ","delta":[{"insert":"​>﻿&  "}]},
+{"markdown":"_a_b_`","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"`"}]},
+{"markdown":"[](leaflet://page/p3)[link](https://example.com/a)b$~~**a*K​**a*","delta":[{"insert":"[](leaflet://page/p3)"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"b$~~"},{"insert":"a*K​","attributes":{"bold":true}},{"insert":"a*"}]},
+{"markdown":"😀&\\*0* ","delta":[{"insert":"😀&*0* "}]},
+{"markdown":"'`code`***","delta":[{"insert":"'"},{"insert":"code","attributes":{"code":true}},{"insert":"***"}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83)*it*é42 [Plan](leaflet://page/p1).a。。'|[Plan](leaflet://page/p1)","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"it","attributes":{"italic":true}},{"insert":"é42 "},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":".a。。'|"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
+{"markdown":"*a**﻿ ","delta":[{"insert":"*a**﻿ "}]},
+{"markdown":"  字 */{﻿*<br>[a](<https://x.com/a b>)``a`b``\\*","delta":[{"insert":"  字 "},{"insert":"/{﻿","attributes":{"italic":true}},{"insert":"<br>"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"a`b","attributes":{"code":true}},{"insert":"*"}]},
+{"markdown":"[a](<https://x.com/a b>)ß***![pic](https://x.com/a.png)？\\_？","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"ß***!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"？_？"}]},
+{"markdown":"*a**$__Σ　😀","delta":[{"insert":"*a**$__Σ　😀"}]},
+{"markdown":"[x](leaflet://page/p2#b1)* a İ[@Bot](mention:agent:a1)(é","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"* a İ"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"(é"}]},
+{"markdown":")</span><","delta":[{"insert":")</span><"}]},
+{"markdown":" !　=  ","delta":[{"insert":" !　=  "}]},
 {"markdown":"[@Ann](mention:user:u1)","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
-{"markdown":"！。x","delta":[{"insert":"！。x"}]},
-{"markdown":"#\\[😀\\\\'","delta":[{"insert":"#[😀\\'"}]},
-{"markdown":"0b\".[1:23](leaflet://page/p2#b1?t=83)![pic](https://x.com/a.png)[link](https://example.com/a){=字-","delta":[{"insert":"0b\"."},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"{=字-"}]},
-{"markdown":"\\\\.é<br>","delta":[{"insert":"\\.é<br>"}]},
-{"markdown":"﻿​\u0001","delta":[{"insert":"﻿​\u0001"}]},
-{"markdown":"0K[@Ann](mention:user:u1)«\r","delta":[{"insert":"0K"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"«\r"}]},
-{"markdown":"-.*a**\\ ß😀{* Σword42","delta":[{"insert":"-."},{"insert":"a**\\ ß😀{","attributes":{"italic":true}},{"insert":" Σword42"}]},
-{"markdown":"snake_case\\[","delta":[{"insert":"snake_case["}]},
-{"markdown":" 42_**bold**[](leaflet://page/p3)日本語\u000b] ![pic](https://x.com/a.png)42","delta":[{"insert":" 42_"},{"insert":"bold","attributes":{"bold":true}},{"insert":"[](leaflet://page/p3)日本語\u000b] !"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"42"}]},
-{"markdown":"**字«/ [](leaflet://page/p3)**b 　","delta":[{"insert":"字«/ [](leaflet://page/p3)","attributes":{"bold":true}},{"insert":"b 　"}]},
-{"markdown":"\\word　<br>。<","delta":[{"insert":"\\word　<br>。<"}]},
-{"markdown":" ~~]字Plan[é|[**>>[a](<https://x.com/a b>)snake_case","delta":[{"insert":" ~~]字Plan[é|[**>>"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"snake_case"}]},
-{"markdown":"]\\[``a`b``  ","delta":[{"insert":"]["},{"insert":"a`b","attributes":{"code":true}},{"insert":"  "}]},
-{"markdown":"😀)_it_ Plan**x)<:\\*！`","delta":[{"insert":"😀)"},{"insert":"it","attributes":{"italic":true}},{"insert":" Plan**x)<:*！`"}]},
-{"markdown":"word[","delta":[{"insert":"word["}]},
-{"markdown":"@42　\\é`😀﻿","delta":[{"insert":"@42　\\é`😀﻿"}]},
-{"markdown":":x","delta":[{"insert":":x"}]},
-{"markdown":"«=\rΣ>`(\\_","delta":[{"insert":"«=\rΣ>`(_"}]},
-{"markdown":"　snake_case**bold**！[@Bot](mention:agent:a1) \" <[link](https://example.com/a)**bold**$","delta":[{"insert":"　snake_case"},{"insert":"bold","attributes":{"bold":true}},{"insert":"！"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":" \" <"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"bold","attributes":{"bold":true}},{"insert":"$"}]},
-{"markdown":"#[a](https://x.com/(b))_42 ~~'*a**Plan)**a***bold**.","delta":[{"insert":"#"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"_42 ~~'"},{"insert":"a","attributes":{"italic":true}},{"insert":"Plan)","attributes":{"italic":true,"bold":true}},{"insert":"a**","attributes":{"italic":true}},{"insert":"bold**."}]},
-{"markdown":"é？[1:23](leaflet://page/p2#b1?t=83)![pic](https://x.com/a.png)@]_it_<Plan\f[Plan](leaflet://page/p1)\\\\![pic](https://x.com/a.png)[a](https://x.com/(b))","delta":[{"insert":"é？"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@]"},{"insert":"it","attributes":{"italic":true}},{"insert":"<Plan\f"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\\!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":"+é<br><0__\t？x:**a*","delta":[{"insert":"+é<br><0__\t？x:*"},{"insert":"a","attributes":{"italic":true}}]},
-{"markdown":"\\[a](https://x.com/(b))`code`[](leaflet://page/p3)x_a_b_​ \\`[1:23](leaflet://page/p2#b1?t=83)[a](https://x.com/(b))+snake_case\u0001","delta":[{"insert":"[a](https://x.com/(b))"},{"insert":"code","attributes":{"code":true}},{"insert":"[](leaflet://page/p3)x_a_b_​ `"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"+snake_case\u0001"}]},
+{"markdown":"？𝔸x","delta":[{"insert":"？𝔸x"}]},
+{"markdown":")\\`字\\[$","delta":[{"insert":")`字[$"}]},
+{"markdown":"0b=/[1:23](leaflet://page/p2#b1?t=83)[a](https://x.com/(b))``a`b``@:K\\","delta":[{"insert":"0b=/"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a`b","attributes":{"code":true}},{"insert":"@:K\\"}]},
+{"markdown":"\\\\<\u0001<br>","delta":[{"insert":"\\<\u0001<br>"}]},
+{"markdown":"　 \f","delta":[{"insert":"　 \f"}]},
+{"markdown":"42ß[@Ann](mention:user:u1)！\u000b","delta":[{"insert":"42ß"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"！\u000b"}]},
+{"markdown":"\\<*a**( é日本語'***İ！42","delta":[{"insert":"<"},{"insert":"a","attributes":{"italic":true}},{"insert":"( é日本語'","attributes":{"italic":true,"bold":true}},{"insert":"İ！42"}]},
+{"markdown":"word\\[","delta":[{"insert":"word["}]},
+{"markdown":"  42<span style=\"background:#00ff00;color:#FF000080\">snake_case[](leaflet://page/p3)字​~{[a](https://x.com/(b))42","delta":[{"insert":"  42<span style=\"background:#00ff00;color:#FF000080\">snake_case[](leaflet://page/p3)字​~{"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"42"}]},
+{"markdown":"<span style=\"color:#ff0000\">K？+  [1:23](leaflet://page/p2#b1?t=83)<span style=\"color:#ff0000\">b { ","delta":[{"insert":"<span style=\"color:#ff0000\">K？+  "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"<span style=\"color:#ff0000\">b { "}]},
+{"markdown":"(« <br>é-","delta":[{"insert":"(« <br>é-"}]},
+{"markdown":"  __`KPlan`𝔸>`**!![link](https://example.com/a)word","delta":[{"insert":"  __"},{"insert":"KPlan","attributes":{"code":true}},{"insert":"𝔸>`**!!"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"word"}]},
+{"markdown":"~\\[`code`  ","delta":[{"insert":"~["},{"insert":"code","attributes":{"code":true}},{"insert":"  "}]},
+{"markdown":"日本語[*it* Plan**x[-|https://example.com/x?y=1？</span>","delta":[{"insert":"日本語["},{"insert":"it","attributes":{"italic":true}},{"insert":" Plan**x[-|https://example.com/x?y=1？</span>"}]},
+{"markdown":"«`","delta":[{"insert":"«`"}]},
+{"markdown":"\"42 (\u0001<span style=\"color:red\">日本語　","delta":[{"insert":"\"42 (\u0001<span style=\"color:red\">日本語　"}]},
+{"markdown":"<x","delta":[{"insert":"<x"}]},
+{"markdown":"？/\u000bß!</span>~~\\_","delta":[{"insert":"？/\u000bß!</span>~~_"}]},
+{"markdown":" wordsnake_case？[@Ann](mention:user:u1) = +``a`b``word:","delta":[{"insert":" wordsnake_case？"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":" = +"},{"insert":"a`b","attributes":{"code":true}},{"insert":"word:"}]},
+{"markdown":")[a](<https://x.com/a b>)<span style=\"background:#00ff00;color:#FF000080\">42@_&*a**Plan[**a*snake_case/","delta":[{"insert":")"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">42@_&"},{"insert":"a","attributes":{"italic":true}},{"insert":"Plan[","attributes":{"italic":true,"bold":true}},{"insert":"a","attributes":{"italic":true}},{"insert":"snake_case/"}]},
+{"markdown":"😀。[1:23](leaflet://page/p2#b1?t=83)[a](https://x.com/(b))&~**bold**-Plan﻿[@Bot](mention:agent:a1)\\\\[a](https://x.com/(b))[a](<https://x.com/a b>)","delta":[{"insert":"😀。"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"&~"},{"insert":"bold","attributes":{"bold":true}},{"insert":"-Plan﻿"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"\\"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"#😀<br>+0<span style=\"color:red\">\téx|**a*","delta":[{"insert":"#😀<br>+0<span style=\"color:red\">\téx|*"},{"insert":"a","attributes":{"italic":true}}]},
+{"markdown":"([a](<https://x.com/a b>)~~gone~~[](leaflet://page/p3)x_a_b_   \\`[x](leaflet://page/p2#b1)[a](https://x.com/(b))#word\f","delta":[{"insert":"("},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"[](leaflet://page/p3)x_a_b_   `"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"#word\f"}]},
 {"markdown":"","delta":[]},
-{"markdown":" *𝔸**a*>Σ","delta":[{"insert":" "},{"insert":"𝔸**a","attributes":{"italic":true}},{"insert":">Σ"}]},
-{"markdown":"　word？**a*:","delta":[{"insert":"　word？*"},{"insert":"a","attributes":{"italic":true}},{"insert":":"}]},
-{"markdown":"\\[=a","delta":[{"insert":"[=a"}]},
-{"markdown":"]\\[\" \f__[x](leaflet://page/p2#b1)$*a**~~\n","delta":[{"insert":"][\" \f__"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"$*a**~~\n"}]},
-{"markdown":")\nß[a](<https://x.com/a b>)ß~~gone~~[@Ann](mention:user:u1)[a](<https://x.com/a b>)_","delta":[{"insert":")\nß"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"ß"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"_"}]},
-{"markdown":"\\[\\[İ`code`\\`* \na[a](https://x.com/(b))𝔸","delta":[{"insert":"[[İ"},{"insert":"code","attributes":{"code":true}},{"insert":"`* \na"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"𝔸"}]},
-{"markdown":"(***a*`","delta":[{"insert":"("},{"insert":"**a","attributes":{"italic":true}},{"insert":"`"}]},
-{"markdown":"``a`b```\u000b","delta":[{"insert":"`"},{"insert":"a","attributes":{"code":true}},{"insert":"b```\u000b"}]},
+{"markdown":" *😀**a*!İ","delta":[{"insert":" "},{"insert":"😀**a","attributes":{"italic":true}},{"insert":"!İ"}]},
+{"markdown":" «。**a*|","delta":[{"insert":" «。*"},{"insert":"a","attributes":{"italic":true}},{"insert":"|"}]},
+{"markdown":"\\[/a","delta":[{"insert":"[/a"}]},
+{"markdown":"~%\\[= ﻿<span style=\"color:red\">[x](leaflet://page/p2#b1):*a**__\n","delta":[{"insert":"~%[= ﻿<span style=\"color:red\">"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":":*a**__\n"}]},
+{"markdown":"[\né[link](https://example.com/a)é*it*![pic](https://x.com/a.png)[link](https://example.com/a)<span style=\"color:#ff0000\">","delta":[{"insert":"[\né"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"é"},{"insert":"it","attributes":{"italic":true}},{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"<span style=\"color:#ff0000\">"}]},
+{"markdown":"\\[\\[~~gone~~\\`* \na[a](<https://x.com/a b>)日本語","delta":[{"insert":"[["},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"`* \na"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"日本語"}]},
+{"markdown":"~~****a*<span style=\"color:red\">{","delta":[{"insert":"~~"},{"insert":"**","attributes":{"italic":true}},{"insert":"a*<span style=\"color:red\">{"}]},
+{"markdown":"`code`<span style=\"color:red\">​","delta":[{"insert":"code","attributes":{"code":true}},{"insert":"<span style=\"color:red\">​"}]},
 {"markdown":"","delta":[]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83)_#[@Bot](mention:agent:a1)_it_**a*\u0001ß[x](leaflet://page/p2#b1)","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"#","attributes":{"italic":true}},{"insert":"@Bot","attributes":{"italic":true,"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"_it","attributes":{"italic":true}},{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"\u0001ß"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}}]},
-{"markdown":"# \"\r`\\`.ß\\[  *a**>.字","delta":[{"insert":"# \"\r"},{"insert":"\\","attributes":{"code":true}},{"insert":".ß[  *a**>.字"}]},
-{"markdown":"[**>*","delta":[{"insert":"[*"},{"insert":">","attributes":{"italic":true}}]},
+{"markdown":"[x](leaflet://page/p2#b1)<span style=\"background:#00ff00;color:#FF000080\">)[@Ann](mention:user:u1)*it***a*\fé[Plan](leaflet://page/p1)","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">)"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"it**","attributes":{"italic":true}},{"insert":"a*\fé"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
+{"markdown":") =\u000b</span>\\`/İ\\`\t*a**!<Σ","delta":[{"insert":") =\u000b</span>`/İ`\t*a**!<Σ"}]},
+{"markdown":"`**{!*","delta":[{"insert":"`*"},{"insert":"{!","attributes":{"italic":true}}]},
 {"markdown":"Plan","delta":[{"insert":"Plan"}]},
-{"markdown":"[a](https://x.com/(b))_it_İsnake_case*it*。)\\`\"b Plan","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"_it_İsnake_case"},{"insert":"it","attributes":{"italic":true}},{"insert":"。)`\"b Plan"}]},
-{"markdown":":Ksnake_case​[@Ann](mention:user:u1)_a_b_'","delta":[{"insert":":Ksnake_case​"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"a_b","attributes":{"italic":true}},{"insert":"'"}]},
-{"markdown":"\\_\nsnake_caseΣ]**bold**é","delta":[{"insert":"_\nsnake_caseΣ]"},{"insert":"bold","attributes":{"bold":true}},{"insert":"é"}]},
-{"markdown":"？%*+!\u000b>\\_KPlan)","delta":[{"insert":"？%*+!\u000b>_KPlan)"}]},
-{"markdown":"*~~gone~~***\n:字{​","delta":[{"insert":"gone","attributes":{"italic":true,"strikethrough":true}},{"insert":"**","attributes":{"italic":true}},{"insert":"\n:字{​"}]},
-{"markdown":"-%**«\\`\\[ \\`　　)\t","delta":[{"insert":"-%**«`[ `　　)\t"}]},
-{"markdown":"/(\u000bhttps://example.com/x?y=1\\`= +-","delta":[{"insert":"/(\u000bhttps://example.com/x?y=1`= +-"}]},
-{"markdown":"K&b\\_a{\\[","delta":[{"insert":"K&b_a{["}]},
-{"markdown":"_a_b_.[a](https://x.com/(b))**a** '«@ *​ #%","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"."},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"a","attributes":{"bold":true}},{"insert":" '«@ *​ #%"}]},
-{"markdown":"«\\*","delta":[{"insert":"«*"}]},
-{"markdown":"**a*\\[Plan .[1:23](leaflet://page/p2#b1?t=83)。\f\u000b<~~~~gone~~!\\\\","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"[Plan ."},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"。\f\u000b<~"},{"insert":"~gone","attributes":{"strikethrough":true}},{"insert":"!\\"}]},
-{"markdown":"\\`\r**a* ","delta":[{"insert":"`\r*"},{"insert":"a","attributes":{"italic":true}},{"insert":" "}]},
-{"markdown":"* \\\\[﻿！[x](leaflet://page/p2#b1)**bold**\f__$","delta":[{"insert":"* \\[﻿！"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"bold","attributes":{"bold":true}},{"insert":"\f__$"}]},
-{"markdown":"\t]![pic](https://x.com/a.png)**bold**","delta":[{"insert":"\t]!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"bold","attributes":{"bold":true}}]},
-{"markdown":"K_\\`\f.","delta":[{"insert":"K_`\f."}]},
-{"markdown":"﻿>İ[1:23](leaflet://page/p2#b1?t=83)","delta":[{"insert":"﻿>İ"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}}]},
-{"markdown":" '[x](leaflet://page/p2#b1)x字\\[_+[b+","delta":[{"insert":" '"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"x字[_+[b+"}]},
-{"markdown":"𝔸[](leaflet://page/p3) \n/[](leaflet://page/p3)_ ？","delta":[{"insert":"𝔸[](leaflet://page/p3) \n/[](leaflet://page/p3)_ ？"}]},
-{"markdown":"**bold**字|[@Bot](mention:agent:a1)%日本語a。 \r​","delta":[{"insert":"bold","attributes":{"bold":true}},{"insert":"字|"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"%日本語a。 \r​"}]},
-{"markdown":"Plan``a`b``**bold**é)","delta":[{"insert":"Plan"},{"insert":"a`b","attributes":{"code":true}},{"insert":"bold","attributes":{"bold":true}},{"insert":"é)"}]},
-{"markdown":"#~~gone~~0&aa\n[{**bold** [İ","delta":[{"insert":"#"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"0&aa\n[{"},{"insert":"bold","attributes":{"bold":true}},{"insert":" [İ"}]},
-{"markdown":"42#0𝔸x *[a](https://x.com/(b))\\*word*a**:​","delta":[{"insert":"42#0𝔸x "},{"insert":"a","attributes":{"italic":true,"href":"https://x.com/(b)"}},{"insert":"*word","attributes":{"italic":true}},{"insert":"a**:​"}]},
-{"markdown":"%**a*","delta":[{"insert":"%*"},{"insert":"a","attributes":{"italic":true}}]},
-{"markdown":":​***İ日本語[1:23](leaflet://page/p2#b1?t=83)","delta":[{"insert":":​***İ日本語"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}}]},
+{"markdown":"[a](<https://x.com/a b>)**bold**é«**bold**𝔸~~\\_=b{Plan","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"bold","attributes":{"bold":true}},{"insert":"é«"},{"insert":"bold","attributes":{"bold":true}},{"insert":"𝔸~~_=b{Plan"}]},
+{"markdown":"|Σword ![pic](https://x.com/a.png)_a_b_&","delta":[{"insert":"|Σword !"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"a_b","attributes":{"italic":true}},{"insert":"&"}]},
+{"markdown":"\\_\nwordß`snake_case😀","delta":[{"insert":"_\nwordß`snake_case😀"}]},
+{"markdown":"。%\"**#]​!\\*ßPlan[","delta":[{"insert":"。%\"**#]​!*ßPlan["}]},
+{"markdown":"*_it_****|K' ","delta":[{"insert":"*"},{"insert":"it**","attributes":{"italic":true}},{"insert":"|K' "}]},
+{"markdown":"%\\'**！\\_\\[ \\_  [\n","delta":[{"insert":"%'**！_[ _  [\n"}]},
+{"markdown":"|~​[](leaflet://page/p3)\\`/#\\","delta":[{"insert":"|~​[](leaflet://page/p3)`/#\\"}]},
+{"markdown":"ß.b\\_a'\\[","delta":[{"insert":"ß.b_a'["}]},
+{"markdown":"_a_b_/[a](<https://x.com/a b>)**a** &！\" *  )\"","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"/"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"a","attributes":{"bold":true}},{"insert":" &！\" *  )\""}]},
+{"markdown":"！\\*\r\r","delta":[{"insert":"！*\r\r"}]},
+{"markdown":"**a*\\[Plan /[1:23](leaflet://page/p2#b1?t=83)é﻿​-___it_]\\[","delta":[{"insert":"*"},{"insert":"a","attributes":{"italic":true}},{"insert":"[Plan /"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"é﻿​-"},{"insert":"__it","attributes":{"italic":true}},{"insert":"]["}]},
+{"markdown":"\\`\u000b**a*\r ","delta":[{"insert":"`\u000b*"},{"insert":"a","attributes":{"italic":true}},{"insert":"\r "}]},
+{"markdown":"* (\\[　。[Plan](leaflet://page/p1)snake_case﻿<span style=\"color:red\">:","delta":[{"insert":"* ([　。"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"snake_case﻿<span style=\"color:red\">:"}]},
+{"markdown":"\n~[a](https://x.com/(b))word","delta":[{"insert":"\n~"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"word"}]},
+{"markdown":"ß<span style=\"color:#ff0000\">\\`﻿<","delta":[{"insert":"ß<span style=\"color:#ff0000\">`﻿<"}]},
+{"markdown":"　\\[1:23](leaflet://page/p2#b1?t=83)","delta":[{"insert":"　\\"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}}]},
+{"markdown":"%&[x](leaflet://page/p2#b1)\r%xΣ\\`<span style=\"color:#ff0000\">#`b#","delta":[{"insert":"%&"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"\r%xΣ`<span style=\"color:#ff0000\">#`b#"}]},
+{"markdown":"日本語[1:23](leaflet://page/p2#b1?t=83)*|[1:23](leaflet://page/p2#b1?t=83)<span style=\"background:#00ff00;color:#FF000080\">%。","delta":[{"insert":"日本語"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"*|"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">%。"}]},
+{"markdown":"snake_caseΣ>[@Bot](mention:agent:a1)'\rKaé \u000b ","delta":[{"insert":"snake_caseΣ>"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"'\rKaé \u000b "}]},
+{"markdown":"Plan`code`snake_case𝔸[\u0001","delta":[{"insert":"Plan"},{"insert":"code","attributes":{"code":true}},{"insert":"snake_case𝔸[\u0001"}]},
+{"markdown":")_it_0.aa*`@word `é","delta":[{"insert":")_it_0.aa*"},{"insert":"@word ","attributes":{"code":true}},{"insert":"é"}]},
+{"markdown":"42)0😀x *[a](<https://x.com/a b>)https://example.com/x?y=1«*a**< ","delta":[{"insert":"42)0😀x "},{"insert":"a","attributes":{"italic":true,"href":"https://x.com/a b"}},{"insert":"https://example.com/x?y=1«","attributes":{"italic":true}},{"insert":"a**< "}]},
+{"markdown":"'**a*","delta":[{"insert":"'*"},{"insert":"a","attributes":{"italic":true}}]},
+{"markdown":"< ***字[x](leaflet://page/p2#b1)","delta":[{"insert":"< ***字"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}}]},
 {"markdown":"","delta":[]},
-{"markdown":"日本語\t{[](leaflet://page/p3)。(字","delta":[{"insert":"日本語\t{[](leaflet://page/p3)。(字"}]},
-{"markdown":"ß\r[@Ann](mention:user:u1)#Plan) \n","delta":[{"insert":"ß\r"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"#Plan) \n"}]},
-{"markdown":"[@Bot](mention:agent:a1)0\\_it_word𝔸[@Bot](mention:agent:a1)","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"0_it_word𝔸"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"_it_\\[","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"["}]},
-{"markdown":"*_it_'\\[x](leaflet://page/p2#b1)\f``a`b``-K]字\u0001x","delta":[{"insert":"*"},{"insert":"it","attributes":{"italic":true}},{"insert":"'[x](leaflet://page/p2#b1)\f"},{"insert":"a`b","attributes":{"code":true}},{"insert":"-K]字\u0001x"}]},
-{"markdown":"\\`wordK\\` **bold**  \\_𝔸%«_","delta":[{"insert":"`wordK` "},{"insert":"bold","attributes":{"bold":true}},{"insert":"  _𝔸%«_"}]},
-{"markdown":"**a**|\u000b\t__**bold*** 😀**bold**\u0001\u0001","delta":[{"insert":"a","attributes":{"bold":true}},{"insert":"|\u000b\t__"},{"insert":"bold","attributes":{"bold":true}},{"insert":"* 😀"},{"insert":"bold","attributes":{"bold":true}},{"insert":"\u0001\u0001"}]},
-{"markdown":"[@Bot](mention:agent:a1)[](leaflet://page/p3)|%","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"[](leaflet://page/p3)|%"}]},
-{"markdown":"𝔸@[link](https://example.com/a)__* ","delta":[{"insert":"𝔸@"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"__* "}]},
-{"markdown":"[link](https://example.com/a)[x](leaflet://page/p2#b1)bé[。 ':>？(\\_","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"bé[。 ':>？(_"}]},
-{"markdown":"42﻿]__snake_case``a`b``x+[a](https://x.com/(b))","delta":[{"insert":"42﻿]__snake_case"},{"insert":"a`b","attributes":{"code":true}},{"insert":"x+"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}}]},
-{"markdown":".:{é>[a](<https://x.com/a b>)","delta":[{"insert":".:{é>"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"(\u000b！_**a*>﻿'\u0001~\\[\u000b\\[","delta":[{"insert":"(\u000b！_*"},{"insert":"a","attributes":{"italic":true}},{"insert":">﻿'\u0001~[\u000b["}]},
+{"markdown":"字\n@[](leaflet://page/p3)𝔸~~Σ","delta":[{"insert":"字\n@[](leaflet://page/p3)𝔸~~Σ"}]},
+{"markdown":"é\u000b[@Ann](mention:user:u1))Plan~~\n","delta":[{"insert":"é\u000b"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":")Plan~~\n"}]},
+{"markdown":"[@Bot](mention:agent:a1)0(**bold**\r！日本語[@Ann](mention:user:u1)","delta":[{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"0("},{"insert":"bold","attributes":{"bold":true}},{"insert":"\r！日本語"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":"*it*\\`","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"`"}]},
+{"markdown":"***it*&([Plan](leaflet://page/p1)﻿`code`\\ß~Σ\fx","delta":[{"insert":"**it","attributes":{"italic":true}},{"insert":"&("},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"﻿"},{"insert":"code","attributes":{"code":true}},{"insert":"\\ß~Σ\fx"}]},
+{"markdown":"\\_«ß\\` snake_case\t\r\\_😀'！<span style=\"color:#ff0000\">","delta":[{"insert":"_«ß` snake_case\t\r_😀'！<span style=\"color:#ff0000\">"}]},
+{"markdown":"**a***>​\t<span style=\"background:#00ff00;color:#FF000080\">snake_case***字snake_case\f\f","delta":[{"insert":"a","attributes":{"bold":true}},{"insert":">​\t<span style=\"background:#00ff00;color:#FF000080\">snake_case**","attributes":{"italic":true}},{"insert":"字snake_case\f\f"}]},
+{"markdown":"[@Ann](mention:user:u1)[1:23](leaflet://page/p2#b1?t=83)-\"","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"-\""}]},
+{"markdown":"日本語&[link](https://example.com/a)<span style=\"color:red\">***","delta":[{"insert":"日本語&"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"<span style=\"color:red\">***"}]},
+{"markdown":"``a`b``[x](leaflet://page/p2#b1)b\u0001`𝔸  &<!。~~\\_","delta":[{"insert":"a`b","attributes":{"code":true}},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"b\u0001`𝔸  &<!。~~_"}]},
+{"markdown":" 　~<span style=\"background:#00ff00;color:#FF000080\">word`code`x#[a](<https://x.com/a b>)","delta":[{"insert":" 　~<span style=\"background:#00ff00;color:#FF000080\">word"},{"insert":"code","attributes":{"code":true}},{"insert":"x#"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"/|@😀![link](https://example.com/a)","delta":[{"insert":"/|@😀!"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"~~​？<span style=\"background:#00ff00;color:#FF000080\"> *!　$\f_\\`​\\[","delta":[{"insert":"~~​？<span style=\"background:#00ff00;color:#FF000080\"> *!　$\f_`​["}]},
 {"markdown":"","delta":[]},
-{"markdown":"é\té\t日本語*__","delta":[{"insert":"é\té\t日本語*__"}]},
-{"markdown":"K~~\nİ«https://example.com/x?y=1","delta":[{"insert":"K~~\nİ«https://example.com/x?y=1"}]},
-{"markdown":"[K0","delta":[{"insert":"[K0"}]},
-{"markdown":")@\tb[1:23](leaflet://page/p2#b1?t=83)。İ~https://example.com/x?y=1\\_\\[**a*","delta":[{"insert":")@\tb"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"。İ~https://example.com/x?y=1_[*"},{"insert":"a","attributes":{"italic":true}}]},
-{"markdown":"word日本語","delta":[{"insert":"word日本語"}]},
-{"markdown":"_#_\r:~~gone~~***+[link](https://example.com/a)？","delta":[{"insert":"#","attributes":{"italic":true}},{"insert":"\r:"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"***+"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"？"}]},
-{"markdown":"`code`https://example.com/x?y=1","delta":[{"insert":"code","attributes":{"code":true}},{"insert":"https://example.com/x?y=1"}]},
-{"markdown":"[@Ann](mention:user:u1)*","delta":[{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"*"}]},
-{"markdown":"[Plan](leaflet://page/p1)&`~","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"&`~"}]},
-{"markdown":"**\t:#　","delta":[{"insert":"**\t:#　"}]},
-{"markdown":"\\`[@Bot](mention:agent:a1)word~~gone~~　\\\\！42&_it_","delta":[{"insert":"`"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"word"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"　\\！42&"},{"insert":"it","attributes":{"italic":true}}]},
-{"markdown":"_\"&+**bold**\\x\n=。[@Bot](mention:agent:a1)_\\`","delta":[{"insert":"\"&+","attributes":{"italic":true}},{"insert":"bold","attributes":{"italic":true,"bold":true}},{"insert":"\\x\n=。","attributes":{"italic":true}},{"insert":"@Bot","attributes":{"italic":true,"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"`"}]},
-{"markdown":"\">:","delta":[{"insert":"\">:"}]},
-{"markdown":"[ *~~_it_* «* ﻿x%  ","delta":[{"insert":"[ "},{"insert":"~~it","attributes":{"italic":true}},{"insert":" «* ﻿x%  "}]},
+{"markdown":"𝔸\t😀\n字*<span style=\"color:red\">","delta":[{"insert":"𝔸\t😀\n字*<span style=\"color:red\">"}]},
+{"markdown":"ß_\n！[](leaflet://page/p3)","delta":[{"insert":"ß_\n！[](leaflet://page/p3)"}]},
+{"markdown":"`ß0","delta":[{"insert":"`ß0"}]},
+{"markdown":"[\"\nb[x](leaflet://page/p2#b1)𝔸é_https://example.com/x?y=1{\\*\\[**a*","delta":[{"insert":"[\"\nb"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"𝔸é_https://example.com/x?y=1{*[*"},{"insert":"a","attributes":{"italic":true}}]},
+{"markdown":"！字","delta":[{"insert":"！字"}]},
+{"markdown":"<span style=\"color:#ff0000\">)<span style=\"color:#ff0000\">\u000b|_it_<br>#``a`b``é","delta":[{"insert":"<span style=\"color:#ff0000\">)<span style=\"color:#ff0000\">\u000b|"},{"insert":"it","attributes":{"italic":true}},{"insert":"<br>#"},{"insert":"a`b","attributes":{"code":true}},{"insert":"é"}]},
+{"markdown":"~~gone~~https://example.com/x?y=1","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"https://example.com/x?y=1"}]},
+{"markdown":"![pic](https://x.com/a.png)*","delta":[{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"*"}]},
+{"markdown":"[Plan](leaflet://page/p1).<span style=\"color:red\">_","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":".<span style=\"color:red\">_"}]},
+{"markdown":"**\n|) ","delta":[{"insert":"**\n|) "}]},
+{"markdown":"\\`[@Bot](mention:agent:a1)«_it_ \\[？ .*it*","delta":[{"insert":"`"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"«"},{"insert":"it","attributes":{"italic":true}},{"insert":" [？ ."},{"insert":"it","attributes":{"italic":true}}]},
+{"markdown":"<span style=\"background:#00ff00;color:#FF000080\">=.>snake_case(x{\n/𝔸[@Ann](mention:user:u1)<span style=\"color:#ff0000\">\\_","delta":[{"insert":"<span style=\"background:#00ff00;color:#FF000080\">=.>snake_case(x{\n/𝔸"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"<span style=\"color:#ff0000\">_"}]},
+{"markdown":"=!|","delta":[{"insert":"=!|"}]},
+{"markdown":"__ *__*it****！* 　0'\t","delta":[{"insert":" *","attributes":{"bold":true}},{"insert":"it**！","attributes":{"italic":true}},{"insert":" 　0'\t"}]},
 {"markdown":"https://example.com/x?y=1<br>","delta":[{"insert":"https://example.com/x?y=1<br>"}]},
-{"markdown":"~~gone~~<br>https://example.com/x?y=1é[link](https://example.com/a)","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"<br>https://example.com/x?y=1é"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"_it_<br>[](leaflet://page/p3)😀``a`b``","delta":[{"insert":"it","attributes":{"italic":true}},{"insert":"<br>[](leaflet://page/p3)😀"},{"insert":"a`b","attributes":{"code":true}}]},
 {"markdown":"","delta":[]},
-{"markdown":"\t\u0001__","delta":[{"insert":"\t\u0001__"}]},
-{"markdown":"<br>b\\[﻿:[](leaflet://page/p3)\t\\_\"-![pic](https://x.com/a.png)\\[","delta":[{"insert":"<br>b[﻿:[](leaflet://page/p3)\t_\"-!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"["}]},
-{"markdown":"x\ré~__　\\`<br>+**bold**42","delta":[{"insert":"x\ré~__　`<br>+"},{"insert":"bold","attributes":{"bold":true}},{"insert":"42"}]},
-{"markdown":"[1:23](leaflet://page/p2#b1?t=83).<  ***[a](https://x.com/(b))~~\t ","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":".<  ***"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"~~\t "}]},
-{"markdown":"!&<br>**\r[a](https://x.com/(b))https://example.com/x?y=1　%x","delta":[{"insert":"!&<br>**\r"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"https://example.com/x?y=1　%x"}]},
-{"markdown":"\t**bold**[1:23](leaflet://page/p2#b1?t=83)​ !_it_ß&​b😀","delta":[{"insert":"\t"},{"insert":"bold","attributes":{"bold":true}},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"​ !_it_ß&​b😀"}]},
-{"markdown":"_[@Bot](mention:agent:a1)`(<  * K[1:23](leaflet://page/p2#b1?t=83)>/Plan","delta":[{"insert":"_"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"`(<  * K"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":">/Plan"}]},
-{"markdown":"﻿\\*[😀[link](https://example.com/a)!\\`-$-","delta":[{"insert":"﻿*[😀"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"!`-$-"}]},
-{"markdown":" ([a](<https://x.com/a b>)","delta":[{"insert":" ("},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"/[@Ann](mention:user:u1)*a**~~~>+![pic](https://x.com/a.png)\\`snake_case_","delta":[{"insert":"/"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"*a**~~~>+!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"`snake_case_"}]},
-{"markdown":"**<\\！snake_case]\\","delta":[{"insert":"**<\\！snake_case]\\"}]},
-{"markdown":"![pic](https://x.com/a.png)x`&\u000b_it__** [@Bot](mention:agent:a1)","delta":[{"insert":"!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"x`&\u000b_it__** "},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
-{"markdown":"b~#","delta":[{"insert":"b~#"}]},
-{"markdown":"{。**bold**ß","delta":[{"insert":"{。"},{"insert":"bold","attributes":{"bold":true}},{"insert":"ß"}]},
-{"markdown":"\\\\.%+~~gone~~\n","delta":[{"insert":"\\.%+"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"\n"}]},
-{"markdown":"  。İΣ[@Bot](mention:agent:a1)`code`__[x](leaflet://page/p2#b1)﻿[](leaflet://page/p3):$","delta":[{"insert":"  。İΣ"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"code","attributes":{"code":true}},{"insert":"__"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"﻿[](leaflet://page/p3):$"}]},
-{"markdown":"。字[a](<https://x.com/a b>)\\-ß{[@0？__","delta":[{"insert":"。字"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"-ß{[@0？__"}]},
-{"markdown":"ß？**bold**\"Plan* ! \\*__snake_case","delta":[{"insert":"ß？"},{"insert":"bold","attributes":{"bold":true}},{"insert":"\"Plan* ! *__snake_case"}]},
-{"markdown":"[x](leaflet://page/p2#b1):*it*İ字https://example.com/x?y=1word\u000b__","delta":[{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":":"},{"insert":"it","attributes":{"italic":true}},{"insert":"İ字https://example.com/x?y=1word\u000b__"}]},
-{"markdown":"𝔸!#_x x\t[](leaflet://page/p3)","delta":[{"insert":"𝔸!#_x x\t[](leaflet://page/p3)"}]},
-{"markdown":" *\t\\_[](leaflet://page/p3)a。","delta":[{"insert":" *\t_[](leaflet://page/p3)a。"}]},
-{"markdown":"  \"\u0001.\\\\ *-~\\","delta":[{"insert":"  \"\u0001.\\ *-~\\"}]},
-{"markdown":"`code`.。\f[Plan](leaflet://page/p1)-`code`  _[@Ann](mention:user:u1)[x](leaflet://page/p2#b1)[Plan](leaflet://page/p1)","delta":[{"insert":"code","attributes":{"code":true}},{"insert":".。\f"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"-"},{"insert":"code","attributes":{"code":true}},{"insert":"  _"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
-{"markdown":"\\\\=<br>|* a[@Ann](mention:user:u1)]_a_b_*it*Σ-é«","delta":[{"insert":"\\=<br>|"},{"insert":" a","attributes":{"italic":true}},{"insert":"@Ann","attributes":{"italic":true,"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"]a_b","attributes":{"italic":true}},{"insert":"it*Σ-é«"}]},
-{"markdown":"|# 0\u0001__\\\\ [1:23](leaflet://page/p2#b1?t=83)``a`b``[x](leaflet://page/p2#b1)","delta":[{"insert":"|# 0\u0001__\\ "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a`b","attributes":{"code":true}},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}}]},
-{"markdown":"𝔸[`code``code`Plan~/https://example.com/x?y=1","delta":[{"insert":"𝔸["},{"insert":"code``code","attributes":{"code":true}},{"insert":"Plan~/https://example.com/x?y=1"}]},
-{"markdown":"`code`\"[link](https://example.com/a)word﻿K:%{","delta":[{"insert":"code","attributes":{"code":true}},{"insert":"\""},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"word﻿K:%{"}]},
-{"markdown":"snake_case)**","delta":[{"insert":"snake_case)**"}]},
-{"markdown":" \\\\\f<字 \r𝔸Σ😀​\\*","delta":[{"insert":" \\\f<字 \r𝔸Σ😀​*"}]},
-{"markdown":"[link](https://example.com/a)word(İ[a](https://x.com/(b)) #)snake_case=","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"word(İ"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":" #)snake_case="}]},
+{"markdown":"\n\f<span style=\"background:#00ff00;color:#FF000080\">","delta":[{"insert":"\n\f<span style=\"background:#00ff00;color:#FF000080\">"}]},
+{"markdown":"<br>b\\[　|[](leaflet://page/p3)\t\\_=\\[a](https://x.com/(b))\\`","delta":[{"insert":"<br>b[　|[](leaflet://page/p3)\t_=[a](https://x.com/(b))`"}]},
+{"markdown":"x\u000b𝔸</span><span style=\"color:red\"> \\`\\\\>snake_case42","delta":[{"insert":"x\u000b𝔸</span><span style=\"color:red\"> `\\>snake_case42"}]},
+{"markdown":"[1:23](leaflet://page/p2#b1?t=83)<+  ***[a](<https://x.com/a b>)__\n ","delta":[{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"<+  ***"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"__\n "}]},
+{"markdown":"[.\\\\\r<span style=\"color:#ff0000\">\u000b[a](<https://x.com/a b>)[](leaflet://page/p3) 'x","delta":[{"insert":"[.\\\r<span style=\"color:#ff0000\">\u000b"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"[](leaflet://page/p3) 'x"}]},
+{"markdown":"\nsnake_case[1:23](leaflet://page/p2#b1?t=83) ]*it*İ= b日本語","delta":[{"insert":"\nsnake_case"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":" ]"},{"insert":"it","attributes":{"italic":true}},{"insert":"İ= b日本語"}]},
+{"markdown":"<span style=\"background:#00ff00;color:#FF000080\">[@Ann](mention:user:u1)</span>~-@ * Σ[x](leaflet://page/p2#b1)!|x","delta":[{"insert":"@Ann","attributes":{"background":"#00ff00","color":"#FF000080","mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"~-@ * Σ"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"!|x"}]},
+{"markdown":"　\\*__字``a`b``]\\`\\:\\","delta":[{"insert":"　*__字"},{"insert":"a`b","attributes":{"code":true}},{"insert":"]`:\\"}]},
+{"markdown":"%~~[link](https://example.com/a)","delta":[{"insert":"%~~"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"+[@Ann](mention:user:u1)*a**__!#![pic](https://x.com/a.png)\\`word<span style=\"background:#00ff00;color:#FF000080\">","delta":[{"insert":"+"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"*a**__!#!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"`word<span style=\"background:#00ff00;color:#FF000080\">"}]},
+{"markdown":"<span style=\"color:#ff0000\">-(？word~(","delta":[{"insert":"<span style=\"color:#ff0000\">-(？word~("}]},
+{"markdown":"[a](https://x.com/(b))x<span style=\"color:red\">.​*it*<span style=\"background:#00ff00;color:#FF000080\"><span style=\"color:#ff0000\"> [@Ann](mention:user:u1)","delta":[{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"x<span style=\"color:red\">.​"},{"insert":"it","attributes":{"italic":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\"><span style=\"color:#ff0000\"> "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":"b_)","delta":[{"insert":"b_)"}]},
+{"markdown":"@ésnake_caseé","delta":[{"insert":"@ésnake_caseé"}]},
+{"markdown":"\\\\{/'#_it_\n","delta":[{"insert":"\\{/'#"},{"insert":"it","attributes":{"italic":true}},{"insert":"\n"}]},
+{"markdown":"\t𝔸İ[@Bot](mention:agent:a1)~~gone~~<span style=\"background:#00ff00;color:#FF000080\">[Plan](leaflet://page/p1)　[1:23](leaflet://page/p2#b1?t=83)|:","delta":[{"insert":"\t𝔸İ"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"<span style=\"background:#00ff00;color:#FF000080\">"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"　"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"|:"}]},
+{"markdown":"𝔸K[link](https://example.com/a)(\\é@__\"0é<span style=\"color:red\">","delta":[{"insert":"𝔸K"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"(\\é@__\"0é<span style=\"color:red\">"}]},
+{"markdown":"ééword=Plan* ] \\*\u0001<span style=\"color:red\">«","delta":[{"insert":"ééword=Plan* ] *\u0001<span style=\"color:red\">«"}]},
+{"markdown":"[Plan](leaflet://page/p1)|**bold**Khttps://example.com/x?y=1«​<span style=\"color:red\">","delta":[{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"|"},{"insert":"bold","attributes":{"bold":true}},{"insert":"Khttps://example.com/x?y=1«​<span style=\"color:red\">"}]},
+{"markdown":"😀])<span style=\"color:#ff0000\">x x\n[](leaflet://page/p3)","delta":[{"insert":"😀])<span style=\"color:#ff0000\">x x\n[](leaflet://page/p3)"}]},
+{"markdown":"* \t\\_[1:23](leaflet://page/p2#b1?t=83)b𝔸","delta":[{"insert":"* \t_"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"b𝔸"}]},
+{"markdown":"\t={\f/\\\\ *\\_(","delta":[{"insert":"\t={\f/\\ *_("}]},
+{"markdown":"~~gone~~<é﻿[Plan](leaflet://page/p1)\\_it_\t<span style=\"color:#ff0000\">![pic](https://x.com/a.png)[Plan](leaflet://page/p1)[Plan](leaflet://page/p1)","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"<é﻿"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"_it_\t<span style=\"color:#ff0000\">!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
+{"markdown":"\\\\:<br>-* a[@Ann](mention:user:u1)~_a_b_**bold**İ\\𝔸？","delta":[{"insert":"\\:<br>-* a"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"~"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"bold","attributes":{"bold":true}},{"insert":"İ\\𝔸？"}]},
+{"markdown":">)@0\f<span style=\"background:#00ff00;color:#FF000080\">\\[ [1:23](leaflet://page/p2#b1?t=83)`code`[Plan](leaflet://page/p1)","delta":[{"insert":">)@0\f<span style=\"background:#00ff00;color:#FF000080\">[ "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"code","attributes":{"code":true}},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
+{"markdown":"😀__~~gone~~~~gone~~Plan_|https://example.com/x?y=1","delta":[{"insert":"😀_"},{"insert":"gonegone","attributes":{"italic":true,"strikethrough":true}},{"insert":"Plan","attributes":{"italic":true}},{"insert":"|https://example.com/x?y=1"}]},
+{"markdown":"~~gone~~$``a`b``！　Σ|'@","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"$"},{"insert":"a`b","attributes":{"code":true}},{"insert":"！　Σ|'@"}]},
+{"markdown":"«[**","delta":[{"insert":"«[**"}]},
+{"markdown":" \\\\﻿-Σ\u000b😀İ日本語 https://example.com/x?y=1","delta":[{"insert":" \\﻿-Σ\u000b😀İ日本語 https://example.com/x?y=1"}]},
+{"markdown":"``a`b``！~~[a](https://x.com/(b)))[«/","delta":[{"insert":"a`b","attributes":{"code":true}},{"insert":"！~~"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":")[«/"}]},
 {"markdown":"","delta":[]},
-{"markdown":"@<_a_b_'x\\*/snake_case@é*it***bold**","delta":[{"insert":"@<"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"'x*/snake_case@é"},{"insert":"it**","attributes":{"italic":true}},{"insert":"bold**"}]},
-{"markdown":"\u000b 😀\r|_a_b_[link](https://example.com/a)` 字İ","delta":[{"insert":"\u000b 😀\r|"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"` 字İ"}]},
-{"markdown":">[](leaflet://page/p3) **a**é*​{aİ  «","delta":[{"insert":">[](leaflet://page/p3) "},{"insert":"a","attributes":{"bold":true}},{"insert":"é*​{aİ  «"}]},
-{"markdown":"K　{[a](https://x.com/(b))~~gone~~*a**😀","delta":[{"insert":"K　{"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"*a**😀"}]},
-{"markdown":"`code`\r*it*_it_worda\u0001","delta":[{"insert":"code","attributes":{"code":true}},{"insert":"\r"},{"insert":"it","attributes":{"italic":true}},{"insert":"_it_worda\u0001"}]},
-{"markdown":"。[@Ann](mention:user:u1)","delta":[{"insert":"。"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
-{"markdown":"\f0 <**\"word！.","delta":[{"insert":"\f0 <**\"word！."}]},
-{"markdown":"<br>  。\"**a*!<br>0​[a](<https://x.com/a b>)**a**a**","delta":[{"insert":"<br>  。\""},{"insert":"a*!<br>0​","attributes":{"bold":true}},{"insert":"a","attributes":{"bold":true,"href":"https://x.com/a b"}},{"insert":"a"},{"insert":"a","attributes":{"bold":true}}]},
-{"markdown":"**\\[* «字é)*(","delta":[{"insert":"*"},{"insert":"[","attributes":{"italic":true}},{"insert":" «字é)*("}]},
-{"markdown":"　 _<br>42`code`~~word\f{` ","delta":[{"insert":"　 _<br>42"},{"insert":"code","attributes":{"code":true}},{"insert":"~~word\f{` "}]},
-{"markdown":"😀é\u000b.:\t:*** ","delta":[{"insert":"😀é\u000b.:\t:*** "}]},
-{"markdown":"\\_ \f","delta":[{"insert":"_ \f"}]},
-{"markdown":"snake_case\u000b.:K``a`b``/é«İ\u0001[Plan](leaflet://page/p1)","delta":[{"insert":"snake_case\u000b.:K"},{"insert":"a`b","attributes":{"code":true}},{"insert":"/é«İ\u0001"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}}]},
-{"markdown":"snake_case+","delta":[{"insert":"snake_case+"}]},
-{"markdown":" !\u000b\\_","delta":[{"insert":" !\u000b_"}]},
-{"markdown":"[a](<https://x.com/a b>)$\\ **","delta":[{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"$\\ **"}]},
-{"markdown":"\t**|\\ *|𝔸+\\[__https://example.com/x?y=1\"[@Ann](mention:user:u1){","delta":[{"insert":"\t**|\\ *|𝔸+[__https://example.com/x?y=1\""},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"{"}]},
+{"markdown":"\"-_a_b_$x\\*|word&𝔸**bold**snake_case","delta":[{"insert":"\"-"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"$x*|word&𝔸"},{"insert":"bold","attributes":{"bold":true}},{"insert":"snake_case"}]},
+{"markdown":"　字\u000b>_a_b_``a`b``<span style=\"color:red\"> K","delta":[{"insert":"　字\u000b>"},{"insert":"a_b","attributes":{"italic":true}},{"insert":"a`b","attributes":{"code":true}},{"insert":"<span style=\"color:red\"> K"}]},
+{"markdown":"![1:23](leaflet://page/p2#b1?t=83) **a**😀*{ @a  ！","delta":[{"insert":"!"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":" "},{"insert":"a","attributes":{"bold":true}},{"insert":"😀*{ @a  ！"}]},
+{"markdown":"Σ '[a](<https://x.com/a b>)_it_*a**日本語","delta":[{"insert":"Σ '"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"it","attributes":{"italic":true}},{"insert":"*a**日本語"}]},
+{"markdown":"~~gone~~\u000b**bold***it*！a\r","delta":[{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"\u000b"},{"insert":"bold","attributes":{"bold":true}},{"insert":"it","attributes":{"italic":true}},{"insert":"！a\r"}]},
+{"markdown":"é![pic](https://x.com/a.png)","delta":[{"insert":"é!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}}]},
+{"markdown":"﻿0 -<span style=\"color:#ff0000\">=！。<","delta":[{"insert":"﻿0 -<span style=\"color:#ff0000\">=！。<"}]},
+{"markdown":"\\\\\té=**a*]<br>0 [link](https://example.com/a)**a**a**","delta":[{"insert":"\\\té="},{"insert":"a*]<br>0 ","attributes":{"bold":true}},{"insert":"link","attributes":{"bold":true,"href":"https://example.com/a"}},{"insert":"a"},{"insert":"a","attributes":{"bold":true}}]},
+{"markdown":"**\\[* ！Σ\u0001~~*~~","delta":[{"insert":"*"},{"insert":"[","attributes":{"italic":true}},{"insert":" ！Σ\u0001"},{"insert":"*","attributes":{"strikethrough":true}}]},
+{"markdown":"  <span style=\"background:#00ff00;color:#FF000080\"><br> \r~~gone~~__！﻿'<span style=\"color:red\">{","delta":[{"insert":"  <span style=\"background:#00ff00;color:#FF000080\"><br> \r"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"__！﻿'<span style=\"color:red\">{"}]},
+{"markdown":"日本語\u0001​<<{\t|***  ","delta":[{"insert":"日本語\u0001​<<{\t|***  "}]},
+{"markdown":"\\*%﻿","delta":[{"insert":"*%﻿"}]},
+{"markdown":"word​<|ß`code`|\u0001？\f[@Bot](mention:agent:a1)","delta":[{"insert":"word​<|ß"},{"insert":"code","attributes":{"code":true}},{"insert":"|\u0001？\f"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}}]},
+{"markdown":"word#","delta":[{"insert":"word#"}]},
+{"markdown":" ]​\\_","delta":[{"insert":" ]​_"}]},
+{"markdown":"[link](https://example.com/a):( **","delta":[{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":":( **"}]},
+{"markdown":"\n**>(* >😀#\\[<span style=\"color:red\">https://example.com/x?y=1$![pic](https://x.com/a.png)@","delta":[{"insert":"\n*"},{"insert":">(","attributes":{"italic":true}},{"insert":" >😀#[<span style=\"color:red\">https://example.com/x?y=1$!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@"}]},
 {"markdown":"","delta":[]},
 {"markdown":"","delta":[]},
-{"markdown":".(\u000142[link](https://example.com/a)","delta":[{"insert":".(\u000142"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
-{"markdown":"#=？%日本語__[link](https://example.com/a)\\`-[@Bot](mention:agent:a1) `*it* ","delta":[{"insert":"#=？%日本語__"},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"`-"},{"insert":"@Bot","attributes":{"mention":{"kind":"agent","id":"a1","name":"Bot"}}},{"insert":" `"},{"insert":"it","attributes":{"italic":true}},{"insert":" "}]},
-{"markdown":"\u000bé**  ****","delta":[{"insert":"\u000bé"},{"insert":"  ","attributes":{"bold":true}},{"insert":"**"}]},
-{"markdown":"。&\u000b:_it_0*\f*****bold**/","delta":[{"insert":"。&\u000b:_it_0"},{"insert":"\f**","attributes":{"italic":true}},{"insert":"bold**/"}]},
-{"markdown":"%42[x](leaflet://page/p2#b1)-[Plan](leaflet://page/p1)***it*\r~\u000b``a`b``:\r","delta":[{"insert":"%42"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"-"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"**it","attributes":{"italic":true}},{"insert":"\r~\u000b"},{"insert":"a`b","attributes":{"code":true}},{"insert":":\r"}]},
-{"markdown":"\t]«x。/　 *:","delta":[{"insert":"\t]«x。/　 *:"}]},
-{"markdown":"_[](leaflet://page/p3)**bold**K«","delta":[{"insert":"_[](leaflet://page/p3)"},{"insert":"bold","attributes":{"bold":true}},{"insert":"K«"}]},
-{"markdown":"_a_b_\t[a](https://x.com/(b))0[a](<https://x.com/a b>)","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"\t"},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"0"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"\t<:\u0001 *it*","delta":[{"insert":"\t<:\u0001 "},{"insert":"it","attributes":{"italic":true}}]},
-{"markdown":".':","delta":[{"insert":".':"}]},
-{"markdown":"é﻿　","delta":[{"insert":"é﻿　"}]},
+{"markdown":"/~\f [link](https://example.com/a)","delta":[{"insert":"/~\f "},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"):é\"字<span style=\"background:#00ff00;color:#FF000080\">``a`b``\\_\\[@Ann](mention:user:u1)%</span>**bold** ","delta":[{"insert":"):é\"字"},{"insert":"a`b","attributes":{"background":"#00ff00","color":"#FF000080","code":true}},{"insert":"_[@Ann](mention:user:u1)%","attributes":{"background":"#00ff00","color":"#FF000080"}},{"insert":"bold","attributes":{"bold":true}},{"insert":" "}]},
+{"markdown":"​\u0001<span style=\"color:#ff0000\">\t****","delta":[{"insert":"​\u0001<span style=\"color:#ff0000\">\t"},{"insert":"**","attributes":{"italic":true}}]},
+{"markdown":"𝔸=​|*it*0**﻿<br>word|","delta":[{"insert":"𝔸=​|"},{"insert":"it","attributes":{"italic":true}},{"insert":"0**﻿<br>word|"}]},
+{"markdown":"\" [x](leaflet://page/p2#b1)\\[@Bot](mention:agent:a1)****bold**\u000b</span>​`code`|\u000b","delta":[{"insert":"\" "},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"[@Bot](mention:agent:a1)"},{"insert":"**","attributes":{"italic":true}},{"insert":"bold**\u000b</span>​"},{"insert":"code","attributes":{"code":true}},{"insert":"|\u000b"}]},
+{"markdown":"\n~？x𝔸+  *|","delta":[{"insert":"\n~？x𝔸+  *|"}]},
+{"markdown":"<span style=\"color:#ff0000\">[](leaflet://page/p3)wordß！","delta":[{"insert":"<span style=\"color:#ff0000\">[](leaflet://page/p3)wordß！"}]},
+{"markdown":"_a_b_\n[a](<https://x.com/a b>)42[a](<https://x.com/a b>)","delta":[{"insert":"a_b","attributes":{"italic":true}},{"insert":"\n"},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"42"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
+{"markdown":"\n-<\f**bold**","delta":[{"insert":"\n-<\f"},{"insert":"bold","attributes":{"bold":true}}]},
+{"markdown":"/$|","delta":[{"insert":"/$|"}]},
+{"markdown":"　 ","delta":[{"insert":"　 "}]},
 {"markdown":"","delta":[]},
-{"markdown":"'~~~_it_`code`-42=","delta":[{"insert":"'~~~"},{"insert":"it","attributes":{"italic":true}},{"insert":"code","attributes":{"code":true}},{"insert":"-42="}]},
-{"markdown":"é[@Ann](mention:user:u1)Σ42=\\_![pic](https://x.com/a.png)[@Ann](mention:user:u1)","delta":[{"insert":"é"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Σ42=_!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
-{"markdown":" [@Ann](mention:user:u1)Σ:​！\"$>a-　","delta":[{"insert":" "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"Σ:​！\"$>a-　"}]},
-{"markdown":"\\\\","delta":[{"insert":"\\"}]},
+{"markdown":"$___*it*~~gone~~\\42:","delta":[{"insert":"$___"},{"insert":"it","attributes":{"italic":true}},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"\\42:"}]},
+{"markdown":"😀[@Ann](mention:user:u1)ß42:\\_![pic](https://x.com/a.png)[@Ann](mention:user:u1)","delta":[{"insert":"😀"},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"ß42:_!"},{"insert":"pic","attributes":{"href":"https://x.com/a.png"}},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}}]},
+{"markdown":" [@Ann](mention:user:u1)İ| 。$:!b\\ ","delta":[{"insert":" "},{"insert":"@Ann","attributes":{"mention":{"kind":"user","id":"u1","name":"Ann"}}},{"insert":"İ| 。$:!b\\ "}]},
+{"markdown":"\\[","delta":[{"insert":"["}]},
 {"markdown":"","delta":[]},
-{"markdown":" [1:23](leaflet://page/p2#b1?t=83)[a](<https://x.com/a b>)* \f%","delta":[{"insert":" "},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"* \f%"}]},
+{"markdown":"%[1:23](leaflet://page/p2#b1?t=83)[a](<https://x.com/a b>)** ﻿\"","delta":[{"insert":"%"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"** ﻿\""}]},
 {"markdown":"","delta":[]},
-{"markdown":"%~~gone~~*字  \\𝔸a？\\*+K","delta":[{"insert":"%"},{"insert":"gone","attributes":{"strikethrough":true}},{"insert":"*字  \\𝔸a？*+K"}]},
-{"markdown":"日本語\\\u0001","delta":[{"insert":"日本語\\\u0001"}]},
-{"markdown":"  ***！>):。`code`:_it_`","delta":[{"insert":"  ***！>):。"},{"insert":"code","attributes":{"code":true}},{"insert":":"},{"insert":"it","attributes":{"italic":true}},{"insert":"`"}]},
-{"markdown":":x«``a`b``[a](https://x.com/(b))*it*[a](<https://x.com/a b>)/_it_","delta":[{"insert":":x«"},{"insert":"a`b","attributes":{"code":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"it","attributes":{"italic":true}},{"insert":"a","attributes":{"href":"https://x.com/a b"}},{"insert":"/"},{"insert":"it","attributes":{"italic":true}}]},
-{"markdown":"word-\n𝔸>é","delta":[{"insert":"word-\n𝔸>é"}]},
-{"markdown":"İé*[1:23](leaflet://page/p2#b1?t=83)。字 ~~/\u0001[](leaflet://page/p3)？*it*[a](<https://x.com/a b>)","delta":[{"insert":"İé"},{"insert":"1:23","attributes":{"italic":true,"href":"leaflet://page/p2#b1?t=83"}},{"insert":"。字 ~~/\u0001[](leaflet://page/p3)？","attributes":{"italic":true}},{"insert":"it*"},{"insert":"a","attributes":{"href":"https://x.com/a b"}}]},
-{"markdown":"é@  \nbPlan~~gone~~","delta":[{"insert":"é@  \nbPlan"},{"insert":"gone","attributes":{"strikethrough":true}}]},
-{"markdown":"@:  İ[1:23](leaflet://page/p2#b1?t=83)~\\","delta":[{"insert":"@:  İ"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"~\\"}]},
-{"markdown":"**bold**\\**a**{\té[x](leaflet://page/p2#b1)\t~","delta":[{"insert":"bold","attributes":{"bold":true}},{"insert":"**a**{\té"},{"insert":"x","attributes":{"href":"leaflet://page/p2#b1"}},{"insert":"\t~"}]}
+{"markdown":"'_it_*Σ (😀a。https://example.com/x?y=1#ß","delta":[{"insert":"'"},{"insert":"it","attributes":{"italic":true}},{"insert":"*Σ (😀a。https://example.com/x?y=1#ß"}]},
+{"markdown":"字]\f","delta":[{"insert":"字]\f"}]},
+{"markdown":"\t***。![|é~~gone~~<*it*<span style=\"color:red\">","delta":[{"insert":"\t"},{"insert":"**。![|é","attributes":{"italic":true}},{"insert":"gone","attributes":{"italic":true,"strikethrough":true}},{"insert":"<","attributes":{"italic":true}},{"insert":"it*<span style=\"color:red\">"}]},
+{"markdown":"|x！`code`[a](https://x.com/(b))**bold**[link](https://example.com/a)+*it*","delta":[{"insert":"|x！"},{"insert":"code","attributes":{"code":true}},{"insert":"a","attributes":{"href":"https://x.com/(b)"}},{"insert":"bold","attributes":{"bold":true}},{"insert":"link","attributes":{"href":"https://example.com/a"}},{"insert":"+"},{"insert":"it","attributes":{"italic":true}}]},
+{"markdown":"«\\*😀!\u0001","delta":[{"insert":"«*😀!\u0001"}]},
+{"markdown":"\u0001**[x](leaflet://page/p2#b1)𝔸Σ __+\f[](leaflet://page/p3)。**bold**[link](https://example.com/a)","delta":[{"insert":"\u0001"},{"insert":"x","attributes":{"bold":true,"href":"leaflet://page/p2#b1"}},{"insert":"𝔸Σ __+\f[](leaflet://page/p3)。","attributes":{"bold":true}},{"insert":"bold**"},{"insert":"link","attributes":{"href":"https://example.com/a"}}]},
+{"markdown":"𝔸\"  \nbPlan_it_","delta":[{"insert":"𝔸\"  \nbPlan_it_"}]},
+{"markdown":"\"|\t[1:23](leaflet://page/p2#b1?t=83)</span>(","delta":[{"insert":"\"|\t"},{"insert":"1:23","attributes":{"href":"leaflet://page/p2#b1?t=83"}},{"insert":"</span>("}]},
+{"markdown":"snake_casehttps://example.com/x?y=1*a**@\t😀[Plan](leaflet://page/p1)\n_","delta":[{"insert":"snake_casehttps://example.com/x?y=1*a**@\t😀"},{"insert":"Plan","attributes":{"href":"leaflet://page/p1","mention":{"kind":"page","id":"p1","name":"Plan"}}},{"insert":"\n_"}]}
 ]

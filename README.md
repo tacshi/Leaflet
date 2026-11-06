@@ -249,6 +249,10 @@ what they write within a second and merges it with what is being typed.
 With the app closed, or no page open, `current_page` gives the page opened
 last on this device, with no selection.
 
+Agents read and write text color and highlight in text fields as
+`<span style="color:#ef4444;background:#fde68a">text</span>`, in hex.
+`leaflet cat` and exports leave colors out.
+
 To try it on a development build, give a binary the dev app's data folder:
 
 ```bash

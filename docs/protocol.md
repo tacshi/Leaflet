@@ -89,7 +89,12 @@ metadata:
 Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
 `href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
 and `color` and `background`, the text's color and highlight as hex
-(`"#rrggbbaa"`), which Markdown leaves out, as MyGo's rich text does.
+(`"#rrggbbaa"`). In agents' inline Markdown they are
+`<span style="color:#ef4444ff;background:#eab30840">text</span>`, either
+alone, not nested: `read_page` shows them so, and both `internal/doc` and
+`_shared/blocks.ts` read them back. A tag with anything but hex colors
+stays text. Markdown for people, an export or a copy, leaves them out, as
+MyGo's rich text does.
 A page mention is the page's title with `href` `leaflet://page/<id>` and a
 `mention` of kind `page`; in agents' inline Markdown it is
 `[Title](leaflet://page/<id>)`, and such a link read back is a page mention.
@@ -119,7 +124,7 @@ loop with the same tools. Tool definitions live in
 ```json
 {
   "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram",
-  "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…); for code, the code verbatim",
+  "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…), <span style=\"color:#ef4444\">color</span>; for code, the code verbatim",
   "language": "go",
   "tone": "tip",
   "collapsed": false,

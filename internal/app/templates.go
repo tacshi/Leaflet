@@ -383,7 +383,7 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 			if m.Item(locales.TemplateEdit()).Chosen() {
 				a.editTemplate(t)
 			}
-			if m.Item(locales.TemplateDelete()).Chosen() {
+			if m.Item(locales.TemplateDelete()).Danger().Chosen() {
 				a.deleteTemplate(t)
 			}
 		})

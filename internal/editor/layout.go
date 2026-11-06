@@ -17,15 +17,17 @@ import (
 // blockLayout is a text block laid out: its text's layout and where the
 // text sits in the block's box.
 type blockLayout struct {
-	// kind, rest, width and code are what the block was laid out as: its
-	// type, its data but its text, the width it wraps at and its inline
-	// code's font. text is the text it held then, as stored, and runs
+	// kind, rest, width, code and pretty are what the block was laid out
+	// as: its type, its data but its text, the width it wraps at, its
+	// inline code's font and whether its last line is kept from a word
+	// alone. text is the text it held then, as stored, and runs
 	// that text, to tell it the same in another slice, as undo and sync
 	// make. pal is the palette its colors are of, as the links' accent.
 	kind   string
 	rest   map[string]any
 	width  float32
 	code   string
+	pretty bool
 	text   textID
 	runs   doc.Delta
 	pal    *theme.Palette
@@ -280,9 +282,12 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	// The text is told by its slice, not read (look), and read only when
 	// the slice is another; the rest of the data is small.
 	text, code := textIDOf(n), e.lookOf(n).code
+	// Only where no one types: a word would hop to the last line and back
+	// under the caret.
+	pretty := e.ReadOnly && n.Type != "code"
 	var runs doc.Delta
 	if l := e.layouts[n.ID]; l != nil && l.pal == pal && l.kind == n.Type && l.width == width && l.font == font &&
-		l.code == code && l.x == x && l.y == top && sameRest(l.rest, n.Data) {
+		l.code == code && l.pretty == pretty && l.x == x && l.y == top && sameRest(l.rest, n.Data) {
 		if l.text == text {
 			return l
 		}
@@ -294,13 +299,13 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 		runs = n.Delta()
 	}
 	spans := e.spans(n, pal, font)
-	tl := ui.ShapeRichText(spans, font, width)
+	tl := ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: width, Pretty: pretty})
 	_, h := tl.Size()
 	if h == 0 {
 		h = font.Size * max(font.LineHeight, 1.3)
 	}
 	l := &blockLayout{kind: n.Type, rest: restOf(n.Data), width: width, code: code, text: text, runs: runs, pal: pal,
-		layout: tl, x: x, y: top, h: top + h + bottom, font: font}
+		layout: tl, x: x, y: top, h: top + h + bottom, font: font, pretty: pretty}
 	e.layouts[n.ID] = l
 	return l
 }

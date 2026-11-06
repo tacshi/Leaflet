@@ -76,11 +76,17 @@ func (a *App) todosList(c *ui.Context) {
 	if len(rows) == 0 {
 		ui.Column(c).Grow(1).Padding(2, 18).Gap(4).Children(func() {
 			ui.Text(c, locales.TodosEmptyTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text)
-			ui.Text(c, locales.TodosEmptyBody()).FontSize(13).TextColor(pal.TextMuted)
+			ui.Text(c, locales.TodosEmptyBody()).FontSize(13).TextColor(pal.TextMuted).Pretty()
 		})
 		return
 	}
-	a.todoState.Header = func(i int) bool { return rows[i].header != "" }
+	// A header held at the top needs a fill to cover the rows under it, and
+	// a see-through sidebar has none to match: there it scrolls with them.
+	opaque := opaqueSidebar(c, pal)
+	a.todoState.Header = nil
+	if opaque {
+		a.todoState.Header = func(i int) bool { return rows[i].header != "" }
+	}
 	a.todoState.Key = func(i int) any {
 		if rows[i].header != "" {
 			return "section:" + rows[i].header
@@ -90,8 +96,11 @@ func (a *App) todosList(c *ui.Context) {
 	ui.List(c, &a.todoState, len(rows), func(i int) {
 		r := rows[i]
 		if r.header != "" {
-			ui.Text(c, todoSection(r.header)).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).
-				Padding(10, 8, 4).FillWidth()
+			h := ui.Text(c, todoSection(r.header)).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).
+				Padding(6, 8, 4).FillWidth().Radius(6)
+			if opaque {
+				h.Background(pal.Sidebar)
+			}
 			return
 		}
 		a.todoRowView(c, r.todo, pal)

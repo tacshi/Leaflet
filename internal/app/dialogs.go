@@ -509,6 +509,53 @@ func (a *App) nameVersion(name string) {
 	d.historyPick, d.historyDiffOf, d.versionOf, d.naming, d.versionName = 0, "", "", false, ""
 }
 
+// historyDays is the rows of history, newest first as it is, by the day
+// they were kept, here.
+func historyDays(history []store.HistoryEntry) [][]int {
+	var days [][]int
+	for i, h := range history {
+		if i > 0 {
+			y, m, d := h.CreatedAt.Local().Date()
+			py, pm, pd := history[i-1].CreatedAt.Local().Date()
+			if y == py && m == pm && d == pd {
+				days[len(days)-1] = append(days[len(days)-1], i)
+				continue
+			}
+		}
+		days = append(days, []int{i})
+	}
+	return days
+}
+
+// historyRow is the row of version i of page history.
+func (a *App) historyRow(c *ui.Context, i int) {
+	pal := theme.Of(c)
+	d := &a.dialogs
+	h := d.history[i]
+	row := ui.ButtonBase(c.Key(h.ID)).Padding(8, 10).Radius(7).Justify(ui.Start).Gap(8).AlignItems(ui.Start)
+	if i == d.historyPick {
+		row.Background(pal.NavSelected)
+	} else if row.Hovered() {
+		row.Background(pal.Hover)
+	}
+	named := h.Reason == "manual"
+	row.Children(func() {
+		ui.Column(c).Gap(2).Grow(1).Children(func() {
+			ui.Text(c, locales.DialogHistoryTime(h.CreatedAt)).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
+			l := ui.Text(c, core.HistoryLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
+			if named {
+				l.TextColor(pal.AccentText).FontWeight(600)
+			}
+		})
+		if named {
+			ui.Icon(c, theme.Icon("bookmark")).FontSize(13).TextColor(pal.AccentText)
+		}
+	})
+	if row.Clicked() {
+		d.historyPick = i
+	}
+}
+
 func (a *App) historyDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
@@ -536,29 +583,16 @@ func (a *App) historyDialog(c *ui.Context) {
 						ui.Text(c, locales.DialogHistoryEmpty()).
 							FontSize(12.5).TextColor(pal.TextMuted).Padding(8, 10)
 					}
-					for i, h := range d.history {
-						row := ui.ButtonBase(c.Key(h.ID)).Padding(8, 10).Radius(7).Justify(ui.Start).Gap(8).AlignItems(ui.Start)
-						if i == d.historyPick {
-							row.Background(pal.NavSelected)
-						} else if row.Hovered() {
-							row.Background(pal.Hover)
-						}
-						named := h.Reason == "manual"
-						row.Children(func() {
-							ui.Column(c).Gap(2).Grow(1).Children(func() {
-								ui.Text(c, locales.DialogHistoryWhen(h.CreatedAt)).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
-								l := ui.Text(c, core.HistoryLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
-								if named {
-									l.TextColor(pal.AccentText).FontWeight(600)
-								}
-							})
-							if named {
-								ui.Icon(c, theme.Icon("bookmark")).FontSize(13).TextColor(pal.AccentText)
+					for _, day := range historyDays(d.history) {
+						// Its own column: its heading stays at the top only
+						// while the day's versions are in view.
+						ui.Column(c.Key(d.history[day[0]].ID + ":day")).Children(func() {
+							ui.Text(c, locales.Day(d.history[day[0]].CreatedAt, time.Now())).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).
+								Padding(10, 10, 4).FillWidth().Background(pal.Surface).Sticky().Top(0)
+							for _, i := range day {
+								a.historyRow(c, i)
 							}
 						})
-						if row.Clicked() {
-							d.historyPick = i
-						}
 					}
 				})
 			})

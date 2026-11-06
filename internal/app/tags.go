@@ -133,7 +133,7 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 				if !hovered {
 					b.Opacity(0)
 				}
-				b.Menu(func(m *ui.Menu) { a.tagMenu(m, tag) })
+				b.PopoverMenuButton(func(m *ui.Menu) { a.tagMenu(m, tag) })
 			})
 			ui.Text(c, strconv.Itoa(counts[tag])).FontSize(12).TextColor(pal.TextMuted).Padding(0, 4)
 		})
@@ -161,7 +161,7 @@ func (a *App) tagMenu(m *ui.Menu, tag string) {
 		a.dialogs.openRenameTag(tag)
 	}
 	m.Separator()
-	if m.Item(locales.TagDelete()).Chosen() {
+	if m.Item(locales.TagDelete()).Danger().Chosen() {
 		a.deleteTag(tag)
 	}
 }

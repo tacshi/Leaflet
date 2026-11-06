@@ -124,6 +124,40 @@ func TestTodosView(t *testing.T) {
 	}
 }
 
+// A section's header stays at the top on a sidebar it can match, and
+// scrolls away over the window's vibrancy, which no fill matches.
+func TestTodoHeaderStaysOnAnOpaqueSidebar(t *testing.T) {
+	a := templatesApp(t)
+	n := &doc.Node{ID: "t1", Type: "todo_list"}
+	n.SetDelta(doc.Delta{{Text: "Send the draft"}})
+	n.Set("checked", false)
+	n.SetDue(time.Now(), false)
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{n})}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.settings.SidebarOpen = true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if err := tt.Click("To-dos"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.todoState.Header == nil {
+		t.Error("no header held on an opaque sidebar")
+	}
+	tt.SetVibrancy(true)
+	tt.Frame()
+	if a.todoState.Header != nil {
+		t.Error("a header held over the window's vibrancy")
+	}
+	if !tt.HasText("Today") {
+		t.Errorf("no section in %v", tt.Texts())
+	}
+}
+
 // A click on a to-do of another page opens that page scrolled to it, as
 // one far below its fold, never drawn yet.
 func TestTodoClickScrollsItsPageToIt(t *testing.T) {

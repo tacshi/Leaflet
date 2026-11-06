@@ -63,9 +63,7 @@ func TestSidebarTree(t *testing.T) {
 	if !tt.HasText("PRD") || tt.HasText("FAQ") {
 		t.Fatalf("open folder shows %v", tt.Texts())
 	}
-	if err := tt.Click("Notes"); err != nil {
-		t.Fatal(err)
-	}
+	clickOn(t, tt, "Notes")
 	if a.route.Kind != "page" || a.route.ID != notes.ID {
 		t.Errorf("route %+v", a.route)
 	}
@@ -156,9 +154,7 @@ func TestSidebarDragPages(t *testing.T) {
 	}
 	a.reloadAll()
 	tt.Frame()
-	if err := tt.Click("Gamma"); err != nil {
-		t.Fatal(err)
-	}
+	clickOn(t, tt, "Gamma")
 	if a.route.Kind != "page" || a.route.ID != ids[2] {
 		t.Errorf("a click on a draggable row opens %+v", a.route)
 	}
@@ -471,9 +467,7 @@ func TestSidebarTabs(t *testing.T) {
 		t.Fatalf("Tags tab shows %v", tt.Texts())
 	}
 	// A tag's menu is drawn in the window, in the app's look.
-	if err := tt.RightClick("daily"); err != nil {
-		t.Fatal(err)
-	}
+	rightClickOn(t, tt, "daily")
 	tt.Frame()
 	if !tt.HasText("Rename…") || !tt.HasText("Delete tag") {
 		t.Fatalf("a tag's menu shows %v", tt.Texts())
@@ -560,9 +554,7 @@ func TestDeleteFileAsksFirst(t *testing.T) {
 	tt.Frame()
 	ask := func() {
 		t.Helper()
-		if err := tt.RightClick("budget.txt"); err != nil {
-			t.Fatal(err)
-		}
+		rightClickOn(t, tt, "budget.txt")
 		tt.Frame()
 		if err := tt.Click(locales.SidebarDeleteFile()); err != nil {
 			t.Fatal(err)
@@ -630,9 +622,7 @@ func TestOpenFileNotHereDownloadsIt(t *testing.T) {
 		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
 	}, 900, 600)
 	tt.Frame()
-	if err := tt.RightClick("budget.txt"); err != nil {
-		t.Fatal(err)
-	}
+	rightClickOn(t, tt, "budget.txt")
 	tt.Frame()
 	if err := tt.Click(locales.CommonOpen()); err != nil {
 		t.Fatal(err)
@@ -893,9 +883,7 @@ func TestTreeArrowsGoByFolders(t *testing.T) {
 		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
 	}, 260, 600)
 	tt.Frame()
-	if err := tt.Click("Notes"); err != nil {
-		t.Fatal(err)
-	}
+	clickOn(t, tt, "Notes")
 	tt.Frame()
 	if a.route.ID != notes.ID {
 		t.Fatalf("route %+v", a.route)
@@ -1064,4 +1052,29 @@ func TestSettingsInTheAppMenu(t *testing.T) {
 		}
 	}
 	walk(items)
+}
+
+// clickOn clicks the middle of what shows s as a pointer does, on whatever
+// is on top there: a tree row's content and a split's wider grip are over
+// the element named s, so Tester.Click takes them for something else.
+func clickOn(t *testing.T, tt *ui.Tester, s string) {
+	t.Helper()
+	x, y := middleOf(t, tt, s)
+	tt.ClickAt(x, y)
+}
+
+// rightClickOn is clickOn with the right button.
+func rightClickOn(t *testing.T, tt *ui.Tester, s string) {
+	t.Helper()
+	x, y := middleOf(t, tt, s)
+	tt.RightClickAt(x, y)
+}
+
+func middleOf(t *testing.T, tt *ui.Tester, s string) (x, y float32) {
+	t.Helper()
+	r, ok := tt.Find(s)
+	if !ok {
+		t.Fatalf("no %q in %v", s, tt.Texts())
+	}
+	return r.X + r.W/2, r.Y + r.H/2
 }

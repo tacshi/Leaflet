@@ -1318,9 +1318,9 @@ func (a *App) offlineSettings(c *ui.Context) {
 					desc = locales.SettingsConflictKeptOver(s.Kept, s.Other)
 				}
 				settingRow(c, cf.ID, a.pageTitleOf(cf.PageID), desc, i == 0, func() {
-					ui.MenuButton(c.Key("act"), locales.SettingsResolve(), func(m *ui.Menu) {
+					ui.PopoverMenuButton(c.Key("act"), locales.SettingsResolve(), func(m *ui.Menu) {
 						if deleted {
-							if m.Item(locales.SettingsDeleteIt()).Chosen() {
+							if m.Item(locales.SettingsDeleteIt()).Danger().Chosen() {
 								a.resolveConflict(cf.ID, core.DeleteBlock)
 							}
 							if m.Item(locales.SettingsKeepIt()).Chosen() {
@@ -1341,7 +1341,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 						if m.Item(locales.SettingsOpenPage()).Chosen() {
 							a.openPage(cf.PageID)
 						}
-					})
+					}, endMenu)
 				})
 			}
 		})

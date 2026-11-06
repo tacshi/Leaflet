@@ -3305,6 +3305,20 @@ func (msgs Messages) DialogHistoryEmpty() string {
 	return Catalog.Format(msgs.locale, "dialogHistoryEmpty", nil)
 }
 
+// DialogHistoryTime says "{at, time, short}"
+// in the language the app shows.
+//
+// Page history: the time a version was kept, under the heading of its day.
+func DialogHistoryTime(at time.Time) string { return In(i18n.Locale()).DialogHistoryTime(at) }
+
+// DialogHistoryTime says "{at, time, short}"
+// in the language of msgs.
+//
+// Page history: the time a version was kept, under the heading of its day.
+func (msgs Messages) DialogHistoryTime(at time.Time) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryTime", map[string]any{"at": at})
+}
+
 // DialogHistoryWhen says "{at, date, ::MMMdHm}"
 // in the language the app shows.
 //
@@ -4973,20 +4987,6 @@ func PageTimeJustNow() string { return In(i18n.Locale()).PageTimeJustNow() }
 // settings.
 func (msgs Messages) PageTimeJustNow() string {
 	return Catalog.Format(msgs.locale, "pageTimeJustNow", nil)
-}
-
-// PageTimeMinutesAgo says "{count, plural, one {# min ago} other {# min ago}}"
-// in the language the app shows.
-//
-// A relative time: minutes ago.
-func PageTimeMinutesAgo(count int) string { return In(i18n.Locale()).PageTimeMinutesAgo(count) }
-
-// PageTimeMinutesAgo says "{count, plural, one {# min ago} other {# min ago}}"
-// in the language of msgs.
-//
-// A relative time: minutes ago.
-func (msgs Messages) PageTimeMinutesAgo(count int) string {
-	return Catalog.Format(msgs.locale, "pageTimeMinutesAgo", map[string]any{"count": count})
 }
 
 // PageTimeTodayAt says "today at {at, time, short}"
@@ -11867,7 +11867,7 @@ func (msgs Messages) SettingsDevicesFailed(error string) string {
 // in the language the app shows.
 //
 // Settings › Account › Devices: when a device was last used; when is a
-// relative time such as “5 min ago”.
+// relative time such as “5 minutes ago”.
 func SettingsDeviceLastActive(when string) string {
 	return In(i18n.Locale()).SettingsDeviceLastActive(when)
 }
@@ -11876,7 +11876,7 @@ func SettingsDeviceLastActive(when string) string {
 // in the language of msgs.
 //
 // Settings › Account › Devices: when a device was last used; when is a
-// relative time such as “5 min ago”.
+// relative time such as “5 minutes ago”.
 func (msgs Messages) SettingsDeviceLastActive(when string) string {
 	return Catalog.Format(msgs.locale, "settingsDeviceLastActive", map[string]any{"when": when})
 }
@@ -14231,14 +14231,14 @@ func (msgs Messages) ExternalDisconnect() string {
 // in the language the app shows.
 //
 // Settings › External agents: an AI app that has used Leaflet; when is a
-// relative time such as “5 min ago”.
+// relative time such as “5 minutes ago”.
 func ExternalLastUsed(when string) string { return In(i18n.Locale()).ExternalLastUsed(when) }
 
 // ExternalLastUsed says "Connected · last used {when}"
 // in the language of msgs.
 //
 // Settings › External agents: an AI app that has used Leaflet; when is a
-// relative time such as “5 min ago”.
+// relative time such as “5 minutes ago”.
 func (msgs Messages) ExternalLastUsed(when string) string {
 	return Catalog.Format(msgs.locale, "externalLastUsed", map[string]any{"when": when})
 }

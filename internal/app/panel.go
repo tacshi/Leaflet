@@ -123,7 +123,7 @@ func (a *App) chatView(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 			avatar(c, "", 40, true)
 			ui.Text(c, locales.PanelNoProviderTitle()).FontSize(16).FontWeight(650).TextColor(pal.Text)
 			ui.Text(c, locales.PanelNoProviderBody()).
-				FontSize(13).TextColor(pal.TextMuted)
+				FontSize(13).TextColor(pal.TextMuted).Pretty()
 			if primary(c, "connect", "sparkles", locales.PanelOpenProviders()).Clicked() {
 				a.openSettings("providers")
 			}
@@ -477,7 +477,7 @@ func (a *App) commentsPanel(c *ui.Context) {
 					ui.Icon(c, theme.Icon("message-square")).FontSize(26).TextColor(pal.ChartMuted).Margin(0, 0, 4, 0)
 					ui.Text(c, locales.PanelCommentsEmpty()).FontSize(14).FontWeight(600).TextColor(pal.Text)
 					ui.Text(c, locales.PanelCommentsEmptyHint()).
-						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260)
+						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260).Balance()
 				})
 			}
 			for _, t := range ps.threads {
@@ -831,13 +831,13 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			if (mine || guest) && cm.DeletedAt.IsZero() {
 				tools(c, func() {
 					more := iconButton(c, "more", "ellipsis", locales.PanelCommentActions()).Size(20, 20).Padding(2)
-					more.Menu(func(m *ui.Menu) {
-						if m.Item(locales.PanelDeleteComment()).Chosen() {
+					more.PopoverMenuButton(func(m *ui.Menu) {
+						if m.Item(locales.PanelDeleteComment()).Danger().Chosen() {
 							if err := a.st.DeleteComment(cm.ID); err != nil {
 								a.toast(locales.PanelCouldNotDelete(err.Error()))
 							}
 						}
-					})
+					}, endMenu)
 				})
 			}
 		})

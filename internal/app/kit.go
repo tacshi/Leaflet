@@ -266,6 +266,16 @@ func dialog(c *ui.Context, open *bool, width float32, fn func()) ui.Element {
 	})
 }
 
+// opaqueSidebar reports whether the sidebar is filled with pal.Sidebar,
+// rather than showing the window's vibrancy through.
+func opaqueSidebar(c *ui.Context, pal *theme.Palette) bool {
+	return !c.Vibrancy() || pal.Opaque
+}
+
+// endMenu lines a menu up with the end of its button, for a button at the
+// end of a row. These menus are drawn, as the system's show no Danger items.
+var endMenu = ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd}
+
 // dialogHeader is a dialog's title row with a close button.
 func dialogHeader(c *ui.Context, title, subtitle string, open *bool) {
 	pal := theme.Of(c)

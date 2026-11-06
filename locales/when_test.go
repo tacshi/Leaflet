@@ -3,6 +3,8 @@ package locales
 import (
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/i18n"
 )
 
 // Today and yesterday are days of the calendar, not 24 and 48 hours; a
@@ -19,7 +21,8 @@ func TestWhenByTheCalendar(t *testing.T) {
 	}{
 		{now.Add(-20 * time.Second), msgs.PageTimeJustNow()},
 		{now.Add(time.Hour), msgs.PageTimeJustNow()},
-		{now.Add(-5 * time.Minute), msgs.PageTimeMinutesAgo(5)},
+		{now.Add(-5 * time.Minute), "5 minutes ago"},
+		{now.Add(-time.Minute), "1 minute ago"},
 		{at(3, 10, 1, 0), msgs.PageTimeTodayAt(at(3, 10, 1, 0))},
 		{at(3, 9, 23, 0), msgs.PageTimeYesterdayAt(at(3, 9, 23, 0))},
 		{at(3, 9, 0, 30), msgs.PageTimeYesterdayAt(at(3, 9, 0, 30))},
@@ -33,5 +36,29 @@ func TestWhenByTheCalendar(t *testing.T) {
 	}
 	if got := In("ja").When(now.Add(-20*time.Second), now); got != In("ja").PageTimeJustNow() || got == msgs.PageTimeJustNow() {
 		t.Errorf("in Japanese: %q", got)
+	}
+}
+
+// Minutes ago are in each language the app ships, as the words around them.
+func TestMinutesAgoInEachLanguage(t *testing.T) {
+	now := time.Now()
+	for _, lang := range Catalog.Languages() {
+		want := i18n.FormatRelativeTime(lang, -5, i18n.RelativeMinute, i18n.RelativeTimeOptions{})
+		if got := In(lang).When(now.Add(-5*time.Minute), now); got != want {
+			t.Errorf("%s: %q, want %q", lang, got, want)
+		}
+	}
+}
+
+// A day says its year only when it is another year's, here.
+func TestDayNamesAnotherYear(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
+	msgs := In("en")
+	this, last := now.AddDate(0, -1, 0), now.AddDate(-1, 0, 0)
+	if got, want := msgs.Day(this.UTC(), now), msgs.PageTimeDate(this); got != want {
+		t.Errorf("this year: %q, want %q", got, want)
+	}
+	if got, want := msgs.Day(last.UTC(), now), msgs.PageTimeDateYear(last); got != want {
+		t.Errorf("last year: %q, want %q", got, want)
 	}
 }

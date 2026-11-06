@@ -546,7 +546,7 @@ func wait(t *testing.T, ev *fakeEvents, reason string) update {
 // nothing for none.
 func TestWhen(t *testing.T) {
 	now := time.Now()
-	if got := When("ja", now.Add(-5*time.Minute).UnixMilli(), now.UnixMilli()); got != locales.In("ja").PageTimeMinutesAgo(5) {
+	if got := When("ja", now.Add(-5*time.Minute).UnixMilli(), now.UnixMilli()); got != "5 分前" {
 		t.Errorf("five minutes ago: %q", got)
 	}
 	if got := When("en", 0, now.UnixMilli()); got != "" {

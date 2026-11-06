@@ -259,7 +259,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					}
 					more = iconButton(c, "more", "ellipsis", locales.RecActions())
 				})
-				more.Menu(func(m *ui.Menu) {
+				more.PopoverMenuButton(func(m *ui.Menu) {
 					if m.Item(locales.RecRename()).Disabled(ro).Chosen() {
 						a.dialogs.openRenameRecording(n.ID, a.recordingTitle(n, rec, true))
 					}
@@ -288,10 +288,10 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					m.Separator()
 					// The block goes as one step to undo; its recording stays,
 					// for the undo to bring back.
-					if m.Item(locales.CommonDelete()).Disabled(ro).Chosen() {
+					if m.Item(locales.CommonDelete()).Danger().Disabled(ro).Chosen() {
 						a.page.editor.Edit(func(content *doc.Content) { content.Remove(n.ID) })
 					}
-				})
+				}, endMenu)
 			}
 		})
 		if live {

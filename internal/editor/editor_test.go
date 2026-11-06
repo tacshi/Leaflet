@@ -1659,3 +1659,101 @@ func TestColoredTableCell(t *testing.T) {
 		t.Fatalf("delta %+v", d)
 	}
 }
+
+// A long page, scrolled down, with the caret in a paragraph on the screen.
+func spacePage(t *testing.T, readOnly bool) (*Editor, *ui.Tester, *ui.ScrollState, *doc.Node) {
+	t.Helper()
+	e := New(doc.Empty(), &fakeHost{})
+	e.SetWidth(440)
+	var scroll ui.ScrollState
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Scroll(c).TrackScroll(&scroll).Fill().Children(func() { e.View(c) })
+	}, 600, 400)
+	if err := tt.Click("Page"); err != nil {
+		t.Fatal(err)
+	}
+	var mid *doc.Node
+	e.Edit(func(c *doc.Content) {
+		c.Children = nil
+		for i := range 60 {
+			n := newText("paragraph", doc.FromMarkdown(fmt.Sprintf("Line %d", i)))
+			c.Children = append(c.Children, n)
+			if i == 30 {
+				mid = n
+			}
+		}
+	})
+	tt.Frame()
+	e.Select(Pos{mid.ID, 4}, Pos{mid.ID, 4})
+	tt.Frame()
+	cr, ok := e.caretRect(e.focus)
+	if !ok {
+		t.Fatal("no caret")
+	}
+	scroll.Y += cr.Y - 150 // the caret's line in the middle of the view
+	tt.Frame()
+	e.ReadOnly = readOnly
+	tt.Frame()
+	return e, tt, &scroll, mid
+}
+
+func TestSpaceTypedLeavesThePageWhereItIs(t *testing.T) {
+	for _, mods := range []ui.Modifiers{0, ui.Shift} {
+		e, tt, scroll, mid := spacePage(t, false)
+		before := scroll.Y
+		tt.TypeKey(mods, ui.KeySpace, " ")
+		tt.Frame()
+		if got := mid.Delta().Plain(); got != "Line  30" {
+			t.Fatalf("mods %v: text = %q", mods, got)
+		}
+		if !e.focused {
+			t.Fatalf("mods %v: the editor lost the focus", mods)
+		}
+		if scroll.Y != before {
+			t.Errorf("mods %v: scrolled from %v to %v", mods, before, scroll.Y)
+		}
+	}
+}
+
+func TestSpacePagesAPageThatCannotBeTypedIn(t *testing.T) {
+	_, tt, scroll, _ := spacePage(t, true)
+	before := scroll.Y
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	if scroll.Y <= before {
+		t.Errorf("stayed at %v, from %v", scroll.Y, before)
+	}
+}
+
+// A page no one can type in keeps a word from a last line of its own, and
+// one being typed in keeps its words where they are.
+func TestReadOnlyTextWrapsPretty(t *testing.T) {
+	var pal *theme.Palette
+	ui.NewTester(func(c *ui.Context) { pal = theme.Of(c) }, 10, 10).Frame()
+	// How many lines n takes, and how many words its last one holds.
+	wrapped := func(e *Editor, n *doc.Node) (lines, last int) {
+		ls := e.layout(n, pal).layout.Lines()
+		end := ls[len(ls)-1]
+		return len(ls), len(strings.Fields(n.Delta().Plain()[end.Start:end.End]))
+	}
+	for words := 2; words < 80; words++ {
+		e := New(doc.Empty(), &fakeHost{})
+		e.SetWidth(300)
+		n := newText("paragraph", doc.Delta{{Text: strings.TrimSpace(strings.Repeat("word ", words))}})
+		e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{n} })
+		if lines, last := wrapped(e, n); lines < 2 || last != 1 {
+			continue
+		}
+		e.ReadOnly = true
+		if _, last := wrapped(e, n); last < 2 {
+			t.Errorf("%d words read-only: %d on the last line", words, last)
+		}
+		code := doc.CodeNode("a := 1", "")
+		e.Edit(func(c *doc.Content) { c.Children = append(c.Children, code) })
+		if e.layout(code, pal).pretty {
+			t.Error("code wraps pretty")
+		}
+		return
+	}
+	t.Fatal("no length left a word alone on its last line")
+}

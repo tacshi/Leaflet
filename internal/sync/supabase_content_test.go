@@ -186,6 +186,188 @@ func TestPushKeepsAConflictTypedWhileStoring(t *testing.T) {
 	}
 }
 
+// conflictedPage is a page edited here, on block a, since it synced at
+// revision 1, and a server that has a later edit of the same block at
+// revision 2: merging them is a conflict, which the server's edit wins.
+func conflictedPage(t *testing.T, st *store.Store) (store.Page, *contentServer) {
+	t.Helper()
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	putSynced(t, st, p.ID, base)
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	theirs := base.Copy()
+	theirs.Find("a").SetDelta(doc.Delta{{Text: "one, edited there"}})
+	theirs.Blocks["a"] = time.Now().UnixMilli() + 60_000
+	return p, &contentServer{content: theirs.Encode(), revision: 2}
+}
+
+// refuseConflicts has the database fail to record a conflict, as a full
+// disk would, until the returned func lets it again.
+func refuseConflicts(t *testing.T, st *store.Store) func() {
+	t.Helper()
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON conflicts BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if _, err := st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// localSides are the sides this device lost of the conflicts on a block.
+func localSides(t *testing.T, st *store.Store, blockID string) []string {
+	t.Helper()
+	conflicts, err := st.Conflicts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, c := range conflicts {
+		if c.BlockID == blockID && c.LocalNode != nil {
+			out = append(out, c.LocalNode.Delta().Plain())
+		}
+	}
+	return out
+}
+
+// A merge whose conflict cannot be recorded is not stored as merged: the
+// revision stays unmerged and the change queued, so the next push merges
+// again and records the side its edit lost.
+func TestPushStoresNoMergeWithoutItsConflicts(t *testing.T) {
+	st := openStore(t)
+	p, srv := conflictedPage(t, st)
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	allow := refuseConflicts(t, st)
+	if done, err := svc.pushContent(context.Background(), p.ID); err == nil || done {
+		t.Fatalf("push with its conflict refused: done %v, %v", done, err)
+	}
+	if row, _ := st.ContentRow(p.ID); row.RemoteRevision != 1 {
+		t.Errorf("device has revision %d stored, though its conflict was not", row.RemoteRevision)
+	}
+	if !st.HasPending("page_content", p.ID) {
+		t.Error("the change is no longer queued")
+	}
+	allow()
+	if done, err := svc.pushContent(context.Background(), p.ID); err != nil || !done {
+		t.Fatalf("push: done %v, %v", done, err)
+	}
+	if got := localSides(t, st, "a"); !slices.Contains(got, "one, edited here") {
+		t.Errorf("conflicts on a keep %q", got)
+	}
+}
+
+// A merge the server takes keeps its conflicts though this device then
+// fails to store it: the next push merges over the server's copy, which
+// has this device's side already, and would never meet the side the
+// server lost.
+func TestPushKeepsConflictsTheServerTookOver(t *testing.T) {
+	st := openStore(t)
+	p, srv := conflictedPage(t, st)
+	// The server's edit is the older here, so this device's is kept and
+	// the server's is the side lost.
+	theirs := doc.MustDecode(srv.content)
+	theirs.Blocks["a"] = 1500
+	srv.content = theirs.Encode()
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := svc.pushContent(context.Background(), p.ID); err == nil || done {
+		t.Fatalf("push stored with the store failing: done %v, %v", done, err)
+	}
+	if srv.updates != 1 {
+		t.Fatalf("server took %d updates, want 1", srv.updates)
+	}
+	if _, err := st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := svc.pushContent(context.Background(), p.ID); err != nil || !done {
+		t.Fatalf("push: done %v, %v", done, err)
+	}
+	conflicts, err := st.Conflicts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lost []string
+	for _, c := range conflicts {
+		if c.BlockID == "a" && c.RemoteNode != nil {
+			lost = append(lost, c.RemoteNode.Delta().Plain())
+		}
+	}
+	if !slices.Equal(lost, []string{"one, edited there"}) {
+		t.Errorf("server's sides kept %q, want the one it lost, once", lost)
+	}
+}
+
+// A merge the server refuses, as another device saved first, takes its
+// conflicts back: the merge over that save meets its own.
+func TestStalePushTakesItsConflictsBack(t *testing.T) {
+	st := openStore(t)
+	p, srv := conflictedPage(t, st)
+	srv.between = func(s *contentServer) { s.revision++ }
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if _, err := svc.saveContent(context.Background(), p.ID); !errors.Is(err, errStale) {
+		t.Fatalf("save over a newer save: %v, want errStale", err)
+	}
+	if conflicts, err := st.Conflicts(); err != nil || len(conflicts) != 0 {
+		t.Errorf("conflicts of a merge the server refused: %d, %v", len(conflicts), err)
+	}
+	// Merged again over that save, the conflict is the push's, once.
+	if done, err := svc.pushContent(context.Background(), p.ID); err != nil || !done {
+		t.Fatalf("push: done %v, %v", done, err)
+	}
+	if got := localSides(t, st, "a"); !slices.Equal(got, []string{"one, edited here"}) {
+		t.Errorf("conflicts on a keep %q", got)
+	}
+}
+
+// A pulled revision is stored with the conflicts of its merge or not at
+// all: stored without them, the page would no longer be behind, and the
+// merge that meets them would never run again.
+func TestPullStoresNoRevisionWithoutItsConflicts(t *testing.T) {
+	st := openStore(t)
+	p, srv := conflictedPage(t, st)
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	allow := refuseConflicts(t, st)
+	if _, err := svc.RefreshContent(context.Background(), p.ID); err == nil {
+		t.Fatal("the pull stored a merge whose conflict it could not record")
+	}
+	row, _ := st.ContentRow(p.ID)
+	if row.RemoteRevision != 1 || textOf(doc.MustDecode(row.Content), "a") != "one, edited here" {
+		t.Errorf("device has revision %d, %q", row.RemoteRevision, textOf(doc.MustDecode(row.Content), "a"))
+	}
+	allow()
+	if _, err := svc.RefreshContent(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := localSides(t, st, "a"); !slices.Equal(got, []string{"one, edited here"}) {
+		t.Errorf("conflicts on a keep %q", got)
+	}
+	if row, _ := st.ContentRow(p.ID); row.RemoteRevision != 2 {
+		t.Errorf("device has revision %d, want 2", row.RemoteRevision)
+	}
+}
+
 // Content the device cannot read now stays queued; only a page that is
 // gone takes its content off the queue.
 func TestPushKeepsContentItCannotRead(t *testing.T) {

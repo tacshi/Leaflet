@@ -412,7 +412,7 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 	// A page with a public link another device serves, as the server says
 	// as the run starts, is read by others too.
 	elsewhere := h.publicElsewhereIn(ctx, space, online)
-	read := func(p store.Page, private func(store.Page) bool) bool { return !private(p) || elsewhere[p.ID] }
+	read := func(p store.Page, private func(store.Page) bool) bool { return !private(p) || elsewhere(p.ID) }
 	// Those whose titles someone else reads, as their cards or mentions of
 	// them are on a page they read: read once a run, of all the pages they
 	// read, and only for a page no one reads itself. Unread, every page is

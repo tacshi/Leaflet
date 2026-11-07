@@ -98,6 +98,13 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		encoded = clean
 	}
 	values := map[string]any{"content": json.RawMessage(encoded), "plain_text": store.CleanText(merged.PlainText())}
+	// The merge's conflicts are recorded before it goes: once the server
+	// has it, the side each one lost is nowhere else, whether or not this
+	// device then stores the merge.
+	held, err := s.st.HoldConflicts(pageID, conflicts)
+	if err != nil {
+		return false, err
+	}
 	// The server answers with the revision and time it saved, not the
 	// content this device sent it.
 	var saved []map[string]any
@@ -105,15 +112,22 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		values["page_id"] = pageID
 		saved, err = s.be.InsertReturning(ctx, "page_content", values, savedCols)
 		if remote.IsConflict(err) {
-			return false, errStale
+			err = errStale
 		}
 	} else {
 		saved, err = s.be.UpdateReturning(ctx, "page_content", []string{
 			remote.Eq("page_id", pageID), remote.Eq("revision", fmt.Sprint(store.Int(remoteRow, "revision"))),
 		}, values, savedCols)
 		if err == nil && len(saved) == 0 {
-			return false, errStale
+			err = errStale
 		}
+	}
+	if errors.Is(err, errStale) {
+		// The server refused the merge, as another was saved first: the
+		// merge over that one meets its own conflicts. One that failed
+		// otherwise may have reached the server, and keeps them; tried
+		// again, it meets them again, and they are not recorded twice.
+		return false, errors.Join(err, s.st.DropConflicts(held))
 	}
 	if err != nil {
 		return false, err
@@ -127,7 +141,8 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	// What that merge's conflicts lose is kept, as the first merge's is.
 	var meanwhile []doc.Conflict
 	// The server has the merge now: unless it is stored here, with its
-	// revision, the change stays queued, and goes again over it.
+	// revision and the conflicts of what was typed meanwhile, the change
+	// stays queued, and goes again over it.
 	before, next, err := s.storeMerge(pageID, func(now store.ContentRow, kept bool) (*doc.Content, error) {
 		meanwhile = nil
 		switch {
@@ -148,13 +163,10 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		if c != merged {
 			content, plain = c.Encode(), c.PlainText()
 		}
-		return s.st.PushedContent(pageID, over, content, plain, encoded, savedAt, savedRev)
+		return s.st.PushedContent(pageID, over, content, plain, encoded, savedAt, savedRev, meanwhile...)
 	})
 	if err != nil || next == nil {
 		return err == nil, err
-	}
-	for _, c := range append(conflicts, meanwhile...) {
-		_ = s.st.AddConflict(pageID, c)
 	}
 	// What was typed meanwhile is not on the server yet.
 	return before == row.Content, nil
@@ -339,7 +351,9 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 		next, conflicts = doc.Merge(baseOf(local), mine, remoteContent)
 		return next, nil
 	}, func(over string, c *doc.Content) error {
-		return s.st.PutSyncedContentOver(pageID, over, c, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision"))
+		// The conflicts are recorded with the revision: once it is stored,
+		// the page is no longer behind, and this merge never runs again.
+		return s.st.PutSyncedContentOver(pageID, over, c, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision"), conflicts...)
 	})
 	if err != nil {
 		return nil, err
@@ -353,11 +367,6 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 			return nil, err
 		}
 		return here, nil
-	}
-	for _, c := range conflicts {
-		if err := s.st.AddConflict(pageID, c); err != nil {
-			return nil, err
-		}
 	}
 	return next, nil
 }

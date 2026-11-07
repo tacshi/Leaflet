@@ -18,6 +18,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/core"
+	"leaflet/internal/export"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -541,24 +542,33 @@ func (a *App) exportAll() {
 	if !a.flush() {
 		return
 	}
-	folders, files := slices.Clone(a.folders), slices.Clone(a.files)
+	folders, files, kept := slices.Clone(a.folders), slices.Clone(a.files), a.keeper()
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
 		if path == "" {
 			return
 		}
-		missing, err := a.writeExport(path, folders, files)
-		a.update(func() {
-			switch {
-			case err != nil:
-				a.toast(locales.SettingsExportFailed(err.Error()))
-			case missing > 0:
-				a.toast(locales.SettingsExportedMissing(missing, filepath.Base(path)))
-			default:
-				a.toast(locales.SettingsExported(filepath.Base(path)))
-			}
-		})
+		report, err := a.writeExport(path, kept, folders, files)
+		a.update(func() { a.exported(path, report, err) })
 	}()
+}
+
+// exported says how an export of every page to path went: the pages it
+// left out, and apart, those that went as this device last had them, as
+// they could not be brought up to date.
+func (a *App) exported(path string, report export.Report, err error) {
+	switch {
+	case err != nil:
+		a.toast(locales.SettingsExportFailed(err.Error()))
+		return
+	case report.Missing > 0:
+		a.toast(locales.SettingsExportedMissing(report.Missing, filepath.Base(path)))
+	default:
+		a.toast(locales.SettingsExported(filepath.Base(path)))
+	}
+	if report.Stale > 0 {
+		a.toast(locales.SettingsExportedStale(report.Stale))
+	}
 }
 
 // signOut uploads the changes waiting, then signs out and removes the

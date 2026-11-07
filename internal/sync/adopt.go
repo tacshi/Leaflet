@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"leaflet/internal/store"
@@ -144,7 +145,21 @@ func (s *Service) retryMoves(ctx context.Context) error {
 	defer cancel()
 	var failed error
 	left := map[string]bool{}
-	files, _ := s.st.Files()
+	// A table that cannot be read keeps its entries for the next retry. Of
+	// one read, an entry whose row is gone is let go: a deleted file's
+	// row stays, and goes up, as requeueAll has it.
+	keep := func(table string, err error) {
+		failed = errors.Join(failed, err)
+		for key := range moves {
+			if strings.HasPrefix(key, table+":") {
+				left[key] = true
+			}
+		}
+	}
+	files, err := s.st.AllFiles()
+	if err != nil {
+		keep("files", err)
+	}
 	for _, f := range files {
 		if key := "files:" + f.ID; moves[key] {
 			if err := s.requeueFile(ctx, f, s.st.Session().SpaceID); err != nil {
@@ -153,7 +168,10 @@ func (s *Service) retryMoves(ctx context.Context) error {
 			}
 		}
 	}
-	recordings, _ := s.st.Recordings()
+	recordings, err := s.st.Recordings()
+	if err != nil {
+		keep("recordings", err)
+	}
 	for _, r := range recordings {
 		if key := "recordings:" + r.ID; moves[key] {
 			if err := s.requeueRecording(ctx, r); err != nil {

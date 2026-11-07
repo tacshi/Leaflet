@@ -62,11 +62,14 @@ struct Device: Codable, Hashable, Sendable, Identifiable {
 
 /// ExportedAll is Export all's zip, in the folder it was written to, for
 /// the user to move where they pick; missing counts the pages it left out,
-/// which this device does not keep and could not download.
+/// which this device does not have and could not download, and stale the
+/// pages that could not be brought up to date, which went as this device
+/// last had them.
 struct ExportedAll: Codable, Sendable {
     var path: String
     var name: String
     var missing: Int
+    var stale: Int
 
     var url: URL { URL(fileURLWithPath: path) }
 }

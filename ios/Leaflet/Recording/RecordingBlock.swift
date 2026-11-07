@@ -386,7 +386,9 @@ private struct Scrubber: View {
         let palette = BlockLook.palette
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             HStack(spacing: 10) {
-                SkipButton(seconds: -PlaySpeed.skip) { Recorder.shared.skip(id, by: -PlaySpeed.skip) }
+                SkipButton(seconds: -PlaySpeed.skip) {
+                    Recorder.shared.skip(id, by: -PlaySpeed.skip)
+                }
                 SkipButton(seconds: PlaySpeed.skip) { Recorder.shared.skip(id, by: PlaySpeed.skip) }
                 Text(RecordControl.time(player.currentTime))
                 Slider(

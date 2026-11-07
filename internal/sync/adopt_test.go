@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -318,5 +319,55 @@ func TestRequeueSendsDeletedFilesAndFolders(t *testing.T) {
 	}
 	if pendingOf(t, st, "folders", folder.ID) == nil {
 		t.Error("the deleted folder is not queued")
+	}
+}
+
+// The files and recordings waiting to go up stay waiting when their table
+// cannot be read, rather than being let go with it; a deleted file's goes
+// up, as requeueAll sends it, and an entry whose row is gone is let go.
+func TestRetryMovesKeepsWhatItCannotRead(t *testing.T) {
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(st, remote.New(remote.Settings{}, st))
+	if err := svc.setIDs(movesKey, map[string]bool{"files:" + f.ID: true, "recordings:gone": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`ALTER TABLE files RENAME TO files_away`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.retryMoves(context.Background()); err == nil {
+		t.Error("the retry read no files, and said nothing")
+	}
+	if got := svc.ids(movesKey); !maps.Equal(got, map[string]bool{"files:" + f.ID: true}) {
+		t.Errorf("waiting for %v", got)
+	}
+
+	if _, err := st.DB().Exec(`ALTER TABLE files_away RENAME TO files`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.retryMoves(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasPending("files", f.ID) {
+		t.Error("the deleted file is not queued")
+	}
+	if got := svc.ids(movesKey); len(got) != 0 {
+		t.Errorf("still waiting for %v", got)
 	}
 }

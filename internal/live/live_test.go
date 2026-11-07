@@ -205,6 +205,32 @@ func TestUnreadableContentComingIn(t *testing.T) {
 	}
 }
 
+// Stored tells a save that stored the edits from one that found nothing
+// it could save over: content gone unreadable meanwhile.
+func TestStoredOnlyWhenTheEditsAre(t *testing.T) {
+	st, pg := openStore(t, para("p1", "one"))
+	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
+	ed := &textEditor{c: content}
+	p.Attach(ed)
+	ed.typeIn("one, typed")
+	p.Changed()
+	if p.Stored() {
+		t.Error("edits waiting count as stored")
+	}
+	if !p.Save() || !p.Stored() {
+		t.Errorf("saved: stored %v", p.Stored())
+	}
+	ed.typeIn("one, typed again")
+	p.Changed()
+	storeRow(t, st, pg.ID, damaged)
+	if !p.Save() {
+		t.Fatal("a save over unreadable content reports edits left to save")
+	}
+	if p.Stored() {
+		t.Error("edits over unreadable content count as stored")
+	}
+}
+
 // A block typed in and stored from outside both merges to one side, the
 // other kept as a conflict, and the merge waits to be saved.
 func TestEditsMergedKeepTheSideThatLost(t *testing.T) {

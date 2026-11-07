@@ -353,6 +353,31 @@ func TestICloudMergesContent(t *testing.T) {
 	}
 }
 
+// Another device's version of a page whose merge's conflict cannot be
+// recorded is not recorded as merged either: the next sync merges it
+// again, and records the side this device's edit lost.
+func TestICloudMergeKeepsItsConflictsWithItsVersion(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Notes", para("x", "x0"))
+	syncAll(a, b)
+	a.edit(p.ID, "x", "mine")
+	nextStamp()
+	b.edit(p.ID, "x", "theirs")
+	b.sync()
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON conflicts BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.svc.SyncNow()
+	if _, err := a.st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if a.text(p.ID, "x") != "theirs" || a.conflicts() != 1 {
+		t.Errorf("x is %q, with %d conflicts", a.text(p.ID, "x"), a.conflicts())
+	}
+}
+
 // A device's version of a page that cannot be read here, as one a newer
 // Leaflet wrote, is not merged, and the page waits for it rather than
 // being taken for up to date: once it can be read, it merges.

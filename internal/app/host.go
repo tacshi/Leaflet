@@ -628,14 +628,14 @@ func (a *App) exportMarkdown(id string) {
 		}
 		opts := a.markdownOptions()
 		opts.Link = export.Moments(c)
-		md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), opts)
+		md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(id, c), opts)
 		name := safeName(p.DisplayTitle()) + ".md"
 		go func() {
 			path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
 			if path == "" {
 				return
 			}
-			err := os.WriteFile(path, []byte(md), 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
+			err := export.Save(path, strings.NewReader(md))
 			a.update(func() {
 				if err != nil {
 					a.toast(locales.HostErrorExport(err.Error()))
@@ -651,8 +651,19 @@ func (a *App) exportMarkdown(id string) {
 // devices have it, kept up to date as it changes: with nothing to sync
 // it with, open or served by a public link (pulled), or kept on the
 // device, alone or with all the pages.
-func (a *App) keptHere(p store.Page) bool {
-	return !a.syncOn() || a.pulled(p.ID) || p.KeepOffline || a.settings.AllPagesOffline
+func (a *App) keptHere(p store.Page) bool { return a.keeper().Keeps(p) }
+
+// keeper is which pages this device keeps up to date, as keptHere tells,
+// now: for an export of every page, which runs off the main thread.
+func (a *App) keeper() export.Keeper {
+	k := export.Keeper{SyncOn: a.syncOn(), AllOffline: a.settings.AllPagesOffline}
+	if a.page != nil {
+		k.Pulled = append(k.Pulled, a.page.id)
+	}
+	if a.pub != nil && a.pulled(a.pub.page) {
+		k.Pulled = append(k.Pulled, a.pub.page)
+	}
+	return k
 }
 
 // exportContent runs use, which exports page id, with its content as the

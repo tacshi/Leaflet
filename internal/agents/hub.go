@@ -169,10 +169,13 @@ type Hub struct {
 	ICloudLinks func() map[string]time.Time
 	// links are when each page's public link, which another device
 	// serves, stops counting, as the server last said (publicElsewhere),
-	// and leases how many leases this device took of each page's link, the
-	// latest of which stands (ServePublicLink). Guarded by linksMu.
+	// listed the spaces whose pages with a link it has listed
+	// (publicElsewhereIn), and leases how many leases this device took of
+	// each page's link, the latest of which stands (ServePublicLink).
+	// Guarded by linksMu.
 	linksMu sync.Mutex
 	links   map[string]time.Time
+	listed  map[string]bool
 	leases  map[string]int
 	// epoch counts the accounts the hub has worked for: Forget moves it
 	// on, and a run started for an earlier one writes nothing more.
@@ -496,7 +499,11 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 		if err := h.keepBefore(s.PageID, run, option, before); err != nil {
 			log.Printf("agent run history: %v", err)
 		}
-		d.to(live, run.Ops)
+		// Ops held back stay for the next delivery, at the latest the
+		// run's end, which fails the run if they still cannot go.
+		if err := d.to(live, run.Ops); err != nil {
+			log.Printf("agent op on the open page: %v", err)
+		}
 		h.keepRunning(s, run, d, o, chatSaveEvery)
 	case !option.Local():
 		// The server keeps a cloud run's ops: a page opened
@@ -548,10 +555,15 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 	}
 	if live := h.host.Live(s.PageID); live != nil {
 		for _, c := range delta {
-			d.apply(live, c)
+			if err := d.apply(live, c); err != nil {
+				log.Printf("agent op on the open page: %v", err)
+				d.failed = errors.Join(d.failed, err)
+				break
+			}
 		}
 	} else if err := storeOps(h.st, s.PageID, delta, true, false, run.ID, "agent op on a closed page"); err != nil {
 		log.Printf("agent op on a closed page: %v", err)
+		d.failed = errors.Join(d.failed, err)
 	}
 }
 
@@ -702,27 +714,34 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 	if len(run.Ops) > 0 && option.Local() {
 		// The page may have opened or closed during the run: it gets the
 		// ops it missed, open or stored.
+		var err error
 		if live := h.host.Live(pageID); live != nil {
 			if err := h.keepBefore(pageID, run, option, before); err != nil {
 				log.Printf("agent run history: %v", err)
 			}
-			d.to(live, run.Ops)
+			// An op whose conflict could not be kept in history is not
+			// applied, nor those after it.
+			err = d.to(live, run.Ops)
 		} else if len(d.missed(run.Ops)) > 0 {
 			// The snapshot goes first, as an MCP edit's: edits that could
 			// not keep one are not stored, so none is stored that the page
 			// cannot go back from.
-			err := h.keepBefore(pageID, run, option, before)
+			err = h.keepBefore(pageID, run, option, before)
 			if err == nil {
 				err = d.save(h.st, pageID, run.Ops, run.ID)
 			}
-			if err != nil {
-				// The edits are not on the page, whatever the agent said.
-				log.Printf("agent run on a closed page: %v", err)
-				saved = false
-				run.Status = "failed"
-				if run.Error == "" {
-					run.Error = err.Error()
-				}
+		}
+		// A change made as a call streamed that did not reach the page is
+		// not made again here.
+		err = errors.Join(d.failed, err)
+		if err != nil {
+			// The page does not have the edits, or not all of them,
+			// whatever the agent said.
+			log.Printf("agent run on the page: %v", err)
+			saved = false
+			run.Status = "failed"
+			if run.Error == "" {
+				run.Error = err.Error()
 			}
 		}
 	}

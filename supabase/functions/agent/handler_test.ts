@@ -5,6 +5,7 @@ import { type NodeJSON, type PageContent, walk } from "../_shared/blocks.ts";
 import { NOW_LINKED, READ_OTHERS, TOO_MANY_CALLS } from "../_shared/tools.ts";
 import { ParseBudget } from "../_shared/page.ts";
 import { Project, type Row } from "../_testing/project.ts";
+import { PROVIDER_MOVED } from "../_shared/supabase.ts";
 
 function para(id: string, text: string): NodeJSON {
   return { id, type: "paragraph", data: { delta: [{ insert: text }] } };
@@ -1693,4 +1694,22 @@ Deno.test("a page that loses its only card keeps a block to type in", async () =
   assertEquals([left.document.children!.length, block.type], [1, "paragraph"]);
   assertEquals(typeof left.meta.blocks[block.id], "number");
   assertEquals(typeof left.meta.deleted.card, "number");
+});
+
+// A save that moves the provider and gives it a new key lands between the
+// run's reads of the provider and of its key: the new key goes nowhere,
+// least of all to the old address, and the run fails, to be asked again.
+Deno.test("a provider's key saved as a run reads it goes not to its old address", async () => {
+  const p = project();
+  p.rpcs.get_provider_secret = (args) => {
+    const saved = p.rows("model_providers")[0];
+    Object.assign(saved, { base_url: "https://elsewhere.example/v1" });
+    if (args.p_base_url !== saved.base_url || args.p_preset !== saved.preset) throw new Error("provider_moved");
+    return "sk-new";
+  };
+  const { chat, asked } = model(says("Done."));
+  await run(p, deps(p, chat));
+  assertEquals(asked, []);
+  assertEquals(jobOf(p).status, "failed");
+  assertEquals(jobOf(p).error, PROVIDER_MOVED);
 });

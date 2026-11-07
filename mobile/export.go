@@ -2,8 +2,10 @@ package mobile
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"leaflet/internal/export"
 	"leaflet/internal/store"
@@ -25,9 +27,12 @@ type exportedAll struct {
 	// to move where the user picks; Name, its file name.
 	Path string `json:"path"`
 	Name string `json:"name"`
-	// Missing counts the pages left out: those this device does not keep
+	// Missing counts the pages left out: those this device does not have
 	// and could not download.
 	Missing int `json:"missing"`
+	// Stale counts the pages that could not be brought up to date, which
+	// went as this device last had them.
+	Stale int `json:"stale"`
 }
 
 // ExportAll writes every page as Markdown in a zip, with the pictures,
@@ -40,9 +45,17 @@ func (c *Core) ExportAll(dir string) (_ string, err error) {
 	var saved bool
 	var folders []store.Folder
 	var files []store.File
+	var kept export.Keeper
 	c.q.do(func() {
 		if saved = c.saveOpen(); !saved {
 			return
+		}
+		// The pages kept up to date, as sync keeps them: open, or kept on
+		// this device, alone or with all the pages.
+		kept = export.Keeper{
+			SyncOn:     c.core.Remote.SignedIn() || c.core.Sync.ICloudOn(),
+			Pulled:     slices.Collect(maps.Keys(c.pages)),
+			AllOffline: c.core.Store.Settings().AllPagesOffline,
 		}
 		if folders, err = c.core.Store.Folders(); err == nil {
 			files, err = c.core.Store.Files()
@@ -60,10 +73,12 @@ func (c *Core) ExportAll(dir string) (_ string, err error) {
 	out := exportedAll{Name: locales.SettingsExportFileName()}
 	out.Path = filepath.Join(dir, out.Name)
 	// Off the queue, as the desktop's runs off its main thread: pages
-	// this device does not keep download first.
-	src := export.Source{Store: c.core.Store, Sync: c.core.Sync, Rec: c.core.Rec}
-	if out.Missing, err = export.All(out.Path, src, folders, files); err != nil {
+	// this device does not keep up to date download first.
+	src := export.Source{Store: c.core.Store, Sync: c.core.Sync, Rec: c.core.Rec, Kept: kept}
+	report, err := export.All(out.Path, src, folders, files)
+	if err != nil {
 		return "", errors.New(locales.SettingsExportFailed(err.Error()))
 	}
+	out.Missing, out.Stale = report.Missing, report.Stale
 	return encode(out)
 }

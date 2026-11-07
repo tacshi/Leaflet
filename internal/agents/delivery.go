@@ -86,6 +86,10 @@ type delivery struct {
 	conflict func(*doc.Content) error
 	// chatSaved is when the page's chat last kept the run's ops.
 	chatSaved time.Time
+	// failed is why a change of an op delivered already, as its call
+	// streamed, did not reach the page: delivered, the op is not delivered
+	// again, so the run ends failed with it.
+	failed error
 }
 
 // newDelivery is a run's delivery to its page, which keeps in the page's
@@ -97,15 +101,22 @@ func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
 }
 
 // to applies the ops ed does not have yet, in order, so an op never comes
-// before the blocks it needs.
-func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
-	for _, op := range ops[d.sent:] {
+// before the blocks it needs. An op whose conflict could not be kept in
+// history stops them: neither it nor those after it are applied, or count
+// as delivered, so the next delivery tries them again, and the error says
+// why the page does not have them, as save's does.
+func (d *delivery) to(ed LiveDoc, ops []doc.Op) error {
+	for i, op := range ops[d.sent:] {
 		if op.IsPageOp() {
 			continue
 		}
-		d.apply(ed, op)
+		if err := d.apply(ed, op); err != nil {
+			d.sent += i
+			return err
+		}
 	}
 	d.sent = len(ops)
+	return nil
 }
 
 // apply applies one op, or one change of an op as its call streams, to
@@ -116,17 +127,24 @@ func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
 // just before it, which has the run's earlier ops by then, so the agent's
 // own edits are no change. The page is read for that, and kept, through
 // Peek, which counts no read of what the user is composing: the op can
-// hold that only where the run read the page with it (read).
-func (d *delivery) apply(ed LiveDoc, op doc.Op) {
-	if d.conflict != nil && overwrites(ed.Peek(), []doc.Op{op}) {
-		if err := d.conflict(ed.Peek()); err != nil {
-			log.Printf("agent op on the open page: %v", err)
+// hold that only where the run read the page with it (read). An op whose
+// conflict could not be kept is not applied, as storeOps saves none, and
+// its error is returned: the change it would take away has nowhere to go
+// back to. An op that does not apply is passed over, as the agent's other
+// edits still go.
+func (d *delivery) apply(ed LiveDoc, op doc.Op) error {
+	if d.conflict != nil {
+		if c := ed.Peek(); overwrites(c, []doc.Op{op}) {
+			if err := d.conflict(c); err != nil {
+				return err
+			}
 		}
 	}
 	if err := ed.ApplyOpFrom(op, ed != d.ed, d.read); err != nil {
 		log.Printf("agent op on the open page: %v", err)
 	}
 	d.ed = ed
+	return nil
 }
 
 // missed are the block ops the page does not have yet.

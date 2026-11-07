@@ -3,6 +3,7 @@ package export
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -368,7 +369,7 @@ func TestWithAudioOneRecordingTwice(t *testing.T) {
 		{ID: "b2", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}},
 	})
 	src := Source{Store: st, Rec: recording.NewController(st, nil)}
-	got := withAudio(src, c, t.TempDir())
+	got := withAudio(src, "p", c, t.TempDir())
 	var files []string
 	got.Walk(func(n, _ *doc.Node) {
 		if n.Type == "file" {
@@ -492,5 +493,159 @@ func TestSave(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(path); string(data) != "RIFF" { // #nosec G304 -- the test's own file.
 		t.Errorf("saved %q", data)
+	}
+}
+
+// A block of another page's recording, as one pasted from it, exports
+// without that page's transcript or audio.
+func TestWithTranscriptsOwnRecordingsOnly(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.OpenMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	wav := filepath.Join(dir, "r1.wav")
+	if err := os.WriteFile(wav, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := store.Recording{ID: "r1", PageID: "p", BlockID: "b1", Status: "ready", LocalPath: wav,
+		Transcript: []store.Segment{{StartMs: 0, EndMs: 4000, Text: "We ship on Friday."}}}
+	if err := st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	c := doc.FromBlocks([]*doc.Node{{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}}})
+	md := func(pageID string) string {
+		return doc.PageMarkdown("Notes", WithTranscripts(st, pageID, c), doc.MarkdownOptions{})
+	}
+	if !strings.Contains(md("p"), "We ship on Friday.") {
+		t.Errorf("the recording's own page misses its transcript:\n%s", md("p"))
+	}
+	if strings.Contains(md("q"), "We ship on Friday.") {
+		t.Errorf("another page has the recording's transcript:\n%s", md("q"))
+	}
+	src := Source{Store: st, Rec: recording.NewController(st, nil)}
+	files := func(pageID string) int {
+		n := 0
+		withAudio(src, pageID, c.Copy(), t.TempDir()).Walk(func(b, _ *doc.Node) {
+			if b.Type == "file" {
+				n++
+			}
+		})
+		return n
+	}
+	if got := files("p"); got != 1 {
+		t.Errorf("the recording's own page has %d audio files", got)
+	}
+	if got := files("q"); got != 0 {
+		t.Errorf("another page has %d of the recording's audio files", got)
+	}
+}
+
+// fakeSync brings pages down from content, and fails for any other page.
+type fakeSync struct {
+	content map[string]*doc.Content
+	asked   []string
+}
+
+func (f *fakeSync) Hold(fn func()) { fn() }
+func (f *fakeSync) CanSync() bool  { return true }
+func (f *fakeSync) RefreshContent(_ context.Context, id string) (*doc.Content, error) {
+	f.asked = append(f.asked, id)
+	if c, ok := f.content[id]; ok {
+		return c, nil
+	}
+	return nil, errors.New("offline")
+}
+
+func text(s string) *doc.Content {
+	n := &doc.Node{ID: "t", Type: "paragraph"}
+	n.SetDelta(doc.Delta{{Text: s}})
+	return doc.FromBlocks([]*doc.Node{n})
+}
+
+// Export all brings down the pages this device does not keep up to date,
+// even those it has an older copy of, and keeps the copy of one that can't
+// come, counting it.
+func TestAllRefreshesPagesNotKept(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	page := func(title string, keep bool) store.Page {
+		p, err := st.CreatePage(store.NewPageOptions{Title: title, Content: text(title + " here")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetKeepOffline(p.ID, keep); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	closed, away, kept, open := page("Closed", false), page("Away", false), page("Kept", true), page("Open", false)
+	sync := &fakeSync{content: map[string]*doc.Content{closed.ID: text("Closed elsewhere")}}
+	out := filepath.Join(t.TempDir(), "export.zip")
+	report, err := All(out, Source{Store: st, Sync: sync, Kept: Keeper{SyncOn: true, Pulled: []string{open.ID}}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report != (Report{Stale: 1}) {
+		t.Errorf("report %+v", report)
+	}
+	if slices.Contains(sync.asked, kept.ID) || slices.Contains(sync.asked, open.ID) || !slices.Contains(sync.asked, away.ID) {
+		t.Errorf("brought down %q", sync.asked)
+	}
+	data, err := os.ReadFile(out) // #nosec G304 -- the test's own file.
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := unzip(t, data)
+	for name, want := range map[string]string{"Closed.md": "Closed elsewhere", "Away.md": "Away here", "Kept.md": "Kept here", "Open.md": "Open here"} {
+		if !strings.Contains(got[name], want) {
+			t.Errorf("%s is %q, want %q in it", name, got[name], want)
+		}
+	}
+}
+
+// An export that fails leaves the file it would have replaced as it was.
+func TestAllFailedKeepsTheFileThere(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	// The export's own folder can't be made.
+	st.Dir = filepath.Join(t.TempDir(), "gone")
+	out := filepath.Join(t.TempDir(), "export.zip")
+	if err := os.WriteFile(out, []byte("last week's"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := All(out, Source{Store: st}, nil, nil); err == nil {
+		t.Fatal("the export reported nothing")
+	}
+	if data, err := os.ReadFile(out); err != nil || string(data) != "last week's" { // #nosec G304 -- the test's own file.
+		t.Errorf("the file there is now %q, %v", data, err)
+	}
+}
+
+// A write that fails part way leaves what was at its path as it was, and
+// nothing beside it.
+func TestWriteCutShort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "export.zip")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Write(path, func(w io.Writer) error {
+		_, _ = io.WriteString(w, "half")
+		return errors.New("cut")
+	})
+	if err == nil {
+		t.Error("a cut write reported nothing")
+	}
+	entries, _ := os.ReadDir(dir)
+	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304 -- the test's own file.
+		t.Errorf("after a cut write: %q, %d entries", data, len(entries))
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"leaflet/internal/doc"
 )
 
 // What iCloud sync keeps of the other devices: the version of each row it
@@ -106,10 +108,50 @@ func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {
 
 // PutPeerContent records what a device published of a page.
 func (s *Store) PutPeerContent(peer, pageID string, version int64, content string) error {
-	_, err := s.db.Exec(`INSERT INTO peer_contents (peer_id, page_id, version, content) VALUES (?, ?, ?, ?)
+	return putPeerContent(s.db, peer, pageID, version, content)
+}
+
+func putPeerContent(q querier, peer, pageID string, version int64, content string) error {
+	_, err := q.Exec(`INSERT INTO peer_contents (peer_id, page_id, version, content) VALUES (?, ?, ?, ?)
 		ON CONFLICT(peer_id, page_id) DO UPDATE SET version = excluded.version, content = excluded.content`,
 		peer, pageID, version, content)
 	return err
+}
+
+// PeerMerged records a merge of another device's version of a page, from,
+// that left this device's content as it was: from, the base the next merge
+// with that device starts from, the conflicts the merge met, and, unless
+// label is "", the content queued to go out, all in one transaction, as
+// PutMergedContentOver records them with the content it stores.
+func (s *Store) PeerMerged(pageID string, from PeerContent, label string, conflicts ...doc.Conflict) error {
+	if err := s.inTx(func(tx *sql.Tx) error { return putPeerMerge(tx, pageID, from, label, conflicts) }); err != nil {
+		return err
+	}
+	s.notifyPeerMerge(pageID, label, conflicts)
+	return nil
+}
+
+// putPeerMerge records what merging another device's version of a page,
+// from, leaves besides the content: from, the conflicts, and, unless label
+// is "", the page's content queued to go out.
+func putPeerMerge(tx *sql.Tx, pageID string, from PeerContent, label string, conflicts []doc.Conflict) error {
+	if err := putPeerContent(tx, from.Peer, pageID, from.Version, from.Content); err != nil {
+		return err
+	}
+	if err := addConflicts(tx, pageID, conflicts); err != nil || label == "" {
+		return err
+	}
+	return queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID)
+}
+
+// notifyPeerMerge tells the listeners what putPeerMerge changed.
+func (s *Store) notifyPeerMerge(pageID, label string, conflicts []doc.Conflict) {
+	if label != "" {
+		s.Notify("outbox", pageID)
+	}
+	if len(conflicts) > 0 {
+		s.Notify("conflicts", pageID)
+	}
 }
 
 // ForgetICloud removes what iCloud sync kept of the other devices, so the

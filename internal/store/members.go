@@ -34,7 +34,10 @@ func (s *Store) Members(pageID string) ([]Member, error) {
 	})
 }
 
-// MembersOrNil returns a page's members, or nil.
+// MembersOrNil returns a page's members, or nil where they cannot be
+// read, for those to whom none is the safe answer, as to CanEdit. Whether
+// someone else has a page is read with Members: members unread do not say
+// that no one has it.
 func (s *Store) MembersOrNil(pageID string) []Member {
 	m, _ := s.Members(pageID)
 	return m

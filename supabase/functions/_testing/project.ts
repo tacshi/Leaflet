@@ -23,6 +23,15 @@ export interface Rules {
   maxRows?: number;
 }
 
+/**
+ * What a function returning one value of an array type answers, as an
+ * RPC's stand-in gives it: the array, whole, in one row, which no filter
+ * or max_rows cuts, as one returning rows (setof) is cut.
+ */
+export class Whole {
+  constructor(readonly value: unknown[]) {}
+}
+
 const URL_BASE = "http://project.test";
 const SERVICE_KEY = "service-key";
 
@@ -35,6 +44,8 @@ export class Project {
   readonly users = new Map<string, { id: string; email: string }>();
   /** Every request, as METHOD path?query. */
   readonly requests: string[] = [];
+  /** The users Auth's admin API deleted, by ID. */
+  readonly deletedUsers: string[] = [];
 
   constructor(public rules: Rules = {}) {}
 
@@ -85,11 +96,17 @@ export class Project {
         const user = this.users.get(token);
         return user ? reply({ id: user.id, email: user.email, aud: "authenticated" }) : reply({ msg: "bad jwt" }, 401);
       }
+      const admin = url.pathname.match(/^\/auth\/v1\/admin\/users\/([^/]+)$/);
+      if (admin && req.method === "DELETE" && caller === "service") {
+        this.deletedUsers.push(admin[1]);
+        return reply({ id: admin[1], aud: "authenticated" });
+      }
       const rpc = url.pathname.match(/^\/rest\/v1\/rpc\/(\w+)$/);
       if (rpc) {
         const fn = this.rpcs[rpc[1]];
         if (!fn) return reply({ code: "PGRST202", message: `no function ${rpc[1]}` }, 404);
         const result = await fn(await req.json().catch(() => ({})), caller);
+        if (result instanceof Whole) return reply(result.value);
         // A function's rows are read as a table's are: its filters, order
         // and limit, and no more than max_rows.
         if (!Array.isArray(result)) return reply(result ?? null);
@@ -180,14 +197,15 @@ export class Project {
     const rest = decodeURIComponent(url.pathname.slice("/storage/v1/object/".length));
     const list = rest.match(/^list\/([^/]+)$/);
     if (list) {
-      const { prefix = "", search = "" } = await req.json();
+      const { prefix = "", search = "", limit = 100, offset = 0 } = await req.json();
       const bucket = this.objects[list[1]] ?? new Map();
       const items = [...bucket.entries()]
         .filter(([path]) => path.startsWith(prefix ? `${prefix}/` : ""))
         .map(([path, data]) => ({ name: path.slice(prefix ? prefix.length + 1 : 0), data }))
         .filter((o) => !o.name.includes("/") && o.name.includes(search))
-        .map((o) => ({ id: crypto.randomUUID(), name: o.name, metadata: { size: o.data.length } }));
-      return reply(items);
+        .map((o) => ({ id: crypto.randomUUID(), name: o.name, metadata: { size: o.data.length } }))
+        .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      return reply(items.slice(offset, offset + limit));
     }
     const [bucketId, ...parts] = rest.split("/");
     const bucket = (this.objects[bucketId] ??= new Map());

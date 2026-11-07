@@ -302,34 +302,46 @@ func changedSince(base string, c *doc.Content) (n int, ok bool) {
 
 // PutSyncedContentOver stores content that came from the server, merged
 // from the stored content over ("" when there was none), with the base it
-// now agrees on: it stores only while over is still what is stored,
-// checked in the statement that writes, and returns ErrContentChanged
-// otherwise.
-func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
-	if err := putSyncedOver(s.db, pageID, over, c, base, remoteAt, revision); err != nil {
-		return err
-	}
-	s.Notify("page_contents", pageID)
-	return nil
-}
-
-// PutMergedContentOver is PutSyncedContentOver for content merged from
-// another device's through iCloud Drive, which has no server base, and,
-// unless label is "", queues it to go out in the same transaction: stored
-// without its entry, this device's merge would never reach the others.
-func (s *Store) PutMergedContentOver(pageID, over string, c *doc.Content, label string) error {
+// now agrees on, and records the conflicts the merge met in the same
+// transaction: once the base is stored, the server's revision is merged,
+// so a conflict not recorded with it would never be met again. It stores
+// only while over is still what is stored, checked in the statement that
+// writes, and returns ErrContentChanged otherwise.
+func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64, conflicts ...doc.Conflict) error {
 	err := s.inTx(func(tx *sql.Tx) error {
-		if err := putSyncedOver(tx, pageID, over, c, "", time.Time{}, 0); err != nil || label == "" {
+		if err := putSyncedOver(tx, pageID, over, c, base, remoteAt, revision); err != nil {
 			return err
 		}
-		return queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID)
+		return addConflicts(tx, pageID, conflicts)
 	})
 	if err != nil {
 		return err
 	}
-	if label != "" {
-		s.Notify("outbox", pageID)
+	s.Notify("page_contents", pageID)
+	if len(conflicts) > 0 {
+		s.Notify("conflicts", pageID)
 	}
+	return nil
+}
+
+// PutMergedContentOver is PutSyncedContentOver for content merged from
+// another device's version of a page, from, through iCloud Drive, which
+// has no server base. In the same transaction it records from, the base
+// the next merge with that device starts from, and the conflicts the merge
+// met, and, unless label is "", queues the merge to go out: stored without
+// its entry, this device's merge would never reach the others, and the
+// version recorded without its conflicts, they would never be met again.
+func (s *Store) PutMergedContentOver(pageID, over string, c *doc.Content, label string, from PeerContent, conflicts ...doc.Conflict) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		if err := putSyncedOver(tx, pageID, over, c, "", time.Time{}, 0); err != nil {
+			return err
+		}
+		return putPeerMerge(tx, pageID, from, label, conflicts)
+	})
+	if err != nil {
+		return err
+	}
+	s.notifyPeerMerge(pageID, label, conflicts)
 	s.Notify("page_contents", pageID)
 	return nil
 }
@@ -361,20 +373,33 @@ func putSyncedOver(q querier, pageID, over string, c *doc.Content, base string, 
 // this device now has, the base both agree on, and its time and revision.
 // It stores them only while over is still the stored content, checked in
 // the statement that writes, and returns ErrContentChanged otherwise.
-func (s *Store) PushedContent(pageID, over, content, plain, base string, remoteAt time.Time, revision int64) error {
-	res, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ?, remote_revision = ?
-		WHERE page_id = ? AND content = ?`,
-		content, plain, base, remoteAt.UnixMilli(), revision, pageID, over)
+//
+// The conflicts the merge met are recorded in the same transaction: once
+// the server's revision is stored as merged, a conflict not recorded with
+// it would never be met again.
+func (s *Store) PushedContent(pageID, over, content, plain, base string, remoteAt time.Time, revision int64, conflicts ...doc.Conflict) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ?, remote_revision = ?
+			WHERE page_id = ? AND content = ?`,
+			content, plain, base, remoteAt.UnixMilli(), revision, pageID, over)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return ErrContentChanged
+		}
+		return addConflicts(tx, pageID, conflicts)
+	})
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n == 0 {
-		return ErrContentChanged
-	}
 	if content != over {
 		s.Notify("page_contents", pageID)
+	}
+	if len(conflicts) > 0 {
+		s.Notify("conflicts", pageID)
 	}
 	return nil
 }

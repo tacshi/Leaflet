@@ -660,6 +660,85 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 	}
 }
 
+// A copy takes only the page's own recordings and files, and each of its
+// subpages' own: a block may name another page's, which would go to the
+// copy's audience. Such a block keeps naming it, nothing of it is copied,
+// and copying needs none of it on this device.
+func TestCopyPageLeavesOtherPagesMedia(t *testing.T) {
+	s := open(t)
+	other, _ := s.CreatePage(NewPageOptions{Title: "Other"})
+	p, _ := s.CreatePage(NewPageOptions{Title: "Mine"})
+	sub, _ := s.CreatePage(NewPageOptions{Title: "Sub", ParentID: p.ID})
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	othersHere, err := s.AddFile(src, "", other.ID, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	othersStored := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, PageID: other.ID, Name: "plan.pdf", MimeType: "application/pdf",
+		SizeBytes: 3, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	othersStored.StoragePath = othersStored.SpaceID + "/" + othersStored.ID + "/plan.pdf"
+	if err := s.PutFile(othersStored); err != nil {
+		t.Fatal(err)
+	}
+	othersRec, err := s.CreateRecording(other.ID, doc.NewBlockID(), "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs, err := s.AddFile(src, "", sub.ID, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileBlock := func(f File) *doc.Node {
+		return &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID}}
+	}
+	blocks := []*doc.Node{
+		fileBlock(othersHere), fileBlock(othersStored), fileBlock(subs),
+		{ID: doc.NewBlockID(), Type: "recording", Data: map[string]any{"recording_id": othersRec.ID}},
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SaveContent(sub.ID, doc.FromBlocks([]*doc.Node{fileBlock(subs)})); err != nil {
+		t.Fatal(err)
+	}
+
+	if needs, err := s.CopyNeeds(p.ID); err != nil || len(needs) != 0 {
+		t.Fatalf("needs %+v, %v", needs, err)
+	}
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Mine copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range s.Content(cp.ID).Children {
+		if got, want := n.Str("file_id")+n.Str("recording_id"), blocks[i].Str("file_id")+blocks[i].Str("recording_id"); got != want {
+			t.Errorf("block %d names %q, not the other page's %q", i, got, want)
+		}
+	}
+	files, err := s.AllFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subCopy Page
+	if kids, _ := s.queryPages(`parent_id = ?`, cp.ID); len(kids) == 1 {
+		subCopy = kids[0]
+	} else {
+		t.Fatalf("the copy has %d subpages", len(kids))
+	}
+	if len(files) != 4 || !slices.ContainsFunc(files, func(f File) bool { return f.PageID == subCopy.ID }) ||
+		slices.ContainsFunc(files, func(f File) bool { return f.PageID == cp.ID }) {
+		t.Errorf("files after the copy: %+v", files)
+	}
+	if recs, _ := s.Recordings(); len(recs) != 1 {
+		t.Errorf("recordings after the copy: %+v", recs)
+	}
+	if id := s.Content(subCopy.ID).Children[0].Str("file_id"); id == subs.ID {
+		t.Errorf("the subpage's copy names the subpage's own file %s", id)
+	}
+}
+
 // A copied recording whose audio is only stored, or still uploading from
 // where it was made, is not copied until its audio is on this device: the
 // copy goes up with audio of its own, never later from the original's,
@@ -3729,6 +3808,25 @@ func TestPagesSharedAndGuestCommented(t *testing.T) {
 	}
 	if got, err := s.GuestCommented(); err != nil || !got[guested.ID] || len(got) != 1 {
 		t.Errorf("guest-commented %v, %v", got, err)
+	}
+}
+
+// HasGuestComments says when it cannot read the comments, rather than
+// that a page has no guest's comment.
+func TestHasGuestCommentsUnread(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Guested"})
+	if _, err := s.AddComment(p.ID, "b1", "Nice", "", "", "guest", "Visitor"); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := s.HasGuestComments(p.ID); !has || err != nil {
+		t.Fatalf("guest-commented %v, %v", has, err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE comments RENAME TO hidden`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HasGuestComments(p.ID); err == nil {
+		t.Error("comments unread, and no error")
 	}
 }
 

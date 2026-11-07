@@ -121,9 +121,9 @@ type pageCopies struct {
 
 // copyPlan reads page id and the pages under it, parents before their
 // subpages, and gives each the ID of its copy (copyID for id) and its
-// content with links among them going to the copies, recording blocks
-// to recordings of their own, and blocks of the page's files to files of
-// their own, which storeCopies stores once the copies are in.
+// content with links among them going to the copies, and blocks of the
+// page's own recordings and files to recordings and files of their own,
+// which storeCopies stores once the copies are in.
 func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 	root, err := s.Page(id)
 	if err != nil {
@@ -167,9 +167,14 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 		files := map[string]int{} // the page's files, by where plan.files has their copies
 		plan.contents[i] = copies[p.ID]
 		plan.contents[i].Walk(func(n, _ *doc.Node) {
+			// Only the page's own recordings and files are copied: a block
+			// may name any, as one an editor of the page wrote could, and
+			// another page's would go to the copy's audience. A block of
+			// another's keeps naming it, as the page's does, and shows it no
+			// more than the page does.
 			if n.Type == "recording" {
 				r, err := s.Recording(n.Str("recording_id"))
-				if err != nil {
+				if err != nil || r.PageID != p.ID {
 					return
 				}
 				from := r.ID
@@ -185,7 +190,7 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 			k, ok := files[fileID]
 			if !ok {
 				f, err := s.File(fileID)
-				if err != nil || !f.DeletedAt.IsZero() {
+				if err != nil || !f.DeletedAt.IsZero() || f.PageID != p.ID {
 					return
 				}
 				k = len(plan.files)

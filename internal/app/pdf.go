@@ -1,8 +1,8 @@
 package app
 
 import (
+	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/export"
 	"leaflet/internal/guard"
 	"leaflet/internal/theme"
 	"leaflet/internal/webpage"
@@ -67,7 +68,7 @@ func (a *App) exportPDF(id string) {
 			cancel()
 			pdf, err := printPDF(webpage.HTML(c, o))
 			if err == nil {
-				err = os.WriteFile(path, pdf, 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
+				err = export.Save(path, bytes.NewReader(pdf))
 			}
 			a.update(func() {
 				if err != nil {

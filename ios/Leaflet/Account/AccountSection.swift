@@ -254,10 +254,14 @@ struct DataSection: View {
                     switch result {
                     case .success(let url):
                         let name = url.lastPathComponent
-                        say(
+                        var said =
                             exported.missing > 0
-                                ? L.settingsExportedMissing(count: exported.missing, name: name)
-                                : L.settingsExported(name: name))
+                            ? L.settingsExportedMissing(count: exported.missing, name: name)
+                            : L.settingsExported(name: name)
+                        if exported.stale > 0 {
+                            said += "\n" + L.settingsExportedStale(count: exported.stale)
+                        }
+                        say(said)
                     case .failure(let error):
                         say(L.settingsExportFailed(error: error.localizedDescription), failed: true)
                     }

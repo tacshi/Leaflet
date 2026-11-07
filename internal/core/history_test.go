@@ -125,3 +125,50 @@ func TestRestoreVersionRefused(t *testing.T) {
 		t.Errorf("kept %d versions", len(h))
 	}
 }
+
+// A page whose edits could not be saved keeps no version named, which
+// would be of the page as it was before them, and has none put back over
+// them: no version would have them.
+func TestHistoryWithEditsNotSaved(t *testing.T) {
+	f := newPagesFixture(t)
+	p := f.page(t, "PRD", "", block("p1", "Goals"))
+	if err := f.st.AddHistory(p.ID, &doc.Content{}, "manual", "", "Empty"); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := f.st.History(p.ID)
+	ed := f.openPage(p.ID)
+	ed.c.Find("p1").SetDelta(doc.FromMarkdown("Goals, typed"))
+	f.open[p.ID].Changed()
+	f.fail(t)
+	if err := f.NameVersion(p.ID, "Sent to legal"); err == nil || err.Error() != locales.AppErrorNotSaved() {
+		t.Errorf("named with %v", err)
+	}
+	if _, _, err := f.RestoreVersion(p.ID, h[0].ID); err == nil || err.Error() != locales.AppErrorNotSaved() {
+		t.Errorf("restored with %v", err)
+	}
+	if got := len(versions(t, f, p.ID, "manual")) + len(versions(t, f, p.ID, "restore")); got != 1 {
+		t.Errorf("kept %d versions more", got-1)
+	}
+	if ed.c.PlainText() != "Goals, typed" || ed.replaced != 0 {
+		t.Errorf("the editor shows %q, %d outside changes", ed.c.PlainText(), ed.replaced)
+	}
+}
+
+// A version put back that could not be saved is said so: the page open
+// shows it, still to be saved.
+func TestRestoreVersionNotSaved(t *testing.T) {
+	f := newPagesFixture(t)
+	p := f.page(t, "PRD", "", block("p1", "Goals"))
+	if err := f.st.AddHistory(p.ID, doc.FromBlocks([]*doc.Node{block("p1", "Old goals")}), "manual", "", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := f.st.History(p.ID)
+	ed := f.openPage(p.ID)
+	f.fail(t)
+	if _, _, err := f.RestoreVersion(p.ID, h[0].ID); err == nil || err.Error() != locales.AppErrorNotSaved() {
+		t.Errorf("restored with %v", err)
+	}
+	if ed.c.PlainText() != "Old goals" || f.st.Content(p.ID).PlainText() != "Goals" {
+		t.Errorf("the editor shows %q, stored %q", ed.c.PlainText(), f.st.Content(p.ID).PlainText())
+	}
+}

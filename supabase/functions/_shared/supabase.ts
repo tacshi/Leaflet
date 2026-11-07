@@ -103,13 +103,29 @@ export async function loadProvider(
   return data as unknown as ProviderRow;
 }
 
+/** What a caller hears when a provider changed between its reads, or under its save. */
+export const PROVIDER_MOVED = "This provider was changed just now, while this was asked. Try again.";
+
+/** Whether a database error is a provider's row having moved (provider_moved). */
+export function providerMoved(error: { message: string }): boolean {
+  return error.message.includes("provider_moved");
+}
+
+/**
+ * A provider's key, for the row the caller read: given only while the
+ * provider still has that row's base URL and preset, read with them in
+ * one statement, so a save that moves the provider and gives it a new key
+ * after the caller's read never has that key sent to the old address.
+ */
 export async function providerSecret(
   sc: SupabaseClient,
-  providerId: string,
+  row: Pick<ProviderRow, "id" | "base_url" | "preset">,
 ): Promise<string | null> {
   const { data, error } = await sc.rpc("get_provider_secret", {
-    p_provider_id: providerId,
+    p_provider_id: row.id,
+    p_base_url: row.base_url,
+    p_preset: row.preset,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw providerMoved(error) ? new HttpError(409, PROVIDER_MOVED) : new Error(error.message);
   return (data as string | null) ?? null;
 }

@@ -452,11 +452,14 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 		return ""
 	}
 	// The merge is stored and queued together, so it cannot be left here
-	// only.
+	// only, and with the version merged and its conflicts: once that
+	// version is recorded, it is never merged again, so a conflict not
+	// recorded with it would never be met again.
+	from := store.PeerContent{Peer: peer, Version: file.Version, Content: string(file.Content)}
 	var merged *doc.Content
 	var conflicts []doc.Conflict
 	queued := false
-	_, _, err = s.storeMerge(pageID, func(local store.ContentRow, kept bool) (*doc.Content, error) {
+	_, next, err := s.storeMerge(pageID, func(local store.ContentRow, kept bool) (*doc.Content, error) {
 		merged, conflicts, queued = theirs, nil, false
 		if !kept {
 			return theirs, nil
@@ -475,26 +478,19 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	}, func(over string, c *doc.Content) error {
 		l := label(c.Encode())
 		queued = l != ""
-		return s.st.PutMergedContentOver(pageID, over, c, l)
+		return s.st.PutMergedContentOver(pageID, over, c, l, from, s.ownConflicts(me, peer, pageID, file, conflicts)...)
 	})
 	if err != nil {
 		return err
 	}
-	if err := s.st.PutPeerContent(peer, pageID, file.Version, string(file.Content)); err != nil {
-		return err
-	}
-	for _, c := range s.ownConflicts(me, peer, pageID, file, conflicts) {
-		if err := s.st.AddConflict(pageID, c); err != nil {
-			return err
-		}
-	}
 	// Content this device had as merged, so stored nothing, is queued
-	// here.
-	if l := label(merged.Encode()); !queued && l != "" {
-		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, l, pageID); err != nil {
+	// with the version merged.
+	if next == nil {
+		l := label(merged.Encode())
+		queued = l != ""
+		if err := s.st.PeerMerged(pageID, from, l, s.ownConflicts(me, peer, pageID, file, conflicts)...); err != nil {
 			return err
 		}
-		queued = true
 	}
 	if queued {
 		s.Kick()

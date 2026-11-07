@@ -1,11 +1,13 @@
 package core
 
 import (
+	"errors"
 	"log"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/live"
+	"leaflet/locales"
 )
 
 // Agents change pages as the app has them, through Pages.
@@ -54,15 +56,23 @@ func (p Pages) content(id string) *doc.Content {
 	return p.Store.Content(id)
 }
 
-// save saves the edits of page id, while the app has it open.
-func (p Pages) save(id string) {
+// save saves the edits of page id, while the app has it open. It reports
+// whether none are left to save; when some are, the page told the user
+// why, and what reads the stored content would read it without them.
+func (p Pages) save(id string) bool {
 	if p.Open == nil {
-		return
+		return true
 	}
 	if lp := p.Open(id); lp != nil {
-		lp.Save()
+		return lp.Save()
 	}
+	return true
 }
+
+// errNotSaved stops what would go on from the stored content of a page
+// open in the app whose edits could not be saved; the page said why. It
+// is made as it is returned, to be in the language the app shows then.
+func errNotSaved() error { return errors.New(locales.AppErrorNotSaved()) }
 
 // canEdit reports whether the user may change page id.
 func (p Pages) canEdit(id string) bool {
@@ -82,15 +92,17 @@ func (p Pages) notify(message string) {
 // changed it: through the page while the app has it open, or else over its
 // stored content, an empty page when this device keeps none, saved only
 // over what edit was given (store.UpdateContent). A page the user can't
-// change is left as it is.
+// change is left as it is. An open page whose change could not be saved
+// shows it still to be saved, and that is an error: what goes on from the
+// stored content would go on without it.
 func (p Pages) EditPage(id string, edit func(c *doc.Content) bool) error {
 	if !p.canEdit(id) {
 		return nil
 	}
 	if lp := p.open(id); lp != nil {
 		c := lp.Doc().Copy()
-		if edit(c) {
-			lp.Change(c)
+		if edit(c) && !lp.Change(c) {
+			return errNotSaved()
 		}
 		return nil
 	}

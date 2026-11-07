@@ -23,10 +23,15 @@ export async function handle(req: Request, clients: Clients): Promise<Response> 
     // Storage objects are removed through the Storage API before the rows
     // that name them go with the account: the account is not deleted while
     // it owns any. The audio of recordings that stay, on others' pages, is
-    // no longer the account's, in place, and stays.
+    // no longer the account's, in place, and stays. Their paths come as one
+    // array, whole: as rows, the Data API would answer the first thousand
+    // (max_rows), and the audio of the rest would be removed.
     const { data: kept, error: keptError } = await sc.rpc("release_kept_recordings", { p_user_id: user.id });
     if (keptError) throw new Error(`recordings: ${keptError.message}`);
-    await removePrefix(sc, "recordings", user.id, new Set((kept ?? []) as string[]));
+    if (!Array.isArray(kept) || kept.some((path) => typeof path !== "string")) {
+      throw new Error("recordings: the audio to keep came back as no list of paths");
+    }
+    await removePrefix(sc, "recordings", user.id, new Set(kept as string[]));
     for (const space of spaces ?? []) {
       // Others' recordings on this user's pages go with the pages.
       await removePaths(sc, "recordings", await othersRecordings(sc, space.id, user.id));

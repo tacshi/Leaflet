@@ -250,8 +250,9 @@ final class EditorController: NSObject, UITextViewDelegate {
         FilePlayback.shared.stop(ids)
         let recordings = gone.filter { $0.type == "recording" }
             .compactMap { $0.data["recording_id"]?.string }
-        if let playing = Recorder.shared.playing, recordings.contains(playing) {
-            Recorder.shared.stopPlaying()
+        let recorder = Recorder.shared
+        if let playing = recorder.playing ?? recorder.loading, recordings.contains(playing) {
+            recorder.stopPlaying()
         }
     }
 

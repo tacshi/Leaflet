@@ -372,6 +372,7 @@ var functionsHashes = map[int]string{
 	12: "c05888e1f0892591a0d2da9abcdbe302dc1f3d16a32c839977555584ea701547",
 	13: "672313c3b28cb0455492789efb2f01d42cf95faefa0b3e85d5015aed408fbc3c",
 	14: "8cfbf2333baeb23ac21c97868eb7a54f5df666eafe17f636f5e8f9b82e957483",
+	15: "5351ceba3a2ac232e9347bb15a5d18f4f7d738d66bcf9b4d3a68ac7cb8c1e550",
 }
 
 // The functions a project gets import their packages at exact versions:

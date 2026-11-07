@@ -197,8 +197,8 @@ func fileBlock(id, notes string) *doc.Node {
 func TestSetFileNotes(t *testing.T) {
 	f := newPagesFixture(t)
 	closed := f.page(t, "Closed", "", fileBlock("a", ""))
-	if err := f.SetFileNotes(closed.ID, "a", "0:05 Hello", ""); err != nil {
-		t.Fatal(err)
+	if written, cut, err := f.SetFileNotes(closed.ID, "a", "f1", "0:05 Hello", ""); written != NotesSaved || cut || err != nil {
+		t.Fatal(written, cut, err)
 	}
 	if got := f.st.Content(closed.ID).Find("a").Str("notes"); got != "0:05 Hello" {
 		t.Errorf("closed page: %q", got)
@@ -207,11 +207,14 @@ func TestSetFileNotes(t *testing.T) {
 	ed := f.openPage(open.ID)
 	var steps []string
 	f.Step = func(page, block string) { steps = append(steps, page+"/"+block) }
-	if err := f.SetFileNotes(open.ID, "b", "0:05 Hello", "old"); err != nil {
-		t.Fatal(err)
+	if written, cut, err := f.SetFileNotes(open.ID, "b", "f1", "0:05 Hello", "old"); written != NotesSaved || cut || err != nil {
+		t.Fatal(written, cut, err)
 	}
 	if got := ed.c.Find("b").Str("notes"); got != "0:05 Hello" || ed.replaced != 0 {
 		t.Errorf("open page: %q, %d outside changes", got, ed.replaced)
+	}
+	if got := f.st.Content(open.ID).Find("b").Str("notes"); got != "0:05 Hello" {
+		t.Errorf("open page stored %q", got)
 	}
 	if len(steps) != 1 || steps[0] != open.ID+"/b" {
 		t.Errorf("steps %q", steps)
@@ -222,8 +225,8 @@ func TestSetFileNotes(t *testing.T) {
 func TestSetFileNotesKeepsNewWriting(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", fileBlock("a", "written since"))
-	if err := f.SetFileNotes(p.ID, "a", "0:05 Hello", ""); err != nil {
-		t.Fatal(err)
+	if written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", ""); written != NotesSaved || cut || err != nil {
+		t.Fatal(written, cut, err)
 	}
 	if got := f.st.Content(p.ID).Find("a").Str("notes"); got != "written since\n\n0:05 Hello" {
 		t.Errorf("notes %q", got)
@@ -231,18 +234,101 @@ func TestSetFileNotesKeepsNewWriting(t *testing.T) {
 }
 
 // A block gone by the time a transcript is done takes nothing, and says so,
-// open or not.
+// open or not, as does one that holds another file by then.
 func TestSetFileNotesBlockGone(t *testing.T) {
 	f := newPagesFixture(t)
+	p := f.page(t, "Notes", "", block("p1", "one"), fileBlock("a", ""))
+	for _, open := range []bool{false, true} {
+		if open {
+			f.openPage(p.ID)
+		}
+		for _, at := range []struct{ block, file string }{{"gone", "f1"}, {"a", "f2"}} {
+			f.told = nil
+			if written, _, err := f.SetFileNotes(p.ID, at.block, at.file, "0:05 Hello", ""); written != NotesGone || err != nil {
+				t.Errorf("open %v, %v: %v, %v", open, at, written, err)
+			}
+			if len(f.told) != 1 || f.told[0] != locales.RecFileBlockGone() {
+				t.Errorf("open %v, %v: told %q", open, at, f.told)
+			}
+		}
+	}
+	if got := f.content(p.ID).Find("a").Str("notes"); got != "" {
+		t.Errorf("another file's transcript went in: %q", got)
+	}
+}
+
+// fail makes the store fail to save any page's content, as a full disk
+// would. It may run as a transcript is made, off the test's goroutine.
+func (f *pagesFixture) fail(t *testing.T) {
+	t.Helper()
+	for _, q := range []string{
+		`CREATE TRIGGER full_insert BEFORE INSERT ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+		`CREATE TRIGGER full_update BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+	} {
+		if _, err := f.st.DB().Exec(q); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// A transcript that could not be stored is not said to be, open or not.
+func TestSetFileNotesNotSaved(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		f := newPagesFixture(t)
+		p := f.page(t, "Notes", "", fileBlock("a", ""))
+		if open {
+			f.openPage(p.ID)
+		}
+		f.fail(t)
+		if written, _, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", ""); written != NotesFailed || err == nil {
+			t.Errorf("open %v: %v, %v", open, written, err)
+		}
+		if got := f.st.Content(p.ID).Find("a").Str("notes"); got != "" {
+			t.Errorf("open %v: stored %q", open, got)
+		}
+	}
+}
+
+// A transcript after notes written meanwhile is cut to the room they
+// leave, and says so; with no room for any of it, the notes stay as they
+// are, and that is said instead.
+func TestSetFileNotesFitsAfterNewWriting(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		f := newPagesFixture(t)
+		since := strings.Repeat("x", doc.MaxNotes-20)
+		p := f.page(t, "Notes", "", fileBlock("a", since), fileBlock("b", strings.Repeat("x", doc.MaxNotes)))
+		if open {
+			f.openPage(p.ID)
+		}
+		written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello\n0:06 And a line too long to fit", "")
+		got := f.st.Content(p.ID).Find("a").Str("notes")
+		if written != NotesSaved || !cut || err != nil || got != since+"\n\n0:05 Hello" {
+			t.Errorf("open %v: %v, cut %v, %v, %d characters ending %q", open, written, cut, err, len(got), got[len(got)-20:])
+		}
+		written, _, err = f.SetFileNotes(p.ID, "b", "f1", "0:05 Hello", "")
+		if written != NotesFailed || err == nil || err.Error() != locales.RecFileNotesFull() {
+			t.Errorf("open %v: notes full: %v, %v", open, written, err)
+		}
+		if got := f.st.Content(p.ID).Find("b").Str("notes"); len(got) != doc.MaxNotes {
+			t.Errorf("open %v: full notes now %d characters", open, len(got))
+		}
+	}
+}
+
+// An open page whose change could not be saved says so: what goes on from
+// its stored content would go on without the change.
+func TestEditPageOpenNotSaved(t *testing.T) {
+	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", block("p1", "one"))
-	if err := f.SetFileNotes(p.ID, "gone", "0:05 Hello", ""); err != nil {
-		t.Fatal(err)
+	ed := f.openPage(p.ID)
+	f.fail(t)
+	err := f.EditPage(p.ID, func(c *doc.Content) bool {
+		return c.Insert(doc.Position{At: "end"}, block("p2", "two")) == nil
+	})
+	if err == nil || err.Error() != locales.AppErrorNotSaved() {
+		t.Errorf("saved with %v", err)
 	}
-	f.openPage(p.ID)
-	if err := f.SetFileNotes(p.ID, "gone", "0:05 Hello", ""); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.told) != 2 || f.told[0] != locales.RecFileBlockGone() {
-		t.Errorf("told %q", f.told)
+	if ed.c.PlainText() != "one\ntwo" || f.st.Content(p.ID).PlainText() != "one" {
+		t.Errorf("the editor shows %q, stored %q", ed.c.PlainText(), f.st.Content(p.ID).PlainText())
 	}
 }

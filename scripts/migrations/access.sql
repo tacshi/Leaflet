@@ -783,8 +783,57 @@ $$;
 set local role service_role;
 do $$
 begin
-  if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee') is distinct from 'key-2' then
+  if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', 'openai') is distinct from 'key-2' then
     raise exception 'the Functions read another key';
+  end if;
+  -- Read for an address or preset the provider no longer has, the key is
+  -- not given.
+  begin
+    perform public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'https://old.example/v1', 'openai');
+    raise exception 'a key was read for an address its provider left';
+  exception when serialization_failure then
+  end;
+  begin
+    perform public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', 'custom');
+    raise exception 'a key was read for a preset its provider left';
+  exception when serialization_failure then
+  end;
+end;
+$$;
+-- Saved, or cleared, for an address or preset the provider no longer has,
+-- the key stays as it was; for the ones it has, it changes.
+set local role authenticated;
+select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+do $$
+begin
+  begin
+    perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-x', 'https://old.example/v1', 'openai');
+    raise exception 'a key was saved for an address its provider left';
+  exception when serialization_failure then
+  end;
+  begin
+    perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', '', 'custom');
+    raise exception 'a key was cleared for a preset its provider left';
+  exception when serialization_failure then
+  end;
+end;
+$$;
+reset role;
+do $$
+begin
+  if pg_temp.provider_key() is distinct from 'key-2' then
+    raise exception 'a key saved for an address its provider left changed it';
+  end if;
+end;
+$$;
+set local role authenticated;
+select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-2b', '', 'openai');
+reset role;
+do $$
+begin
+  if pg_temp.provider_key() is distinct from 'key-2b' then
+    raise exception 'a key saved for the provider''s own address did not change';
   end if;
 end;
 $$;

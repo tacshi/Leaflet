@@ -211,7 +211,7 @@ export async function endpointFor(
       `The endpoint is not ${baseUrl}, the address of the provider whose key it uses. Choose no key, or that address.`,
     );
   }
-  return { baseUrl, apiKey: await providerSecret(sc, provider.id) };
+  return { baseUrl, apiKey: await providerSecret(sc, provider) };
 }
 
 /** Where a caller's audio goes: their settings, the language asked for, and the key or the address. */
@@ -445,11 +445,14 @@ async function transcribeFile(
     if (!retaken?.length) throw new HttpError(409, "This file is being transcribed already");
   }
   // What the call leaves: Soniox's job for the next, or nothing at all.
+  // Only while the row is still this call's claim: once it is let go,
+  // another call may take it, and one that took a stale claim has it now.
   const release = async () => {
-    const { error } = await sc.from("stt_file_jobs").update({ claimed_at: null }).match(mine);
-    if (error) console.error("stt_file_jobs:", error.message);
-    const gone = await sc.from("stt_file_jobs").delete().match(mine).is("transcription_id", null);
+    const gone = await sc.from("stt_file_jobs").delete().match(mine).eq("claimed_at", now)
+      .is("transcription_id", null);
     if (gone.error) console.error("stt_file_jobs:", gone.error.message);
+    const { error } = await sc.from("stt_file_jobs").update({ claimed_at: null }).match(mine).eq("claimed_at", now);
+    if (error) console.error("stt_file_jobs:", error.message);
   };
   const ext = /\.[A-Za-z0-9]{1,8}$/.exec(stored)?.[0] ?? "";
   const audio: Audio = {

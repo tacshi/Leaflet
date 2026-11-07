@@ -132,6 +132,11 @@ func (p *Page) Close() { p.closed = true }
 // Unreadable reports whether the stored content could not be read.
 func (p *Page) Unreadable() bool { return p.unreadable }
 
+// Stored reports whether the page's edits are stored: none is waiting,
+// and its content here can be read and is still on this device, which
+// Save, reporting nothing left to save, does not tell apart.
+func (p *Page) Stored() bool { return !p.dirty && !p.unreadable && !p.removed }
+
 // Dirty reports whether edits wait to be saved.
 func (p *Page) Dirty() bool { return p.dirty }
 
@@ -165,14 +170,16 @@ func (p *Page) setDirty(dirty bool) {
 // subpage's card comes or goes, a version is restored or a conflict
 // resolved, and saves it at once. It is no undo step: undoing in the page
 // would take back what was not done there. A page the user can't change
-// takes nothing.
-func (p *Page) Change(c *doc.Content) {
+// takes nothing. It reports whether c was stored: when it was not, the
+// editor shows it all the same, still to be saved, and the user was told
+// why.
+func (p *Page) Change(c *doc.Content) bool {
 	if p.readOnly {
-		return
+		return false
 	}
 	p.ed.Replace(c)
 	p.setDirty(true)
-	p.Save()
+	return p.Save()
 }
 
 // Edited marks the content as edited, and saves it shortly after the

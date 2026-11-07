@@ -106,7 +106,7 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 		a.dialogs.openRenameFolder(&ff)
 	}
 	m.Separator()
-	if m.Item(locales.SidebarDeleteFolder()).Chosen() {
+	if m.Item(locales.SidebarDeleteFolder()).Danger().Chosen() {
 		if err := a.st.DeleteFolder(f); err != nil {
 			a.toast(locales.SidebarCouldNotDelete(err.Error()))
 			return
@@ -347,7 +347,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			ui.Icon(c, theme.Icon(icon)).FontSize(15)
 			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine().Tooltip(f.Name)
 			tools(c, func() {
-				button("more", "ellipsis", locales.SidebarFolderActions()).Menu(func(m *ui.Menu) { a.folderMenu(m, f) })
+				button("more", "ellipsis", locales.SidebarFolderActions()).PopoverMenuButton(func(m *ui.Menu) { a.folderMenu(m, f) })
 			})
 		})
 		row.PopoverMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
@@ -370,7 +370,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				if hovered && a.canEdit(p.ID) && button("add", "plus", locales.PageAddSubpage()).Clicked() {
 					a.newPage(p.ID, "")
 				}
-				button("more", "ellipsis", locales.PageActions()).Menu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
+				button("more", "ellipsis", locales.PageActions()).PopoverMenuButton(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 			})
 		})
 		row.PopoverMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
@@ -403,7 +403,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			if m.Item(locales.CommonOpen()).Chosen() {
 				a.openFile(f)
 			}
-			if m.Item(locales.SidebarDeleteFile()).Chosen() {
+			if m.Item(locales.SidebarDeleteFile()).Danger().Chosen() {
 				a.fileToDelete = &f
 			}
 		})
@@ -739,7 +739,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 		}
 	}
 	m.Separator()
-	if m.Item(locales.CommonDelete()).Disabled(!editable).Chosen() {
+	if m.Item(locales.CommonDelete()).Danger().Disabled(!editable).Chosen() {
 		a.deletePage(p.ID)
 	}
 }

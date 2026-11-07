@@ -25,6 +25,13 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	}
 	root.HandleInput(e.HandleInput)
 	e.focused = root.Focused()
+	if e.focused && !e.ReadOnly {
+		// Space types here. Left unclaimed, MyGo pages the page as well, as
+		// a browser does, and revealing the caret brings its line back at
+		// the page's top.
+		root.Shortcut(0, ui.KeySpace)
+		root.Shortcut(ui.Shift, ui.KeySpace)
+	}
 	// The root paints before its blocks, which are where it is, as they
 	// were last drawn, until they draw again.
 	root.Draw(func(_ *ui.Painter, r ui.Rect) { e.root = r })

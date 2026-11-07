@@ -219,9 +219,7 @@ func TestSidebarSplit(t *testing.T) {
 	a.route = Route{Kind: "home"}
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 700)
 	tt.Frame()
-	if err := tt.Click("Divider"); err != nil {
-		t.Fatalf("%v in %v", err, tt.Texts())
-	}
+	clickOn(t, tt, "Divider")
 	tt.Key(0, ui.KeyRight)
 	tt.Frame()
 	if a.sidebarW <= 260 {

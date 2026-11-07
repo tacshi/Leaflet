@@ -123,7 +123,7 @@ func (a *App) chatView(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 			avatar(c, "", 40, true)
 			ui.Text(c, locales.PanelNoProviderTitle()).FontSize(16).FontWeight(650).TextColor(pal.Text)
 			ui.Text(c, locales.PanelNoProviderBody()).
-				FontSize(13).TextColor(pal.TextMuted)
+				FontSize(13).TextColor(pal.TextMuted).Pretty()
 			if primary(c, "connect", "sparkles", locales.PanelOpenProviders()).Clicked() {
 				a.openSettings("providers")
 			}
@@ -477,7 +477,7 @@ func (a *App) commentsPanel(c *ui.Context) {
 					ui.Icon(c, theme.Icon("message-square")).FontSize(26).TextColor(pal.ChartMuted).Margin(0, 0, 4, 0)
 					ui.Text(c, locales.PanelCommentsEmpty()).FontSize(14).FontWeight(600).TextColor(pal.Text)
 					ui.Text(c, locales.PanelCommentsEmptyHint()).
-						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260)
+						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260).Balance()
 				})
 			}
 			for _, t := range ps.threads {
@@ -816,14 +816,17 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	ui.Column(c.Key(cm.ID)).Gap(4).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			avatar(c, cm.AuthorName, 20, cm.AuthorKind == "agent")
-			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text)
+			// Short of room, the name gives way before the time, which keeps
+			// its line.
+			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine().MinWidth(0).Tooltip(cm.AuthorName)
 			if asked := a.askedBy(cm); asked != "" {
-				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted)
+				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().MinWidth(0)
 			}
 			if cm.AuthorKind == "guest" {
-				ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted)
+				ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().MinWidth(0)
 			}
-			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).Grow(1)
+			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().Shrink(0)
+			ui.Spacer(c)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
 			// A guest's comment came through the owner's public link: the
 			// owner may delete it.
@@ -831,13 +834,13 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			if (mine || guest) && cm.DeletedAt.IsZero() {
 				tools(c, func() {
 					more := iconButton(c, "more", "ellipsis", locales.PanelCommentActions()).Size(20, 20).Padding(2)
-					more.Menu(func(m *ui.Menu) {
-						if m.Item(locales.PanelDeleteComment()).Chosen() {
+					more.PopoverMenuButton(func(m *ui.Menu) {
+						if m.Item(locales.PanelDeleteComment()).Danger().Chosen() {
 							if err := a.st.DeleteComment(cm.ID); err != nil {
 								a.toast(locales.PanelCouldNotDelete(err.Error()))
 							}
 						}
-					})
+					}, endMenu)
 				})
 			}
 		})

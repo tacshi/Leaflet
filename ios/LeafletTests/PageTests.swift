@@ -165,7 +165,9 @@ struct PageTests {
         let say = { (t: Date) in Byline.humanTime(t, now: now) }
         #expect(say(Date(timeIntervalSince1970: 0)).isEmpty)
         #expect(say(ago(30)) == L.pageTimeJustNow)
-        #expect(say(ago(5 * 60)) == L.pageTimeMinutesAgo(count: 5))
+        // In the CLDR's words, which the core's tests check in each language.
+        #expect(say(ago(5 * 60)).contains("5"))
+        #expect(say(ago(5 * 60)) != L.pageTimeTodayAt(at: ago(5 * 60)))
         #expect(say(ago(3 * 3600)) == L.pageTimeTodayAt(at: ago(3 * 3600)))
         #expect(say(ago(20 * 3600)) == L.pageTimeYesterdayAt(at: ago(20 * 3600)))
         #expect(say(ago(30 * 86400)) == L.pageTimeDate(date: ago(30 * 86400)))

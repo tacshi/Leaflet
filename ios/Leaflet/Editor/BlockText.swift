@@ -15,13 +15,25 @@ final class BlockText: NSObject {
     var trailing: BlockInfo? {
         didSet {
             guard trailing !== oldValue else { return }
-            index = nil
+            // Kept beside a last paragraph that holds its block, it is no
+            // paragraph's, and the index stands: the first key typed in a
+            // page sets it, and would have the whole page found again.
+            if !lastHoldsItsBlock { index = nil }
             for id in [oldValue?.id, trailing?.id].compactMap(\.self) { touched.insert(id) }
         }
     }
     /// emptied is the block of the page's last paragraph, as an edit
     /// empties it, for the trailing block to keep.
     var emptied: BlockInfo?
+
+    /// lastHoldsItsBlock reports whether the page's last paragraph has text
+    /// that holds its block, so that trailing doesn't count.
+    private var lastHoldsItsBlock: Bool {
+        let ns = storage.string as NSString
+        guard ns.length > 0, ns.character(at: ns.length - 1) != 0x0A else { return false }
+        let last = ns.paragraphRange(for: NSRange(location: ns.length - 1, length: 0))
+        return blockAt(last.location) != nil
+    }
     /// index is the paragraphs' blocks and ranges, as blocks() last found
     /// them, and stale what changed in the text since: where, as the text
     /// now is, and how far the text after it moved. blocks() finds the

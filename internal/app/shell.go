@@ -76,7 +76,7 @@ func (a *App) view(c *ui.Context) {
 		sw := a.sidebarWidth(c)
 		split := ui.Split(c, &sw, func() {
 			bar := ui.Column(c.Key("sidebar")).Fill()
-			if !c.Vibrancy() || pal.Opaque {
+			if opaqueSidebar(c, pal) {
 				bar.Background(pal.Sidebar)
 			}
 			bar.Children(func() { a.sidebar(c) })
@@ -244,7 +244,7 @@ func (a *App) homeView(c *ui.Context) {
 	ui.Column(c).Grow(1).Center().Gap(14).Children(func() {
 		ui.Icon(c, theme.Icon("file-text")).FontSize(36).TextColor(pal.ChartMuted)
 		ui.Text(c, locales.ShellNoPageOpen()).FontSize(18).FontWeight(650).TextColor(pal.Text)
-		ui.Text(c, locales.ShellNoPageHint()).TextColor(pal.TextMuted)
+		ui.Text(c, locales.ShellNoPageHint()).TextColor(pal.TextMuted).Balance()
 		ui.Row(c).Gap(8).Children(func() {
 			if primary(c, "new", "plus", locales.ShellNewPage()).Clicked() {
 				a.newPage("", "")

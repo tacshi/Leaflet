@@ -15,7 +15,7 @@ struct Byline: View {
     @State private var editingTags = false
 
     var body: some View {
-        // The time ("just now", "5 min ago") moves on as the page stays open.
+        // The time ("just now", "5 minutes ago") moves on as the page stays open.
         TimelineView(.everyMinute) { context in
             FlowRow {
                 // The page keeps who created it, not who edited it last.

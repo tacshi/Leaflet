@@ -1,7 +1,10 @@
 package app
 
 import (
+	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
@@ -147,5 +150,54 @@ func TestNarrowestWindow(t *testing.T) {
 	r, ok := tt.Find(locales.CommonClose())
 	if !ok || r.W == 0 || r.X+r.W > windowMinW-16 {
 		t.Errorf("History's close button at %+v, shown %v, in a window %v wide", r, ok, windowMinW)
+	}
+}
+
+// Versions go under their days, by the calendar here.
+func TestHistoryDays(t *testing.T) {
+	at := func(day, hour int) time.Time { return time.Date(2026, 3, day, hour, 0, 0, 0, time.Local) }
+	got := historyDays([]store.HistoryEntry{{CreatedAt: at(10, 23)}, {CreatedAt: at(10, 1)}, {CreatedAt: at(9, 23)}})
+	if want := [][]int{{0, 1}, {2}}; !slices.EqualFunc(got, want, slices.Equal[[]int]) {
+		t.Errorf("days %v, want %v", got, want)
+	}
+}
+
+// A day's heading stays at the top of the list while its versions scroll
+// under it, as the list is cut to the dialog's height.
+func TestHistoryDayStaysInView(t *testing.T) {
+	a := templatesApp(t)
+	para := &doc.Node{ID: "p1", Type: "paragraph"}
+	para.SetDelta(doc.Delta{{Text: "Text"}})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{para})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openHistory(p.ID)
+	a.nameVersion("Kept")
+	day := a.dialogs.history[0]
+	day.CreatedAt = time.Date(2026, 3, 10, 9, 0, 0, 0, time.Local)
+	a.dialogs.history = slices.Repeat([]store.HistoryEntry{day}, 30)
+	for i := range a.dialogs.history {
+		a.dialogs.history[i].ID += strconv.Itoa(i)
+		a.dialogs.history[i].Label = "Kept " + strconv.Itoa(i)
+	}
+	tt := ui.NewTester(func(c *ui.Context) { a.historyDialog(c) }, 1000, 700)
+	tt.Frame()
+	label := locales.Day(day.CreatedAt, time.Now())
+	before, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("no %q in %v", label, tt.Texts())
+	}
+	first, ok := tt.Find("Kept 0")
+	if !ok {
+		t.Fatalf("no version in %v", tt.Texts())
+	}
+	tt.Scroll(first.X+20, first.Y+20, 0, 200)
+	tt.Frame()
+	// Find cuts what it finds to the list, so that a heading scrolled away
+	// would still be at its top, cut to nothing.
+	if after, ok := tt.Find(label); !ok || after.Y != before.Y || after.H != before.H {
+		t.Errorf("heading %v, then %v (shown %v)", before, after, ok)
 	}
 }

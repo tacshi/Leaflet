@@ -55,7 +55,7 @@ func (a *App) pageView(c *ui.Context) {
 				}
 			}
 			more := iconButton(c, "page-more", "ellipsis", locales.PageActions())
-			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
+			more.PopoverMenuButton(func(m *ui.Menu) { a.pageMenu(m, *p, true) }, endMenu)
 			a.panelToggle(c)
 		})
 	})
@@ -425,7 +425,7 @@ func (a *App) emptyActions(c *ui.Context) {
 						if !hovered {
 							more.Opacity(0)
 						}
-						more.Menu(menu)
+						more.PopoverMenuButton(menu, endMenu)
 					})
 				}
 			})

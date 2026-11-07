@@ -1131,6 +1131,10 @@
   "@dialogHistoryEmpty": {
     "description": "Page history: the list of versions when there are none."
   },
+  "dialogHistoryTime": "{at, time, short}",
+  "@dialogHistoryTime": {
+    "description": "Page history: the time a version was kept, under the heading of its day."
+  },
   "dialogHistoryWhen": "{at, date, ::MMMdHm}",
   "@dialogHistoryWhen": {
     "description": "Page history: when a version was kept, its date and time.",
@@ -1688,7 +1692,7 @@
     "placeholders": {
       "when": {
         "type": "String",
-        "example": "5 min ago"
+        "example": "5 minutes ago"
       }
     }
   },
@@ -1709,16 +1713,6 @@
   "pageTimeJustNow": "just now",
   "@pageTimeJustNow": {
     "description": "A relative time: less than a minute ago. Shown in bylines, comments and settings."
-  },
-  "pageTimeMinutesAgo": "{count, plural, one {# min ago} other {# min ago}}",
-  "@pageTimeMinutesAgo": {
-    "description": "A relative time: minutes ago.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "5"
-      }
-    }
   },
   "pageTimeTodayAt": "today at {at, time, short}",
   "@pageTimeTodayAt": {
@@ -4187,11 +4181,11 @@
   },
   "settingsDeviceLastActive": "Last active {when}",
   "@settingsDeviceLastActive": {
-    "description": "Settings › Account › Devices: when a device was last used; when is a relative time such as “5 min ago”.",
+    "description": "Settings › Account › Devices: when a device was last used; when is a relative time such as “5 minutes ago”.",
     "placeholders": {
       "when": {
         "type": "String",
-        "example": "5 min ago"
+        "example": "5 minutes ago"
       }
     }
   },
@@ -5012,11 +5006,11 @@
   },
   "externalLastUsed": "Connected · last used {when}",
   "@externalLastUsed": {
-    "description": "Settings › External agents: an AI app that has used Leaflet; when is a relative time such as “5 min ago”.",
+    "description": "Settings › External agents: an AI app that has used Leaflet; when is a relative time such as “5 minutes ago”.",
     "placeholders": {
       "when": {
         "type": "String",
-        "example": "5 min ago"
+        "example": "5 minutes ago"
       }
     }
   },

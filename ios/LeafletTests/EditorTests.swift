@@ -979,6 +979,46 @@ struct EditorTests {
         #expect(blocks(c).first?.data?["checked"]?.bool == true)
     }
 
+    /// A to-do at the caret offers a date however full its last line is:
+    /// one that leaves no room takes some while it offers one, gives it
+    /// back as the caret leaves, and says nothing new in the page.
+    @Test func aFullLastLineStillOffersADate() async throws {
+        var made = false
+        for words in 14...40 {
+            let text = Array(repeating: "word", count: words).joined(separator: " ")
+            let c = editor([
+                block("t", "todo_list", text, data: ["checked": .bool(false)]),
+                block("p", "paragraph", "After"),
+            ])
+            let (_, done) = try show(c)
+            defer { done() }
+            try await settle(c)
+            let (range, info) = c.text.paragraph(at: 0)
+            let before = blocks(c)
+            c.textView.selectedRange = NSRange(location: 1, length: 0)
+            c.textViewDidChangeSelection(c.textView)
+            try await settle(c)
+            try await settle(c)
+            #expect(c.due.chipRect(info) != nil, "\(words) words")
+            let style =
+                c.text.storage.attribute(
+                    .paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            guard style?.tailIndent != 0 else { continue }
+            made = true
+            #expect(blocks(c) == before)
+            c.textView.selectedRange = NSRange(location: NSMaxRange(range) + 2, length: 0)
+            c.textViewDidChangeSelection(c.textView)
+            try await settle(c)
+            try await settle(c)
+            let back =
+                c.text.storage.attribute(
+                    .paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            #expect(back?.tailIndent == 0)
+            break
+        }
+        #expect(made, "no length left its last line too full for the offer")
+    }
+
     /// The editor's format commands are offered, which UIKit offers only
     /// to a text view that edits its attributes itself.
     @Test func theFormatCommandsAreOffered() throws {

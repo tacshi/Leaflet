@@ -29,6 +29,14 @@ type agentState struct {
 	// DefaultAgent is the agent asked where none is named, as Settings
 	// sets it; nil while none can run.
 	DefaultAgent *agentChoice `json:"default_agent,omitempty"`
+	// Past are the page's earlier conversations, the latest first.
+	Past []pastConversation `json:"past"`
+}
+
+// pastConversation is an earlier conversation to go back to.
+type pastConversation struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 // agentChoice is an agent and the model it runs, as the chat's picker
@@ -112,6 +120,10 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 				Undone: r.Undone, Error: r.Error, Edits: edits, EditPages: pages, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
 				Stoppable: r.Stoppable(), Answer: r.Answer, Activity: r.Activity, Settled: c.settled[pageID] == r.ID,
 			})
+		}
+		out.Past = make([]pastConversation, 0, len(s.Past))
+		for _, p := range s.Past {
+			out.Past = append(out.Past, pastConversation{ID: p.ID, Title: p.Title()})
 		}
 		out.Options = c.options()
 		out.Available = c.core.Hub.Available()
@@ -262,6 +274,13 @@ func (c *Core) RedoRun(pageID, runID string) (err error) {
 func (c *Core) NewConversation(pageID string) {
 	defer catch(nil)
 	c.q.do(func() { c.core.Hub.NewConversation(pageID) })
+}
+
+// OpenConversation goes back to an earlier conversation of a page, keeping
+// the one it had among the earlier ones.
+func (c *Core) OpenConversation(pageID, id string) {
+	defer catch(nil)
+	c.q.do(func() { c.core.Hub.OpenConversation(pageID, id) })
 }
 
 // Comments.

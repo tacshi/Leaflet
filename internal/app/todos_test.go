@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
@@ -40,7 +41,7 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	}
 	reminded := map[string]bool{"late": true}
 	var due []string
-	for _, r := range dueReminders(todos, now, func(t store.PageTodo) bool { return reminded[t.BlockID] }) {
+	for _, r := range core.DueReminders(todos, now, func(t store.PageTodo) bool { return reminded[t.BlockID] }) {
 		due = append(due, r.BlockID)
 	}
 	if fmt.Sprint(due) != "[today]" {
@@ -49,15 +50,15 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	// Before 9:00, today's waits, and one two days late is past being
 	// reminded of: it is among the overdue.
 	early := time.Date(2026, 10, 26, 8, 0, 0, 0, time.Local)
-	if r := dueReminders(todos, early, func(store.PageTodo) bool { return false }); len(r) != 0 {
+	if r := core.DueReminders(todos, early, func(store.PageTodo) bool { return false }); len(r) != 0 {
 		t.Errorf("early reminders %+v", r)
 	}
 	// Yesterday's, from 9:00, is reminded of until 9:00 today.
 	yesterday := []store.PageTodo{todo("yesterday", day(-1))}
-	if r := dueReminders(yesterday, early, func(store.PageTodo) bool { return false }); len(r) != 1 {
+	if r := core.DueReminders(yesterday, early, func(store.PageTodo) bool { return false }); len(r) != 1 {
 		t.Errorf("reminders of yesterday's at 8:00 %+v", r)
 	}
-	if r := dueReminders(yesterday, now, func(store.PageTodo) bool { return false }); len(r) != 0 {
+	if r := core.DueReminders(yesterday, now, func(store.PageTodo) bool { return false }); len(r) != 0 {
 		t.Errorf("reminders of yesterday's at 10:00 %+v", r)
 	}
 }
@@ -77,10 +78,10 @@ func TestTimedTodos(t *testing.T) {
 		t.Errorf("rows %v, want %s", got, want)
 	}
 	none := func(store.PageTodo) bool { return false }
-	if r := dueReminders(todos, at(10, 0), none); len(r) != 1 || r[0].BlockID != "call" {
+	if r := core.DueReminders(todos, at(10, 0), none); len(r) != 1 || r[0].BlockID != "call" {
 		t.Errorf("reminders at 10:00 %+v", r)
 	}
-	if r := dueReminders(todos, at(15, 0), none); len(r) != 2 {
+	if r := core.DueReminders(todos, at(15, 0), none); len(r) != 2 {
 		t.Errorf("reminders at 15:00 %+v", r)
 	}
 }
@@ -257,7 +258,7 @@ func TestReminderClickBeforeTheWindow(t *testing.T) {
 	a.reloadAll()
 	block := a.st.Content(p.ID).Children[0].ID
 	a.notificationClicked("other:" + p.ID)
-	a.notificationClicked(todoNotification + p.ID + "#" + block)
+	a.notificationClicked(core.ReminderID(p.ID, block))
 	if len(a.early) != 1 || a.page != nil && a.page.id == p.ID {
 		t.Fatalf("%d waiting, page open %v", len(a.early), a.page != nil)
 	}
@@ -324,7 +325,7 @@ func TestRemindersOfTheUsersOwnTodos(t *testing.T) {
 	}
 	for _, r := range a.reminders(now) {
 		if r.BlockID == "call" {
-			if err := a.st.SetValue(reminderKey(r), dueValue(r)); err != nil {
+			if err := a.st.SetValue(core.ReminderKey(r.PageID, r.BlockID), core.ReminderValue(r)); err != nil {
 				t.Fatal(err)
 			}
 		}

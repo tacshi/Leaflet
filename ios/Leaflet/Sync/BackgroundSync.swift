@@ -80,6 +80,8 @@ enum BackgroundSync {
             }
             do {
                 try await client.syncNow()
+                // What came from other devices is reminded of here too.
+                await Reminders.schedule(client, asking: false)
                 done.complete(success: true)
             } catch {
                 done.complete(success: false)

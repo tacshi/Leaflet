@@ -51,6 +51,8 @@ extension AppModel {
         await client?.setLocale(L.language)
         shown = L.language
         await reload()
+        // What is scheduled says it in the language it was scheduled in.
+        remind()
     }
 
     /// save keeps the settings given by their JSON names; the others stay

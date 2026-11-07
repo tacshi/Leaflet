@@ -1,5 +1,6 @@
 import LeafletCore
 import SwiftUI
+import UserNotifications
 import os
 
 /// LeafletApp is the iPhone and iPad app: a window of the library and a
@@ -10,6 +11,9 @@ struct LeafletApp: App {
 
     init() {
         Logger.app.info("Leaflet core built with \(MobileVersion(), privacy: .public)")
+        // Before the app finishes launching, for a tap on a reminder that
+        // launches it.
+        UNUserNotificationCenter.current().delegate = ReminderDelegate.shared
     }
 
     var body: some Scene {

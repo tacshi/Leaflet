@@ -57,6 +57,20 @@ struct FolderRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// FileRow is a file of the sidebar, uploaded to a folder, or at the top
+/// level with none.
+struct FileRow: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var folderID: String?
+    var name: String
+    var size: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, size
+        case folderID = "folder_id"
+    }
+}
+
 /// TemplateRow is a template to start a page from: the user's own, or one
 /// that comes with Leaflet, named by its key.
 struct TemplateRow: Codable, Hashable, Identifiable, Sendable {
@@ -167,12 +181,13 @@ struct LibrarySnapshot: Decodable, Sendable {
     let pages: [PageRow]
     let folders: [FolderRow]
     let tags: [TagRow]
+    let files: [FileRow]
     /// tree is the library as the sidebar arranges it, its pages looked up
     /// once as it is read.
     let tree: LibraryTree
 
     enum CodingKeys: String, CodingKey {
-        case pages, folders, tags, top, children, shared
+        case pages, folders, tags, files, top, children, shared
         case spaceID = "space_id"
         case inFolder = "in_folder"
     }
@@ -182,13 +197,14 @@ struct LibrarySnapshot: Decodable, Sendable {
     /// shared with the user whose parent the user has not, each in order.
     init(
         spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow],
-        top: [String] = [], inFolder: [String: [String]] = [:],
+        files: [FileRow] = [], top: [String] = [], inFolder: [String: [String]] = [:],
         children: [String: [String]] = [:], shared: [String] = []
     ) {
         self.spaceID = spaceID
         self.pages = pages
         self.folders = folders
         self.tags = tags
+        self.files = files
         tree = LibraryTree(
             pages: pages, tags: tags, top: top, inFolder: inFolder, children: children,
             shared: shared)
@@ -201,6 +217,7 @@ struct LibrarySnapshot: Decodable, Sendable {
             pages: try c.decode([PageRow].self, forKey: .pages),
             folders: try c.decode([FolderRow].self, forKey: .folders),
             tags: try c.decode([TagRow].self, forKey: .tags),
+            files: try c.decode([FileRow].self, forKey: .files),
             top: try c.decode([String].self, forKey: .top),
             inFolder: try c.decode([String: [String]].self, forKey: .inFolder),
             children: try c.decode([String: [String]].self, forKey: .children),

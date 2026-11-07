@@ -16,8 +16,12 @@ Go core as the desktop app.
   block.
 - New pages and subpages, from the template a folder or a page names for
   them; moving, duplicating, renaming and deleting pages, with Undo; saving
-  one as a template; page history with named versions; export to Markdown;
-  and keeping a page on the device.
+  one as a template; page history with named versions and what changed
+  since each; export to Markdown; and keeping a page on the device.
+- Pages dragged into another order or into a folder, and files in folders,
+  uploaded, shown and deleted from the sidebar.
+- Reminders of to-dos due, at their time or at 9:00, as Time Sensitive
+  notifications that open the to-do.
 - On iPad, more than one window, a page opening in a window of its own, and
   the desktop's keyboard shortcuts in the menu bar.
 
@@ -38,7 +42,8 @@ Go core as the desktop app.
 ### Agents and comments
 
 - The Agent panel: the chat, each run's edits as they stream into the page,
-  with Stop, Undo and Redo, and the agent and model it asks.
+  with Stop, Undo and Redo, the agent and model it asks, and a page's past
+  conversations.
 - Asking an agent from the editor, about the text chosen or at the caret,
   and to summarize a YouTube or Vimeo video in its notes, from what is
   said in it.
@@ -52,8 +57,9 @@ Go core as the desktop app.
   locked, transcribed on the device or through Soniox or an
   OpenAI-compatible endpoint, showing the last two lines of the words as
   they come. A long transcript folds to its first lines, and a block can
-  be renamed or deleted from its menu, and its notice of what went wrong
-  closed.
+  be renamed, summarized by an agent or deleted from its menu, and its
+  notice of what went wrong closed. How long audio stays on the device once
+  uploaded is a choice in Settings.
 
 ### Sync and settings
 

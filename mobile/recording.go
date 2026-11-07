@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"slices"
@@ -556,6 +557,9 @@ type speechSettings struct {
 	// Status says where transcription runs, or that it is not set up.
 	Status    string           `json:"status"`
 	Languages []speechLanguage `json:"languages"`
+	// KeepAudio is how long recordings' audio stays on this device once
+	// uploaded: until_uploaded, 30_days or always.
+	KeepAudio string `json:"keep_audio"`
 }
 
 // SpeechSettings returns the speech settings as speechSettings.
@@ -563,7 +567,8 @@ func (c *Core) SpeechSettings() (_ string, err error) {
 	defer catch(&err)
 	var out speechSettings
 	c.q.do(func() {
-		out.Stt = c.core.Store.Settings().Stt
+		s := c.core.Store.Settings()
+		out.Stt, out.KeepAudio = s.Stt, s.KeepAudioOnDevice
 		out.SignedIn = c.core.Remote.SignedIn()
 		out.OnDevice = c.core.Rec.Engine != nil
 	})
@@ -575,6 +580,21 @@ func (c *Core) SpeechSettings() (_ string, err error) {
 		out.Languages = append(out.Languages, speechLanguage{Code: code, Name: recording.LanguageName(code)})
 	}
 	return encode(out)
+}
+
+// SetKeepAudio keeps how long recordings' audio stays on this device, as
+// speechSettings.KeepAudio has it.
+func (c *Core) SetKeepAudio(keep string) (err error) {
+	defer catch(&err)
+	if !slices.Contains([]string{"until_uploaded", "30_days", "always"}, keep) {
+		return fmt.Errorf("mobile: no way to keep audio %q", keep)
+	}
+	c.q.do(func() {
+		s := c.core.Store.Settings()
+		s.KeepAudioOnDevice = keep
+		err = c.core.Store.SaveSettings(s)
+	})
+	return err
 }
 
 // SaveSpeechSettings keeps the speech settings, a store.SttSettings as

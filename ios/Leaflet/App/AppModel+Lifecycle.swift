@@ -13,7 +13,10 @@ extension AppModel {
         front.add(scene)
         guard away else { return }
         turn { client in await client.start() }
-        Task { await reload() }
+        Task {
+            await reload()
+            remind()
+        }
     }
 
     /// background saves what is being typed and sends what waits to go up,
@@ -48,6 +51,9 @@ extension AppModel {
             for scene in self?.scenes.allObjects ?? [] { await scene.flush() }
             _ = await client.saveOpenPages()
             try? await client.syncNow()
+            // What was typed last, and what came from elsewhere, stay
+            // reminded of while the app is away.
+            await Reminders.schedule(client, asking: false)
             self?.turn { [weak self] client in
                 if self?.stays(away: leaving) ?? true { await client.stop() }
                 task.end()

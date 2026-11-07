@@ -88,6 +88,7 @@ final class AppModel {
     /// one does, each autosave of a page being typed in a change, and once
     /// as one comes to show them.
     @ObservationIgnored private var todosShown = Set<UUID>()
+    @ObservationIgnored private var remindTask: Task<Void, Never>?
     /// saving is the last of the settings on their way to the core, which
     /// go one after another, as they were changed.
     @ObservationIgnored var saving: Task<Void, Never>?
@@ -195,8 +196,11 @@ final class AppModel {
     private func handle(_ event: CoreEvent) {
         switch event {
         case .changed(let table, let pageID):
+            if ["pages", "page_contents", "*"].contains(table) { remind(after: .seconds(2)) }
             if ["pages", "folders", "spaces", "session"].contains(table) {
                 Task { await reload() }
+            } else if table == "files" {
+                Task { await reload(.library) }
             } else if table == "page_contents" {
                 // A page's content saved, as each autosave does: its time,
                 // to-dos and what waits to go up change, and a template's
@@ -234,6 +238,20 @@ final class AppModel {
             break
         }
         for fn in pageListeners.values { fn(event) }
+    }
+
+    // MARK: Reminders
+
+    /// remind schedules the to-dos' reminders again, after a moment for
+    /// the changes that come together, or as a save follows a save. Only
+    /// with a window in front may it ask for permission.
+    func remind(after delay: Duration = .zero) {
+        remindTask?.cancel()
+        remindTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, let client = await opened() else { return }
+            await Reminders.schedule(client, asking: !front.allObjects.isEmpty)
+        }
     }
 
     // MARK: Library

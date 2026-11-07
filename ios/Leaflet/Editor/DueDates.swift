@@ -15,6 +15,10 @@ final class DueDates {
     /// caret is in, or whose date is open.
     private(set) var dateOffer: String?
     private var dueOpen: String?
+    /// roomy is the to-do that took room for its offer, its text too long
+    /// to leave any, until the offer moves on.
+    private var roomy: String?
+    private var fitting: Task<Void, Never>?
     /// dueAt is the refresh of the due dates at the next time a to-do is
     /// due at, which turns it overdue.
     private var dueAt: Task<Void, Never>?
@@ -30,6 +34,13 @@ final class DueDates {
         {
             let (_, info) = text.paragraph(at: textView.selectedRange.location)
             if info.type == "todo_list" { offer = info.id }
+        }
+        // After what laid the text out as it is now, and after the edit
+        // that may have brought us here, which no attribute may change.
+        fitting?.cancel()
+        fitting = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            self?.fitOffer()
         }
         guard offer != dateOffer else { return }
         let old = dateOffer
@@ -53,6 +64,48 @@ final class DueDates {
         }
         // Laid out again in view, for them to draw again.
         textView.replaceBlocks()
+    }
+
+    /// fitOffer has the to-do at the caret that offers a date make room for
+    /// the offer, where its last line leaves none, and the one that did give
+    /// it back as the offer moves on. Only that to-do's lines change, for
+    /// as long as it offers one: room left in every to-do would narrow them
+    /// all, for a chip that most of them never show.
+    private func fitOffer() {
+        if let id = roomy, id != dateOffer {
+            roomy = nil
+            if let p = text.blocks().first(where: { $0.info.id == id }) {
+                setTail(p.range, -DueChip.room(p.info))
+            }
+        }
+        guard let id = dateOffer, textView.selectedRange.length == 0 else { return }
+        let (range, info) = text.paragraph(at: textView.selectedRange.location)
+        guard info.id == id, Due(info) == nil, range.length > 0 else { return }
+        if roomy != id {
+            guard let tlm = textView.textLayoutManager,
+                let start = tlm.location(tlm.documentRange.location, offsetBy: range.location),
+                let fragment = tlm.textLayoutFragment(for: start) as? BlockLayoutFragment,
+                fragment.offerOverflows
+            else { return }
+            roomy = id
+        }
+        // Each time: styling the paragraph as it is typed in gives it back
+        // the lines of a to-do with no date.
+        setTail(range, -DueChip.offerRoom)
+    }
+
+    /// setTail has the lines of the paragraph at range end tail from the
+    /// page's edge. It is how the text is laid out, not what it says: the
+    /// page has not changed.
+    private func setTail(_ range: NSRange, _ tail: CGFloat) {
+        let para = (storage.string as NSString).paragraphRange(for: range)
+        guard para.length > 0,
+            let now = storage.attribute(.paragraphStyle, at: para.location, effectiveRange: nil)
+                as? NSParagraphStyle,
+            now.tailIndent != tail, let style = now.mutableCopy() as? NSMutableParagraphStyle
+        else { return }
+        style.tailIndent = tail
+        storage.addAttribute(.paragraphStyle, value: style, range: para)
     }
 
     /// refresh draws the to-dos' due dates again, as the day changes, a

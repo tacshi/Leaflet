@@ -152,6 +152,10 @@ struct RecordingBlock: View {
             ) {
                 recorder.insertTranscript(id, after: block.id, into: editor)
             },
+            // The agent reads the transcript with the block.
+            BlockAction(title: L.recSummarize, symbol: "sparkles", enabled: !empty && canEdit) {
+                editor?.onSummarize?(block, L.recSummarizePrompt(title: title(block, row)))
+            },
             // Not while a transcription runs, which the new one would race.
             BlockAction(
                 title: empty ? L.recTranscribe : L.recTranscribeAgain, symbol: "captions.bubble",

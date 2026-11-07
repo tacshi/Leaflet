@@ -184,6 +184,10 @@ struct HistorySheet: View {
     @State private var chosen: PageVersion.ID?
     @State private var naming = false
     @State private var name = ""
+    /// current is the page's text now, and comparing says a version shows
+    /// what changed since it, rather than itself.
+    @State private var current = ""
+    @State private var comparing = false
     /// sizeClass is the sheet's: compact, as on iPhone, it shows the list
     /// alone, which a version chosen would push away.
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -222,13 +226,29 @@ struct HistorySheet: View {
             }
         } detail: {
             if let v = versions?.first(where: { $0.id == chosen }) {
-                ScrollView {
-                    MarkdownPreview(markdown: v.markdown, size: app.textSize)
-                        .foregroundStyle(palette.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(24)
+                Group {
+                    if comparing {
+                        VersionChanges(rows: VersionDiff.rows(from: v.markdown, to: current))
+                    } else {
+                        ScrollView {
+                            MarkdownPreview(markdown: v.markdown, size: app.textSize)
+                                .foregroundStyle(palette.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(24)
+                        }
+                    }
                 }
-                .navigationTitle(L.dialogHistoryThisVersion)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    Picker(L.dialogHistoryThisVersion, selection: $comparing) {
+                        Text(L.dialogHistoryThisVersion).tag(false)
+                        Text(L.dialogHistoryChangesSince).tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(.bar)
+                }
+                .navigationTitle(v.when)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     if page.canEdit {
@@ -252,6 +272,7 @@ struct HistorySheet: View {
 
     private func load() async {
         versions = (try? await app.client?.history(page.id)) ?? []
+        current = (try? await app.client?.currentMarkdown(page.id)) ?? ""
         chooseFirst()
     }
 

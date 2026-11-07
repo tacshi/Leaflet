@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -198,5 +199,164 @@ func TestAppendBlockGoesAtThePagesEnd(t *testing.T) {
 	}
 	if err := c.AppendBlock(page.ID, `not a block`); err == nil {
 		t.Error("a block that can't be read was taken")
+	}
+}
+
+// The page as it is now is there to compare a version with, with what is
+// being typed.
+func TestCurrentMarkdown(t *testing.T) {
+	c, _ := open(t)
+	page := create(t, c, `{"title":"Plan"}`)
+	if err := c.AppendBlock(page.ID, `{"id":"p","type":"paragraph","data":{"delta":[{"insert":"Hello"}]}}`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.CurrentMarkdown(page.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Hello") {
+		t.Errorf("markdown %q", got)
+	}
+}
+
+// The sidebar has a folder's files, and the top level those of a folder
+// gone; the files pages hold are the pages'.
+func TestFolderFiles(t *testing.T) {
+	c, _ := open(t)
+	raw, err := c.CreateFolder("Docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var folder struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &folder); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "budget.txt")
+	if err := os.WriteFile(path, []byte("sums"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddFolderFile(folder.ID, path); err != nil {
+		t.Fatal(err)
+	}
+	page := create(t, c, `{"title":"Plan"}`)
+	if _, err := c.AddFile(page.ID, path); err != nil {
+		t.Fatal(err)
+	}
+	lib := func() library {
+		t.Helper()
+		raw, err := c.Library()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out library
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	files := lib().Files
+	if len(files) != 1 || files[0].Name != "budget.txt" || files[0].FolderID != folder.ID || files[0].Size != 4 {
+		t.Fatalf("files %+v", files)
+	}
+	if local, err := c.LocalFile(files[0].ID, 0); err != nil || local == "" {
+		t.Errorf("local file %q, %v", local, err)
+	}
+	if err := c.DeleteFile(files[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if files := lib().Files; len(files) != 0 {
+		t.Errorf("after deleting, files %+v", files)
+	}
+}
+
+// A page goes before another, or first, as well as after one.
+func TestMovePageBefore(t *testing.T) {
+	c, _ := open(t)
+	a := create(t, c, `{"title":"A"}`)
+	b := create(t, c, `{"title":"B"}`)
+	first := func() string {
+		t.Helper()
+		raw, err := c.Library()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lib library
+		if err := json.Unmarshal([]byte(raw), &lib); err != nil {
+			t.Fatal(err)
+		}
+		return lib.Top[0]
+	}
+	for _, id := range []string{a.ID, b.ID} {
+		if err := c.MovePageBefore(id, "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := first(); got != id {
+			t.Errorf("first %s, want %s", got, id)
+		}
+	}
+	if err := c.MovePageBefore(a.ID, "", "", b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := first(); got != a.ID {
+		t.Errorf("before: first %s, want %s", got, a.ID)
+	}
+}
+
+// How long audio stays is a choice of three, kept among the settings.
+func TestKeepAudio(t *testing.T) {
+	c, _ := open(t)
+	if err := c.SetKeepAudio("30_days"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.SpeechSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s speechSettings
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.KeepAudio != "30_days" {
+		t.Errorf("keep audio %q", s.KeepAudio)
+	}
+	if err := c.SetKeepAudio("forever"); err == nil {
+		t.Error("no way to keep audio was kept")
+	}
+}
+
+// A page's earlier conversations are there to go back to, and the one left
+// joins them.
+func TestPastConversations(t *testing.T) {
+	c, _ := open(t)
+	page := create(t, c, `{"title":"Plan"}`)
+	state := func() agentState {
+		t.Helper()
+		raw, err := c.AgentState(page.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out agentState
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if s := state(); s.Past == nil || len(s.Past) != 0 {
+		t.Fatalf("past %v", s.Past)
+	}
+	c.q.do(func() {
+		s := c.core.Hub.Session(page.ID)
+		s.Messages = []*agents.Message{{Mine: true, Text: "First question"}}
+	})
+	c.NewConversation(page.ID)
+	s := state()
+	if len(s.Past) != 1 || s.Past[0].Title != "First question" || len(s.Messages) != 0 {
+		t.Fatalf("state %+v", s)
+	}
+	c.OpenConversation(page.ID, s.Past[0].ID)
+	if s := state(); len(s.Past) != 0 || len(s.Messages) != 1 {
+		t.Errorf("gone back: %+v", s)
 	}
 }

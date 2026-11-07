@@ -58,11 +58,14 @@ targets:
     # Signing in with Supabase: the web session takes the Worker's
     # https redirect as its callback, which needs this domain's
     # webcredentials (worker/: /.well-known/apple-app-site-association).
+    # A to-do's reminder is Time Sensitive, to get through a Focus; without
+    # this entitlement iOS shows it as an ordinary notification.
     entitlements:
       path: Config/Leaflet.entitlements
       properties:
         com.apple.developer.associated-domains:
           - webcredentials:leaflet-auth.capyvibe.app
+        com.apple.developer.usernotifications.time-sensitive: true
     dependencies:
       # The Go core, built by make ios-core. gomobile makes a static
       # framework, so it is linked and not embedded.

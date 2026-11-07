@@ -85,6 +85,24 @@ extension CoreClient {
         }
     }
 
+    /// currentMarkdown is a page's text now, to compare its versions with.
+    nonisolated(nonsending) func currentMarkdown(_ pageID: String) async throws -> String {
+        try await call(waiting: true) { core in
+            try Self.answer { e in core.currentMarkdown(pageID, error: e) }
+        }
+    }
+
+    /// addFolderFile keeps a file in a folder, or at the top level, as the
+    /// sidebar's Upload does.
+    nonisolated(nonsending) func addFolderFile(_ folderID: String, path: String) async throws {
+        try await call(waiting: true) { try $0.addFolderFile(folderID, path: path) }
+    }
+
+    /// deleteFile deletes a file of the sidebar, from every device.
+    nonisolated(nonsending) func deleteFile(_ id: String) async throws {
+        try await call { try $0.deleteFile(id) }
+    }
+
     nonisolated(nonsending) func nameVersion(_ pageID: String, name: String) async throws {
         try await call { try $0.nameVersion(pageID, name: name) }
     }

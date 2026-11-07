@@ -30,6 +30,9 @@ struct LibraryTests {
             {"space_id":"me","pages":[\(row("b")),\(row("a")),\(row("a1", parent: "a")),\(row("f1")),\(row("s"))],
             "folders":[{"id":"f","name":"Work","sort_key":"a"}],
             "tags":[{"tag":"home","count":2,"pages":["b","a"]}],
+            "files":[{"id":"in","folder_id":"f","name":"a.pdf","size":1},
+            {"id":"left","folder_id":"deleted","name":"b.pdf","size":2},
+            {"id":"top","name":"c.pdf","size":3}],
             "top":["a","b","gone"],"in_folder":{"f":["f1"]},"children":{"a":["a1"]},"shared":["s"]}
             """
         let lib = try JSONDecoder().decode(LibrarySnapshot.self, from: Data(json.utf8))
@@ -41,6 +44,8 @@ struct LibraryTests {
         #expect(lib.pages(tagged: "work").isEmpty)
         #expect(lib.page("a1")?.parentID == "a")
         #expect(lib.page("nope") == nil)
+        #expect(lib.files(in: lib.folders[0]).map(\.id) == ["in"])
+        #expect(lib.topFiles.map(\.id) == ["left", "top"])
     }
 
     /// A page whose parents go round in a loop, as two devices' moves can

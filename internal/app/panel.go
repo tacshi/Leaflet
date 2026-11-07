@@ -816,14 +816,17 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	ui.Column(c.Key(cm.ID)).Gap(4).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			avatar(c, cm.AuthorName, 20, cm.AuthorKind == "agent")
-			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text)
+			// Short of room, the name gives way before the time, which keeps
+			// its line.
+			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine().MinWidth(0).Tooltip(cm.AuthorName)
 			if asked := a.askedBy(cm); asked != "" {
-				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted)
+				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().MinWidth(0)
 			}
 			if cm.AuthorKind == "guest" {
-				ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted)
+				ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().MinWidth(0)
 			}
-			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).Grow(1)
+			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().Shrink(0)
+			ui.Spacer(c)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
 			// A guest's comment came through the owner's public link: the
 			// owner may delete it.

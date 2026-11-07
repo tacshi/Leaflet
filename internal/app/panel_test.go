@@ -93,6 +93,34 @@ func TestAgentCommentSaysWhoAsked(t *testing.T) {
 	}
 }
 
+// In the panel at its narrowest a comment's time keeps its line and all
+// its words: a long name and "via public link" give way.
+func TestCommentTimeKeepsItsLine(t *testing.T) {
+	a := templatesApp(t)
+	cm := store.Comment{ID: "c", AuthorKind: "guest", AuthorName: "Alexandra Montgomery", DeletedAt: time.Now(), CreatedAt: time.Now().Add(-45 * time.Minute)}
+	when := humanTime(cm.CreatedAt)
+	alone := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Children(func() { ui.Text(c, when).FontSize(11.5) })
+	}, 400, 100)
+	alone.Frame()
+	want, ok := alone.Find(when)
+	if !ok {
+		t.Fatalf("no %q in %v", when, alone.Texts())
+	}
+	narrowest := panelMin - 2*(12+12) // the panel's and the card's padding
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(float32(narrowest)).Children(func() { a.commentRow(c, cm) })
+	}, 400, 300)
+	tt.Frame()
+	got, ok := tt.Find(when)
+	if !ok {
+		t.Fatalf("no %q in %v", when, tt.Texts())
+	}
+	if got.H != want.H || got.W < want.W {
+		t.Errorf("time %+v, on its own %+v", got, want)
+	}
+}
+
 // A run on this device stops from the chat's Stop, which shows in place
 // of Send while it works; it ends as a run that made no change.
 func TestStopAnAgentRun(t *testing.T) {

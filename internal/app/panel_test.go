@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/internal/theme"
 	"leaflet/locales"
 )
 
@@ -723,5 +725,54 @@ func TestUndoOfASubpageRunOnTheOpenPage(t *testing.T) {
 	a.redoRun(p.ID, run)
 	if got, _ := a.st.Page(sub.ID); run.Undone || cards() != 1 || !got.DeletedAt.IsZero() {
 		t.Errorf("after Redo: undone %v, %d cards, subpage deleted %v", run.Undone, cards(), !got.DeletedAt.IsZero())
+	}
+}
+
+// A page's callouts are alerts in its Markdown: they keep their colors in
+// page history, agents' replies and comments, in either appearance.
+func TestAlertsTakeTheColorsOfCallouts(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		var o markdown.Options
+		var pal *theme.Palette
+		tt := ui.NewTesterWith(func(c *ui.Context) {
+			pal = theme.Of(c)
+			markdownView(c, "> [!NOTE]\n> a\n\n> [!TIP]\n> b\n\n> [!IMPORTANT]\n> c\n\n> [!WARNING]\n> d\n\n> [!CAUTION]\n> e\n", &o)
+		}, 600, 600, ui.TesterOptions{Dark: dark})
+		tt.Frame()
+		for _, title := range []string{"Note", "Tip", "Important", "Warning", "Caution"} {
+			if !tt.HasText(title) {
+				t.Errorf("dark %v: no %s alert in %q", dark, title, tt.Texts())
+			}
+		}
+		want := [5]ui.Color{pal.AccentText, pal.OkText, pal.AccentText, pal.WarnText, pal.DangerText}
+		if o.Theme.Alerts != want {
+			t.Errorf("dark %v: alerts %v, want %v", dark, o.Theme.Alerts, want)
+		}
+	}
+}
+
+// alertTones keeps to what doc.AlertTone reads an alert as.
+func TestAlertTonesAreTheCalloutsOfAlerts(t *testing.T) {
+	for i, alert := range []string{"NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"} {
+		if tone, ok := doc.AlertTone("> [!" + alert + "]"); !ok || tone != alertTones[i] {
+			t.Errorf("%s reads as %q, alertTones has %q", alert, tone, alertTones[i])
+		}
+	}
+}
+
+// Showing a comment keeps its mentions' mark beside the alerts' colors.
+func TestCommentKeepsItsMentionsMark(t *testing.T) {
+	a := workspaceApp(t)
+	var pal *theme.Palette
+	tt := ui.NewTester(func(c *ui.Context) {
+		pal = theme.Of(c)
+		a.commentText(c, "Thanks @agent, see #123")
+	}, 600, 200)
+	tt.Frame()
+	if a.commentMD.Theme.Mark != pal.AccentSoft || a.commentMD.Theme.Alerts[3] != pal.WarnText {
+		t.Errorf("comment theme mark %v, warning %v", a.commentMD.Theme.Mark, a.commentMD.Theme.Alerts[3])
+	}
+	if got := strings.Join(tt.Texts(), ""); !strings.Contains(got, "Thanks @agent, see #123") {
+		t.Errorf("comment reads %q", got)
 	}
 }

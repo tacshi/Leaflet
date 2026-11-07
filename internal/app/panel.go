@@ -11,6 +11,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
+	"leaflet/internal/editor"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -335,14 +336,14 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 		body.Children(func() {
 			switch {
 			case m.Streamed:
-				markdown.View(c, m.Text, &a.md).FontSize(13.5)
+				markdownView(c, m.Text, &a.md).FontSize(13.5)
 				ui.Spinner(c).Size(11, 11)
 			case m.Pending:
 				shimmer(c, m.Text, 13)
 			case m.Error:
 				ui.Text(c, m.Text).FontSize(13).TextColor(pal.DangerText).Selectable()
 			default:
-				markdown.View(c, m.Text, &a.md).FontSize(13.5)
+				markdownView(c, m.Text, &a.md).FontSize(13.5)
 			}
 			run := sess.Run(m.RunID)
 			if run == nil || m.Pending || len(run.Edits) == 0 {
@@ -852,6 +853,24 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	})
 }
 
+// alertTones are the tones of the callouts GitHub's alerts stand for, in
+// the order of markdown.Theme's Alerts: Note, Tip, Important, Warning and
+// Caution, as doc.AlertTone reads them.
+var alertTones = [5]string{"info", "tip", "info", "warning", "danger"}
+
+// markdownView is markdown.View with alerts in the colors of callouts:
+// a page's callouts are alerts in its Markdown, as page history shows it.
+func markdownView(c *ui.Context, md string, o *markdown.Options) ui.Element {
+	if o.Theme == nil {
+		o.Theme = &markdown.Theme{}
+	}
+	pal := theme.Of(c)
+	for i, tone := range alertTones {
+		_, _, o.Theme.Alerts[i], _ = editor.CalloutLook(tone, pal)
+	}
+	return markdown.View(c, md, o)
+}
+
 // commentText shows a comment's Markdown as the agents' replies show, its
 // mentions of agents marked as the editor marks mentions.
 func (a *App) commentText(c *ui.Context, body string) ui.Element {
@@ -865,7 +884,7 @@ func (a *App) commentText(c *ui.Context, body string) ui.Element {
 	}
 	// Marked as bold in the accent, as the editor marks mentions.
 	md := core.MarkMentions(body, names, func(m string) string { return "<mark><b>" + m + "</b></mark>" })
-	return markdown.View(c, md, &a.commentMD)
+	return markdownView(c, md, &a.commentMD)
 }
 
 // commentBody is a comment's text, or says it was deleted: a thread whose

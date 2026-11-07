@@ -103,9 +103,17 @@ struct AgentState: Codable, Sendable {
     /// defaultAgent is the agent asked where none is named, as Settings
     /// sets it.
     var defaultAgent: Choice?
+    /// past are the page's earlier conversations, the latest first.
+    var past: [Past] = []
+
+    /// Past is an earlier conversation to go back to.
+    struct Past: Codable, Hashable, Identifiable, Sendable {
+        var id: String
+        var title: String
+    }
 
     enum CodingKeys: String, CodingKey {
-        case messages, runs, running, options, available, current
+        case messages, runs, running, options, available, current, past
         case defaultAgent = "default_agent"
     }
 
@@ -303,6 +311,11 @@ extension CoreClient {
         async
     {
         try? await call { $0.selectAgent(pageID, providerID: providerID, model: model) }
+    }
+
+    /// openConversation goes back to an earlier conversation of a page.
+    nonisolated(nonsending) func openConversation(_ pageID: String, id: String) async {
+        try? await call { $0.openConversation(pageID, id_: id) }
     }
 
     nonisolated(nonsending) func newConversation(_ pageID: String) async {

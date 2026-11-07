@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// SidebarTab is the sidebar's view: the page tree, the tags, or the
 /// to-dos of every page.
@@ -219,7 +220,8 @@ struct SidebarView: View {
             ForEach(lib.topPages) { page in
                 PageTree(page: page, actions: actions)
             }
-            if lib.topPages.isEmpty && lib.folders.isEmpty {
+            ForEach(lib.topFiles) { FileRowView(file: $0) }
+            if lib.topPages.isEmpty && lib.folders.isEmpty && lib.topFiles.isEmpty {
                 Text(L.sidebarNoPages).foregroundStyle(.secondary)
             }
         }
@@ -547,7 +549,10 @@ struct PageTree: View {
         let children = app.library.children(of: page)
         PageLink(
             page: page, actions: actions, depth: depth,
-            expanded: children.isEmpty ? nil : $expanded)
+            expanded: children.isEmpty ? nil : $expanded
+        )
+        // Pages are in order here: a tag's are by title.
+        .modifier(PageDrops(page: page))
         if expanded {
             ForEach(children) { PageTree(page: $0, actions: actions, depth: depth + 1) }
         }
@@ -629,10 +634,12 @@ struct FolderRowView: View {
     let actions: RowActions
     @Environment(AppModel.self) private var app
     @State private var expanded = true
+    @State private var uploading = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             ForEach(app.library.pages(in: folder)) { PageTree(page: $0, actions: actions) }
+            ForEach(app.library.files(in: folder)) { FileRowView(file: $0) }
         } label: {
             Label(folder.name, systemImage: "folder")
                 // A tap opens or closes the folder, which is no page to
@@ -649,12 +656,31 @@ struct FolderRowView: View {
                     ) {
                         await app.setDefaultTemplate($0, folder: folder)
                     }
+                    Button(L.sidebarUploadFile, systemImage: "square.and.arrow.up") {
+                        uploading = true
+                    }
                     Button(L.sidebarRenameEllipsis, systemImage: "pencil") {
                         actions.renameFolder(folder)
                     }
                     Divider()
                     Button(L.sidebarDeleteFolder, systemImage: "trash", role: .destructive) {
                         Task { await app.deleteFolder(folder) }
+                    }
+                }
+                // A page dropped on a folder goes last in it.
+                .dropDestination(for: String.self) { ids, _ in
+                    guard let id = ids.first, let page = app.library.page(id), page.canEdit,
+                        !page.template, app.library.own(page)
+                    else { return false }
+                    Task { await app.move(page, parentID: "", folderID: folder.id) }
+                    return true
+                }
+                .fileImporter(
+                    isPresented: $uploading, allowedContentTypes: [.item],
+                    allowsMultipleSelection: true
+                ) { result in
+                    if case .success(let urls) = result {
+                        Task { await app.upload(urls, folderID: folder.id) }
                     }
                 }
         }

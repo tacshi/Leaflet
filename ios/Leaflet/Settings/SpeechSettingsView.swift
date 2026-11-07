@@ -39,6 +39,8 @@ struct SpeechSettingsView: View {
     @Environment(\.palette) private var palette
     @State private var loaded: SpeechSettings?
     @State private var stt: SttSettings?
+    /// keepAudio is the choice made here, over the one read.
+    @State private var keepAudio: String?
     @State private var endpointKey = ""
     /// savedKey is the endpoint's key as kept, and keyFocused says its field
     /// has the keyboard: the key is kept as the field lets it go, not as
@@ -277,6 +279,19 @@ struct SpeechSettingsView: View {
                 if let heard = heard(state, live: recorder.liveText) {
                     Text(heard).font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            Picker(
+                L.settingsKeepAudio,
+                selection: Binding(
+                    get: { keepAudio ?? s.keepAudio },
+                    set: { keep in
+                        keepAudio = keep
+                        Task { try? await app.client?.setKeepAudio(keep) }
+                    })
+            ) {
+                Text(L.settingsKeepAudioUntilUploaded).tag("until_uploaded")
+                Text(L.settingsKeepAudio30Days).tag("30_days")
+                Text(L.settingsKeepAudioAlways).tag("always")
             }
         }
     }

@@ -54,6 +54,14 @@ extension LibrarySnapshot {
 
     func page(_ id: String) -> PageRow? { tree.byID[id] }
 
+    func files(in folder: FolderRow) -> [FileRow] { files.filter { $0.folderID == folder.id } }
+
+    /// topFiles are the files of no folder, or of one deleted.
+    var topFiles: [FileRow] {
+        let held = Set(folders.map(\.id))
+        return files.filter { !held.contains($0.folderID ?? "") }
+    }
+
     /// path is the page's ancestors, from the top, for its breadcrumbs.
     func path(to page: PageRow) -> [PageRow] {
         var out: [PageRow] = []

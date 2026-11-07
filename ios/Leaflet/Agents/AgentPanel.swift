@@ -151,6 +151,19 @@ struct AgentPanel<Chat: AgentChat>: View {
                 Button(L.panelNewConversation, systemImage: "square.and.pencil") {
                     Task { await app.client?.newConversation(model.id) }
                 }
+                if !state.past.isEmpty {
+                    Menu(L.panelPastConversations, systemImage: "clock") {
+                        ForEach(state.past) { past in
+                            Button(past.title.isEmpty ? L.commonUntitled : past.title) {
+                                Task {
+                                    await app.client?.openConversation(model.id, id: past.id)
+                                    await model.refreshAgents()
+                                }
+                            }
+                        }
+                    }
+                    .disabled(state.running)
+                }
                 Button(L.panelManageProviders) { openProviders() }
             } label: {
                 Image(systemName: "ellipsis.circle").imageScale(.large)

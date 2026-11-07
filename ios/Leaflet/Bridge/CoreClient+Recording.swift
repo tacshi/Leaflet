@@ -139,6 +139,9 @@ struct SpeechSettings: Codable, Sendable {
     /// status says where transcription runs, or that it is not set up.
     var status: String
     var languages: [Language]
+    /// keepAudio is how long recordings' audio stays here once uploaded:
+    /// until_uploaded, 30_days or always.
+    var keepAudio: String
 
     struct Language: Codable, Hashable, Sendable {
         var code: String
@@ -147,6 +150,7 @@ struct SpeechSettings: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case stt, status, languages
+        case keepAudio = "keep_audio"
         case endpointKey = "endpoint_key"
         case sonioxSaved = "soniox_saved"
         case signedIn = "signed_in"
@@ -233,6 +237,10 @@ extension CoreClient {
     /// saveSpeechSettings keeps the speech settings, in line with the
     /// other calls, for the last saved to be the one kept: the core sends
     /// them to the server on its own, waiting for nothing.
+    nonisolated(nonsending) func setKeepAudio(_ keep: String) async throws {
+        try await call { try $0.setKeepAudio(keep) }
+    }
+
     nonisolated(nonsending) func saveSpeechSettings(_ stt: SttSettings) async throws {
         let json = String(decoding: try JSONEncoder().encode(stt), as: UTF8.self)
         try await call { try $0.saveSpeechSettings(json) }

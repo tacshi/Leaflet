@@ -65,10 +65,21 @@ type tagRow struct {
 // it (library.Arrange), by page ID, each list in order: the user's pages
 // at the top level in no folder, those of each folder, those under each
 // page, and those shared with the user whose parent the user has not.
+// fileRow is a file of the sidebar.
+type fileRow struct {
+	ID       string `json:"id"`
+	FolderID string `json:"folder_id,omitempty"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+}
+
 type library struct {
-	SpaceID  string              `json:"space_id"`
-	Pages    []pageRow           `json:"pages"`
-	Folders  []folderRow         `json:"folders"`
+	SpaceID string      `json:"space_id"`
+	Pages   []pageRow   `json:"pages"`
+	Folders []folderRow `json:"folders"`
+	// Files are those uploaded to folders, the sidebar's, not the ones
+	// pages hold.
+	Files    []fileRow           `json:"files"`
 	Tags     []tagRow            `json:"tags"`
 	Top      []string            `json:"top"`
 	InFolder map[string][]string `json:"in_folder"`
@@ -115,6 +126,17 @@ func (c *Core) Library() (_ string, err error) {
 		lib.Tags = make([]tagRow, 0, len(tree.Tags))
 		for _, t := range tree.Tags {
 			lib.Tags = append(lib.Tags, tagRow{Tag: t.Name, Count: t.Count, Pages: pageIDs(tree.Tagged(t.Name))})
+		}
+		var files []store.File
+		if files, err = st.Files(); err != nil {
+			return
+		}
+		lib.Files = make([]fileRow, 0, len(files))
+		for _, f := range files {
+			// Files of a folder that was deleted are at the top level.
+			if f.FolderID != "" || f.PageID == "" {
+				lib.Files = append(lib.Files, fileRow{ID: f.ID, FolderID: f.FolderID, Name: f.Name, Size: f.SizeBytes})
+			}
 		}
 		lib.Top, lib.Shared = pageIDs(tree.Top), pageIDs(tree.Shared)
 		lib.InFolder, lib.Children = idsBy(tree.InFolder), idsBy(tree.Children)
@@ -244,6 +266,18 @@ func (c *Core) MovePage(id, parentID, folderID, afterID string) (err error) {
 	c.q.do(func() {
 		err = c.pageCore().MovePage(id, parentID, func() error {
 			return c.core.Store.MovePage(id, parentID, folderID, afterID)
+		})
+	})
+	return err
+}
+
+// MovePageBefore moves page id as MovePage does, before page beforeID
+// among its new siblings, or first without one.
+func (c *Core) MovePageBefore(id, parentID, folderID, beforeID string) (err error) {
+	defer catch(&err)
+	c.q.do(func() {
+		err = c.pageCore().MovePage(id, parentID, func() error {
+			return c.core.Store.MovePageBefore(id, parentID, folderID, beforeID)
 		})
 	})
 	return err

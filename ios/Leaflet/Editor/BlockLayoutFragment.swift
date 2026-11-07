@@ -76,9 +76,21 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
 
     /// dueChips are where the to-dos of the fragment show their due dates,
     /// or offer one, after their text: its own block's and a trailing
-    /// to-do's. An offer that has no room on its line is left out; a date
-    /// has room, which EditorStyle leaves at the ends of its lines.
+    /// to-do's. An offer that has no room on its line is left out, until
+    /// its to-do makes some (DueDates); a date has room, which EditorStyle
+    /// leaves at the ends of its lines.
     func dueChips() -> [(info: BlockInfo, rect: CGRect)] {
+        chips(fitting: true)
+    }
+
+    /// offerOverflows reports whether the to-do offering a date has no room
+    /// for the offer at the end of its text.
+    var offerOverflows: Bool {
+        let right = columnWidth - layoutFragmentFrame.minX
+        return chips(fitting: false).contains { Due($0.info) == nil && $0.rect.maxX > right }
+    }
+
+    private func chips(fitting: Bool) -> [(info: BlockInfo, rect: CGRect)] {
         var out: [(info: BlockInfo, rect: CGRect)] = []
         let right = columnWidth - layoutFragmentFrame.minX
         func add(_ info: BlockInfo, x: CGFloat, baseline: CGFloat, font: UIFont) {
@@ -89,7 +101,7 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
             let rect = CGRect(
                 x: x + DueChip.gap, y: midY - size.height / 2, width: size.width,
                 height: size.height)
-            if due == nil, rect.maxX > right { return }
+            if fitting, due == nil, rect.maxX > right { return }
             out.append((info, rect))
         }
         let font = attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body)

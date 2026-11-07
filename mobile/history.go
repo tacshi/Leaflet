@@ -65,6 +65,20 @@ func (c *Core) History(pageID string) (_ string, err error) {
 	return encode(out)
 }
 
+// CurrentMarkdown returns a page's text as it is now, as History has its
+// versions', to compare them with. The page's edits are saved first.
+func (c *Core) CurrentMarkdown(pageID string) (_ string, err error) {
+	defer catch(&err)
+	var out string
+	c.q.do(func() {
+		if p := c.pages[pageID]; p != nil {
+			p.live.Save()
+		}
+		out = doc.PageMarkdown("", c.core.Store.Content(pageID), c.markdownOptions())
+	})
+	return out, nil
+}
+
 // NameVersion keeps a page as it is now as a version named name.
 func (c *Core) NameVersion(pageID, name string) (err error) {
 	defer catch(&err)
@@ -276,6 +290,31 @@ func (c *Core) AppendBlock(pageID, node string) (err error) {
 		err = c.editContent(pageID, func(content *doc.Content) bool {
 			return content.Insert(doc.Position{At: "end"}, &n) == nil
 		})
+	})
+	return err
+}
+
+// AddFolderFile keeps the file at path in folder folderID, or at the top
+// level without one, as the sidebar's Upload does.
+func (c *Core) AddFolderFile(folderID, path string) (err error) {
+	defer catch(&err)
+	// Off the core's queue, as AddFile: the store keeps itself safe.
+	if _, err = c.core.Store.AddFile(path, folderID, "", mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))); err != nil {
+		return err
+	}
+	c.core.Sync.KickPush()
+	return nil
+}
+
+// DeleteFile deletes a file of the sidebar, from every device it syncs to.
+func (c *Core) DeleteFile(id string) (err error) {
+	defer catch(&err)
+	c.q.do(func() {
+		var f store.File
+		if f, err = c.core.Store.File(id); err != nil {
+			return
+		}
+		err = c.core.Store.DeleteFile(f)
 	})
 	return err
 }

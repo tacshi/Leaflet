@@ -116,6 +116,10 @@ enum DueChip {
         return size(due.widest).width + gap
     }
 
+    /// offerRoom is the room for Add date, which a to-do whose text leaves
+    /// none for it takes while it offers one.
+    static var offerRoom: CGFloat { size(L.editorAddDate).width + gap }
+
     /// label is what the chip of a to-do says: its date, or Add date.
     static func label(_ info: BlockInfo) -> String {
         Due(info)?.label() ?? L.editorAddDate

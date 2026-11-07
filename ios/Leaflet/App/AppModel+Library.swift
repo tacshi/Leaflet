@@ -278,6 +278,57 @@ extension AppModel {
         }
     }
 
+    /// place moves the page dragged, by its ID, before or after a page, in
+    /// the same place. Dragged text that names no page does nothing, nor
+    /// does a page dropped on itself, on a page inside it, or in or out of
+    /// what others shared.
+    func place(_ id: String, beside target: PageRow, before: Bool) async {
+        guard let page = library.page(id), page.id != target.id, page.canEdit, target.canEdit,
+            !page.template, !target.template, library.own(page), library.own(target),
+            !library.path(to: target).contains(where: { $0.id == page.id })
+        else { return }
+        let parent = target.parentID ?? ""
+        let folder = target.folderID ?? ""
+        do {
+            if before {
+                try await client?.movePageBefore(
+                    page.id, parentID: parent, folderID: folder, beforeID: target.id)
+            } else {
+                try await client?.movePage(
+                    page.id, parentID: parent, folderID: folder, afterID: target.id)
+            }
+            await reload()
+        } catch {
+            show(Toast(message: L.sidebarCouldNotMove(error: error.localizedDescription)))
+        }
+    }
+
+    /// upload keeps the files chosen in a folder, or at the top level with
+    /// none, as the desktop's Upload does. The core copies each while the
+    /// app may read it.
+    func upload(_ urls: [URL], folderID: String = "") async {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try await client?.addFolderFile(folderID, path: url.path)
+            } catch {
+                show(Toast(message: L.hostErrorAddFile(error: error.localizedDescription)))
+            }
+        }
+        await reload(.library)
+    }
+
+    /// delete deletes a file of the sidebar, from every device.
+    func delete(_ file: FileRow) async {
+        do {
+            try await client?.deleteFile(file.id)
+            await reload(.library)
+        } catch {
+            show(Toast(message: L.sidebarCouldNotDelete(error: error.localizedDescription)))
+        }
+    }
+
     /// syncs reports whether pages go anywhere but this device, through
     /// an account or iCloud: only then is keeping one here a choice.
     var syncs: Bool { status?.signedIn ?? false || status?.iCloudOn ?? false }

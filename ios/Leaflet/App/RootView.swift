@@ -18,6 +18,14 @@ struct RootView: View {
     /// folderName is the name typed for a new folder.
     @State private var folderName = ""
 
+    /// openReminder opens the to-do of a reminder tapped, in the window in
+    /// front.
+    private func openReminder() {
+        guard app.activeScene === scene, let target = ReminderInbox.shared.target else { return }
+        ReminderInbox.shared.target = nil
+        scene.open(target.pageID, at: target.blockID)
+    }
+
     var body: some View {
         let palette = Palette.of(accent: app.accent, mode: app.theme, scheme: scheme)
         @Bindable var scene = scene
@@ -124,6 +132,7 @@ struct RootView: View {
             // The page the window was left at, as it comes back, over the
             // one it opened for, which it keeps as its own.
             scene.open(savedPage ?? opening)
+            openReminder()
             #if DEBUG
                 // -LeafletOpen <title> opens the page of that title, to
                 // look at it on a simulator without a tap.
@@ -150,6 +159,7 @@ struct RootView: View {
             #endif
         }
         .onChange(of: scene.selection) { savedPage = scene.selection }
+        .onChange(of: ReminderInbox.shared.target) { openReminder() }
         .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }
         .onChange(of: app.library.pages.map(\.id)) { _, ids in

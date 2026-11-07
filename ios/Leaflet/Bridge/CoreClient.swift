@@ -228,6 +228,14 @@ final class CoreClient: Sendable {
         try await call { try $0.renamePage(id, title: title) }
     }
 
+    nonisolated(nonsending) func movePageBefore(
+        _ id: String, parentID: String = "", folderID: String = "", beforeID: String = ""
+    ) async throws {
+        try await call {
+            try $0.movePage(before: id, parentID: parentID, folderID: folderID, beforeID: beforeID)
+        }
+    }
+
     nonisolated(nonsending) func movePage(
         _ id: String, parentID: String = "", folderID: String = "", afterID: String = ""
     )
@@ -308,6 +316,21 @@ final class CoreClient: Sendable {
     /// To-dos tab's sections, as the desktop sorts them.
     nonisolated(nonsending) func todos() async throws -> [TodoGroup] {
         try await call([TodoGroup].self) { core in try Self.answer { e in core.todos(e) } }
+    }
+
+    /// reminders are the to-dos' notifications to schedule, at now.
+    nonisolated(nonsending) func reminders(now: Date, limit: Int) async throws -> [Reminder] {
+        let ms = Int64(now.timeIntervalSince1970 * 1000)
+        return try await call([Reminder].self) { core in
+            try Self.answer { e in core.reminders(ms, limit: limit, error: e) }
+        }
+    }
+
+    /// remindedOf keeps that these were scheduled, for each to be reminded
+    /// of once.
+    nonisolated(nonsending) func remindedOf(_ reminders: [Reminder]) async throws {
+        let json = try encode(reminders)
+        try await call { try $0.reminded(of: json) }
     }
 
     /// moveTargets are the pages a page can move under, the one changed

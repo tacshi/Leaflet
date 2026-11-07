@@ -559,6 +559,7 @@ struct Inspector: View {
                 }
             }
         }
+        .modifier(PanelTop(column: !isSheet))
         .task { scene.workspace.start(app) }
         // Settings, or a new folder, asked for while the panel is a sheet
         // shows once it goes.
@@ -577,6 +578,35 @@ struct Inspector: View {
             scene.focusChat = false
             scene.panelGone(asSheet: counted)
         }
+    }
+}
+
+/// PanelTop has a panel beside the page take the room its column keeps
+/// over it for the bar, which stands by the window's edge on a display
+/// with a vertical bar and leaves it empty.
+private struct PanelTop: ViewModifier {
+    /// column says the panel is a column, and not a sheet.
+    let column: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *), column {
+            content.modifier(UnderNoBar())
+        } else {
+            content
+        }
+    }
+}
+
+@available(iOS 27.1, *)
+private struct UnderNoBar: ViewModifier {
+    @Environment(\.toolbarVerticalEdge) private var edge
+
+    func body(content: Content) -> some View {
+        // In one line with the page's title, as the tabs' own padding
+        // leaves them.
+        content
+            .padding(.top, edge == nil ? 0 : 17)
+            .ignoresSafeArea(.container, edges: edge == nil ? [] : .top)
     }
 }
 

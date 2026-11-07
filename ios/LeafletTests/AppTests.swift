@@ -199,8 +199,18 @@ struct AppTests {
         }
     }
 
+    /// Half folded, the sidebar comes up to the fold, the page in the half
+    /// beyond it, unless that leaves either of them too little.
+    @Test func theSidebarComesUpToTheFold() {
+        #expect(FoldReader.width(of: 867, fold: 455.5...495.5) == 475.5)
+        #expect(FoldReader.width(of: 867, fold: nil) == nil)
+        #expect(FoldReader.width(of: 867, fold: 150...190) == nil)
+        #expect(FoldReader.width(of: 600, fold: 400...440) == nil)
+    }
+
     @Test func theDeviceGoesByItsModel() {
         #expect(PlatformBridge.label(of: .iPadPro13M5) == "iPad Pro (13-inch) (M5)")
+        #expect(PlatformBridge.label(of: .iPhoneDuo) == "iPhone Duo")
         #expect(PlatformBridge.label(of: .simulator(.iPhone17)) == "Simulator (iPhone 17)")
         // One newer than DeviceKit knows, by its kind.
         #expect(PlatformBridge.label(of: .unknown("iPad99,1")) == "iPad")

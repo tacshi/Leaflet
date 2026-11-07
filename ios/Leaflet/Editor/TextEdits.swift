@@ -230,11 +230,16 @@ final class TextEdits {
     /// view scrolling back to the caret, as it does after a change.
     func keepingScroll(_ change: () -> Void) {
         let offset = textView.contentOffset
+        let width = textView.widthChanges
         change()
         textView.layoutIfNeeded()
+        // At another width the same scroll is other text, and the text
+        // view keeps the page where it was itself.
+        guard textView.widthChanges == width else { return }
         textView.setContentOffset(offset, animated: false)
         DispatchQueue.main.async { [weak textView] in
-            textView?.setContentOffset(offset, animated: false)
+            guard let textView, textView.widthChanges == width else { return }
+            textView.setContentOffset(offset, animated: false)
         }
     }
 }

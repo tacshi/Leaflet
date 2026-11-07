@@ -24,7 +24,7 @@ packages:
   # The device's model, which names it in Account › Devices.
   DeviceKit:
     url: https://github.com/devicekit/DeviceKit
-    exactVersion: 5.9.0
+    exactVersion: 5.10.0
   # Transcription with the device's own speech recognition, which the
   # Mac's speech helper is built with too: the repository's own, so not
   # pinned.

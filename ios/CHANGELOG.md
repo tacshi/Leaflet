@@ -24,6 +24,9 @@ Go core as the desktop app.
   notifications that open the to-do.
 - On iPad, more than one window, a page opening in a window of its own, and
   the desktop's keyboard shortcuts in the menu bar.
+- On iPhone Duo, your page, place and keyboard stay with you as it folds and
+  unfolds; half folded, the sidebar comes up to the crease, and stood like a
+  laptop, the keyboard comes up on its lower half.
 
 ### Write
 

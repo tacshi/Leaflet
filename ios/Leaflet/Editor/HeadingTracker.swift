@@ -22,6 +22,10 @@ final class HeadingTracker {
     /// ending first.
     private var jumpShort = false
 
+    /// isJumping says a scroll to a block is on its way: where it lands
+    /// holds at any width.
+    var isJumping: Bool { jumping }
+
     init(_ editor: EditorController) { self.editor = editor }
 
     func didScroll() {

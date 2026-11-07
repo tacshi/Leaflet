@@ -33,8 +33,42 @@ final class EditorTextView: UITextView {
     }
     var measureFooter: ((CGFloat) -> CGFloat)?
     static let readableWidth: CGFloat = 720
+    /// narrowest is the least width the page lays out at.
+    static let narrowest: CGFloat = 120
+    /// fold is where a half folded display folds down the view, from left
+    /// to right, or nil: the text keeps to one side of it.
+    var fold: ClosedRange<CGFloat>? {
+        didSet { if fold != oldValue { setNeedsLayout() } }
+    }
+    private lazy var foldWatch = FoldWatch(view: self, wait: .milliseconds(300)) {
+        [weak self] in self?.fold = $0
+    }
+    /// standing says the display is half folded across the view, as a
+    /// laptop stands, or nil until the hinge has said; standWait waits to
+    /// see that it stays.
+    private var standing: Bool?
+    private var standWait: Task<Void, Never>?
+    /// typingAsItClosed says the text had the keyboard as the display
+    /// closed; hingeClosed that the hinge last said it was closed, which
+    /// it goes on saying while typing on the display that took over.
+    private var typingAsItClosed = false
+    private var hingeClosed = true
     /// laidOutWidth is the text's width the page was last laid out at.
     private var laidOutWidth: CGFloat = 0
+    /// laidOutSize is the view's size as last laid out.
+    private var laidOutSize = CGSize.zero
+    /// widthChanges counts the widths the page was laid out at again: a
+    /// scroll kept from before one no longer says where the text is.
+    private(set) var widthChanges = 0
+    /// topLine is the line at the top of the view: where its text starts,
+    /// and how far into it the view is, as a part of its height, which
+    /// stays the same place as the page wraps again. It is nil at the
+    /// page's top.
+    private var topLine: (offset: Int, into: CGFloat)?
+    /// settling goes back to the line the page was at once a resize has
+    /// stopped: TextKit corrects its estimates for a moment after, which
+    /// moves the page. topLine stays as it was until then.
+    private var settling: Task<Void, Never>?
     /// viewportStale says the text in view is to be laid out before the
     /// blocks are placed on it.
     private var viewportStale = false
@@ -110,6 +144,17 @@ final class EditorTextView: UITextView {
         blocks.editable = isEditable
         backgroundColor = .clear
         accessibilityIdentifier = "pageText"
+        if #available(iOS 27.1, *) {
+            addInteraction(
+                UIHingeInteraction { [weak self] _, update in
+                    guard let self else { return }
+                    let closed = update.hinge?.status == .closed
+                    if closed, !hingeClosed { displayClosed() }
+                    if update.hinge != nil { hingeClosed = closed }
+                    followStanding()
+                    foldWatch.hingeMoved()
+                })
+        }
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardChanged(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
@@ -118,19 +163,119 @@ final class EditorTextView: UITextView {
             name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 
+    /// sides are the room left of the text and right of it in a view of
+    /// width: the text keeps to a readable width in the middle of the
+    /// view. A fold across it with room for text on either side changes
+    /// nothing, for the page to have both halves as it has open; with room
+    /// on one side only, as beside the panel, the text keeps to that side.
+    static func sides(width: CGFloat, fold: ClosedRange<CGFloat>?) -> (
+        left: CGFloat, right: CGFloat
+    ) {
+        let side = max(20, (width - readableWidth) / 2)
+        guard let fold, fold.lowerBound < width - side, fold.upperBound > side else {
+            return (side, side)
+        }
+        let before = fold.lowerBound
+        let after = width - fold.upperBound
+        let room = max(before, after) - 40
+        guard room >= 280, min(before, after) - 40 < 280 else { return (side, side) }
+        let text = min(room, readableWidth)
+        let margin = (max(before, after) - text) / 2
+        return before >= after
+            ? (margin, width - before + margin) : (fold.upperBound + margin, margin)
+    }
+
+    /// displayClosed notes the text had the keyboard, which the display
+    /// closing takes from it, to have it back on the display that takes
+    /// over.
+    func displayClosed() {
+        if isFirstResponder { typingAsItClosed = true }
+    }
+
+    /// followStanding brings up the keyboard as the display comes to stand
+    /// as a laptop does, its lower half to type on, and only then: hidden,
+    /// it stays hidden, and a page opened in that pose is only opened.
+    private func followStanding() {
+        let was = standing
+        standing = standsAcross
+        guard standing == true else {
+            standWait?.cancel()
+            standWait = nil
+            return
+        }
+        guard was == false else { return }
+        standWait = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            self.standWait = nil
+            self.takeKeyboard()
+        }
+    }
+
+    /// takeKeyboard brings up the keyboard for the page, the page staying
+    /// where it is: the caret goes to the text in view if it isn't there.
+    /// With a sheet over the page, a keyboard in use elsewhere, or a page
+    /// that can't be changed, there is nothing to do.
+    func takeKeyboard() {
+        guard canTakeKeyboard, !isFirstResponder, !keyboardIsUp else { return }
+        let view = bounds.inset(by: adjustedContentInset)
+        if let topLine, let at = selectedTextRange?.end, !view.contains(caretRect(for: at).origin) {
+            selectedRange = NSRange(location: min(topLine.offset, textStorage.length), length: 0)
+        }
+        _ = becomeFirstResponder()
+    }
+
+    /// canTakeKeyboard says the page can be typed in and nothing is over it.
+    private var canTakeKeyboard: Bool {
+        isEditable && window?.windowScene?.activationState == .foregroundActive
+            && window?.rootViewController?.presentedViewController == nil
+    }
+
+    /// keyboardIsUp says a keyboard, or its shortcuts bar, shows.
+    private var keyboardIsUp: Bool {
+        guard let end = Self.keyboardEnd, let screen = window?.windowScene?.screen,
+            end.screen == nil || end.screen == screen
+        else { return false }
+        return end.frame.height > 0 && end.frame.minY < screen.bounds.height
+    }
+
+    /// standsAcross says the display is half folded from side to side of
+    /// the view.
+    private var standsAcross: Bool {
+        guard #available(iOS 27.1, *) else { return false }
+        return reservedRegions(kind: .division).contains { $0.frame.width > $0.frame.height }
+    }
+
+    /// keyboardEnd is where the keyboard last said it ends up, on the
+    /// screen it said if it did, or nil with none: every page's, for one
+    /// that comes or resizes with no word from the keyboard.
+    private static var keyboardEnd: (frame: CGRect, screen: UIScreen?)?
+
     /// keyboardChanged keeps the text clear of a keyboard, or its floating
     /// shortcuts bar, where it covers the text view, and of nothing else:
     /// the page runs on under them.
     @objc private func keyboardChanged(_ note: Notification) {
-        guard let window,
-            let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        guard let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         else { return }
-        // The keyboard's frame is the screen's: a window on iPad, in
-        // Stage Manager or Split View, is only part of it.
-        let keyboard = convert(end, from: window.screen.coordinateSpace)
         let hidden = note.name == UIResponder.keyboardWillHideNotification
-        let visibleBottom = bounds.maxY
-        let covered = hidden ? 0 : max(0, visibleBottom - keyboard.minY)
+        Self.keyboardEnd = hidden ? nil : (end, note.object as? UIScreen)
+        clearKeyboard()
+    }
+
+    /// clearKeyboard makes room for the keyboard where it now covers the
+    /// text view.
+    private func clearKeyboard() {
+        guard let screen = window?.windowScene?.screen else { return }
+        var covered: CGFloat = 0
+        // A keyboard on another screen, or the other display, covers
+        // nothing here.
+        if let end = Self.keyboardEnd, end.screen == nil || end.screen == screen {
+            // The keyboard's frame is the screen's: a window on iPad, in
+            // Stage Manager or Split View, is only part of it.
+            let keyboard = convert(end.frame, from: screen.coordinateSpace)
+            covered = max(0, bounds.maxY - keyboard.minY)
+        }
+        guard contentInset.bottom != covered else { return }
         contentInset.bottom = covered
         verticalScrollIndicatorInsets.bottom = covered
     }
@@ -175,35 +320,66 @@ final class EditorTextView: UITextView {
         return CGRect(x: rect.minX, y: baseline - font.ascender, width: rect.width, height: height)
     }
 
+    // A rotation that takes the bar by the camera to the other side ends
+    // with a size UIKit lays nothing out for, which would leave the title
+    // and the blocks at the size before it.
+    override var frame: CGRect {
+        didSet { if frame.size != oldValue.size { setNeedsLayout() } }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        let side = max(20, (bounds.width - Self.readableWidth) / 2)
+        // A split view opening gives its column next to no width for a
+        // frame. Laid out at it, the title measures as a tower, and keeps
+        // that height at the width that follows.
+        guard bounds.width >= Self.narrowest else { return }
+        // A window resized may move the page against a keyboard that
+        // stays, which says nothing.
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
+            clearKeyboard()
+            foldWatch.resized()
+        }
+        let (left, right) = Self.sides(width: bounds.width, fold: fold)
         var top: CGFloat = 12
         if let header {
-            let width = bounds.width - side * 2
+            let width = bounds.width - left - right
             let height =
                 height(of: header, width: width, measure: measureHeader, &headerSize)
                 ?? header.bounds.height
-            header.frame = CGRect(x: side, y: 12, width: width, height: height)
+            header.frame = CGRect(x: left, y: 12, width: width, height: height)
             top = header.frame.maxY + 8
         }
         top += leadingCardSpace
         let footerHeight =
             footer.flatMap {
-                height(of: $0, width: bounds.width - side * 2, measure: measureFooter, &footerSize)
+                height(
+                    of: $0, width: bounds.width - left - right, measure: measureFooter, &footerSize)
             } ?? 0
         let inset = UIEdgeInsets(
-            top: top, left: side, bottom: max(120, footerHeight + 40), right: side)
+            top: top, left: left, bottom: max(120, footerHeight + 40), right: right)
         if textContainerInset != inset { textContainerInset = inset }
         // At a new width (a column shown or hidden, the window resized)
         // all of the page is laid out again: TextKit keeps paragraphs out
         // of view as they were, with blocks sized for the old width, which
         // then overlap the text.
-        let width = bounds.width - side * 2
+        let width = bounds.width - left - right
         if abs(width - laidOutWidth) > 0.5, let tlm = textLayoutManager {
+            let resized = laidOutWidth > 0
             laidOutWidth = width
+            widthChanges += 1
+            // The text view follows its width in its own time, which can
+            // be after this pass and any other: laid out now, the text
+            // would wrap again then, and the blocks stay sized for this.
+            textContainer.size.width = width
             tlm.invalidateLayout(for: tlm.documentRange)
             viewportStale = true
+            if resized {
+                keepPlace()
+                // The title, a text field, measures as it last laid out
+                // until it has laid out at the new width.
+                Task { @MainActor [weak self] in self?.remeasure() }
+            }
         }
         // TextKit lays out the text in view as the text view's canvas, a
         // view inside it, lays out, which UIKit does only after this. Text
@@ -242,9 +418,94 @@ final class EditorTextView: UITextView {
             // Under the text's last line.
             let end = caretRect(for: endOfDocument).maxY
             footer.frame = CGRect(
-                x: side, y: end + 16, width: bounds.width - side * 2, height: footerHeight)
+                x: left, y: end + 16, width: bounds.width - left - right, height: footerHeight)
             footer.isHidden = footerHeight < 1
         }
+        if settling == nil { takeTopLine() }
+    }
+
+    /// takeTopLine notes the line at the top of the view, here and not as
+    /// the page scrolls: a resize scrolls it too, before it lays out.
+    private func takeTopLine() {
+        topLine = nil
+        guard let tlm = textLayoutManager, textStorage.length > 0 else { return }
+        let y = contentOffset.y + adjustedContentInset.top - textContainerInset.top
+        guard y > 0, let fragment = tlm.textLayoutFragment(for: CGPoint(x: 0, y: y)) else { return }
+        let top = y - fragment.layoutFragmentFrame.minY
+        let lines = fragment.textLineFragments
+        guard
+            let line = lines.first(where: { $0.typographicBounds.maxY > top }) ?? lines.last
+        else { return }
+        let box = line.typographicBounds
+        let start = tlm.offset(
+            from: tlm.documentRange.location, to: fragment.rangeInElement.location)
+        topLine = (
+            start + line.characterRange.location,
+            box.height > 0 ? (top - box.minY) / box.height : 0
+        )
+    }
+
+    /// keepPlace keeps the text the page was at at the top of the view as
+    /// the page wraps again, as a resize goes, and once more when it has
+    /// stopped: at another width the same scroll is other text.
+    private func keepPlace() {
+        guard controller?.headings.isJumping != true, !isDragging, !isDecelerating else { return }
+        settling?.cancel()
+        // By hand, a window goes through a width on each frame: going there
+        // for each would lay out all the text above it each time.
+        if window?.windowScene?.effectiveGeometry.isInteractivelyResizing != true { goToTopLine() }
+        settling = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, !Task.isCancelled else { return }
+            self.settling = nil
+            self.settle()
+        }
+    }
+
+    /// settle goes back to the line the page was at, as far as the page
+    /// goes, as its height is known by now, and gives the keyboard back to
+    /// the text that had it as the display closed, the caret in view.
+    private func settle() {
+        guard !isDragging, !isDecelerating, controller?.headings.isJumping != true else { return }
+        if topLine != nil {
+            goToTopLine()
+            let bottom = max(
+                -adjustedContentInset.top,
+                contentSize.height - bounds.height + adjustedContentInset.bottom)
+            if contentOffset.y > bottom { contentOffset.y = bottom }
+        }
+        if typingAsItClosed {
+            typingAsItClosed = false
+            if canTakeKeyboard { _ = becomeFirstResponder() }
+        }
+        if isFirstResponder { scrollRangeToVisible(selectedRange) }
+    }
+
+    /// goToTopLine scrolls the line the page was at back to the top of the
+    /// view, laid out down to its paragraph's end so that its place is
+    /// known rather than estimated.
+    private func goToTopLine() {
+        guard let (offset, into) = topLine, let tlm = textLayoutManager,
+            offset <= textStorage.length
+        else { return }
+        let page = tlm.documentRange.location
+        let paragraph = (textStorage.string as NSString).paragraphRange(
+            for: NSRange(location: offset, length: 0))
+        guard let at = tlm.location(page, offsetBy: offset),
+            let end = tlm.location(page, offsetBy: NSMaxRange(paragraph)),
+            let before = NSTextRange(location: page, end: end)
+        else { return }
+        tlm.ensureLayout(for: before)
+        guard let fragment = tlm.textLayoutFragment(for: at) else { return }
+        let inFragment = offset - tlm.offset(from: page, to: fragment.rangeInElement.location)
+        let lines = fragment.textLineFragments
+        guard
+            let line = lines.last(where: { $0.characterRange.location <= inFragment })
+                ?? lines.first
+        else { return }
+        let box = line.typographicBounds
+        let y = fragment.layoutFragmentFrame.minY + box.minY + into * box.height
+        contentOffset.y = y + textContainerInset.top - adjustedContentInset.top
     }
 
     /// Measured is the header's or the footer's height at a width, measured

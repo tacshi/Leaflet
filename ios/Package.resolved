@@ -1,13 +1,13 @@
 {
-  "originHash" : "ec7dbe54ac0857139ee29b12f6e1dbd62fb98b289f9c11548114c51615e1cb05",
+  "originHash" : "2e6220fe0051ba355e191081d5e79a0462e6396bffed6cfa771b1d17f3b3a238",
   "pins" : [
     {
       "identity" : "devicekit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/devicekit/DeviceKit",
       "state" : {
-        "revision" : "19528aa07e1426626ea9fb2c4a161edf43c4f9e8",
-        "version" : "5.9.0"
+        "revision" : "fab82bd988405367c915143e293479f481e93ba0",
+        "version" : "5.10.0"
       }
     },
     {

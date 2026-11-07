@@ -31,6 +31,10 @@ final class SceneModel {
     /// open, no panel is beside one, and the workspace agent's chat is a
     /// sheet of the sidebar's.
     var stacked = false
+    /// sidebarToFold is the width that takes the sidebar, where it shows,
+    /// up to the fold of a half folded display, the page in the half
+    /// beyond it, or nil.
+    var sidebarToFold: CGFloat?
     /// recordOnOpen is a page opening to record in, as New Recording makes
     /// one with no page open: it records once its editor shows.
     @ObservationIgnored var recordOnOpen: String?

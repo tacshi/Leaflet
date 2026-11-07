@@ -312,9 +312,16 @@ final class DocumentSession {
     /// which the text view follows by scrolling to the caret, then and
     /// once laid out. A page the user is scrolling goes where they take it.
     private func hold(_ offset: CGPoint) {
+        // At another width the same scroll is other text, and the text
+        // view keeps the page where it was itself.
+        let width = textView.widthChanges
         textView.layoutIfNeeded()
+        guard textView.widthChanges == width else { return }
         scroll(to: offset)
-        DispatchQueue.main.async { [weak self] in self?.scroll(to: offset) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.textView.widthChanges == width else { return }
+            self.scroll(to: offset)
+        }
     }
 
     /// scroll puts the page at offset, as far as it goes, unless the user

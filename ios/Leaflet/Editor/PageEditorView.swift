@@ -29,8 +29,12 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         let view = c.controller.textView
         view.header = host.view
         view.measureHeader = { [weak host] width in
-            host?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
-                ?? 0
+            // A title measured at a width keeps that height, lines and
+            // all, though it wraps by how it last laid out: measuring at
+            // another width first has it measure afresh.
+            _ = host?.sizeThatFits(in: CGSize(width: width + 1, height: .greatestFiniteMagnitude))
+            return host?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+                .height ?? 0
         }
         let foot = UIHostingController(rootView: AnyView(footer()))
         foot.view.backgroundColor = .clear

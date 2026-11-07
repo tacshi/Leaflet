@@ -88,11 +88,19 @@ final class CaretMenu {
     /// place puts the menu under the caret, or over it when there is no
     /// room below, within the part of the text view that shows.
     func place(in textView: UITextView, caret: CGRect) {
-        let width = min(320, textView.bounds.width - 24)
+        var room = textView.bounds.width - 24
+        var visible = textView.bounds.inset(by: textView.adjustedContentInset)
+        // Clear of a fold, over the text that keeps to one side of it.
+        if (textView as? EditorTextView)?.fold != nil {
+            let inset = textView.textContainerInset
+            visible.origin.x = inset.left - 12
+            visible.size.width = textView.bounds.width - inset.left - inset.right + 24
+            room = visible.width - 24
+        }
+        let width = min(320, room)
         let rows = max(items.count, 1)
         let headers = Set(items.map(\.group)).count
         let height = min(CGFloat(rows) * 48 + CGFloat(headers) * 28 + 12, 340)
-        let visible = textView.bounds.inset(by: textView.adjustedContentInset)
         var x = caret.minX - 12
         x = min(max(x, visible.minX + 12), visible.maxX - width - 12)
         var y = caret.maxY + 6

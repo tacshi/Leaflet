@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 
 /// RootView is a window: the library in the sidebar, and the page chosen
-/// in it. On iPhone, and in a narrow window on iPad, the two stack.
+/// in it. On iPhone, on a foldable closed, and in a narrow window on iPad,
+/// the two stack.
 struct RootView: View {
     /// opening is the page a window opened for one starts on.
     var opening: String?
@@ -50,7 +51,9 @@ struct RootView: View {
                                 .tint(Color.primary)
                             }
                         }
-                        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
+                        .navigationSplitViewColumnWidth(
+                            min: 240, ideal: scene.sidebarToFold ?? 300,
+                            max: scene.sidebarToFold ?? 420)
                 } detail: {
                     if let selection = scene.selection {
                         PageScreen(pageID: selection).id(selection)
@@ -70,6 +73,7 @@ struct RootView: View {
         .preferredColorScheme(app.theme.colorScheme)
         // The toast shows in a window of its own, over the sheets.
         .background(SceneReader { scene.toasts.show(in: $0, app: app) })
+        .background(FoldReader { scene.sidebarToFold = $0 })
         .sheet(isPresented: $scene.settingsShown) {
             // A sheet open keeps the scheme it opened with, and one let go
             // to follow the system keeps the last it was given: the theme
@@ -263,6 +267,53 @@ private struct SceneReader: UIViewRepresentable {
         override func didMoveToWindow() {
             super.didMoveToWindow()
             if let scene = window?.windowScene { found?(scene) }
+        }
+    }
+}
+
+/// FoldReader says the width that takes the sidebar up to the fold of a
+/// half folded display, or nil with no fold, as it changes.
+struct FoldReader: UIViewRepresentable {
+    var changed: (CGFloat?) -> Void
+
+    /// width is the sidebar's in a window of width with fold down it: to
+    /// the middle of the fold, as long as that leaves it and the page room.
+    static func width(of window: CGFloat, fold: ClosedRange<CGFloat>?) -> CGFloat? {
+        guard let fold else { return nil }
+        let middle = (fold.lowerBound + fold.upperBound) / 2
+        return middle >= 240 && window - middle >= 320 ? middle : nil
+    }
+
+    func makeUIView(context: Context) -> FoldView {
+        let view = FoldView()
+        view.isUserInteractionEnabled = false
+        view.changed = changed
+        return view
+    }
+
+    func updateUIView(_ view: FoldView, context: Context) { view.changed = changed }
+
+    final class FoldView: UIView {
+        var changed: ((CGFloat?) -> Void)?
+        // Before the page's own, for it to come in clear of the fold and
+        // not lay out twice.
+        private lazy var watch = FoldWatch(view: self, wait: .milliseconds(250)) { [weak self] in
+            guard let self else { return }
+            changed?(FoldReader.width(of: bounds.width, fold: $0))
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            if #available(iOS 27.1, *) {
+                addInteraction(UIHingeInteraction { [weak self] _, _ in self?.watch.hingeMoved() })
+            }
+        }
+
+        required init?(coder: NSCoder) { fatalError("not coded") }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            watch.resized()
         }
     }
 }

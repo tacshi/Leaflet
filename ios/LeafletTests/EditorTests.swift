@@ -2165,7 +2165,9 @@ struct EditorTests {
         UIPasteboard.general.string = "- one\n- two"
         c.textView.selectedRange = NSRange(location: 0, length: 0)
         c.textView.paste(nil)
-        try await Task.sleep(for: .milliseconds(50))
+        // A paste comes when the system has read the pasteboard, in its
+        // own time.
+        for _ in 0..<150 where blocks(c).count < 2 { try await Task.sleep(for: .milliseconds(20)) }
         #expect(blocks(c).map(\.type) == ["bulleted_list", "bulleted_list"])
         #expect(blocks(c).map(\.text) == ["one", "two"])
     }
@@ -2226,6 +2228,374 @@ struct EditorTests {
         #expect(BlockCard.height(embed, width: 300) == 400)
         _ = BlockHeights.set(id, CGSize(width: 300, height: 100))
         #expect(BlockCard.height(embed, width: 300) == 320)
+    }
+
+    /// placed puts the editor in a window of size, with no keyboard, and
+    /// returns what takes it away again.
+    private func placed(_ c: EditorController, _ size: CGSize) throws -> () -> Void {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.addSubview(c.textView)
+        c.textView.frame = window.bounds
+        window.isHidden = false
+        c.textView.layoutIfNeeded()
+        return {
+            c.textView.removeFromSuperview()
+            window.isHidden = true
+            window.windowScene = nil
+        }
+    }
+
+    /// long is an editor of many long paragraphs, p0 on.
+    private func long() -> EditorController {
+        editor(
+            (0..<40).map {
+                block("p\($0)", "paragraph", String(repeating: "word \($0) ", count: 80))
+            })
+    }
+
+    /// scroll brings block id's line index to the top of the view, laid out.
+    private func scroll(_ c: EditorController, to id: String, line index: Int = 0) throws {
+        let view = c.textView
+        let tlm = try #require(view.textLayoutManager)
+        let at = try #require(c.text.blocks().first { $0.info.id == id }).range.location
+        let start = try #require(tlm.location(tlm.documentRange.location, offsetBy: at))
+        let before = try #require(NSTextRange(location: tlm.documentRange.location, end: start))
+        tlm.ensureLayout(for: before)
+        let fragment = try #require(tlm.textLayoutFragment(for: start))
+        tlm.ensureLayout(for: fragment.rangeInElement)
+        let line = fragment.textLineFragments[index].typographicBounds
+        view.contentOffset.y =
+            fragment.layoutFragmentFrame.minY + line.minY + view.textContainerInset.top
+            - view.adjustedContentInset.top
+        view.layoutIfNeeded()
+    }
+
+    /// top is the block at the top of the view, and the words of the line
+    /// there, at the start of it.
+    private func top(_ c: EditorController) throws -> (block: String, line: String) {
+        let view = c.textView
+        let tlm = try #require(view.textLayoutManager)
+        let y =
+            view.contentOffset.y + view.adjustedContentInset.top - view.textContainerInset.top + 1
+        let fragment = try #require(tlm.textLayoutFragment(for: CGPoint(x: 0, y: y)))
+        let top = y - fragment.layoutFragmentFrame.minY
+        let line = try #require(
+            fragment.textLineFragments.first { $0.typographicBounds.maxY > top })
+        let start = tlm.offset(
+            from: tlm.documentRange.location, to: fragment.rangeInElement.location)
+        let offset = start + line.characterRange.location
+        return (
+            c.text.paragraph(at: offset).info.id,
+            (view.text as NSString).substring(with: NSRange(location: offset, length: 12))
+        )
+    }
+
+    /// A page keeps the text at the top of the view as a new width wraps
+    /// it, as a phone folding or a window resizing gives it: down the
+    /// page, and part way through a paragraph, where the line that held
+    /// the text is no longer the same line.
+    @Test func aNewWidthKeepsTheTextAtTheTopOfTheView() async throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer { done() }
+        try scroll(c, to: "p20")
+        #expect(try top(c).block == "p20")
+        c.textView.frame.size.width = 466
+        c.textView.layoutIfNeeded()
+        #expect(try top(c).block == "p20")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(try top(c).block == "p20")
+        c.textView.frame.size.width = 669
+        c.textView.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(try top(c).block == "p20")
+
+        try scroll(c, to: "p30", line: 5)
+        let text = try top(c).line
+        c.textView.frame.size.width = 466
+        c.textView.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        let (block, line) = try top(c)
+        #expect(block == "p30")
+        // A line's own text, or the line now holding it.
+        let wrapped = (c.textView.text as NSString).range(of: line)
+        let was = (c.textView.text as NSString).range(of: text)
+        #expect(abs(wrapped.location - was.location) < 120)
+    }
+
+    /// The text keeps to the middle of the view, across a fold with room
+    /// for text on either side, as the page has both halves. With room on
+    /// one side only it keeps to that side, clear of the fold, unless that
+    /// side is too narrow too, and keeps its width on a wide display.
+    @Test func theTextKeepsToOneSideOfAFoldOnlyWithRoomOnOneSide() {
+        let sides = EditorTextView.sides
+        #expect(sides(951, nil) == (115.5, 115.5))
+        #expect(sides(400, nil) == (20, 20))
+        // Room on either side: the page has both halves.
+        #expect(sides(951, 465...486) == (115.5, 115.5))
+        #expect(sides(867, 455.5...495.5) == (73.5, 73.5))
+        // Room on one side, either one, and the text in the middle of it.
+        #expect(sides(527, 455...495) == (20, 527 - 455 + 20))
+        #expect(sides(951, 200...240) == (240 + 20, 20))
+        // Too narrow on either side, the text stays and crosses the fold.
+        #expect(sides(600, 290...310) == (20, 20))
+        // Past the text's edges, it isn't in the way.
+        #expect(sides(951, 0...100) == (115.5, 115.5))
+        #expect(sides(951, 840...900) == (115.5, 115.5))
+        // No wider than a page reads.
+        #expect(sides(1200, 260...300) == (300 + 90, 90))
+    }
+
+    /// With a fold that leaves room on one side, the text, its title and
+    /// what follows it keep to that side, and back with none.
+    @Test func aFoldMovesTheTextAndItsHeaderToOneSide() async throws {
+        let c = long()
+        let header = UIView()
+        let footer = UIView()
+        c.textView.header = header
+        c.textView.footer = footer
+        c.textView.measureHeader = { _ in 40 }
+        c.textView.measureFooter = { _ in 40 }
+        let done = try placed(c, CGSize(width: 527, height: 669))
+        defer { done() }
+        let view = c.textView
+        view.fold = 455...495
+        view.layoutIfNeeded()
+        #expect(view.textContainerInset.left == 20)
+        #expect(view.textContainerInset.right == 92)
+        #expect(view.textContainer.size.width == 415)
+        #expect(header.frame.minX == 20)
+        #expect(header.frame.width == 415)
+        #expect(footer.frame.minX == 20)
+        view.fold = nil
+        view.layoutIfNeeded()
+        #expect(view.textContainerInset.right == 20)
+        #expect(header.frame.width == 487)
+    }
+
+    /// A block keeps to the text as a fold narrows it with the view's own
+    /// width the same, as beside the panel: laid out at the old width, a
+    /// table would go on past the text and over what is above it.
+    @Test func aBlockFollowsTheTextAsAFoldNarrowsIt() async throws {
+        let cell = { (row: Int64, col: Int64) in
+            DocNode(
+                id: "c\(row)\(col)", type: "table_cell",
+                data: ["rowPosition": .int(row), "colPosition": .int(col)], children: nil)
+        }
+        let table = DocNode(
+            id: "t-" + UUID().uuidString, type: "table",
+            data: ["rowsLen": .int(2), "colsLen": .int(2)],
+            children: [cell(0, 0), cell(0, 1), cell(1, 0), cell(1, 1)])
+        let c = editor([block("a", "paragraph", "Before"), table, block("b", "paragraph", "After")])
+        let done = try placed(c, CGSize(width: 527, height: 669))
+        defer { done() }
+        let view = c.textView
+        view.layoutIfNeeded()
+        let card = try #require(view.subviews.first { view.blocks.owns($0) })
+        #expect(card.frame.maxX > 500)
+        view.fold = 455...495
+        view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(card.frame.maxX <= 455)
+        view.fold = nil
+        view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(card.frame.maxX > 500)
+    }
+
+    /// At a new width the header is measured again once it has laid out
+    /// there: a title measures as it last laid out until then.
+    @Test func theHeaderIsMeasuredAgainAfterANewWidth() async throws {
+        let c = long()
+        let header = UIView()
+        c.textView.header = header
+        c.textView.measureHeader = { _ in 40 }
+        let done = try placed(c, CGSize(width: 951, height: 669))
+        defer { done() }
+        let view = c.textView
+        var measures = 0
+        view.measureHeader = { _ in
+            measures += 1
+            return measures == 1 ? 90 : 40
+        }
+        view.frame.size.width = 600
+        view.layoutIfNeeded()
+        #expect(header.frame.height == 90)
+        try await Task.sleep(for: .milliseconds(50))
+        view.layoutIfNeeded()
+        #expect(header.frame.height == 40)
+    }
+
+    /// A fold the system lets go of just after the hinge stops goes too,
+    /// with no more word from the hinge.
+    @Test func aFoldLetGoAfterTheHingeStopsGoes() async throws {
+        let view = UIView()
+        var reserved: ClosedRange<CGFloat>? = 465...486
+        var said: [ClosedRange<CGFloat>?] = []
+        let watch = FoldWatch(view: view, wait: .milliseconds(20)) { said.append($0) }
+        watch.reserved = { _ in reserved }
+        watch.hingeMoved()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(watch.fold == 465...486)
+        watch.hingeMoved()
+        reserved = nil
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(watch.fold == nil)
+        #expect(said == [465...486, nil])
+        withExtendedLifetime(view) {}
+    }
+
+    /// The menu at the caret stays over the text, clear of a fold.
+    @Test func theMenuAtTheCaretStaysClearOfAFold() throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 527, height: 669))
+        defer { done() }
+        let view = c.textView
+        view.fold = 455...495
+        view.layoutIfNeeded()
+        let menu = CaretMenu(
+            anchor: 0, trigger: "/", palette: Palette.palettes["Indigo"]!["light"]!)
+        menu.place(in: view, caret: CGRect(x: 430, y: 100, width: 2, height: 20))
+        #expect(menu.view.frame.maxX <= 455)
+        view.fold = nil
+        view.layoutIfNeeded()
+        menu.place(in: view, caret: CGRect(x: 430, y: 100, width: 2, height: 20))
+        #expect(menu.view.frame.maxX > 455)
+    }
+
+    /// The keyboard a pose brings up leaves the page where it is: a caret
+    /// out of view comes to the text in view, as the text view would
+    /// otherwise scroll back to it.
+    @Test func theKeyboardAPoseBringsLeavesThePageWhereItIs() throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer {
+            _ = c.textView.resignFirstResponder()
+            done()
+        }
+        c.textView.window?.makeKey()
+        try scroll(c, to: "p20")
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.takeKeyboard()
+        #expect(c.text.paragraph(at: c.textView.selectedRange.location).info.id == "p20")
+        #expect(try top(c).block == "p20")
+    }
+
+    /// Text that had the keyboard as the display closed has it back on the
+    /// display that takes over, which UIKit doesn't do.
+    @Test func textHasTheKeyboardBackAfterTheDisplayCloses() async throws {
+        let c = long()
+        let (_, done) = try show(c)
+        defer { done() }
+        #expect(c.textView.isFirstResponder)
+        c.textView.displayClosed()
+        _ = c.textView.resignFirstResponder()
+        c.textView.frame.size.width = 466
+        c.textView.layoutIfNeeded()
+        for _ in 0..<40 where !c.textView.isFirstResponder {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(c.textView.isFirstResponder)
+    }
+
+    /// Text that didn't have the keyboard isn't given it by a new width.
+    @Test func aNewWidthLeavesTheKeyboardAwayIfItWas() async throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer { done() }
+        c.textView.displayClosed()
+        c.textView.frame.size.width = 466
+        c.textView.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!c.textView.isFirstResponder)
+    }
+
+    /// A page that can't be changed takes no keyboard.
+    @Test func aPageThatCantBeChangedTakesNoKeyboard() throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer { done() }
+        c.textView.isEditable = false
+        c.textView.takeKeyboard()
+        #expect(!c.textView.isFirstResponder)
+    }
+
+    /// A column too narrow to lay out in, as a split view gives for a
+    /// frame as it opens, leaves the page as it was.
+    @Test func aColumnNarrowForAFrameLeavesThePageAsItWas() throws {
+        let c = long()
+        let header = UIView()
+        c.textView.header = header
+        c.textView.measureHeader = { width in width < 100 ? 600 : 80 }
+        let done = try placed(c, CGSize(width: 466, height: 800))
+        defer { done() }
+        #expect(header.frame.height == 80)
+        c.textView.frame.size.width = 82
+        c.textView.layoutIfNeeded()
+        #expect(header.frame.height == 80)
+        #expect(c.textView.textContainerInset.top < 120)
+        c.textView.frame.size.width = 567
+        c.textView.layoutIfNeeded()
+        #expect(header.frame.width == 527)
+        #expect(header.frame.height == 80)
+    }
+
+    /// A page at its top stays there at a new width.
+    @Test func aNewWidthLeavesThePageAtItsTop() async throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer { done() }
+        let y = c.textView.contentOffset.y
+        c.textView.frame.size.width = 466
+        c.textView.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(c.textView.contentOffset.y == y)
+    }
+
+    /// A scroll held for a change from before a new width doesn't put the
+    /// page back on what is by then other text.
+    @Test func aScrollHeldOverANewWidthLeavesThePageWhereItKeptItself() async throws {
+        let c = long()
+        let done = try placed(c, CGSize(width: 669, height: 800))
+        defer { done() }
+        try scroll(c, to: "p20")
+        c.edits.keepingScroll { c.textView.frame.size.width = 466 }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(try top(c).block == "p20")
+    }
+
+    /// A keyboard that stays keeps the text clear as the view resizes under
+    /// it, and says nothing as it does: and one gone leaves no room.
+    @Test func aResizeKeepsTheTextClearOfAKeyboardThatStays() throws {
+        let c = editor([block("a", "paragraph", "One")])
+        let done = try placed(c, CGSize(width: 600, height: 800))
+        defer { done() }
+        let view = c.textView
+        func keyboard(_ name: Notification.Name, top: CGFloat) {
+            NotificationCenter.default.post(
+                name: name, object: nil,
+                userInfo: [
+                    UIResponder.keyboardFrameEndUserInfoKey: CGRect(
+                        x: 0, y: top, width: 600, height: 300)
+                ])
+        }
+        keyboard(UIResponder.keyboardWillChangeFrameNotification, top: 500)
+        #expect(view.contentInset.bottom == 300)
+        view.frame.size.height = 600
+        view.layoutIfNeeded()
+        #expect(view.contentInset.bottom == 100)
+        // A page that doesn't reach the keyboard leaves no room for it.
+        view.frame.size.height = 400
+        view.layoutIfNeeded()
+        #expect(view.contentInset.bottom == 0)
+
+        keyboard(UIResponder.keyboardWillHideNotification, top: 800)
+        view.frame.size.height = 800
+        view.layoutIfNeeded()
+        #expect(view.contentInset.bottom == 0)
     }
 
     /// settle waits for the keyboard to come up, as an iPhone's software

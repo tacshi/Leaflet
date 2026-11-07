@@ -68,7 +68,7 @@ Go core as the desktop app.
   line being said is lit, a long transcript moves on with it in a small window until
   opened, and transcripts can follow along. Audio plays at the
   speed you choose, skips 15 seconds each way, and shows in Control Center and
-  on the lock screen.
+  on the lock screen, as videos do.
 - Recording blocks, from the device's microphone, going on with the screen
   locked, transcribed on the device or through Soniox or an
   OpenAI-compatible endpoint, showing the last two lines of the words as

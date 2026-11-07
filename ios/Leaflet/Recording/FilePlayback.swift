@@ -237,7 +237,8 @@ final class FilePlayback {
 /// NowPlayingBar is a small player over the top of the page, for audio
 /// whose own has scrolled away: a transcript is read below it, and a block
 /// may still show when its player no longer does. A video has none, as it
-/// has picture in picture.
+/// has picture in picture, but shows in the system's media controls from
+/// here as audio does.
 struct NowPlayingBar: View {
     /// editor is the page's, whose audio it plays.
     weak var editor: EditorController?
@@ -346,12 +347,12 @@ struct NowPlayingBar: View {
                 return
             }
             guard let found = find(playing) else { return }
-            (block, title) = found
+            (block, title) = (found.id, found.title)
             NowPlaying.shared.show(
-                block: found.0, title: found.1, cover: Self.cover(playing),
+                block: found.id, title: found.title, cover: Self.cover(playing),
                 controls: Self.controls(playing))
             while !Task.isCancelled {
-                away = !(editor?.showsHead(ofBlock: found.0) ?? true)
+                away = found.audio && !(editor?.showsHead(ofBlock: found.id) ?? true)
                 read(playing)
                 NowPlaying.shared.sync(at: at, length: length, on: on)
                 try? await Task.sleep(for: .milliseconds(250))
@@ -384,19 +385,17 @@ struct NowPlayingBar: View {
         }
     }
 
-    /// find is the block of what plays, in this page, and its name; nil for
-    /// a video, or audio of another page.
-    private func find(_ playing: Playing) -> (String, String)? {
+    /// find is the block of what plays, in this page, its name, and whether
+    /// it is audio; nil for what plays in another page.
+    private func find(_ playing: Playing) -> (id: String, title: String, audio: Bool)? {
         switch playing {
         case .file(let id):
-            guard let node = editor?.node(ofBlock: id), FileBlock.kind(node) == "audio" else {
-                return nil
-            }
-            return (id, node.data?["name"]?.string ?? L.cardFile)
+            guard let node = editor?.node(ofBlock: id) else { return nil }
+            return (id, node.data?["name"]?.string ?? L.cardFile, FileBlock.kind(node) == "audio")
         case .recording(let id):
             guard let node = editor?.recordingBlock(id) else { return nil }
             let title = node.data?["title"]?.string ?? ""
-            return (node.id, title.isEmpty ? L.commonRecording : title)
+            return (node.id, title.isEmpty ? L.commonRecording : title, true)
         }
     }
 
@@ -485,12 +484,14 @@ struct FileBar: View {
     }
 }
 
-/// FileVideo shows a video file's picture, with the system's controls.
+/// FileVideo shows a video file's picture, with the system's controls. What
+/// it plays shows in the media controls from NowPlaying, with its name.
 struct FileVideo: UIViewControllerRepresentable {
     let player: AVPlayer
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let view = AVPlayerViewController()
+        view.updatesNowPlayingInfoCenter = false
         view.player = player
         return view
     }

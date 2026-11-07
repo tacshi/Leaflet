@@ -26,9 +26,22 @@ import (
 // Video blocks show the video's picture until play is clicked, and then
 // its site's player, or a player of the file, in a web view of its own.
 
-// videoSession is the website data of the video players, kept in memory
-// only, which goes as the last player closes.
-var videoSession = sync.OnceValue(mygo.NewEphemeralSession)
+// videoSession is the website data of the videos' sites' players, which
+// goes as the first of them opens and as the last closes. It isn't kept in
+// memory alone: a web view keeps what plays in such a session from the
+// system, which then shows its own name in place of the video's.
+var videoSession = sync.OnceValue(func() *mygo.Session {
+	s := mygo.NewSession("video-player")
+	clearVideoData(s)
+	return s
+})
+
+// clearVideoData lets go of what s's sites stored.
+func clearVideoData(s *mygo.Session) {
+	if err := s.ClearData(mygo.SiteDataAll); err != nil {
+		log.Printf("video players' data: %v", err)
+	}
+}
 
 // fileSession is the website data of the players of files, which have none,
 // as their pages run no script. It isn't kept in memory as a video's is: a
@@ -155,8 +168,8 @@ func (a *App) playVideo(id string, v doc.Video) {
 	if a.win == nil {
 		return
 	}
-	// The player's cookies and storage stay in memory, apart from the
-	// other web views'. Its videos may float in picture in picture, which
+	// The player's cookies and storage stay apart from the other web
+	// views', until it closes. Its videos may float in picture in picture, which
 	// macOS otherwise keeps to Safari. The wheel over the player, which
 	// does not scroll, scrolls the page around it.
 	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#000000", ScrollToContainer: true,
@@ -183,6 +196,7 @@ func (a *App) playVideo(id string, v doc.Video) {
 	})
 	page.LoadHTML(rendered.VideoPage(web.KnownVideoPart(v)), rendered.VideoOrigin)
 	a.videos[id] = wv
+	a.sitePlayers = true
 	a.playAlone(id, "")
 	// Started from its own controls, as after a pause, it plays alone too.
 	page.OnAudibleChanged(func(audible bool) {
@@ -413,6 +427,23 @@ func (a *App) closePlayer(id string) {
 	if a.now.block == id {
 		a.now = nowPlaying{}
 	}
+	a.clearSitePlayers()
+}
+
+// clearSitePlayers lets go of what the videos' sites stored, once none of
+// their players is left.
+func (a *App) clearSitePlayers() {
+	if !a.sitePlayers {
+		return
+	}
+	for id := range a.videos {
+		if a.fileMedia[id] == "" {
+			return
+		}
+	}
+	a.sitePlayers = false
+	// It waits for the web views, so not on the UI thread.
+	go clearVideoData(videoSession())
 }
 
 // seekVideo plays video block id of the open page from sec seconds in:

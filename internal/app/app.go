@@ -240,6 +240,8 @@ type App struct {
 	// and lineRow the line being said, and lineMoved that it just changed.
 	followLines, followRead bool
 	followAt                float32
+	// sitePlayers says a video's site's player opened since their data went.
+	sitePlayers bool
 	// playSpeed is how fast audio plays, 0 until read.
 	playSpeed float64
 	// systemAudio is what the system's media controls were last told, and

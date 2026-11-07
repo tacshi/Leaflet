@@ -242,6 +242,19 @@ final class EditorController: NSObject, UITextViewDelegate {
         textView.blocks.reset()
     }
 
+    /// stopPlaying stops what plays in blocks that left the page: its view
+    /// may stay a while, for an undo, and would go on being heard.
+    func stopPlaying(_ gone: [BlockInfo]) {
+        let ids = Set(gone.map(\.id))
+        VideoPlayback.shared.stop(ids)
+        FilePlayback.shared.stop(ids)
+        let recordings = gone.filter { $0.type == "recording" }
+            .compactMap { $0.data["recording_id"]?.string }
+        if let playing = Recorder.shared.playing, recordings.contains(playing) {
+            Recorder.shared.stopPlaying()
+        }
+    }
+
     /// emptyPageBlock is the block of an empty page, when it draws a
     /// marker or a card, with its font and the palette.
     var emptyPageBlock: (BlockInfo, UIFont, Palette)? {

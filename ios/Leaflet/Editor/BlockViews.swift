@@ -426,10 +426,16 @@ final class VideoPlayback {
         }
     }
 
-    /// stop takes the blocks of ids out of play, as their page closes.
+    /// stop takes the blocks of ids out of play, as their page closes or
+    /// they leave it, and silences their players.
     func stop(_ ids: Set<String>) {
+        let heard = !playing.isDisjoint(with: ids)
+        defer {
+            if heard, playing.isEmpty { WebPage.clearPlayers() }
+        }
         playing.subtract(ids)
         for id in ids {
+            views[id]?.view?.pauseAllMediaPlayback(completionHandler: nil)
             start[id] = nil
             loads[id] = nil
             seeks[id] = nil
@@ -877,14 +883,34 @@ struct WebPage: UIViewRepresentable {
 
     /// store keeps nothing past the app's run, shared by the blocks' pages.
     @MainActor static let store = WKWebsiteDataStore.nonPersistent()
+    /// playerStore is the videos' sites' players' apart, whose data goes as
+    /// the first opens and as the last closes. It isn't kept in memory alone:
+    /// a web view keeps what plays in such a store from the system, which
+    /// then shows its own name in place of the video's.
+    @MainActor private static let playerStore: WKWebsiteDataStore = {
+        let id = UUID(uuidString: "6F2B1C3A-8D44-4E7B-9A51-2C7E0D3F1B64") ?? UUID()
+        let store = WKWebsiteDataStore(forIdentifier: id)
+        clear(store)
+        return store
+    }()
+
+    private static func clear(_ store: WKWebsiteDataStore) {
+        store.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast
+        ) {}
+    }
+
+    /// clearPlayers lets go of what the videos' sites stored.
+    @MainActor static func clearPlayers() { clear(playerStore) }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         // One store for all of them: each store of its own starts a web
-        // process of its own, which is what made blocks slow to show.
-        config.websiteDataStore = Self.store
+        // process of its own, which is what made blocks slow to show. A
+        // video's player opens only as it is asked for.
+        config.websiteDataStore = player == nil ? Self.store : Self.playerStore
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         // Safari's own end of the user agent, which WebKit's lacks: the

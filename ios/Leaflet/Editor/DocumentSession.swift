@@ -259,6 +259,8 @@ final class DocumentSession {
             editor.style.apply(to: storage, in: span)
             editor.restyleNumbersAfter(span)
         }
+        // A block another device deleted stops being heard here too.
+        editor.stopPlaying(shown.filter { next[$0.key] == nil }.values.map(\.info))
         shown = next
         _ = text.takeTouched()
         _ = text.keepTrailing()
@@ -394,6 +396,8 @@ final class DocumentSession {
         sendTask = nil
         unsentSince = nil
         if text.uniqueIDs() { editor.layout.redrawEnd() }
+        // Before a block that went is forgotten as touched.
+        let before = shown
         forgetTouched()
         var next: [String: Shown] = [:]
         let content = DocumentMapper.content(
@@ -403,6 +407,7 @@ final class DocumentSession {
             next[info.id] = Shown(info: info, came: kept(info)?.came, node: n)
             return n
         }
+        editor.stopPlaying(before.filter { next[$0.key] == nil }.values.map(\.info))
         shown = next
         editor.onEdit?(content)
     }

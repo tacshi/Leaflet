@@ -3,8 +3,8 @@ import UIKit
 
 /// NowPlaying shows the audio of a page where the system shows media: Control
 /// Center and the lock screen. Those, and the keyboard's and headphones' media
-/// keys, then play, pause, skip, seek and change its speed. A video's own
-/// player does this for it.
+/// keys, then play, pause, skip, seek and change its speed. A site's video
+/// shows through its web view.
 @MainActor
 final class NowPlaying {
     /// Controls are what the system can do to the audio.

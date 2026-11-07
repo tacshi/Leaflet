@@ -263,7 +263,7 @@ func (a *App) previewBody(c *ui.Context, p *filePreview) {
 		a.previewImage(c, p, message)
 	case p.kind == doc.FileMarkdown:
 		ui.Scroll(c).Grow(1).FillWidth().Padding(20, pagePadX).Children(func() {
-			markdown.View(c, p.md, &p.mdo).Font(theme.PageFamily(p.md)).FontSize(15)
+			markdownView(c, p.md, &p.mdo).Font(theme.PageFamily(p.md)).FontSize(15)
 		})
 	case p.kind == doc.FileTable:
 		a.previewTable(c, p)

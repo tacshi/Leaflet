@@ -10,7 +10,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
-	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
@@ -640,7 +639,7 @@ func (a *App) historyDialog(c *ui.Context) {
 					a.historyChanges(c, h, content)
 				} else {
 					ui.Scroll(c).Grow(1).Padding(18, 24).Children(func() {
-						markdown.View(c, md, &a.md).Font(theme.PageFamily(md)).FontSize(15)
+						markdownView(c, md, &a.md).Font(theme.PageFamily(md)).FontSize(15)
 					})
 				}
 				ui.Row(c).Padding(12, 16).Justify(ui.End).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
@@ -1288,7 +1287,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 					// An answer in words shows as it comes.
 					if run.Answer != "" {
 						ui.Scroll(c).MaxHeight(320).Children(func() {
-							markdown.View(c, run.Answer, &a.md).FontSize(13.5)
+							markdownView(c, run.Answer, &a.md).FontSize(13.5)
 						})
 					}
 				}
@@ -1304,7 +1303,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)
 				ui.Scroll(c).MaxHeight(320).Children(func() {
-					markdown.View(c, ip.reply, &a.md).FontSize(13.5)
+					markdownView(c, ip.reply, &a.md).FontSize(13.5)
 				})
 				// A reply in words can go in the page; edits are there already.
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {

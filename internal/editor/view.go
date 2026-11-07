@@ -677,6 +677,12 @@ func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 	e.colorOpen = false
 }
 
+// menuChoice is a choice of the / or @ menu, among what a trigger found.
+type menuChoice struct {
+	trigger Trigger
+	key     string
+}
+
 // findMenuItems asks the host for the open menu's choices, as it has them
 // now.
 func (e *Editor) findMenuItems() {
@@ -722,7 +728,11 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					row := ui.ButtonBase(c.Key("item:"+item.Key)).Gap(10).Padding(6, 10).Radius(6).AlignItems(ui.Center).KeepFocus()
 					if i == e.menuIndex {
 						row.Background(pal.NavSelected)
-						if e.reveal == "" {
+						// Into view as the choice moves to it, and not
+						// again: in every frame, it would pull the list
+						// back from the wheel.
+						if at := (menuChoice{e.menuFor, item.Key}); e.menuShown != at {
+							e.menuShown = at
 							row.ScrollIntoView()
 						}
 					} else if row.Hovered() {

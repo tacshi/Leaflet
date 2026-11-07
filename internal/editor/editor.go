@@ -190,6 +190,8 @@ type Editor struct {
 
 	trigger   *Trigger
 	menuIndex int
+	// menuShown is the choice last brought into view.
+	menuShown menuChoice
 	// menuItems are the choices of the menu open, as the host gave them
 	// for menuFor.
 	menuItems []MenuItem

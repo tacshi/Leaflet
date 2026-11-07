@@ -35,6 +35,9 @@ final class EditorTextView: UITextView {
     static let readableWidth: CGFloat = 720
     /// narrowest is the least width the page lays out at.
     static let narrowest: CGFloat = 120
+    /// leastGlide is the least the page glides by with no animation going
+    /// on around it.
+    private static let leastGlide: CGFloat = 40
     /// fold is where a half folded display folds down the view, from left
     /// to right, or nil: the text keeps to one side of it.
     var fold: ClosedRange<CGFloat>? {
@@ -53,6 +56,9 @@ final class EditorTextView: UITextView {
     /// it goes on saying while typing on the display that took over.
     private var typingAsItClosed = false
     private var hingeClosed = true
+    /// pageLeft is where the text's left edge was last laid out in the
+    /// window, and how wide the window was.
+    private var pageLeft: (x: CGFloat, window: CGFloat)?
     /// laidOutWidth is the text's width the page was last laid out at.
     private var laidOutWidth: CGFloat = 0
     /// laidOutSize is the view's size as last laid out.
@@ -328,6 +334,39 @@ final class EditorTextView: UITextView {
     }
 
     override func layoutSubviews() {
+        // A column shown or hidden gives this view its new place at once.
+        // What is laid out here would then take an animation going on from
+        // where it was, going past where the page is going and coming
+        // back; and with none going on, as an inspector closes, the page
+        // would be there before the column has moved. All of it goes there
+        // at once instead, and the view glides there from where it was.
+        let animated = UIView.inheritedAnimationDuration > 0
+        guard bounds.width != laidOutSize.width, let was = pageLeft,
+            was.window == window?.bounds.width ?? 0,
+            window?.windowScene?.effectiveGeometry.isInteractivelyResizing != true
+        else {
+            layOutPage()
+            return
+        }
+        UIView.performWithoutAnimation { layOutPage() }
+        guard let now = pageLeft else { return }
+        let distance = was.x - now.x
+        // A column dragged wider moves the page by a little on each frame,
+        // which it follows as it goes.
+        guard abs(distance) > (animated ? 0.5 : Self.leastGlide) else { return }
+        UIView.performWithoutAnimation {
+            transform = CGAffineTransform(translationX: distance, y: 0)
+        }
+        if animated {
+            transform = .identity
+        } else {
+            UIView.animate(springDuration: 0.4, bounce: 0, options: .allowUserInteraction) {
+                self.transform = .identity
+            }
+        }
+    }
+
+    private func layOutPage() {
         super.layoutSubviews()
         // A split view opening gives its column next to no width for a
         // frame. Laid out at it, the title measures as a tower, and keeps
@@ -341,6 +380,7 @@ final class EditorTextView: UITextView {
             foldWatch.resized()
         }
         let (left, right) = Self.sides(width: bounds.width, fold: fold)
+        pageLeft = (convert(CGPoint(x: left, y: 0), to: nil).x, window?.bounds.width ?? 0)
         var top: CGFloat = 12
         if let header {
             let width = bounds.width - left - right

@@ -332,12 +332,18 @@ final class SceneModel {
     }
 
     func search() {
-        columns = .all
+        setColumns(.all)
         searchRequested += 1
     }
 
     func toggleSidebar() {
-        columns = columns == .detailOnly ? .all : .detailOnly
+        setColumns(columns == .detailOnly ? .all : .detailOnly)
+    }
+
+    /// setColumns slides the sidebar in or out, as its own button does: a
+    /// split view given its columns outside an animation jumps to them.
+    private func setColumns(_ visibility: NavigationSplitViewVisibility) {
+        withAnimation { columns = visibility }
     }
 }
 

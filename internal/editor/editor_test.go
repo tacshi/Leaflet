@@ -26,6 +26,8 @@ type fakeHost struct {
 	imageFailed bool
 	// follows are the share links the editor asked to follow.
 	follows []follow
+	// slash is what the / menu offers, when not the one heading.
+	slash []MenuItem
 }
 
 func (h *fakeHost) PageTitle(id string) string { return "Sub" }
@@ -42,6 +44,9 @@ func (h *fakeHost) CommentCount(string) int                     { return 0 }
 func (h *fakeHost) OpenComments(string)                         {}
 func (h *fakeHost) CommentPreview(*ui.Context, string)          {}
 func (h *fakeHost) SlashItems(q string) []MenuItem {
+	if h.slash != nil {
+		return h.slash
+	}
 	return []MenuItem{{Key: "h1", Label: "Heading 1"}}
 }
 func (h *fakeHost) MentionItems(q string) []MenuItem  { return nil }
@@ -198,6 +203,55 @@ func TestSlashMenu(t *testing.T) {
 	tt.Key(0, ui.KeyEnter)
 	if len(host.picked) != 1 || host.picked[0].Key != "h1" {
 		t.Errorf("picked %+v", host.picked)
+	}
+}
+
+// longMenu opens a / menu too long to show whole, of two groups.
+func longMenu(t *testing.T) (*Editor, *ui.Tester) {
+	t.Helper()
+	e, tt, host := setup(t)
+	tt.SetSize(900, 900)
+	for i := range 20 {
+		group := "First"
+		if i >= 12 {
+			group = "Second"
+		}
+		host.slash = append(host.slash, MenuItem{Key: strconv.Itoa(i), Label: fmt.Sprintf("Item %d", i), Hint: "Hint", Group: group})
+	}
+	tt.Type("/")
+	return e, tt
+}
+
+// The arrows bring the row they move to into view, past a group's header
+// too.
+func TestMenuKeysShowTheChoice(t *testing.T) {
+	e, tt := longMenu(t)
+	top, _ := tt.Find("Item 0")
+	for range 15 {
+		tt.Key(0, ui.KeyDown)
+		r, ok := tt.Find(fmt.Sprintf("Item %d", e.menuIndex))
+		if !ok || r.H == 0 || r.Y < top.Y-20 || r.Y+r.H > top.Y+320 {
+			t.Errorf("item %d at %+v, %v, under a menu from %v", e.menuIndex, r, ok, top.Y)
+		}
+	}
+}
+
+// The wheel scrolls the menu away from the choice, which stays where the
+// keys left it until they move it.
+func TestMenuScrollsByWheel(t *testing.T) {
+	e, tt := longMenu(t)
+	was, _ := tt.Find("Item 2")
+	tt.Scroll(was.X+10, was.Y, 0, 200)
+	tt.Frame()
+	if now, _ := tt.Find("Item 2"); now.H != 0 && now.Y > was.Y-150 {
+		t.Errorf("Item 2 from %+v to %+v: the menu went back to the choice", was, now)
+	}
+	if e.menuIndex != 0 {
+		t.Errorf("the wheel chose %d", e.menuIndex)
+	}
+	tt.Key(0, ui.KeyDown)
+	if r, _ := tt.Find("Item 1"); r.H != was.H {
+		t.Errorf("Item 1 at %+v: the keys left the choice out of view", r)
 	}
 }
 

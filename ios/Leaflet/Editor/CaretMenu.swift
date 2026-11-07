@@ -131,47 +131,53 @@ struct CaretMenuView: View {
                             .padding(14)
                     }
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                        if i == 0 || items[i - 1].group != item.group {
-                            Text(item.group)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(palette.textMuted)
-                                .padding(.horizontal, 14)
-                                .padding(.top, 8)
-                                .padding(.bottom, 4)
-                        }
-                        Button {
-                            pick(i)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: item.symbol)
-                                    .frame(width: 28, height: 28)
-                                    .background(palette.panel, in: .rect(cornerRadius: 6))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(item.label).font(.subheadline.weight(.medium))
-                                    if !item.hint.isEmpty {
-                                        Text(item.hint).font(.caption).foregroundStyle(
-                                            palette.textMuted
-                                        )
-                                        .lineLimit(1)
-                                    }
-                                }
-                                Spacer(minLength: 0)
+                        // One view for each item, its group's header with
+                        // it: scrollTo stops at the first of what an id
+                        // has, and a row after a header would stay out of
+                        // view.
+                        VStack(alignment: .leading, spacing: 0) {
+                            if i == 0 || items[i - 1].group != item.group {
+                                Text(item.group)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(palette.textMuted)
+                                    .padding(.horizontal, 14)
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 4)
                             }
-                            .foregroundStyle(palette.text)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                i == selected ? palette.accentSoft : .clear,
-                                in: .rect(cornerRadius: 8)
-                            )
-                            .contentShape(.rect)
+                            Button {
+                                pick(i)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: item.symbol)
+                                        .frame(width: 28, height: 28)
+                                        .background(palette.panel, in: .rect(cornerRadius: 6))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(item.label).font(.subheadline.weight(.medium))
+                                        if !item.hint.isEmpty {
+                                            Text(item.hint).font(.caption).foregroundStyle(
+                                                palette.textMuted
+                                            )
+                                            .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .foregroundStyle(palette.text)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    i == selected ? palette.accentSoft : .clear,
+                                    in: .rect(cornerRadius: 8)
+                                )
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .hoverEffect(.highlight)
+                            .padding(.horizontal, 4)
+                            .accessibilityAddTraits(i == selected ? .isSelected : [])
                         }
-                        .buttonStyle(.plain)
-                        .hoverEffect(.highlight)
-                        .padding(.horizontal, 4)
                         .id(item.id)
-                        .accessibilityAddTraits(i == selected ? .isSelected : [])
                     }
                 }
                 .padding(.vertical, 4)

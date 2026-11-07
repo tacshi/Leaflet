@@ -7,6 +7,8 @@ import SwiftUI
 struct NotesSheet: View {
     /// notes are the block's as the sheet opens.
     let notes: String
+    /// file says they are a file's, not a video's.
+    var file = false
     /// save gives the notes as the block keeps them (mobile.NormalizeNotes).
     let save: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -14,7 +16,9 @@ struct NotesSheet: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
-    private var kept: String { MobileNormalizeNotes(text) }
+    /// kept is text as the block would keep it, worked out once it pauses:
+    /// a transcript is long, and this goes through the core.
+    @State private var kept = ""
     /// tooLong counts code points, as the core and the server do: an emoji
     /// or a Devanagari syllable is one character here but several there.
     private var tooLong: Bool { kept.unicodeScalars.count > Int(MobileMaxNotes) }
@@ -41,13 +45,13 @@ struct NotesSheet: View {
                         Text(L.videoNotesTooLong(max: Int(MobileMaxNotes)))
                             .foregroundStyle(palette.dangerText)
                     } else {
-                        Text(L.videoNotesHint)
+                        Text(file ? L.cardNotesHint : L.videoNotesHint)
                     }
                 }
                 .listRowBackground(palette.surface)
             }
             .themedForm(palette)
-            .navigationTitle(L.videoNotesTitle)
+            .navigationTitle(file ? L.cardNotesTitle : L.videoNotesTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -65,7 +69,13 @@ struct NotesSheet: View {
         .interactiveDismissDisabled(dirty)
         .onAppear {
             text = notes
+            kept = MobileNormalizeNotes(notes)
             focused = true
+        }
+        .task(id: text) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            kept = MobileNormalizeNotes(text)
         }
     }
 }

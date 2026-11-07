@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/export"
 	"leaflet/internal/guard"
 	"leaflet/internal/macspeech"
 	"leaflet/internal/recording"
@@ -19,6 +21,49 @@ import (
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
+
+// exportRecordingAudio saves a recording's audio where the user chooses,
+// as it comes, for one that is not on this device any more, and never all
+// in memory.
+func (a *App) exportRecordingAudio(rec store.Recording, title string) {
+	a.saveExport(export.SafeName(title)+".wav", func(path string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		audio, err := a.rec.OpenAudio(ctx, rec)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = audio.Close() }()
+		return export.Save(path, audio)
+	})
+}
+
+// exportTranscript saves a recording's transcript as a file of format.
+func (a *App) exportTranscript(rec store.Recording, title, format string) {
+	text := recording.TranscriptFile(rec.Transcript, format)
+	a.saveExport(export.SafeName(title)+"."+format, func(path string) error {
+		return export.Save(path, strings.NewReader(text))
+	})
+}
+
+// saveExport asks where to save a file, by default named name, and has
+// save write it there, off the main thread, saying how it went.
+func (a *App) saveExport(name string, save func(path string) error) {
+	guard.Go(func() {
+		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
+		if path == "" {
+			return
+		}
+		err := save(path)
+		a.update(func() {
+			if err != nil {
+				a.toast(locales.HostErrorExport(err.Error()))
+			} else {
+				a.toast(locales.HostExported(filepath.Base(path)))
+			}
+		})
+	})
+}
 
 // startRecording records into the open page.
 func (a *App) startRecording(pageID string) {
@@ -174,7 +219,7 @@ func (a *App) play(rec store.Recording) {
 				return
 			}
 			pl.sound = snd
-			pl.p = snd.NewPlayer()
+			pl.p = snd.NewPlayer().SetSpeed(a.speed()).SetPreservesPitch(true)
 			if pl.from > 0 {
 				pl.p.Seek(pl.from)
 			}
@@ -270,10 +315,28 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					if m.Item(locales.RecInsertTranscript()).Disabled(len(rec.Transcript) == 0 || ro).Chosen() {
 						a.insertTranscript(n.ID, rec)
 					}
+					name := a.recordingTitle(n, rec, true)
+					if m.Item(locales.RecExportAudio()).Disabled(rec.LocalPath == "" && rec.AudioPath == "").Chosen() {
+						a.exportRecordingAudio(rec, name)
+					}
+					m.Submenu(locales.RecExportTranscript(), func(m *ui.Menu) {
+						for _, f := range []struct{ format, label string }{
+							{recording.TranscriptTxt, locales.RecExportText()},
+							{recording.TranscriptSrt, locales.RecExportSrt()},
+							{recording.TranscriptVtt, locales.RecExportVtt()},
+						} {
+							if m.Item(f.label).Chosen() {
+								a.exportTranscript(rec, name, f.format)
+							}
+						}
+					}).Disabled(len(rec.Transcript) == 0)
 					// The agent reads the transcript with the block.
 					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available() || ro).Chosen() {
 						a.openPageAgent()
 						a.hub.Chat(a.page.id, locales.RecSummarizePrompt(a.recordingTitle(n, rec, true)), []string{n.ID})
+					}
+					if m.Item(locales.CardFollowAlong()).Checked(a.followOn()).Disabled(len(rec.Transcript) == 0).Chosen() {
+						a.setFollow(!a.followOn())
 					}
 					label := locales.RecTranscribeAgain()
 					if len(rec.Transcript) == 0 {
@@ -334,16 +397,24 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			lines := v.lines
 			long := doc.FoldsTranscript(len(lines))
 			open := a.recOpen[n.ID]
-			if long && !open {
-				lines = lines[:doc.FoldedLines]
+			current := -1
+			sec, _, heard := a.playhead(c, n.ID)
+			if heard {
+				for i, s := range lines {
+					if float64(s.StartMs)/1000 > sec {
+						break
+					}
+					current = i
+				}
 			}
 			// A click on a line plays from it, so its text is not selectable;
 			// the menu's Copy transcript copies it.
 			col := timeColumn(c, []string{recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)}, 12)
 			ui.Column(c).Gap(8).Children(func() {
-				for i, s := range lines {
+				line := func(i int) ui.Element {
+					s := lines[i]
 					at := time.Duration(s.StartMs) * time.Millisecond
-					timedRow(c, i, recording.FormatDuration(at), col, 12, func() bool {
+					return timedRow(c, i, recording.FormatDuration(at), col, 12, func() bool {
 						if s.Speaker != "" {
 							ui.Text(c, locales.RecSpeaker(s.Speaker)).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
 						}
@@ -351,7 +422,23 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 						return false
 					}, func() { a.seek(rec, at) })
 				}
-				if long && foldButton(c, len(v.lines), open, col) {
+				if long && !open {
+					a.rollingLines(c, n.ID, current, len(lines), func(i int) ui.Element {
+						row := line(i)
+						if i == current {
+							lightLine(c, row)
+						}
+						return row
+					})
+				} else {
+					for i := range lines {
+						row := line(i)
+						if i == current {
+							a.markLine(c, row, n.ID, i)
+						}
+					}
+				}
+				if long && foldButton(c, len(lines), open, col) {
 					if a.recOpen == nil {
 						a.recOpen = map[string]bool{}
 					}
@@ -448,8 +535,16 @@ func (a *App) seek(rec store.Recording, t time.Duration) {
 }
 
 func (a *App) scrubber(c *ui.Context, pl *player) {
+	a.playerBar(c, pl.p.Position(), pl.p.Duration(), func(t time.Duration) {
+		pl.p.Seek(t)
+		a.watchSystemAudio()
+	})
+}
+
+// scrubBar shows where audio of length dur is, at pos, for a drag to move
+// by seek.
+func (a *App) scrubBar(c *ui.Context, pos, dur time.Duration, seek func(time.Duration)) {
 	pal := theme.Of(c)
-	pos, dur := pl.p.Position(), pl.p.Duration()
 	frac := 0.0
 	if dur > 0 {
 		frac = float64(pos) / float64(dur)
@@ -463,7 +558,7 @@ func (a *App) scrubber(c *ui.Context, pl *player) {
 			p.Fill(ui.Rect{X: r.X, Y: y, W: r.W * float32(v), H: 4}, pal.Accent, 2)
 			p.Fill(ui.Rect{X: r.X + r.W*float32(v) - 6, Y: r.Y + r.H/2 - 6, W: 12, H: 12}, pal.Accent, 6)
 		}).Changed() {
-			pl.p.Seek(time.Duration(v * float64(dur)))
+			seek(time.Duration(v * float64(dur)))
 		}
 		ui.Text(c, recording.FormatDuration(dur)).FontSize(12).TextColor(pal.TextMuted).FontFeatures("tnum")
 	})

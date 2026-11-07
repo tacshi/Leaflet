@@ -28,6 +28,7 @@ import (
 	"leaflet/internal/guard"
 	"leaflet/internal/library"
 	"leaflet/internal/live"
+	"leaflet/internal/mediaserver"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -221,12 +222,46 @@ type App struct {
 	embedBuilt  map[string]bool
 	// videos are the players of the open page's videos that were played;
 	// videoInfo what each video's site said about it, by provider and ID.
-	videos    map[string]*mygo.WebView
+	videos map[string]*mygo.WebView
+	// media serves the files players play, and fileMedia is what it serves
+	// for a file block's player, by block; fileFailed are the file blocks
+	// whose player could not read their file.
+	media      mediaserver.Server
+	fileMedia  map[string]string
+	fileFailed map[string]bool
+	// now is the audio that started last, with fileNow where a file's has
+	// got to, and fileWatch stops what asks each file's player how it is.
+	now       nowPlaying
+	fileNow   fileStatus
+	fileNowAt time.Time
+	fileWatch map[string]chan struct{}
+	// followLines says transcripts follow the audio, as read once by
+	// followRead; followAt is where that last scrolled the page, or -1, line
+	// and lineRow the line being said, and lineMoved that it just changed.
+	followLines, followRead bool
+	followAt                float32
+	// playSpeed is how fast audio plays, 0 until read.
+	playSpeed float64
+	// systemAudio is what the system's media controls were last told, and
+	// systemWatch says a check on them is due, systemHeard that the app
+	// listens to them.
+	systemAudio              systemAudio
+	systemWatch, systemHeard bool
+	line                     lineKey
+	lineRow                  ui.Handle
+	lineMoved                bool
+	// rolls are the windows of long transcripts, by block.
+	rolls map[string]*roll
+	// fileToTranscribe is the file block whose notes a transcript is to
+	// replace, while that is asked.
+	fileToTranscribe string
+	// preview is the file shown in the window, or nil.
+	preview   *filePreview
 	videoInfo webAnswers[videoInfo]
 	// notesRead are videos' notes read in lines, by their text, and
 	// notesOpen the video blocks whose long notes show whole, by block ID;
 	// on the main thread only.
-	notesRead map[string][]doc.NoteLine
+	notesRead map[string]readNotes
 	notesOpen map[string]bool
 	// linkInfo is what each link card's page said about itself, by link.
 	linkInfo webAnswers[web.LinkInfo]
@@ -1066,6 +1101,7 @@ func (a *App) follow() {
 
 // openPage shows a page.
 func (a *App) openPage(id string) {
+	a.closePreview()
 	if a.route.Kind == "page" && a.route.ID == id {
 		// Open already, as from a conflict in Settings: it shows.
 		a.settingsOpen = false

@@ -217,7 +217,7 @@ func (a *App) tree(c *ui.Context) {
 		case "file":
 			for _, f := range a.files {
 				if f.ID == id {
-					a.openFile(f)
+					a.previewFile(f)
 				}
 			}
 		}
@@ -401,6 +401,9 @@ func (a *App) treeItem(c *ui.Context, key string) {
 		})
 		row.PopoverMenu(func(m *ui.Menu) {
 			if m.Item(locales.CommonOpen()).Chosen() {
+				a.previewFile(f)
+			}
+			if m.Item(locales.CardOpenExternally()).Chosen() {
 				a.openFile(f)
 			}
 			if m.Item(locales.SidebarDeleteFile()).Danger().Chosen() {

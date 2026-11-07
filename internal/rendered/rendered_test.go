@@ -88,3 +88,58 @@ func TestNoRTCGuardsFramesReached(t *testing.T) {
 		}
 	}
 }
+
+// A file's player plays the file beside it, from a time, and its script
+// reaches it as a video's does.
+func TestFilePlayerPage(t *testing.T) {
+	audio := FilePlayerPage(false, 83)
+	if !strings.Contains(audio, `<audio src="media#t=83" controls autoplay`) {
+		t.Errorf("audio: %s", audio)
+	}
+	if video := FilePlayerPage(true, 0); !strings.Contains(video, `<video src="media" controls`) {
+		t.Errorf("video: %s", video)
+	}
+	if !strings.Contains(VideoSeek(doc.Video{Provider: "file"}, 5), `"iframe, video, audio"`) {
+		t.Error("a seek misses an audio bar")
+	}
+	if strings.Contains(FilePlayerCSP, "script-src") || !strings.Contains(FilePlayerCSP, "media-src 'self'") ||
+		!strings.Contains(FilePlayerCSP, "img-src 'self'") {
+		t.Errorf("policy %s", FilePlayerCSP)
+	}
+}
+
+// A file's player gives the system its name, quoted, and its cover.
+func TestFileMetadata(t *testing.T) {
+	got := FileMetadata(`Mum's "talk"</script>`)
+	if !strings.Contains(got, `"Mum's \"talk\"\u003c/script\u003e"`) || !strings.Contains(got, `{src: "cover"}`) {
+		t.Errorf("metadata %s", got)
+	}
+}
+
+// A file's player is told which to do, not to change.
+func TestFilePlaying(t *testing.T) {
+	if got := FilePlaying(true); !strings.Contains(got, "el.play()") {
+		t.Errorf("play %s", got)
+	}
+	if got := FilePlaying(false); !strings.Contains(got, "el.pause()") {
+		t.Errorf("pause %s", got)
+	}
+}
+
+// A file's player keeps its speed through loading.
+func TestFileSpeed(t *testing.T) {
+	got := FileSpeed(1.5)
+	if !strings.Contains(got, "el.defaultPlaybackRate = 1.50") || !strings.Contains(got, "el.playbackRate = 1.50") {
+		t.Errorf("speed %s", got)
+	}
+}
+
+// A file's player can be told where to go without starting or stopping.
+func TestFileSeekTo(t *testing.T) {
+	if got := FileSeekTo(83.5); !strings.Contains(got, "el.currentTime = 83.500") || strings.Contains(got, "play") {
+		t.Errorf("seek %s", got)
+	}
+	if got := FileSeekTo(-1); !strings.Contains(got, "el.currentTime = 0.000") {
+		t.Errorf("seek %s", got)
+	}
+}

@@ -673,7 +673,13 @@ func (s *pubServer) Image(path, typ string) string {
 
 func (s *pubServer) File(path, name string) string {
 	served := strconv.Itoa(len(s.files)+1) + servedExt(name)
-	s.files[served] = pubFile{typ: "application/octet-stream", path: path, name: name}
+	// Audio and video say what they are, for the page's players; anything
+	// else is bytes to download.
+	typ := "application/octet-stream"
+	if t := doc.FileMediaType(name, ""); strings.HasPrefix(t, "audio/") || strings.HasPrefix(t, "video/") {
+		typ = t
+	}
+	s.files[served] = pubFile{typ: typ, path: path, name: name}
 	return s.prefix + "f/" + served
 }
 
@@ -1188,16 +1194,30 @@ func pubEmbedPage(src string) string {
 	return rendered.LeadWith(meta, src)
 }
 
-// recordingScript plays a recording from a line of its transcript, as a
-// click on one does in the app, unless the click ends selecting text.
+// recordingScript plays a recording from a line of its transcript, or from
+// a link to a moment of it, as a click on one does in the app, unless the
+// click ends selecting text. A link to one elsewhere in the page shows it
+// first.
 const recordingScript = `document.addEventListener("click", function (e) {
-  var line = e.target.closest && e.target.closest(".recording [data-start]");
   var sel = getSelection();
-  if (!line || sel && !sel.isCollapsed) return;
-  var audio = line.closest(".recording").querySelector("audio");
-  if (!audio) return;
-  audio.currentTime = +line.dataset.start;
-  audio.play();
+  if (!e.target.closest || sel && !sel.isCollapsed) return;
+  var line = e.target.closest(".recording [data-start]");
+  if (line) {
+    var audio = line.closest(".recording").querySelector("audio");
+    if (!audio) return;
+    audio.currentTime = +line.dataset.start;
+    audio.play();
+    return;
+  }
+  var a = e.target.closest("a[data-media]");
+  var fig = a && document.getElementById("b-" + a.dataset.media);
+  var el = fig && fig.querySelector("audio, video");
+  if (!el) return;
+  e.preventDefault();
+  for (var d = fig.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
+  fig.scrollIntoView({behavior: "smooth", block: "center"});
+  el.currentTime = +a.dataset.t;
+  el.play();
 });
 `
 

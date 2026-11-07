@@ -78,9 +78,9 @@ metadata:
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
-| `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 20,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
+| `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
-| `file` | `file_id`, `url`, `name`, `size`, `mime` | a file kept with the page, as a card |
+| `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1" |
 | `math_equation` | `formula` | TeX, drawn in display style by KaTeX |
 | `diagram` | `source` | Mermaid, drawn by Pele |
 | `recording` | `recording_id`, `title`, `duration_ms` | transcript lives in `recordings` |
@@ -143,6 +143,9 @@ loop with the same tools. Tool definitions live in
 }
 ```
 
+`replace_block` also takes `{ "type": "file", "file": { "notes": "0:05 …" } }`
+on a file block: only its notes change. No tool makes a file block.
+
 ### Position
 
 One of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
@@ -184,7 +187,7 @@ the same on the client and the server: `text` only for text blocks and
 code (a code block's is its code, not markdown); `chart` is
 `{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
 `image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
-`{url, title, description}`; `file` `{name, mime, size}`; `recording`
+`{url, title, description}`; `file` `{name, mime, size, notes?}`; `recording`
 `{recording_id, title, duration_ms}`, as far as the block has them, with
 its `transcript` when it has one, and the recording is the page's; the
 server adds the recording's `status`, and its `duration_ms` when the block
@@ -463,6 +466,8 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | | `{ action: "delete", id }` | `{ ok }` |
 | `stt` | `{ action: "soniox_key" }` | `{ api_key, expires_at }` (short-lived Soniox key) |
 | | `{ action: "transcribe", recording_id, language? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
+| | `{ action: "transcribe", file_id, language? }` | `{ segments: [...] }`, saved in no row |
+| | `{ action: "transcribed", file_id }` | `{ ok }` |
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
 
@@ -501,6 +506,17 @@ leaves nothing to pick up, and is refused as too long for the server, unless
 the call's worker cost it 10 seconds of its time or more, or was shutting
 down: that says nothing of the recording, and answers 504 with the same
 `code`, for the app to ask again, on a worker with its time.
+
+`transcribe` of a `file_id` is of an audio file in the `files` bucket: the
+app puts its segments in the block's `notes`. Someone who can only view its
+page is refused (403) before any of their key is spent, and a file that is
+not up yet, or gone, is 404. A call takes the file for its caller, whose key
+it spends (`stt_file_jobs`, by file and caller), so a second call of theirs
+is refused (409); one the platform stopped is taken again as a recording's
+is. No row holds the transcript, so what Soniox made stays there until the
+app says it has it with `transcribed`: an app stopped before the answer
+reached it asks again for nothing. Told nothing, it goes by Soniox's
+retention. `still_transcribing` is as for a recording.
 
 `transcribe` streams the audio from Storage to the transcriber as it reads
 it, never holding a recording whole, in a multipart body with no length

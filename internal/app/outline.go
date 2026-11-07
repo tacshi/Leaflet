@@ -57,13 +57,14 @@ func (a *App) openBlock(pageID, blockID string) {
 // plays a video or a recording from at seconds in, for a link to a moment
 // of one; at is -1 for none.
 func (a *App) openLink(pageID, blockID string, at int) {
+	a.closePreview()
 	a.openBlock(pageID, blockID)
 	if at < 0 || a.page == nil || a.page.id != pageID {
 		return
 	}
 	switch n := a.page.editor.Content.Find(blockID); {
 	case n == nil:
-	case n.Type == "video":
+	case n.Type == "video", n.Type == "file":
 		a.seekVideo(blockID, at)
 	case n.Type == "recording":
 		if rec, err := a.st.Recording(n.Str("recording_id")); err == nil {

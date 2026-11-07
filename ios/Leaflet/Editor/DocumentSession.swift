@@ -129,11 +129,15 @@ final class DocumentSession {
     /// it (held), and the editor goes on showing what it showed, over
     /// which the edits it sends are made.
     @discardableResult
-    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool) -> Bool {
+    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool, notesOf: String? = nil)
+        -> Bool
+    {
         if composing {
             held = (content, tinted)
             return false
         }
+        // A transcript is one step to undo, back to the notes it replaced.
+        let notesBefore = notesOf.flatMap { editor.node(ofBlock: $0)?.data }
         held = nil
         defer { editor.reportBlank() }
         updating = true
@@ -264,6 +268,9 @@ final class DocumentSession {
         // undoes it, its ops taken back over what came since.
         if byAgent, let undo = textView.undoManager, editor.onUndoRun != nil {
             undo.registerUndo(withTarget: editor) { c in c.onUndoRun?() }
+        }
+        if let notesOf, let notesBefore, let undo = textView.undoManager {
+            undo.registerUndo(withTarget: editor) { c in c.setData(notesBefore, ofBlock: notesOf) }
         }
         editor.edits.tellKeyboard()
         if let menu, let anchor {

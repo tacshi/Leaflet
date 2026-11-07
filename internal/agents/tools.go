@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -49,7 +50,7 @@ var blockSchema = map[string]any{
 	"type":        "object",
 	"description": "A block to write.",
 	"properties": map[string]any{
-		"type":      map[string]any{"type": "string", "enum": doc.AgentTypes},
+		"type":      map[string]any{"type": "string", "enum": append(slices.Clone(doc.AgentTypes), "file")},
 		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, [text](url), and text color and highlight as <span style=\"color:#ef4444;background:#fde68a\">text</span>, either alone, in hex, not nested. Keep the spans read_page shows when rewriting text. No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
 		"language":  map[string]any{"type": "string", "description": "A code block's language, such as go, python or typescript."},
 		"tone":      map[string]any{"type": "string", "enum": []string{"info", "tip", "warning", "danger"}, "description": "A callout's tone."},
@@ -83,6 +84,8 @@ var blockSchema = map[string]any{
 			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's link on its site, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"},
 				"notes": map[string]any{"type": "string", "description": "Plain-text notes shown under the video, a line each, no Markdown: a line that starts with a time, as 0:00 or 1:02:03, plays the video from there when clicked. For its summary, chapters or key moments."}},
 			"required": []string{"url"}},
+		"file": map[string]any{"type": "object", "description": "For replace_block on a file block, keeping the file itself: its notes. No tool makes a new file.",
+			"properties": map[string]any{"notes": map[string]any{"type": "string", "description": "Plain-text notes shown under the file, a line each, no Markdown: for an audio or video file, a line that starts with a time, as 0:00 or 1:02:03, plays it from there when clicked."}}},
 	},
 	"required": []string{"type"},
 }
@@ -1397,6 +1400,9 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 // replacement is the block spec gives to replace prev with.
 func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, error) {
 	id := prev.ID
+	if spec["type"] == "file" && prev.Type == "file" {
+		return doc.FileWithNotes(prev, spec)
+	}
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err

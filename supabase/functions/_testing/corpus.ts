@@ -676,6 +676,7 @@ export function block(r: Random, ids: Ids, odd: boolean, depth = 0): NodeJSON {
       if (r.chance(0.5)) data.url = v(["file:///x/r.pdf"]);
       if (r.chance(0.5)) data.mime = v(["application/pdf"]);
       if (r.chance(0.5)) data.size = v([1234, 0]);
+      if (r.chance(0.5)) data.notes = v(["0:00 Intro\n1:23 Caches", "Said 字"]);
       break;
     case "math_equation":
       data.formula = v(["e^{i\\pi}+1=0", " ", ""]);

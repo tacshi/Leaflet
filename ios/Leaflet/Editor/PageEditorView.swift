@@ -162,7 +162,10 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
                     // A composition holds the change, which the editor
                     // doesn't show: what is composed goes over the rev it
                     // does, for the core to merge the two.
-                    if controller.update(content, tinted: model.tinted, byAgent: model.byAgent) {
+                    if controller.update(
+                        content, tinted: model.tinted, byAgent: model.byAgent,
+                        notesOf: model.notesOf)
+                    {
                         model.shown = model.rev
                     }
                     tinted = model.tinted

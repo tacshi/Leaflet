@@ -163,14 +163,25 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				}
 				block(indent, link(title, n.Str("url")))
 				if v, ok := ParseVideoURL(n.Str("url")); ok {
-					block(indent, notesMarkdown(n.Str("notes"), v))
+					block(indent, notesMarkdown(n.Str("notes"), func(at int) string { return v.At(at).WatchURL() }))
 				}
 			case "math_equation":
 				block(indent, mathMarkdown(n.Str("formula")))
 			case "diagram":
 				block(indent, CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "mermaid", "delta": Delta{{Text: n.Str("source")}}.JSON()}}))
-			case "link_preview", "file":
+			case "link_preview":
 				block(indent, link(cardTitle(n), n.Str("url")))
+			case "file":
+				block(indent, link(cardTitle(n), n.Str("url")))
+				// Its times link into the file where it has an address that
+				// goes anywhere, as a zip's does.
+				to := href(n.Str("url"))
+				block(indent, notesMarkdown(ShownNotes(n), func(at int) string {
+					if to == "" || strings.HasPrefix(to, "file:") {
+						return ""
+					}
+					return to + "#t=" + strconv.Itoa(at)
+				}))
 			case "recording":
 				name := msgs.CommonRecording()
 				if title := n.Str("title"); title != "" {
@@ -205,17 +216,24 @@ func mathMarkdown(formula string) string {
 	return "$$\n" + formula + "\n$$"
 }
 
-// notesMarkdown writes a video's notes as a list, a line an item, its
-// times links to the video's site at each, which plays it from there. A
-// line's text that would start another kind of block in its item, or
-// make the item a rule, is escaped, as TextMarkdown escapes a list item's.
-func notesMarkdown(notes string, v Video) string {
+// notesMarkdown writes a block's notes as a list, a line an item, its times
+// links to where to gives for each, which plays from there, or plain where
+// it gives none. A line's text that would start another kind of block in
+// its item, or make the item a rule, is escaped, as TextMarkdown escapes a
+// list item's.
+func notesMarkdown(notes string, to func(at int) string) string {
+	time := func(text string, at int) string {
+		if dest := to(at); dest != "" {
+			return "[" + escapeText(text) + "](" + LinkDestination(dest) + ")"
+		}
+		return escapeText(text)
+	}
 	var lines []string
 	for _, l := range NoteLines(notes) {
 		var b strings.Builder
 		for _, p := range l.Parts {
 			if p.At >= 0 {
-				b.WriteString("[" + escapeText(p.Text) + "](" + LinkDestination(v.At(p.At).WatchURL()) + ")")
+				b.WriteString(time(p.Text, p.At))
 			} else {
 				b.WriteString(escapeText(p.Text))
 			}
@@ -223,7 +241,7 @@ func notesMarkdown(notes string, v Video) string {
 		text := b.String()
 		switch {
 		case l.At >= 0:
-			text = strings.TrimRight("["+Clock(l.At)+"]("+LinkDestination(v.At(l.At).WatchURL())+") "+text, " ")
+			text = strings.TrimRight(time(Clock(l.At), l.At)+" "+text, " ")
 		default:
 			if text = EscapeBlockStart(text); IsRule("- " + text) {
 				text = `\` + text

@@ -36,6 +36,7 @@ func (h *fakeHost) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
+func (h *fakeHost) File(c *ui.Context, n *doc.Node, w float32)  {}
 func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)        {}
 func (h *fakeHost) CommentCount(string) int                     { return 0 }
 func (h *fakeHost) OpenComments(string)                         {}
@@ -49,6 +50,9 @@ func (h *fakeHost) Comment(id, quote string)          {}
 func (h *fakeHost) AskAgent(id, quote string)         {}
 func (h *fakeHost) EditBlock(id string)               { h.edited = append(h.edited, id) }
 func (h *fakeHost) VideoMenu(m *ui.Menu, n *doc.Node) { m.Item("Video item for " + n.ID) }
+func (h *fakeHost) FileMenu(_ *ui.Context, m *ui.Menu, n *doc.Node) {
+	m.Item("File item for " + n.ID)
+}
 func (h *fakeHost) OpenBlock(page, id string, at int) {
 	if at >= 0 {
 		id += "@" + strconv.Itoa(at)

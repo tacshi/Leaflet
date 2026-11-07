@@ -21,6 +21,8 @@ struct RecordingState: Codable, Equatable, Sendable {
     /// said this.
     var elapsedMs: Int64 = 0
     var transcribing: [String] = []
+    /// transcribingFiles are the file blocks being transcribed.
+    var transcribingFiles: [String] = []
     /// finishing are the recordings transcribed live, now getting their
     /// times.
     var finishing: [String] = []
@@ -37,6 +39,7 @@ struct RecordingState: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case active, starting, paused, id, levels, engine, error, transcribing, finishing,
             testing, heard
+        case transcribingFiles = "transcribing_files"
         case pageID = "page_id"
         case blockID = "block_id"
         case liveText = "live_text"
@@ -89,6 +92,12 @@ struct RecordingRow: Codable, Equatable, Sendable {
         case createdMs = "created_ms"
         case pageTitle = "page_title"
     }
+}
+
+/// TranscriptFile is a recording's transcript as a file to share.
+struct TranscriptFile: Decodable, Sendable {
+    var name: String
+    var text: String
 }
 
 /// Transcript is a recording's transcript as blocks, a paragraph a line,
@@ -206,6 +215,25 @@ extension CoreClient {
             try Self.answer { e in core.recordingAudio(id, token: token, error: e) }
         }
         return URL(fileURLWithPath: path)
+    }
+
+    /// recordingTranscriptFile returns a recording's transcript as a file
+    /// of format, txt, srt or vtt, named for title.
+    nonisolated(nonsending) func recordingTranscriptFile(
+        _ id: String, title: String, format: String
+    )
+        async throws -> TranscriptFile
+    {
+        try await call(TranscriptFile.self) { core in
+            try Self.answer { e in
+                core.recordingTranscriptFile(id, title: title, format: format, error: e)
+            }
+        }
+    }
+
+    /// transcribeFile transcribes audio file block of page into its notes.
+    nonisolated(nonsending) func transcribeFile(page: String, block: String) async throws {
+        try await call { try $0.transcribeFile(page, blockID: block) }
     }
 
     nonisolated(nonsending) func retranscribe(_ id: String) async throws {

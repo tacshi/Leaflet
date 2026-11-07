@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,9 +44,14 @@ func Find(dir string) *Helper {
 	return &Helper{path: path}
 }
 
-// File transcribes the WAV file at path.
+// File transcribes the audio file at path: a recording's, in half an hour
+// at the most, or another's, of any length.
 func (h *Helper) File(path, language string) ([]store.Segment, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	wait := 30 * time.Minute
+	if !strings.EqualFold(filepath.Ext(path), ".wav") {
+		wait = 3 * time.Hour
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.path, "file", language, path) // #nosec G204 -- the app's own helper, on the recording's own file.
 	out, err := cmd.StdoutPipe()

@@ -25,6 +25,10 @@ type Pages struct {
 	// or taken out of it as its subpage moved: the page moved all the
 	// same.
 	Notify func(message string)
+	// Step, on an app that keeps its own undo steps, is told a block of an
+	// open page was written apart from its editor, as a step of its own; it
+	// may be nil.
+	Step func(pageID, blockID string)
 }
 
 // open returns page id as the app has it open, when its content could be

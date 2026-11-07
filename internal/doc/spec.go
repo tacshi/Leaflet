@@ -241,10 +241,12 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			return nil, err
 		}
 		n.Data = vn.Data
-		notes, _ := v["notes"].(string)
-		if notes = NormalizeNotes(notes); utf8.RuneCountInString(notes) > MaxNotes {
-			return nil, toolErr("A video's notes take at most %d characters.", MaxNotes)
-		} else if notes != "" {
+		raw, _ := v["notes"].(string)
+		notes, err := checkedNotes(raw, "video")
+		if err != nil {
+			return nil, err
+		}
+		if notes != "" {
 			n.Data["notes"] = notes
 		}
 	}
@@ -684,7 +686,7 @@ func BlockViews(c *Content) []map[string]any {
 			case "link_preview":
 				v["link"] = present(n, "url", "title", "description")
 			case "file":
-				v["file"] = present(n, "name", "mime", "size")
+				v["file"] = present(n, "name", "mime", "size", "notes")
 			case "recording":
 				v["recording"] = present(n, "recording_id", "title", "duration_ms")
 			case "subpage":
@@ -704,6 +706,15 @@ func BlockViews(c *Content) []map[string]any {
 
 // present are the keys of a block's data it has, with their values: one
 // it lacks is left out, not null, as the server's views have it.
+// checkedNotes is notes as a block of kind, "video" or "file", keeps them,
+// or why it can't.
+func checkedNotes(notes, kind string) (string, error) {
+	if notes = NormalizeNotes(notes); utf8.RuneCountInString(notes) > MaxNotes {
+		return "", toolErr("A %s's notes take at most %d characters.", kind, MaxNotes)
+	}
+	return notes, nil
+}
+
 func present(n *Node, keys ...string) map[string]any {
 	out := map[string]any{}
 	for _, k := range keys {

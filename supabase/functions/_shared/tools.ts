@@ -8,6 +8,7 @@ import {
   collectIds,
   deltaOf,
   emptyContent,
+  fileWithNotes,
   LIST_TYPES,
   type NodeJSON,
   type PageContent,
@@ -190,7 +191,7 @@ const writeSchema = {
 const blockSpecSchema = {
   type: "object",
   properties: {
-    type: { type: "string", enum: [...SPEC_TYPES] },
+    type: { type: "string", enum: [...SPEC_TYPES, "file"] },
     text: {
       type: "string",
       description:
@@ -218,6 +219,17 @@ const blockSpecSchema = {
         },
       },
       required: ["url"],
+    },
+    file: {
+      type: "object",
+      description: "For replace_block on a file block, keeping the file itself: its notes. No tool makes a new file",
+      properties: {
+        notes: {
+          type: "string",
+          description:
+            "Plain-text notes shown under the file, a line each, no Markdown: for an audio or video file, a line that starts with a time, as 0:00 or 1:02:03, plays it from there when clicked",
+        },
+      },
     },
     link: {
       type: "object",
@@ -1878,7 +1890,8 @@ export class PageEditSession {
     if (!isObject(rawSpec)) throw new ToolError("block must be a BlockSpec object");
     const spec = rawSpec as unknown as BlockSpec;
     const at = this.locate(id);
-    const node = specToNode(spec, this.specOptions(), id);
+    const file = spec.type === "file" && at.node.type === "file";
+    const node = file ? fileWithNotes(at.node, spec) : specToNode(spec, this.specOptions(), id);
     this.checkUrls([node]);
     const op = this.swap(at, node, this.keepsChildren(at, spec, node));
     return outcome({ id }, [op], [{ summary: summaryFor("Rewrote", [node]), blockIds: [id] }]);

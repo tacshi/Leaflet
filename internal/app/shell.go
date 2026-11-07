@@ -66,7 +66,9 @@ func (a *App) view(c *ui.Context) {
 			a.saveWidthsSoon()
 		}
 	}
-	if !a.settings.SidebarOpen {
+	if a.preview != nil {
+		a.previewView(c)
+	} else if !a.settings.SidebarOpen {
 		page()
 	} else {
 		// MyGo's split: its line, dragged or moved with the arrows,
@@ -92,6 +94,7 @@ func (a *App) view(c *ui.Context) {
 		ui.WebView(c.Key("rec-capture"), v).Absolute().Left(0).Top(0).Size(1, 1).Opacity(0.01).PassThrough()
 	}
 	a.dialogs.view(c, a)
+	a.replaceNotesAlert(c)
 	if a.settingsOpen {
 		a.settingsDialog(c)
 	}

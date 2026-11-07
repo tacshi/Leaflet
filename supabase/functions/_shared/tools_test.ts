@@ -1059,6 +1059,27 @@ Deno.test("link cards and videos read as their links", async () => {
   assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
 });
 
+// A file's notes are all an agent writes of it (doc.FileWithNotes), and no
+// tool makes a file.
+Deno.test("a replace writes a file's notes and nothing else of it", async () => {
+  const file = { id: "f", type: "file", data: { file_id: "f1", name: "call.m4a", size: 3 } };
+  const content = pageOf(file);
+  const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: false });
+  const out = await session.call("replace_block", {
+    id: "f",
+    block: { type: "file", file: { notes: " 0:05 Hello\r\n", name: "evil.exe" } },
+  });
+  assertEquals(out.result, { id: "f" });
+  assertEquals(session.content.document.children![0].data, {
+    file_id: "f1",
+    name: "call.m4a",
+    size: 3,
+    notes: "0:05 Hello",
+  });
+  const made = await session.call("insert_blocks", { position: { at: "end" }, blocks: [{ type: "file" }] });
+  assert((made.result as { error?: string }).error);
+});
+
 // Only a list block holds nested blocks (protocol §2), as the app has it:
 // rewriting a block of another type that holds some, as one from another
 // editor may, is refused even in its own type, not done with them kept.

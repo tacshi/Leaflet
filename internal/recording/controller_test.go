@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -910,5 +911,167 @@ func TestTranscribeWaitsForALongRecording(t *testing.T) {
 	still, stillFor = 1<<30, 5*time.Millisecond
 	if _, err := r.transcribe(rec, "", nil, stt); !remote.IsStillTranscribing(err) {
 		t.Errorf("asked for too long: %v", err)
+	}
+}
+
+// fileRecorder is a Controller that runs what goes to the main thread at
+// once, on a store of its own, with one audio file in it, and the file.
+func fileRecorder(t *testing.T, url, name string) (*Controller, store.File) {
+	t.Helper()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(src, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewController(st, remote.SignedInForTest(url, st, "u1"))
+	r.update = func(fn func()) { fn() }
+	return r, f
+}
+
+// waitTranscript waits for what TranscribeFile gives done.
+func waitTranscript(t *testing.T, got chan []store.Segment) []store.Segment {
+	t.Helper()
+	select {
+	case segs := <-got:
+		return segs
+	case <-time.After(5 * time.Second):
+		t.Fatal("no transcript")
+		return nil
+	}
+}
+
+// An audio file transcribes on the device, its own file, and only one
+// transcription of it runs at a time.
+func TestTranscribeFileOnDevice(t *testing.T) {
+	r, f := fileRecorder(t, "http://127.0.0.1:1", "call.m4a")
+	r.SetEngine(fakeEngine{})
+	stt := store.SttSettings{Provider: OnDevice}
+	got := make(chan []store.Segment, 1)
+	hold := make(chan struct{})
+	var once sync.Once
+	realUpdate := r.update
+	r.update = func(fn func()) {
+		<-hold
+		realUpdate(fn)
+	}
+	done := func(segs []store.Segment, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+		got <- segs
+	}
+	if err := r.TranscribeFile(f, "b1", stt, false, done); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.TranscribeFile(f, "b2", stt, false, done); err == nil || err.Error() != locales.RecErrFileTranscribing() {
+		t.Errorf("a second transcription: %v", err)
+	}
+	once.Do(func() { close(hold) })
+	if segs := waitTranscript(t, got); len(segs) != 1 || segs[0].Text != "hello" {
+		t.Errorf("segments %+v", segs)
+	}
+	if len(r.TranscribingFiles) != 0 {
+		t.Errorf("still transcribing %v", r.TranscribingFiles)
+	}
+}
+
+// What the device can't read, or that is no audio, is refused at once; a
+// file still going up can't go to the server.
+func TestTranscribeFileRefused(t *testing.T) {
+	r, f := fileRecorder(t, "http://127.0.0.1:1", "call.ogg")
+	r.SetEngine(fakeEngine{})
+	nothing := func([]store.Segment, error) { t.Error("it ran") }
+	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: OnDevice}, false, nothing); err == nil || err.Error() != locales.RecErrFileKind() {
+		t.Errorf("on the device: %v", err)
+	}
+	r, f = fileRecorder(t, "http://127.0.0.1:1", "notes.txt")
+	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: OnDevice}, false, nothing); err == nil || err.Error() != locales.RecErrFileKind() {
+		t.Errorf("no audio: %v", err)
+	}
+	r, f = fileRecorder(t, "http://127.0.0.1:1", "call.m4a")
+	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: "soniox"}, true, nothing); err == nil || err.Error() != locales.RecErrFileUploading() {
+		t.Errorf("not up yet: %v", err)
+	}
+}
+
+// On the server a file goes by its ID, asked for again while it goes on,
+// and word that the app has it goes after.
+func TestTranscribeFileOnServer(t *testing.T) {
+	defer func(every time.Duration) { stillEvery = every }(stillEvery)
+	stillEvery = time.Millisecond
+	var calls atomic.Int32
+	bodies := make(chan map[string]any, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		bodies <- body
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			_, _ = w.Write([]byte(`{"error":"still working","code":"still_transcribing"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"segments":[{"start_ms":5000,"end_ms":6000,"text":"Hello."}]}`))
+	}))
+	defer srv.Close()
+	r, f := fileRecorder(t, srv.URL, "call.m4a")
+	queued, err := r.st.Queued()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range queued {
+		if err := r.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := make(chan []store.Segment, 1)
+	stt := store.SttSettings{Provider: "soniox", Language: "en"}
+	err = r.TranscribeFile(f, "b", stt, true, func(segs []store.Segment, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+		got <- segs
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if segs := waitTranscript(t, got); len(segs) != 1 || segs[0].StartMs != 5000 {
+		t.Errorf("segments %+v", segs)
+	}
+	if first := <-bodies; first["action"] != "transcribe" || first["file_id"] != f.ID || first["language"] != "en" {
+		t.Errorf("asked %v", first)
+	}
+	<-bodies
+	r.FileTranscribed(f, stt)
+	select {
+	case ack := <-bodies:
+		if ack["action"] != "transcribed" || ack["file_id"] != f.ID {
+			t.Errorf("told %v", ack)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the server was not told")
+	}
+}
+
+// Functions older than the app say so in words for the user, not theirs.
+func TestTranscribeFileOnAnOlderServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"recording_id is required"}`))
+	}))
+	defer srv.Close()
+	r, f := fileRecorder(t, srv.URL, "call.m4a")
+	if _, err := r.transcribeFile(context.Background(), f, store.SttSettings{Provider: "soniox"}); err == nil || err.Error() != locales.RecErrServerOld() {
+		t.Errorf("told %v", err)
 	}
 }

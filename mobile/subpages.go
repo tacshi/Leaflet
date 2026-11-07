@@ -16,7 +16,11 @@ import (
 // their live pages, so the editors show the change. Run on the core's
 // queue.
 func (c *Core) pageCore() core.Pages {
-	return core.Pages{Core: c.core, Open: c.openLive, Notify: c.ev.notice}
+	return core.Pages{Core: c.core, Open: c.openLive, Notify: c.ev.notice, Step: func(pageID, blockID string) {
+		if p := c.pages[pageID]; p != nil {
+			p.stepReason = "notes:" + blockID
+		}
+	}}
 }
 
 // openLive returns page id's live page while the app has it open.

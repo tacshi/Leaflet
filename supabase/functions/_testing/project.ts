@@ -137,7 +137,12 @@ export class Project {
       case "POST": {
         const body = await req.json();
         const made: Row[] = [];
+        const conflict = url.searchParams.get("on_conflict")?.split(",");
         for (const value of Array.isArray(body) ? body : [body]) {
+          if (
+            conflict && prefer.includes("resolution=ignore-duplicates") &&
+            table.some((r) => conflict.every((k) => r[k] === value[k]))
+          ) continue;
           const row: Row = { id: crypto.randomUUID(), created_at: now(), updated_at: now(), ...value };
           const key = name === "page_content" ? "page_id" : "id";
           if (table.some((r) => r[key] === row[key])) {

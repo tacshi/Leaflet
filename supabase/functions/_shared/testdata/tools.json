@@ -142,6 +142,14 @@
                 ],
                 "type": "object"
               },
+              "file": {
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "formula": {
                 "type": "string"
               },
@@ -211,6 +219,7 @@
                   "diagram",
                   "divider",
                   "embed",
+                  "file",
                   "heading",
                   "image",
                   "link_preview",
@@ -368,6 +377,14 @@
               ],
               "type": "object"
             },
+            "file": {
+              "properties": {
+                "notes": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "formula": {
               "type": "string"
             },
@@ -437,6 +454,7 @@
                 "diagram",
                 "divider",
                 "embed",
+                "file",
                 "heading",
                 "image",
                 "link_preview",
@@ -622,6 +640,14 @@
                 ],
                 "type": "object"
               },
+              "file": {
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "formula": {
                 "type": "string"
               },
@@ -691,6 +717,7 @@
                   "diagram",
                   "divider",
                   "embed",
+                  "file",
                   "heading",
                   "image",
                   "link_preview",
@@ -832,6 +859,14 @@
                 ],
                 "type": "object"
               },
+              "file": {
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "formula": {
                 "type": "string"
               },
@@ -901,6 +936,7 @@
                   "diagram",
                   "divider",
                   "embed",
+                  "file",
                   "heading",
                   "image",
                   "link_preview",
@@ -1124,6 +1160,14 @@
                 ],
                 "type": "object"
               },
+              "file": {
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "formula": {
                 "type": "string"
               },
@@ -1193,6 +1237,7 @@
                   "diagram",
                   "divider",
                   "embed",
+                  "file",
                   "heading",
                   "image",
                   "link_preview",

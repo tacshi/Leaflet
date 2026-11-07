@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -127,13 +128,7 @@ func WithTranscripts(st *store.Store, c *doc.Content) *doc.Content {
 		if err != nil {
 			continue
 		}
-		var lines []*doc.Node
-		for _, s := range recording.Tidy(rec.Transcript) {
-			l := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-			l.SetDelta(doc.Delta{{Text: clock(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}}, {Text: s.Text}})
-			lines = append(lines, l)
-		}
-		if len(lines) > 0 {
+		if lines := recording.TranscriptBlocks(rec); len(lines) > 0 {
 			_ = c.Insert(doc.Position{After: n.ID}, lines...)
 		}
 	}
@@ -150,9 +145,60 @@ func recordings(c *doc.Content) []*doc.Node {
 	return recs
 }
 
-// clock says a time into a recording as its transcript does: 1:05, or
-// 1:02:05.
-func clock(d time.Duration) string { return doc.Clock(int(d.Seconds())) }
+// Moments is the Link of a page of content exported alone as Markdown: a
+// link to a moment of one of its blocks can't play there, so a video's
+// goes to its site at that time, and a recording's or a file's, which have
+// no address of their own, is its words alone. Other links stay.
+func Moments(c *doc.Content) func(string) string {
+	return func(href string) string {
+		at, ok := doc.LinkMoment(href)
+		if !ok || c == nil {
+			return href
+		}
+		n := c.Find(doc.LinkBlock(href))
+		if n == nil {
+			return href
+		}
+		switch n.Type {
+		case "video":
+			if v, ok := doc.ParseVideoURL(n.Str("url")); ok {
+				return v.At(at).WatchURL()
+			}
+		case "recording", "file":
+			return ""
+		}
+		return href
+	}
+}
+
+// Save writes what r gives to path, the file the user chose: to a file
+// beside it first, so a save cut short leaves what was at path as it was.
+func Save(path string, r io.Reader) (err error) {
+	f, err := os.CreateTemp(filepath.Dir(path), ".leaflet-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = os.Remove(f.Name())
+		}
+	}()
+	_, err = io.Copy(f, r)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	// CreateTemp's file is the user's alone; a saved file is like any other.
+	if err = os.Chmod(f.Name(), 0o644); err != nil { // #nosec G302 -- a file the user saves, readable like any other they save.
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// audioOf names, in a file block withAudio adds, its recording's block.
+const audioOf = "audio_of"
 
 // withAudio is WithTranscripts for a zip: each recording's audio follows
 // its block as a file, named for the recording, which the zip takes into
@@ -180,7 +226,7 @@ func withAudio(src Source, c *doc.Content, dir string) *doc.Content {
 		if putAudio(src, rec, path) != nil {
 			continue
 		}
-		file := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + path, "name": name}}
+		file := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + path, "name": name, audioOf: n.ID}}
 		_ = c.Insert(doc.Position{After: n.ID}, file)
 	}
 	return c
@@ -434,38 +480,35 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 	// files are the pictures and files written so far, by their URL on
 	// this device.
 	files := map[string]string{}
-	// videos are the exported pages' videos, by page and block, read when
-	// a link to a moment of one is.
+	// videos are the exported pages' videos, and media the addresses of
+	// the audio that plays their recordings and files, by page and block,
+	// which links to moments of them go to.
 	videos := map[string]map[string]doc.Video{}
-	videoAt := func(pageID, blockID string) (doc.Video, bool) {
-		if _, read := videos[pageID]; !read {
-			videos[pageID] = map[string]doc.Video{}
-			if c := content(pageID); c != nil {
-				c.Walk(func(n, _ *doc.Node) {
-					if v, ok := doc.ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
-						videos[pageID][n.ID] = v
-					}
-				})
-			}
-		}
-		v, ok := videos[pageID][blockID]
-		return v, ok
-	}
+	media := map[string]map[string]string{}
+	// All the files go in first: a page may link to a moment of a file of
+	// a page after it.
 	for _, p := range pages {
 		c := content(p.ID)
 		if c == nil {
 			continue
 		}
-		own := paths[p.ID]
-		rel := func(to string) string { return (&url.URL{Path: relPath(path.Dir(own), to)}).String() }
-		// The page's pictures and files go in first, for its links to go
-		// to them.
+		videos[p.ID], media[p.ID] = map[string]doc.Video{}, map[string]string{}
 		var fail error
 		c.Walk(func(n, _ *doc.Node) {
+			if v, ok := doc.ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
+				videos[p.ID][n.ID] = v
+			}
 			if n.Type != "image" && n.Type != "file" || fail != nil {
 				return
 			}
 			src := n.Str("url")
+			if n.Type == "file" {
+				block := n.Str(audioOf)
+				if block == "" {
+					block = n.ID
+				}
+				media[p.ID][block] = src
+			}
 			local, ok := strings.CutPrefix(src, "file://")
 			if _, done := files[src]; done || !ok {
 				return
@@ -489,6 +532,14 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 		if fail != nil {
 			return fail
 		}
+	}
+	for _, p := range pages {
+		c := content(p.ID)
+		if c == nil {
+			continue
+		}
+		own := paths[p.ID]
+		rel := func(to string) string { return (&url.URL{Path: relPath(path.Dir(own), to)}).String() }
 		// Links to pages, of subpage blocks and page mentions alike, and
 		// links to their blocks, go to the pages' files.
 		md := doc.PageMarkdown(p.DisplayTitle(), c, doc.MarkdownOptions{
@@ -504,10 +555,15 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 					return rel(name)
 				}
 				if id, ok := doc.PageLinkID(href); ok && paths[id] != "" {
-					// A moment of a video plays on its site, from that time.
+					// A moment of a video plays on its site, from that time,
+					// and of a recording or a file from its file in the zip.
 					if at, ok := doc.LinkMoment(href); ok {
-						if v, ok := videoAt(id, doc.LinkBlock(href)); ok {
+						block := doc.LinkBlock(href)
+						if v, ok := videos[id][block]; ok {
 							return v.At(at).WatchURL()
+						}
+						if name, ok := files[media[id][block]]; ok {
+							return rel(name) + "#t=" + strconv.Itoa(at)
 						}
 					}
 					if block := doc.LinkBlock(href); block != "" {

@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import LeafletCore
 
 /// Recorder is recording as the app's views see it: the recording in
 /// progress, the recordings the open pages' blocks show, and the one
@@ -177,6 +178,49 @@ final class Recorder {
         }
     }
 
+    /// transcribeFile transcribes audio file block of page into its notes.
+    func transcribeFile(page: String, block: String) {
+        guard let client else { return }
+        Task {
+            do {
+                try await client.transcribeFile(page: page, block: block)
+            } catch {
+                toast?(error.localizedDescription)
+            }
+        }
+    }
+
+    /// shareAudio shares recording id's audio, named for title, through
+    /// editor's page: downloaded first when it is not on this device.
+    func shareAudio(_ id: String, title: String, in editor: EditorController?) {
+        guard let client else { return }
+        Task {
+            do {
+                let audio = try await client.recordingAudio(id)
+                editor?.onShare?(try SharedFile(name: MobileRecordingAudioName(title), of: audio))
+            } catch {
+                toast?(error.localizedDescription)
+            }
+        }
+    }
+
+    /// shareTranscript shares recording id's transcript as a file of format,
+    /// named for title, through editor's page.
+    func shareTranscript(
+        _ id: String, title: String, format: String, in editor: EditorController?
+    ) {
+        guard let client else { return }
+        Task {
+            do {
+                let file = try await client.recordingTranscriptFile(
+                    id, title: title, format: format)
+                editor?.onShare?(try SharedFile(name: file.name, text: file.text))
+            } catch {
+                toast?(error.localizedDescription)
+            }
+        }
+    }
+
     /// dismissError closes the notice of what went wrong with recording id.
     func dismissError(_ id: String) {
         guard let client else { return }
@@ -224,11 +268,13 @@ final class Recorder {
             if let at {
                 player.currentTime = at
                 VideoPlayback.shared.pauseAll()
+                FilePlayback.shared.pause()
                 player.play()
             } else if player.isPlaying {
                 player.pause()
             } else {
                 VideoPlayback.shared.pauseAll()
+                FilePlayback.shared.pause()
                 player.play()
             }
             changes += 1
@@ -246,9 +292,12 @@ final class Recorder {
                 try audio.setActive(true)
                 let p = try AVAudioPlayer(contentsOf: url)
                 p.delegate = ended
+                p.enableRate = true
+                p.rate = PlaySpeed.current
                 p.prepareToPlay()
                 if let at { p.currentTime = at }
                 VideoPlayback.shared.pauseAll()
+                FilePlayback.shared.pause()
                 p.play()
                 player = p
                 playing = id
@@ -269,6 +318,15 @@ final class Recorder {
         guard playing == id, let player else { return }
         player.currentTime = at
     }
+
+    /// skip moves the recording playing by seconds, within it.
+    func skip(_ id: String, by seconds: TimeInterval) {
+        guard playing == id, let player else { return }
+        player.currentTime = min(max(player.currentTime + seconds, 0), player.duration)
+    }
+
+    /// speedChanged plays the recording at the speed now asked for.
+    func speedChanged() { player?.rate = PlaySpeed.current }
 
     func stopPlaying() {
         let was = player

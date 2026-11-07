@@ -127,14 +127,10 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
 func (h *host) VideoMenu(m *ui.Menu, n *doc.Node)               { h.a.videoMenu(m, n) }
-func (h *host) Card(c *ui.Context, n *doc.Node) {
-	if n.Type == "file" {
-		h.a.fileBlock(c, n)
-	} else {
-		h.a.linkPreviewBlock(c, n)
-	}
-}
-func (h *host) Recording(c *ui.Context, n *doc.Node) { h.a.recordingBlock(c, n) }
+func (h *host) Card(c *ui.Context, n *doc.Node)                 { h.a.linkPreviewBlock(c, n) }
+func (h *host) File(c *ui.Context, n *doc.Node, width float32)  { h.a.fileBlock(c, n, width) }
+func (h *host) FileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) { h.a.fileMenu(c, m, n) }
+func (h *host) Recording(c *ui.Context, n *doc.Node)            { h.a.recordingBlock(c, n) }
 
 func (h *host) CommentCount(blockID string) int {
 	if h.a.page == nil {
@@ -630,7 +626,9 @@ func (a *App) exportMarkdown(id string) {
 		if p == nil {
 			return
 		}
-		md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.markdownOptions())
+		opts := a.markdownOptions()
+		opts.Link = export.Moments(c)
+		md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), opts)
 		name := safeName(p.DisplayTitle()) + ".md"
 		go func() {
 			path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})

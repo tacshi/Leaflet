@@ -327,13 +327,79 @@ func VideoPage(v doc.Video) string {
 		player + `</body></html>`
 }
 
+// FilePlayerCSP lets a file's player page play the file beside it, and run
+// nothing of its own: the app seeks it with Eval.
+const FilePlayerCSP = "default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// FilePlayerPage plays the file at media beside it, an audio bar or a
+// video filling the web view, from at seconds in.
+func FilePlayerPage(video bool, at int) string {
+	src := "media"
+	if at > 0 {
+		src += "#t=" + strconv.Itoa(at)
+	}
+	el, look := "audio", "html{color-scheme:light dark}body{background:transparent}"
+	if video {
+		el, look = "video", "html,body{background:#000}"
+	}
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+		`<style>html,body{margin:0;height:100%;overflow:hidden}` + look + `audio,video{border:0;width:100%;height:100%;display:block}</style></head><body>` +
+		`<` + el + ` src="` + src + `" controls autoplay playsinline></` + el + `></body></html>`
+}
+
+// FilePlayerStatus is the expression that asks a file's player how it is.
+const FilePlayerStatus = `(function () {
+  var el = document.querySelector("audio, video");
+  if (!el || el.error) return {failed: true};
+  return {at: el.currentTime, length: isFinite(el.duration) ? el.duration : 0, paused: el.paused, rate: el.playbackRate};
+})()`
+
+// FileMetadata is the expression that names a file's player where the
+// system shows media, with the cover beside it: a web view plays in a
+// process of its own, which the system would show by its own name.
+func FileMetadata(title string) string {
+	name, err := json.Marshal(title)
+	if err != nil {
+		name = []byte(`""`)
+	}
+	return `(function () { document.title = ` + string(name) +
+		`; if (!navigator.mediaSession || typeof MediaMetadata === "undefined") return false; ` +
+		`navigator.mediaSession.metadata = new MediaMetadata({title: ` + string(name) +
+		`, artist: "Leaflet", artwork: [{src: "cover"}]}); return true; })()`
+}
+
+// FilePlaying is the expression that plays a file's player or pauses it:
+// said outright, as it may be starting on its own when told.
+func FilePlaying(on bool) string {
+	act := "pause"
+	if on {
+		act = "play"
+	}
+	return `(function () { var el = document.querySelector("audio, video"); if (el) el.` + act + `(); })()`
+}
+
+// FileSeekTo is the expression that takes a file's player to sec seconds
+// in, playing or not as it was.
+func FileSeekTo(sec float64) string {
+	return `(function () { var el = document.querySelector("audio, video"); if (el) el.currentTime = ` +
+		strconv.FormatFloat(max(sec, 0), 'f', 3, 64) + `; })()`
+}
+
+// FileSpeed is the expression that plays a file's player at speed, from now
+// on and once it has loaded.
+func FileSpeed(speed float64) string {
+	s := strconv.FormatFloat(speed, 'f', 2, 64)
+	return `(function () { var el = document.querySelector("audio, video"); if (el) { el.defaultPlaybackRate = ` +
+		s + `; el.playbackRate = ` + s + `; } })()`
+}
+
 // VideoSeekJS defines leafletSeek(el, provider, t), which plays the player
 // in el, a site's frame or a video, from t seconds in, and leafletPause(el,
 // provider), which pauses it, as far as the site lets a page around its
 // player say so: YouTube's and Vimeo's take a message, a video file is the
 // page's own. Each reports whether it could.
 const VideoSeekJS = `function leafletSeek(el, provider, t) {
-  if (el.tagName === "VIDEO") {
+  if (el.tagName === "VIDEO" || el.tagName === "AUDIO") {
     el.currentTime = t;
     el.play();
     return true;
@@ -355,7 +421,7 @@ const VideoSeekJS = `function leafletSeek(el, provider, t) {
   return false;
 }
 function leafletPause(el, provider) {
-  if (el.tagName === "VIDEO") {
+  if (el.tagName === "VIDEO" || el.tagName === "AUDIO") {
     el.pause();
     return true;
   }
@@ -387,7 +453,7 @@ func VideoSeek(v doc.Video, sec int) string {
 	if !SeeksInPlace(v) {
 		return ""
 	}
-	return "(function () {\n" + VideoSeekJS + "return leafletSeek(document.querySelector(\"iframe, video\"), " +
+	return "(function () {\n" + VideoSeekJS + "return leafletSeek(document.querySelector(\"iframe, video, audio\"), " +
 		strconv.Quote(v.Provider) + ", " + strconv.Itoa(max(sec, 0)) + ");\n})()"
 }
 
@@ -397,7 +463,7 @@ func VideoPause(v doc.Video) string {
 	if !SeeksInPlace(v) {
 		return ""
 	}
-	return "(function () {\n" + VideoSeekJS + "return leafletPause(document.querySelector(\"iframe, video\"), " +
+	return "(function () {\n" + VideoSeekJS + "return leafletPause(document.querySelector(\"iframe, video, audio\"), " +
 		strconv.Quote(v.Provider) + ");\n})()"
 }
 

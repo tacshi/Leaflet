@@ -14,6 +14,7 @@ struct LeafletApp: App {
         // Before the app finishes launching, for a tap on a reminder that
         // launches it.
         UNUserNotificationCenter.current().delegate = ReminderDelegate.shared
+        SharedFile.sweep()
     }
 
     var body: some Scene {

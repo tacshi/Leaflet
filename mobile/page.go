@@ -44,6 +44,9 @@ type openPage struct {
 	shown, newStep bool
 	shownAt        time.Time
 	showing        *time.Timer
+	// stepReason is why the change to show next is a step of its own, for
+	// the app, which keeps its undo steps, to take it as one.
+	stepReason string
 	// retry is how long a page no editor shows waits to try its failed
 	// save again, longer each time; 0 while its saves go through.
 	retry time.Duration
@@ -514,7 +517,11 @@ func (p *openPage) show() {
 	raw := p.encode(p.cur)
 	p.bump(p.cur, p.fresh)
 	p.fresh = 0
-	p.c.ev.pageUpdated(p.id, raw, p.rev, "agent", newStep)
+	reason := "agent"
+	if p.stepReason != "" {
+		reason, p.stepReason = p.stepReason, ""
+	}
+	p.c.ev.pageUpdated(p.id, raw, p.rev, reason, newStep)
 }
 
 // thawed returns c for op to apply to in place without changing c: a

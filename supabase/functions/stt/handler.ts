@@ -38,6 +38,7 @@ const CUT_SHORT_MS = 10_000;
 // words, and the address it was sent to, go to the log only.
 const FAILED = "The transcription failed on the server. Try again, or choose an on-device model.";
 const UNREACHABLE = "Could not reach the transcription endpoint.";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface SttDeps {
   clients: Clients;
@@ -65,10 +66,12 @@ export interface SttDeps {
 }
 
 interface Body {
-  action: "soniox_key" | "save_key" | "transcribe";
+  action: "soniox_key" | "save_key" | "transcribe" | "transcribed";
   provider?: string;
   api_key?: string;
   recording_id?: string;
+  /** An audio file to transcribe, in place of recording_id. */
+  file_id?: string;
   language?: string;
 }
 
@@ -98,7 +101,13 @@ export async function handle(req: Request, deps: SttDeps): Promise<Response> {
       case "transcribe":
         // The recording's transcript, or its failure, is saved as the caller.
         requireTokenUntil(req, workDeadline(started, deps.deadlineMs, deps.workerStarted) + SAVE_MS);
-        return json(await transcribe(uc, sc, user, body, started, deps));
+        return json(
+          body.file_id
+            ? await transcribeFile(uc, sc, user, body, started, deps)
+            : await transcribe(uc, sc, user, body, started, deps),
+        );
+      case "transcribed":
+        return json(await fileTranscribed(sc, user, body, deps));
       default:
         throw new HttpError(400, "Unknown action");
     }
@@ -205,28 +214,8 @@ export async function endpointFor(
   return { baseUrl, apiKey: await providerSecret(sc, provider.id) };
 }
 
-async function transcribe(
-  uc: SupabaseClient,
-  sc: SupabaseClient,
-  user: User,
-  body: Body,
-  started: number,
-  deps: SttDeps,
-) {
-  const deadline = workDeadline(started, deps.deadlineMs, deps.workerStarted);
-  if (!body.recording_id) throw new HttpError(400, "recording_id is required");
-  const { data: rec, error } = await uc
-    .from("recordings")
-    .select("id, page_id, audio_path, duration_ms")
-    .eq("id", body.recording_id)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!rec) throw new HttpError(404, "Recording not found");
-  // recordings/{user_id}/{recording_id}.wav, as the app uploads it.
-  const slash = rec.audio_path?.lastIndexOf("/") ?? -1;
-  const fileName = rec.audio_path?.slice(slash + 1) ?? "";
-  if (!fileName) throw new HttpError(400, "This recording's audio has not been uploaded");
-
+/** Where a caller's audio goes: their settings, the language asked for, and the key or the address. */
+async function transcriberOf(uc: SupabaseClient, sc: SupabaseClient, user: User, body: Body) {
   const { data: settingsRow } = await uc
     .from("stt_settings")
     .select("provider, model, base_url, provider_id, language, speaker_labels")
@@ -249,9 +238,58 @@ async function transcribe(
   }
   const language = languageCode(body.language ?? settings.language);
   // Where the audio goes, and its key, before anything is claimed: settings
-  // that cannot work leave the recording as it was.
+  // that cannot work leave what was asked for as it was.
   const sonioxApiKey = useSoniox ? await sonioxKey(sc, user) : null;
   const endpoint = useSoniox ? null : await endpointFor(uc, sc, settings);
+  return { settings, language, useSoniox, sonioxApiKey, endpoint };
+}
+
+/** What a transcription that failed says, and how: only this function's own words, what the transcriber answered going to the log. */
+function failure(e: unknown, started: number, deadline: number, deps: SttDeps) {
+  // A provider call stopped at the deadline.
+  const timedOut = isTimeout(e);
+  const cutShort = timedOut && (started + deps.deadlineMs - deadline >= CUT_SHORT_MS || !!deps.unloading?.aborted);
+  const told = cutShort
+    ? CUT_SHORT
+    : timedOut
+    ? TOO_LONG
+    : e instanceof HttpError
+    ? e.message
+    : e instanceof UnsafeUrlError
+    ? UNREACHABLE
+    : FAILED;
+  if (!timedOut && !(e instanceof HttpError)) console.error("transcription:", e);
+  const raised = cutShort
+    ? new HttpError(504, told, "still_transcribing")
+    : e instanceof HttpError
+    ? e
+    : new HttpError(timedOut ? 504 : 502, told);
+  return { told, raised };
+}
+
+async function transcribe(
+  uc: SupabaseClient,
+  sc: SupabaseClient,
+  user: User,
+  body: Body,
+  started: number,
+  deps: SttDeps,
+) {
+  const deadline = workDeadline(started, deps.deadlineMs, deps.workerStarted);
+  if (!body.recording_id) throw new HttpError(400, "recording_id is required");
+  const { data: rec, error } = await uc
+    .from("recordings")
+    .select("id, page_id, audio_path, duration_ms")
+    .eq("id", body.recording_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!rec) throw new HttpError(404, "Recording not found");
+  // recordings/{user_id}/{recording_id}.wav, as the app uploads it.
+  const slash = rec.audio_path?.lastIndexOf("/") ?? -1;
+  const fileName = rec.audio_path?.slice(slash + 1) ?? "";
+  if (!fileName) throw new HttpError(400, "This recording's audio has not been uploaded");
+
+  const { settings, language, useSoniox, sonioxApiKey, endpoint } = await transcriberOf(uc, sc, user, body);
 
   const folder = rec.audio_path.slice(0, Math.max(slash, 0));
   const { data: listed, error: listError } = await uc.storage.from("recordings").list(folder, {
@@ -296,11 +334,19 @@ async function transcribe(
   const audio: Audio = {
     name: fileName,
     type: mediaType(object.metadata?.mimetype),
-    open: (signal) => openAudio(uc, rec.audio_path, deps.maxAudioBytes, signal),
+    open: (signal) => openAudio(uc, "recordings", rec.audio_path, deps.maxAudioBytes, signal),
   };
   try {
     const { segments, model, finish } = sonioxApiKey
-      ? await sonioxFile(sc, rec.id, user, sonioxApiKey, audio, settings, language, deadline, deps)
+      ? await sonioxFile(
+        recordingJobs(sc, { recording_id: rec.id, user_id: user.id }),
+        sonioxApiKey,
+        audio,
+        settings,
+        language,
+        deadline,
+        deps,
+      )
       : await openAiCompatible(endpoint!, audio, settings, language, rec.duration_ms ?? 0, deadline, deps);
 
     const { data: saved, error: saveError } = await uc.from("recordings").update({
@@ -323,24 +369,124 @@ async function transcribe(
     // A provider call stopped at the deadline: the recording fails rather
     // than staying transcribing when the platform stops the function,
     // Soniox's going on from there at the next call.
-    // Only this function's own words are told: what the transcriber
-    // answered, which may be anything, goes to the log.
-    const timedOut = isTimeout(e);
-    const cutShort = timedOut && (started + deps.deadlineMs - deadline >= CUT_SHORT_MS || !!deps.unloading?.aborted);
-    const told = cutShort
-      ? CUT_SHORT
-      : timedOut
-      ? TOO_LONG
-      : e instanceof HttpError
-      ? e.message
-      : e instanceof UnsafeUrlError
-      ? UNREACHABLE
-      : FAILED;
-    if (!timedOut && !(e instanceof HttpError)) console.error("transcription:", e);
+    const { told, raised } = failure(e, started, deadline, deps);
     await uc.from("recordings").update({ status: "failed", error: told, transcribing_at: null }).eq("id", rec.id);
-    if (cutShort) throw new HttpError(504, told, "still_transcribing");
-    throw e instanceof HttpError ? e : new HttpError(timedOut ? 504 : 502, told);
+    throw raised;
   }
+}
+
+/**
+ * Transcribes an audio file of a page and answers with its segments, which
+ * the caller's app puts in the file's notes: no row here holds them. One
+ * call at a time has it, for each person, whose key it spends. Soniox keeps
+ * what it made until the app says it has it (transcribed), so an app
+ * stopped before the answer reached it asks again for nothing.
+ */
+async function transcribeFile(
+  uc: SupabaseClient,
+  sc: SupabaseClient,
+  user: User,
+  body: Body,
+  started: number,
+  deps: SttDeps,
+) {
+  const deadline = workDeadline(started, deps.deadlineMs, deps.workerStarted);
+  const id = body.file_id!;
+  if (!UUID.test(id)) throw new HttpError(400, "file_id is not a file's");
+  const { data: file, error } = await uc
+    .from("files")
+    .select("id, page_id, storage_path, mime_type, deleted_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!file || file.deleted_at) throw new HttpError(404, "File not found");
+  // Its notes are its page's, which a viewer can't change: nothing of their
+  // key goes on what they could not keep.
+  if (file.page_id) {
+    const { data: editable } = await uc.rpc("can_edit_page", { p_page_id: file.page_id });
+    if (editable !== true) throw new HttpError(403, "You can view this file but not edit its page");
+  }
+  const path: string = file.storage_path ?? "";
+  const slash = path.lastIndexOf("/");
+  const stored = path.slice(slash + 1);
+  if (!stored) throw new HttpError(404, "This file has not finished uploading");
+  const { settings, language, sonioxApiKey, endpoint } = await transcriberOf(uc, sc, user, body);
+
+  const { data: listed, error: listError } = await uc.storage.from("files").list(path.slice(0, Math.max(slash, 0)), {
+    search: stored,
+    limit: 100,
+  });
+  if (listError) throw new Error(`Could not read the audio: ${listError.message}`);
+  const object = listed?.find((o) => o.name === stored);
+  if (!object) throw new HttpError(404, "This file has not finished uploading");
+  if (Number(object.metadata?.size ?? 0) > deps.maxAudioBytes) {
+    throw new HttpError(
+      413,
+      `This file is too large to transcribe on the server (over ${
+        Math.round(deps.maxAudioBytes / 1024 / 1024)
+      } MB). Choose an on-device model to transcribe it.`,
+    );
+  }
+
+  const mine = { source_file_id: id, user_id: user.id };
+  const now = new Date(started).toISOString();
+  const staleBefore = new Date(started - deps.deadlineMs - SAVE_MS - 60_000).toISOString();
+  const { data: made, error: claimError } = await sc.from("stt_file_jobs")
+    .upsert({ ...mine, claimed_at: now }, { onConflict: "source_file_id,user_id", ignoreDuplicates: true })
+    .select("source_file_id");
+  if (claimError) throw new Error(claimError.message);
+  if (!made?.length) {
+    const { data: retaken, error: retakeError } = await sc.from("stt_file_jobs")
+      .update({ claimed_at: now })
+      .match(mine)
+      .or(`claimed_at.is.null,claimed_at.lt.${staleBefore}`)
+      .select("source_file_id");
+    if (retakeError) throw new Error(retakeError.message);
+    if (!retaken?.length) throw new HttpError(409, "This file is being transcribed already");
+  }
+  // What the call leaves: Soniox's job for the next, or nothing at all.
+  const release = async () => {
+    const { error } = await sc.from("stt_file_jobs").update({ claimed_at: null }).match(mine);
+    if (error) console.error("stt_file_jobs:", error.message);
+    const gone = await sc.from("stt_file_jobs").delete().match(mine).is("transcription_id", null);
+    if (gone.error) console.error("stt_file_jobs:", gone.error.message);
+  };
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(stored)?.[0] ?? "";
+  const audio: Audio = {
+    // Its extension is all the transcriber needs of a name that is the
+    // user's: it says what the bytes are.
+    name: "audio" + ext,
+    type: mediaType(object.metadata?.mimetype ?? file.mime_type),
+    open: (signal) => openAudio(uc, "files", path, deps.maxAudioBytes, signal),
+  };
+  try {
+    const { segments } = sonioxApiKey
+      ? await sonioxFile(fileJobs(sc, mine), sonioxApiKey, audio, settings, language, deadline, deps)
+      : await openAiCompatible(endpoint!, audio, settings, language, 0, deadline, deps);
+    await release();
+    return { segments };
+  } catch (e) {
+    const { raised } = failure(e, started, deadline, deps);
+    await release();
+    throw raised;
+  }
+}
+
+/** The app has a file's transcript: what Soniox keeps of it goes. */
+async function fileTranscribed(sc: SupabaseClient, user: User, body: Body, deps: SttDeps) {
+  const id = body.file_id ?? "";
+  if (!UUID.test(id)) throw new HttpError(400, "file_id is not a file's");
+  const mine = { source_file_id: id, user_id: user.id };
+  const { data: left, error } = await sc.from("stt_file_jobs")
+    .select("file_id, transcription_id, model")
+    .match(mine)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (left?.transcription_id) {
+    await sonioxRemove(deps.fetch, await sonioxKey(sc, user), left as SonioxJob);
+  }
+  await sc.from("stt_file_jobs").delete().match(mine);
+  return { ok: true };
 }
 
 /** What a transcriber made, and what is to go once it is saved. */
@@ -373,21 +519,22 @@ function mediaType(raw: unknown): string {
  */
 async function openAudio(
   uc: SupabaseClient,
+  bucket: "recordings" | "files",
   path: string,
   maxBytes: number,
   signal: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { data, error } = await uc.storage.from("recordings").download(path, {}, { signal }).asStream();
+  const { data, error } = await uc.storage.from(bucket).download(path, {}, { signal }).asStream();
   if (error || !data) {
-    console.error("recording audio:", error?.message ?? "missing");
-    throw new HttpError(502, "Could not read the recording's audio");
+    console.error("audio:", error?.message ?? "missing");
+    throw new HttpError(502, "Could not read the audio");
   }
   let read = 0;
   return (data as ReadableStream<Uint8Array>).pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, out) {
         read += chunk.byteLength;
-        if (read > maxBytes) out.error(new HttpError(413, "This recording is too long to transcribe on the server"));
+        if (read > maxBytes) out.error(new HttpError(413, "This audio is too long to transcribe on the server"));
         else out.enqueue(chunk);
       },
     }),
@@ -504,8 +651,75 @@ interface SonioxJob {
   model: string;
 }
 
+/** Where a transcription's job is kept, for a later call to pick up. */
+interface SonioxJobs {
+  load(): Promise<SonioxJob | null>;
+  save(job: SonioxJob): Promise<void>;
+  forget(): Promise<void>;
+  /** Whether Soniox's copy goes as soon as the call has it, or waits for word from the app. */
+  keeps: boolean;
+}
+
+/** A recording's job: its transcript is saved before Soniox's goes. */
+function recordingJobs(sc: SupabaseClient, mine: { recording_id: string; user_id: string }): SonioxJobs {
+  return {
+    keeps: false,
+    load: async () => {
+      const { data, error } = await sc.from("stt_jobs").select("file_id, transcription_id, model").match(mine)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data as SonioxJob | null;
+    },
+    save: async (job) => {
+      const { error } = await sc.from("stt_jobs").insert({ ...mine, ...job });
+      if (error) throw new Error(error.message);
+    },
+    forget: async () => {
+      const { error } = await sc.from("stt_jobs").delete().match(mine);
+      if (error) console.error("stt_jobs:", error.message);
+    },
+  };
+}
+
+/** A file's job, on the row its call claimed. */
+function fileJobs(sc: SupabaseClient, mine: { source_file_id: string; user_id: string }): SonioxJobs {
+  return {
+    keeps: true,
+    load: async () => {
+      const { data, error } = await sc.from("stt_file_jobs").select("file_id, transcription_id, model").match(mine)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data?.transcription_id ? data as SonioxJob : null;
+    },
+    save: async (job) => {
+      const { error } = await sc.from("stt_file_jobs").update(job).match(mine);
+      if (error) throw new Error(error.message);
+    },
+    forget: async () => {
+      const { error } = await sc.from("stt_file_jobs")
+        .update({ file_id: null, transcription_id: null, model: null })
+        .match(mine);
+      if (error) console.error("stt_file_jobs:", error.message);
+    },
+  };
+}
+
+/** Takes from Soniox what a job left there. */
+async function sonioxRemove(fetch: typeof globalThis.fetch, key: string, job: SonioxJob) {
+  const remove = (path: string) =>
+    fetch(`${SONIOX_API}/${path}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(CLEANUP_MS),
+    })
+      .then((res) => res.body?.cancel())
+      .catch(() => {});
+  await remove(`transcriptions/${job.transcription_id}`);
+  await remove(`files/${job.file_id}`);
+}
+
 /**
- * Transcribes a recording through Soniox's files and transcriptions. What
+ * Transcribes audio through Soniox's files and transcriptions. What
  * it spends goes once: the audio is sent and a transcription started, kept
  * as the caller's job on the recording before anything waits on it, and a
  * call that runs out of time, or is stopped, leaves it going on at Soniox
@@ -515,9 +729,7 @@ interface SonioxJob {
  * by itself within 30 days.
  */
 async function sonioxFile(
-  sc: SupabaseClient,
-  recordingId: string,
-  user: User,
+  jobs: SonioxJobs,
   key: string,
   audio: Audio,
   settings: SttSettings,
@@ -528,20 +740,13 @@ async function sonioxFile(
   const fetch = deps.fetch;
   const pollMs = deps.pollMs ?? POLL_MS;
   const auth = { Authorization: `Bearer ${key}` };
-  const mine = { recording_id: recordingId, user_id: user.id };
-
   const remove = (path: string) =>
     fetch(`${SONIOX_API}/${path}`, { method: "DELETE", headers: auth, signal: AbortSignal.timeout(CLEANUP_MS) })
       .then((res) => res.body?.cancel())
       .catch(() => {});
-  const forget = async () => {
-    const { error } = await sc.from("stt_jobs").delete().match(mine);
-    if (error) console.error("stt_jobs:", error.message);
-  };
   const finish = async (job: SonioxJob) => {
-    await remove(`transcriptions/${job.transcription_id}`);
-    await remove(`files/${job.file_id}`);
-    await forget();
+    await sonioxRemove(fetch, key, job);
+    await jobs.forget();
   };
 
   // Sends the audio and starts transcribing it.
@@ -571,8 +776,7 @@ async function sonioxFile(
       });
       if (!create.ok) throw await sonioxFailure(create, "transcription");
       const job = { file_id: fileId, transcription_id: (await create.json()).id as string, model };
-      const { error } = await sc.from("stt_jobs").insert({ ...mine, ...job });
-      if (error) throw new Error(error.message);
+      await jobs.save(job);
       return job;
     } catch (e) {
       await remove(`files/${fileId}`);
@@ -612,19 +816,21 @@ async function sonioxFile(
       });
       if (!transcript.ok) throw await sonioxFailure(transcript, "transcript");
       const data = await transcript.json();
-      return { segments: tokensToSegments(data.tokens ?? []), model: job.model, finish: () => finish(job) };
+      return {
+        segments: tokensToSegments(data.tokens ?? []),
+        model: job.model,
+        ...(jobs.keeps ? {} : { finish: () => finish(job) }),
+      };
     } catch (e) {
       throw isTimeout(e) ? still() : e;
     }
   };
 
-  const { data: left, error } = await sc.from("stt_jobs").select("file_id, transcription_id, model").match(mine)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+  const left = await jobs.load();
   if (left) {
-    const done = await wait(left as SonioxJob);
+    const done = await wait(left);
     if (done) return done;
-    await forget();
+    await jobs.forget();
   }
   const done = await wait(await start());
   if (!done) throw new HttpError(502, "Soniox could not transcribe the recording");

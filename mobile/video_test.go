@@ -27,7 +27,7 @@ func TestVideoNotesAndMoments(t *testing.T) {
 	if err := json.Unmarshal([]byte(VideoPlayer("https://youtu.be/dQw4w9WgXcQ?t=5")), &p); err != nil || !strings.Contains(p.Page, "start=5") {
 		t.Errorf("player: %+v, %v", p, err)
 	}
-	if s := VideoSeek("https://youtu.be/dQw4w9WgXcQ", 83); !strings.Contains(s, `leafletSeek(document.querySelector("iframe, video"), "youtube", 83)`) {
+	if s := VideoSeek("https://youtu.be/dQw4w9WgXcQ", 83); !strings.Contains(s, `leafletSeek(document.querySelector("iframe, video, audio"), "youtube", 83)`) {
 		t.Errorf("seek %s", s)
 	}
 	if VideoSeek("https://www.bilibili.com/video/BV1KofNYjEuK", 83) != "" || VideoSeek("nope", 1) != "" {

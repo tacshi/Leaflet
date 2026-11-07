@@ -140,9 +140,11 @@ func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
 			return
 		}
 		content := c.content(pageID)
+		opts := c.markdownOptions()
+		opts.Link = export.Moments(content)
 		out = exported{
 			Name:     export.SafeName(p.DisplayTitle()) + ".md",
-			Markdown: doc.PageMarkdown(p.DisplayTitle(), export.WithTranscripts(c.core.Store, content), c.markdownOptions()),
+			Markdown: doc.PageMarkdown(p.DisplayTitle(), export.WithTranscripts(c.core.Store, content), opts),
 		}
 	})
 	if err != nil {

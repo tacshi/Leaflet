@@ -13,14 +13,19 @@ import (
 // there, and one that starts a line makes the line a moment, with its time
 // beside it, as a recording's transcript has.
 
-// MaxNotes is the most characters a video's notes hold, as on the server.
-const MaxNotes = 20000
+// MaxNotes is the most characters a block's notes hold, as on the server:
+// room for three hours of speech at 15 characters a second, and its times.
+const MaxNotes = 200000
 
 // NoteLine is a line of a video's notes: the time it starts with, in
 // seconds, or -1, and its text after that time, in parts.
 type NoteLine struct {
 	At    int
 	Parts []NotePart
+	// Line is its place among the notes' lines, and Speaker who it names,
+	// as SpokenLines reads them.
+	Line    int
+	Speaker string
 }
 
 // NotePart is a piece of a note's text: a time in it, at seconds into the

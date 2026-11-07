@@ -82,10 +82,20 @@ type dialogs struct {
 	recName   string
 	recSelect bool
 
-	// The dialog writing the notes of a video block of the open page.
+	// The dialog writing the notes of a video or file block of the open
+	// page; notesFile says it is a file's.
 	notesOpen  bool
 	notesBlock string
 	notesText  string
+	notesFile  bool
+
+	// The dialog naming a speaker of a file block's notes: speakerFrom, all
+	// their lines, or for "" a new one for line speakerLine.
+	speakerOpen  bool
+	speakerBlock string
+	speakerFrom  string
+	speakerLine  int
+	speakerName  string
 
 	moveOpen  bool
 	movePage  string
@@ -174,6 +184,9 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.tagOpen {
 		a.tagDialog(c)
+	}
+	if d.speakerOpen {
+		a.speakerDialog(c)
 	}
 	if d.recOpen {
 		a.recordingDialog(c)
@@ -1190,10 +1203,7 @@ func (a *App) setMediaLink(id, link string) {
 			n.Set("title", "")
 		}
 	})
-	if wv := a.videos[id]; wv != nil {
-		wv.Destroy()
-		delete(a.videos, id)
-	}
+	a.closePlayer(id)
 }
 
 // Inline agent prompt ---------------------------------------------------

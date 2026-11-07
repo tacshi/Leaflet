@@ -22,6 +22,8 @@ struct RecordingBlock: View {
     @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 32
     /// open shows a long transcript whole.
     @State private var open = false
+    /// clock says what is being said while the recording plays.
+    @State private var clock = LineClock()
 
     private var id: String { node.data?["recording_id"]?.string ?? "" }
 
@@ -64,7 +66,19 @@ struct RecordingBlock: View {
             onHeight?(CGSize(width: $0.width, height: $0.height + 2))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .coordinateSpace(.named(LineClock.space))
         .task(id: id) { _ = recorder.row(id) }
+        .task(id: recorder.playing == id) {
+            guard recorder.playing == id else {
+                clock.clear()
+                return
+            }
+            let starts = (row?.transcript ?? []).map { Double($0.startMs) / 1000 }
+            while !Task.isCancelled, let player = recorder.player {
+                clock.tick(player.currentTime, starts: starts)
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 
     private func header(_ recorder: Recorder, _ row: RecordingRow?, live: Bool) -> some View {
@@ -152,25 +166,40 @@ struct RecordingBlock: View {
             ) {
                 recorder.insertTranscript(id, after: block.id, into: editor)
             },
-            // The agent reads the transcript with the block.
-            BlockAction(title: L.recSummarize, symbol: "sparkles", enabled: !empty && canEdit) {
-                editor?.onSummarize?(block, L.recSummarizePrompt(title: title(block, row)))
-            },
-            // Not while a transcription runs, which the new one would race.
-            BlockAction(
-                title: empty ? L.recTranscribe : L.recTranscribeAgain, symbol: "captions.bubble",
-                enabled: canEdit && !recorder.state.transcribing.contains(id)
-            ) {
-                recorder.retranscribe(id)
-            },
-            // The block goes as one step to undo; its recording stays, for
-            // the undo to bring back.
-            BlockAction(
-                title: L.commonDelete, symbol: "trash", enabled: canEdit, destructive: true
-            ) {
-                editor?.removeBlock(block.id)
+            BlockAction(title: L.recExportAudio, symbol: "square.and.arrow.up") {
+                recorder.shareAudio(id, title: title(block, row), in: editor)
             },
         ]
+            + [("txt", L.recExportText), ("srt", L.recExportSrt), ("vtt", L.recExportVtt)].map {
+                format, kind in
+                BlockAction(
+                    title: L.recExportTranscriptAs(kind: kind), symbol: "square.and.arrow.up",
+                    enabled: !empty
+                ) {
+                    recorder.shareTranscript(
+                        id, title: title(block, row), format: format, in: editor)
+                }
+            } + [
+                // The agent reads the transcript with the block.
+                BlockAction(title: L.recSummarize, symbol: "sparkles", enabled: !empty && canEdit) {
+                    editor?.onSummarize?(block, L.recSummarizePrompt(title: title(block, row)))
+                },
+                // Not while a transcription runs, which the new one would race.
+                BlockAction(
+                    title: empty ? L.recTranscribe : L.recTranscribeAgain,
+                    symbol: "captions.bubble",
+                    enabled: canEdit && !recorder.state.transcribing.contains(id)
+                ) {
+                    recorder.retranscribe(id)
+                },
+                // The block goes as one step to undo; its recording stays, for
+                // the undo to bring back.
+                BlockAction(
+                    title: L.commonDelete, symbol: "trash", enabled: canEdit, destructive: true
+                ) {
+                    editor?.removeBlock(block.id)
+                },
+            ]
     }
 
     private func play(_ recorder: Recorder) -> some View {
@@ -222,32 +251,38 @@ struct RecordingBlock: View {
         let palette = BlockLook.palette
         let widest = row.durationMs >= 3_600_000 ? "0:00:00" : "00:00"
         let folds = row.folded > 0 && row.folded < row.transcript.count
-        let lines = folds && !open ? Array(row.transcript.prefix(row.folded)) : row.transcript
+        let lines = row.transcript
+        let follow: (CGFloat) -> Void = { [editor, block = node.id] in
+            editor?.follow(block: block, y: $0)
+        }
         return VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, s in
-                TimedRow(time: RecordControl.time(TimeInterval(s.startMs) / 1000), widest: widest) {
-                    Recorder.shared.play(id, from: TimeInterval(s.startMs) / 1000)
-                } content: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let speaker = s.speaker, !speaker.isEmpty {
-                            Text(L.recSpeaker(name: speaker))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(palette.textMuted)
-                        }
-                        Text(s.text)
-                            .font(.system(size: BlockLook.textSize - 2))
-                            .foregroundStyle(palette.text)
-                            .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 8) {
+                if folds, !open {
+                    RollingLines(count: lines.count, clock: clock, spacing: 8) { index in
+                        transcriptLine(lines[index], index, widest: widest, follow: { _ in })
+                    }
+                } else {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        transcriptLine(line, index, widest: widest, follow: follow)
                     }
                 }
-                .disabled(Recorder.shared.state.recording)
             }
+            .padding(.horizontal, -TimeStyle.lineInset)
             if folds {
                 FoldButton(
                     open: $open, count: row.transcript.count,
                     indent: TimeStyle.caption.indent(widest))
             }
         }
+    }
+
+    private func transcriptLine(
+        _ line: Segment, _ index: Int, widest: String, follow: @escaping (CGFloat) -> Void
+    ) -> some View {
+        RecordingLine(
+            line: line, index: index, widest: widest, clock: clock,
+            disabled: Recorder.shared.state.recording, follow: follow,
+            play: { Recorder.shared.play(id, from: TimeInterval(line.startMs) / 1000) })
     }
 
     /// notice is what went wrong with the recording, in red when it failed:
@@ -275,6 +310,51 @@ struct RecordingBlock: View {
         .foregroundStyle(fg)
         .padding(10)
         .background(failed ? palette.dangerBg : palette.warnBg, in: .rect(cornerRadius: 8))
+    }
+}
+
+/// RecordingLine is a line of a recording's transcript.
+private struct RecordingLine: View {
+    let line: Segment
+    let index: Int
+    let widest: String
+    let clock: LineClock
+    let disabled: Bool
+    let follow: (CGFloat) -> Void
+    let play: () -> Void
+
+    var body: some View {
+        let palette = BlockLook.palette
+        let current = clock.line == index
+        TimedRow(time: RecordControl.time(TimeInterval(line.startMs) / 1000), widest: widest) {
+            play()
+        } content: {
+            VStack(alignment: .leading, spacing: 2) {
+                if let speaker = line.speaker, !speaker.isEmpty {
+                    Text(L.recSpeaker(name: speaker))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textMuted)
+                }
+                Text(line.text)
+                    .font(.system(size: BlockLook.textSize - 2))
+                    .foregroundStyle(palette.text)
+                    .multilineTextAlignment(.leading)
+            }
+        }
+        .disabled(disabled)
+        .padding(.horizontal, TimeStyle.lineInset)
+        .padding(.vertical, TimeStyle.lineLift)
+        .background(current ? palette.accentSoft : .clear, in: .rect(cornerRadius: 6))
+        .background {
+            if current {
+                Color.clear.onGeometryChange(for: CGFloat.self) {
+                    $0.frame(in: .named(LineClock.space)).minY
+                } action: {
+                    follow($0)
+                }
+            }
+        }
+        .padding(.vertical, -TimeStyle.lineLift)
     }
 }
 
@@ -306,6 +386,8 @@ private struct Scrubber: View {
         let palette = BlockLook.palette
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             HStack(spacing: 10) {
+                SkipButton(seconds: -PlaySpeed.skip) { Recorder.shared.skip(id, by: -PlaySpeed.skip) }
+                SkipButton(seconds: PlaySpeed.skip) { Recorder.shared.skip(id, by: PlaySpeed.skip) }
                 Text(RecordControl.time(player.currentTime))
                 Slider(
                     value: Binding(
@@ -315,6 +397,7 @@ private struct Scrubber: View {
                 )
                 .tint(palette.accent)
                 Text(RecordControl.time(player.duration))
+                SpeedMenu()
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(palette.textMuted)

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 	"unicode/utf8"
 
@@ -412,5 +413,84 @@ func TestCopyAudioCutShortGoes(t *testing.T) {
 	}
 	if _, err := os.Stat(to); !os.IsNotExist(err) {
 		t.Errorf("the copy cut short stayed: %v", err)
+	}
+}
+
+// A link to a moment of a recording plays its audio in the zip, from a page
+// before the audio's too, and a moment of a video goes to its site.
+func TestExportZipMoments(t *testing.T) {
+	first := &doc.Node{ID: "l", Type: "paragraph"}
+	first.SetDelta(doc.Delta{{Text: "1:23", Attrs: doc.Attrs{Href: doc.MomentLink("second", "r", 83)}},
+		{Text: " and "}, {Text: "0:10", Attrs: doc.Attrs{Href: doc.MomentLink("second", "v", 10)}}})
+	contents := map[string]*doc.Content{
+		"first": doc.FromBlocks([]*doc.Node{first}),
+		"second": doc.FromBlocks([]*doc.Node{
+			{ID: "r", Type: "recording", Data: map[string]any{"recording_id": "x"}},
+			{ID: "a", Type: "file", Data: map[string]any{"url": "file:///tmp/audio/Call.wav", "name": "Call.wav", audioOf: "r"}},
+			{ID: "v", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}},
+		}),
+	}
+	var buf bytes.Buffer
+	err := Zip(&buf, []store.Page{{ID: "first", Title: "First"}, {ID: "second", Title: "Second"}}, nil,
+		func(id string) *doc.Content { return contents[id] }, func(string) string { return "" },
+		func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("RIFF")), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := unzip(t, buf.Bytes())["First.md"]
+	for _, want := range []string{"[1:23](files/Call.wav#t=83)", "[0:10](https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s)"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in\n%s", want, md)
+		}
+	}
+}
+
+// In a page exported alone a moment of a recording or a file has no
+// address, so it is words; of a video, it goes to the site; other links
+// stay as they are.
+func TestMoments(t *testing.T) {
+	c := doc.FromBlocks([]*doc.Node{
+		{ID: "r", Type: "recording"}, {ID: "f", Type: "file"}, {ID: "p", Type: "paragraph"},
+		{ID: "v", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}},
+	})
+	link := Moments(c)
+	for href, want := range map[string]string{
+		doc.MomentLink("pg", "r", 83):    "",
+		doc.MomentLink("pg", "f", 83):    "",
+		doc.MomentLink("pg", "v", 83):    "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=83s",
+		doc.MomentLink("pg", "p", 83):    doc.MomentLink("pg", "p", 83),
+		doc.MomentLink("pg", "gone", 83): doc.MomentLink("pg", "gone", 83),
+		doc.BlockLink("pg", "r"):         doc.BlockLink("pg", "r"),
+		"https://example.com":            "https://example.com",
+	} {
+		if got := link(href); got != want {
+			t.Errorf("link(%q) = %q, want %q", href, got, want)
+		}
+	}
+	if got := Moments(nil)(doc.MomentLink("pg", "r", 1)); got != doc.MomentLink("pg", "r", 1) {
+		t.Errorf("without content: %q", got)
+	}
+}
+
+// A save puts the whole file at its path, over what was there; one cut
+// short leaves that as it was, and nothing beside it.
+func TestSave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Call.wav")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, iotest.ErrReader(errors.New("cut"))); err == nil {
+		t.Error("a cut save reported nothing")
+	}
+	entries, _ := os.ReadDir(dir)
+	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304 -- the test's own file.
+		t.Errorf("after a cut save: %q, %d entries", data, len(entries))
+	}
+	if err := Save(path, strings.NewReader("RIFF")); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+		t.Errorf("saved %q", data)
 	}
 }

@@ -129,11 +129,15 @@ final class DocumentSession {
     /// it (held), and the editor goes on showing what it showed, over
     /// which the edits it sends are made.
     @discardableResult
-    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool) -> Bool {
+    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool, notesOf: String? = nil)
+        -> Bool
+    {
         if composing {
             held = (content, tinted)
             return false
         }
+        // A transcript is one step to undo, back to the notes it replaced.
+        let notesBefore = notesOf.flatMap { editor.node(ofBlock: $0)?.data }
         held = nil
         defer { editor.reportBlank() }
         updating = true
@@ -255,6 +259,8 @@ final class DocumentSession {
             editor.style.apply(to: storage, in: span)
             editor.restyleNumbersAfter(span)
         }
+        // A block another device deleted stops being heard here too.
+        editor.stopPlaying(shown.filter { next[$0.key] == nil }.values.map(\.info))
         shown = next
         _ = text.takeTouched()
         _ = text.keepTrailing()
@@ -264,6 +270,9 @@ final class DocumentSession {
         // undoes it, its ops taken back over what came since.
         if byAgent, let undo = textView.undoManager, editor.onUndoRun != nil {
             undo.registerUndo(withTarget: editor) { c in c.onUndoRun?() }
+        }
+        if let notesOf, let notesBefore, let undo = textView.undoManager {
+            undo.registerUndo(withTarget: editor) { c in c.setData(notesBefore, ofBlock: notesOf) }
         }
         editor.edits.tellKeyboard()
         if let menu, let anchor {
@@ -387,6 +396,8 @@ final class DocumentSession {
         sendTask = nil
         unsentSince = nil
         if text.uniqueIDs() { editor.layout.redrawEnd() }
+        // Before a block that went is forgotten as touched.
+        let before = shown
         forgetTouched()
         var next: [String: Shown] = [:]
         let content = DocumentMapper.content(
@@ -396,6 +407,7 @@ final class DocumentSession {
             next[info.id] = Shown(info: info, came: kept(info)?.came, node: n)
             return n
         }
+        editor.stopPlaying(before.filter { next[$0.key] == nil }.values.map(\.info))
         shown = next
         editor.onEdit?(content)
     }

@@ -198,7 +198,7 @@ so the deadline bounds that size, not the function's memory. A call has
 `STT_DEADLINE_MS` (default 120000, the most), on any plan: its answer comes
 at its end, and the gateway gives up on one that has not begun at 150 s. Soniox
 goes on with a long recording past that: its transcription is kept in
-`stt_jobs` (service role only), and asking again picks it up, sending nothing
+`stt_jobs`, or `stt_file_jobs` for an audio file (service role only), and asking again picks it up, sending nothing
 and spending nothing more, until it is done. What went to Soniox goes from it
 once it is; Soniox deletes what is never asked for again in 30 days.
 

@@ -95,11 +95,25 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	// The page's videos, by block, which its notes and the links to their
 	// moments play.
 	videos := map[string]Video{}
+	// The page's recordings, by block, which links to their moments play.
+	media := map[string]bool{}
+	files := map[string]servedFile{}
 	c.Walk(func(n, _ *Node) {
 		math = math || n.Type == "math_equation"
 		diagram = diagram || n.Type == "diagram"
 		embed = embed || n.Type == "embed" && opts.Embed != nil
-		recording = recording || n.Type == "recording"
+		if n.Type == "recording" {
+			recording, media[n.ID] = true, true
+		}
+		// Asked once each: what serves a file counts it as it is asked.
+		if n.Type == "file" && opts.File != nil {
+			var f servedFile
+			f.href, f.name, f.detail = opts.File(n)
+			files[n.ID] = f
+			if f.href != "" && playable(n) && !opts.Print {
+				recording, media[n.ID] = true, true
+			}
+		}
 		if v, ok := ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
 			if opts.Video != nil && !opts.Print {
 				v = opts.Video(v)
@@ -127,7 +141,7 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	if !diagram || !served("diagram") {
 		diagram = false
 	}
-	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram, videos: videos}
+	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram, videos: videos, media: media, files: files}
 	w.blocks(c.Children)
 
 	var b strings.Builder
@@ -170,14 +184,24 @@ type htmlWriter struct {
 	opts          HTMLOptions
 	math, diagram bool
 	videos        map[string]Video
+	media         map[string]bool
+	files         map[string]servedFile
 }
+
+// servedFile is what HTMLOptions.File says of a file block.
+type servedFile struct{ href, name, detail string }
 
 // text writes rich text as the page shows it: a link to a moment of one of
 // its videos goes to the video's site at that time, which the page's video
-// script plays in place instead.
+// script plays in place instead, and to a moment of a recording or a file
+// goes to its block, which the page's recording script plays from then. On
+// paper one of those, with no address of its own, is its words alone.
 func (w htmlWriter) text(d Delta) string {
 	return d.html(func(href string) (string, string) {
 		at, ok := LinkMoment(href)
+		if block := LinkBlock(href); ok && w.media[block] && !w.opts.Print {
+			return "#b-" + block, ` data-media="` + html.EscapeString(block) + `" data-t="` + strconv.Itoa(at) + `"`
+		}
 		v, found := w.videos[LinkBlock(href)]
 		if !ok || !found || w.opts.Print {
 			if ok && found {
@@ -456,7 +480,7 @@ func (w htmlWriter) block(n *Node) {
 			// Paper plays nothing: the video is a card linking to it, its
 			// notes' times to its site at each.
 			w.videoCard(n, v)
-			w.notes(n, v)
+			w.notes(n, w.videoMoment(v))
 			break
 		}
 		// It plays in place, as in the app, but only once the visitor
@@ -474,7 +498,7 @@ func (w htmlWriter) block(n *Node) {
 		if t := n.Str("title"); t != "" {
 			w.write(`<figcaption><a href="`, html.EscapeString(v.WatchURL()), `" rel="noopener noreferrer">`, html.EscapeString(t), "</a></figcaption>")
 		}
-		w.notes(n, v)
+		w.notes(n, w.videoMoment(v))
 		w.write("</figure>\n")
 	case "link_preview":
 		w.card(n)
@@ -554,21 +578,26 @@ func (w htmlWriter) videoCard(n *Node, v Video) {
 	w.write("</a>\n")
 }
 
-// notes writes a video's notes as its block shows them, a line's time
-// beside it, and folded when long, but on paper. A time links to the
-// video's site there, which the page's video script plays in place
-// instead.
-func (w htmlWriter) notes(n *Node, v Video) {
-	lines := NoteLines(n.Str("notes"))
-	if len(lines) == 0 {
-		return
-	}
-	moment := func(class, text string, at int) string {
+// videoMoment writes a time in video v's notes: a link to the video's site
+// there, which the page's video script plays in place instead.
+func (w htmlWriter) videoMoment(v Video) func(class, text string, at int) string {
+	return func(class, text string, at int) string {
 		data := ""
 		if !w.opts.Print {
 			data = momentData(v, at)
 		}
 		return `<a class="` + class + `" href="` + html.EscapeString(v.At(at).WatchURL()) + `" rel="noopener noreferrer"` + data + `>` + html.EscapeString(text) + "</a>"
+	}
+}
+
+// notes writes a video's notes as its block shows them, a line's time
+// beside it, and folded when long, but on paper. A time links to the
+// video's site there, which the page's video script plays in place
+// instead.
+func (w htmlWriter) notes(n *Node, moment func(class, text string, at int) string) {
+	lines := NoteLines(ShownNotes(n))
+	if len(lines) == 0 {
+		return
 	}
 	// The times' column is as wide as the longest of them, in figures.
 	widest := 0
@@ -615,19 +644,63 @@ func (w htmlWriter) lazy() string {
 // file writes a file's card: its name and what it is, a link that
 // downloads it where it is served.
 func (w htmlWriter) file(n *Node) {
-	name, href, detail := cardTitle(n), "", ""
-	if w.opts.File != nil {
-		var named string
-		href, named, detail = w.opts.File(n)
-		if named != "" {
-			name = named
+	id := n.ID
+	notes := n.Str("notes") != ""
+	if w.media[id] || notes {
+		w.write("<figure", w.attrs(n, "file"), ">")
+		w.fileCard(n, "")
+		_, href, _ := w.fileInfo(n)
+		if w.media[id] {
+			tag := "audio"
+			if FilePreviewKind(n.Str("name"), n.Str("mime")) == FileVideo {
+				tag = "video"
+			}
+			w.write("<", tag, ` controls preload="metadata" src="`, html.EscapeString(href), `"></`, tag, ">")
 		}
+		w.notes(n, func(class, text string, at int) string {
+			if !w.media[id] {
+				return `<span class="` + class + `">` + html.EscapeString(text) + "</span>"
+			}
+			return `<a class="` + class + `" href="#b-` + html.EscapeString(id) + `" data-media="` + html.EscapeString(id) + `" data-t="` + strconv.Itoa(at) + `">` + html.EscapeString(text) + "</a>"
+		})
+		w.write("</figure>\n")
+		return
+	}
+	w.fileCard(n, w.attrs(n, "card file"))
+}
+
+// fileInfo is a file block's name, where its file is served, "" for
+// nowhere, and what it is.
+func (w htmlWriter) fileInfo(n *Node) (name, href, detail string) {
+	name = cardTitle(n)
+	if f, ok := w.files[n.ID]; ok {
+		href, detail = f.href, f.detail
+		if f.name != "" {
+			name = f.name
+		}
+	}
+	return name, href, detail
+}
+
+// playable reports whether a file block is audio or a video, which a web
+// page plays.
+func playable(n *Node) bool {
+	kind := FilePreviewKind(n.Str("name"), n.Str("mime"))
+	return kind == FileAudio || kind == FileVideo
+}
+
+// fileCard writes a file block's card, with attrs, or as a part of its block
+// without an ID of its own for "".
+func (w htmlWriter) fileCard(n *Node, attrs string) {
+	name, href, detail := w.fileInfo(n)
+	if attrs == "" {
+		attrs = ` class="card file"`
 	}
 	tag := "div"
 	if href != "" {
 		tag = "a"
 	}
-	w.write("<", tag, w.attrs(n, "card file"))
+	w.write("<", tag, attrs)
 	if href != "" {
 		w.write(` href="`, html.EscapeString(href), `" download="`, html.EscapeString(name), `"`)
 	}
@@ -739,7 +812,11 @@ func (d Delta) html(link func(href string) (to, attrs string)) string {
 		href, attrs := SafeHref(a.Href), ""
 		if link != nil {
 			if to, more := link(a.Href); to != "" {
-				href, attrs = SafeHref(to), more
+				// A link within the page leaves it for nowhere.
+				if !strings.HasPrefix(to, "#") {
+					to = SafeHref(to)
+				}
+				href, attrs = to, more
 			}
 		}
 		if href != "" {
@@ -954,6 +1031,8 @@ figure.embed{border:1px solid var(--line);border-radius:10px;padding:12px 14px 1
 figure.embed figcaption{margin:0 0 10px;color:var(--fg);font-weight:650;font-size:15px}
 figure.embed iframe{display:block;width:100%;border:0}
 figure.video video{width:100%;border-radius:8px;background:#000}
+figure.file{display:flex;flex-direction:column;gap:12px}
+figure.file audio,figure.file video{width:100%;border-radius:8px}
 figure.video .frame{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000}
 figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .notes{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--code);gap:4px}

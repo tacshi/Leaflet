@@ -399,3 +399,147 @@ Deno.test("a transcript keeps to what the database takes", async () => {
   assertEquals((await transcribe(p, deps(p, soniox().fetch, send))).status, 200);
   assertEquals((rec(p).transcript as { text: string }[]).map((t) => t.text), ["Hello \ufffd."]);
 });
+
+const FILE = "11111111-1111-4111-8111-111111111111";
+
+/** project, with Ann's audio file on her page, uploaded. */
+function withFile(settings: Row = {}, row: Row = {}): Project {
+  const p = project(settings);
+  p.tables.files = [{
+    id: FILE,
+    page_id: "plan",
+    storage_path: `space/${FILE}/Call 字.m4a`,
+    mime_type: "audio/mp4",
+    deleted_at: null,
+    ...row,
+  }];
+  p.tables.stt_file_jobs = [];
+  p.objects.files = new Map([[`space/${FILE}/Call 字.m4a`, new Uint8Array(64)]]);
+  return p;
+}
+
+async function transcribeFile(p: Project, d: SttDeps, token = "ann-token") {
+  const res = await handle(p.request(token, { action: "transcribe", file_id: FILE }), d);
+  return { status: res.status, body: await res.json() };
+}
+
+async function transcribed(p: Project, d: SttDeps) {
+  return await handle(p.request("ann-token", { action: "transcribed", file_id: FILE }), d);
+}
+
+// A file's transcript is the caller's to keep: it comes back, no row holds
+// it, and the audio goes under a name that says only what it is.
+Deno.test("a file's transcript comes back and is saved nowhere", async () => {
+  const p = withFile();
+  const s = soniox();
+  const { status, body } = await transcribeFile(p, deps(p, s.fetch));
+  assertEquals(status, 200);
+  assertEquals(body.segments.map((t: { text: string }) => t.text), ["Hello."]);
+  assertEquals(rec(p).status, "uploading");
+  assertEquals(s.files.map((f) => f.name), ["audio.m4a"]);
+});
+
+// Soniox's copy stays until the app has the transcript: an app stopped
+// before the answer reached it asks again, and pays nothing more.
+Deno.test("a file's transcript stays at Soniox until the app has it", async () => {
+  const p = withFile();
+  const s = soniox();
+  const d = deps(p, s.fetch);
+  await transcribeFile(p, d);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), []);
+  assertEquals((await transcribeFile(p, d)).status, 200);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 1);
+  assertEquals((await transcribed(p, d)).status, 200);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), [
+    "DELETE /v1/transcriptions/job",
+    "DELETE /v1/files/file",
+  ]);
+  assertEquals(p.tables.stt_file_jobs, []);
+});
+
+Deno.test("a file is transcribed by one call at a time", async () => {
+  const p = withFile();
+  const s = soniox();
+  const results = await Promise.all([transcribeFile(p, deps(p, s.fetch)), transcribeFile(p, deps(p, s.fetch))]);
+  assertEquals(results.map((r) => r.status).sort(), [200, 409]);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 1);
+});
+
+Deno.test("a file a stopped call left is taken again", async () => {
+  const p = withFile();
+  p.tables.stt_file_jobs = [{ source_file_id: FILE, user_id: "ann", claimed_at: "2020-01-01T00:00:00.000Z" }];
+  const s = soniox();
+  assertEquals((await transcribeFile(p, deps(p, s.fetch))).status, 200);
+});
+
+Deno.test("two people each transcribe a file with their own key", async () => {
+  const p = withFile();
+  p.rpcs.can_edit_page = () => true;
+  p.tables.stt_file_jobs = [{ source_file_id: FILE, user_id: "ann", claimed_at: new Date().toISOString() }];
+  const s = soniox();
+  assertEquals((await transcribeFile(p, deps(p, s.fetch), "bob-token")).status, 200);
+});
+
+Deno.test("a viewer of a file's page spends nothing", async () => {
+  const p = withFile();
+  const s = soniox();
+  assertEquals((await transcribeFile(p, deps(p, s.fetch), "bob-token")).status, 403);
+  assertEquals(s.calls, []);
+  assertEquals(p.tables.stt_file_jobs, []);
+});
+
+Deno.test("a file gone, or not yet up, is said to be", async () => {
+  const s = soniox();
+  const deleted = withFile({}, { deleted_at: "2026-01-01T00:00:00Z" });
+  assertEquals((await transcribeFile(deleted, deps(deleted, s.fetch))).status, 404);
+  const pending = withFile({}, { storage_path: null });
+  assertEquals((await transcribeFile(pending, deps(pending, s.fetch))).status, 404);
+  const missing = withFile();
+  missing.objects.files = new Map();
+  const { status, body } = await transcribeFile(missing, deps(missing, s.fetch));
+  assertEquals([status, body.error], [404, "This file has not finished uploading"]);
+  assertEquals(s.calls, []);
+});
+
+Deno.test("a file id that is none is refused", async () => {
+  const p = withFile();
+  const res = await handle(p.request("ann-token", { action: "transcribe", file_id: "x" }), deps(p, soniox().fetch));
+  assertEquals(res.status, 400);
+  await res.body?.cancel();
+});
+
+Deno.test("a file too large to send is refused in words that say so", async () => {
+  const p = withFile();
+  p.objects.files = new Map([[`space/${FILE}/Call 字.m4a`, new Uint8Array(2 << 20)]]);
+  const s = soniox();
+  const { status, body } = await transcribeFile(p, deps(p, s.fetch));
+  assertEquals(status, 413);
+  assert(body.error.includes("too large"), body.error);
+  assertEquals(p.tables.stt_file_jobs, []);
+});
+
+// A long file goes on at Soniox past a call, as a recording does.
+Deno.test("a file Soniox is still working on is picked up, not paid for again", async () => {
+  const p = withFile();
+  const s = soniox({ status: "processing" });
+  const d = { ...deps(p, s.fetch), deadlineMs: 20 };
+  const first = await transcribeFile(p, d);
+  assertEquals([first.status, first.body.code], [504, "still_transcribing"]);
+  assertEquals(p.tables.stt_file_jobs[0].claimed_at, null);
+  const again = await transcribeFile(p, d);
+  assertEquals(again.status, 504);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 1);
+});
+
+Deno.test("an endpoint's transcription leaves nothing behind", async () => {
+  const p = withFile({ provider: "openai-compatible", provider_id: "openai" });
+  const send: SttDeps["send"] = async (url, init) => {
+    const sent = await upload(String(url), init);
+    assertEquals(sent.name, "audio.m4a");
+    return Response.json({ segments: [{ start: 1, end: 2, text: "Hi." }] });
+  };
+  const { status, body } = await transcribeFile(p, deps(p, soniox().fetch, send));
+  assertEquals(status, 200);
+  assertEquals(body.segments, [{ start_ms: 1000, end_ms: 2000, text: "Hi." }]);
+  assertEquals(p.tables.stt_file_jobs, []);
+});

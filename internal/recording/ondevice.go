@@ -3,10 +3,23 @@ package recording
 import (
 	"encoding/json"
 	"errors"
+	"path"
+	"strings"
 
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
+
+// OnDeviceReads reports whether the device's engine can read an audio file
+// of name, as Apple's audio files can: on any other it fails with nothing
+// to say why.
+func OnDeviceReads(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".aac", ".aif", ".aiff", ".caf", ".flac", ".m4a", ".mp3", ".mp4", ".wav":
+		return true
+	}
+	return false
+}
 
 // OnDeviceAnswer is what a device's own speech engine says of a
 // transcription (speech/, Leaflet's Swift package): a line of it each, as

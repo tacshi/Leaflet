@@ -145,6 +145,15 @@ final class SceneModel {
     /// blockName the name being typed for it.
     var renamingBlock: DocNode?
     var blockName = ""
+    /// sharing is a file in the share sheet.
+    var sharing: SharedFile?
+    /// quickLook is a file shown with Quick Look.
+    var quickLook: URL?
+    /// speakerEdit is a speaker being named, with the name in blockName.
+    var speakerEdit: SpeakerEdit?
+    /// replacingNotes is a file block whose notes a transcript is to
+    /// replace, while that is asked.
+    var replacingNotes: DocNode?
     /// editingNotes is a video block whose notes are being written, and
     /// editingLink one whose link is being changed.
     var editingNotes: DocNode?
@@ -212,6 +221,10 @@ final class SceneModel {
         renamingBlock = nil
         editingNotes = nil
         editingLink = nil
+        sharing = nil
+        quickLook = nil
+        replacingNotes = nil
+        speakerEdit = nil
     }
 
     /// keep drops the pages not among ids from the history, as they are

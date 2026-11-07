@@ -56,6 +56,8 @@ type Host interface {
 	Video(c *ui.Context, n *doc.Node, width float32)
 	// Card builds a link card or a file's card.
 	Card(c *ui.Context, n *doc.Node)
+	// File draws a file block, width wide.
+	File(c *ui.Context, n *doc.Node, width float32)
 	// Recording builds a recording block.
 	Recording(c *ui.Context, n *doc.Node)
 	// CommentCount is the number of open threads on a block.
@@ -80,6 +82,8 @@ type Host interface {
 	// VideoMenu adds a video block's own items to its context menu: its
 	// notes and an agent's summary.
 	VideoMenu(m *ui.Menu, n *doc.Node)
+	// FileMenu adds a file block's own items to its context menu.
+	FileMenu(c *ui.Context, m *ui.Menu, n *doc.Node)
 	// OpenBlock opens a page at one of its blocks, for a link to a block,
 	// and plays a video or a recording from at seconds in, for a link to a
 	// moment of one; at is -1 for none.

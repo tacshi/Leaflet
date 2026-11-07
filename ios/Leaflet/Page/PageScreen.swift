@@ -85,6 +85,25 @@ struct PageScreen: View {
                             scene?.renamingBlock = node
                         }
                         c.onEditNotes = { [weak scene] in scene?.editingNotes = $0 }
+                        c.onShare = { [weak scene] in scene?.sharing = $0 }
+                        c.client = app.client
+                        c.onOpenFile = { [weak scene, app] id in
+                            Task {
+                                do {
+                                    guard let path = try await app.client?.localFile(id) else {
+                                        return
+                                    }
+                                    scene?.quickLook = URL(fileURLWithPath: path)
+                                } catch {
+                                    app.show(Toast(message: error.localizedDescription))
+                                }
+                            }
+                        }
+                        c.onReplaceNotes = { [weak scene] in scene?.replacingNotes = $0 }
+                        c.onEditSpeaker = { [weak scene] node, from, place in
+                            scene?.blockName = from ?? ""
+                            scene?.speakerEdit = SpeakerEdit(node: node, from: from, place: place)
+                        }
                         c.onEditLink = { [weak scene] in scene?.editingLink = $0 }
                         c.onSummarize = { [weak scene] node, prompt in
                             scene?.asking = AskRequest(
@@ -215,13 +234,15 @@ struct PageScreen: View {
                 editor.setData(data, ofBlock: node.id)
             }
         }
+        .modifier(FileDialogs(scene: scene))
         .sheet(item: Binding(get: { scene.editingNotes }, set: { scene.editingNotes = $0 })) {
             node in
-            NotesSheet(notes: node.data?["notes"]?.string ?? "") { [scene] notes in
+            NotesSheet(notes: node.data?["notes"]?.string ?? "", file: node.type == "file") {
+                [scene] notes in
                 // Into the block as it is now, with what synced in while the
                 // sheet was open.
                 guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
-                    now.type == "video"
+                    now.type == "video" || now.type == "file"
                 else { return }
                 var data = now.data ?? [:]
                 data["notes"] = notes.isEmpty ? nil : .string(notes)

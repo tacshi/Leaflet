@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/export"
 	"leaflet/internal/guard"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
@@ -151,8 +153,10 @@ func (e engine) Stream(language string, text func(string)) (recording.Stream, er
 }
 
 func (e engine) File(path, language string) ([]store.Segment, error) {
-	var lasts time.Duration
-	if fi, err := os.Stat(path); err == nil {
+	// Only a WAV's size says how long it lasts; other audio goes by
+	// Swift's own watch on the engine.
+	lasts := anyLength
+	if fi, err := os.Stat(path); err == nil && strings.EqualFold(filepath.Ext(path), ".wav") {
 		lasts = audioLasts(fi.Size() - 44)
 	}
 	raw, err := giveUpAfter(lasts, func() (string, error) { return e.t.File(path, language) })
@@ -168,6 +172,9 @@ func (e engine) File(path, language string) ([]store.Segment, error) {
 // than leave the recording transcribing until the app quits. Tests
 // shorten it.
 var onDeviceSlack = time.Minute
+
+// anyLength is the longest an audio file not the recorder's is given.
+const anyLength = 6 * time.Hour
 
 // audioLasts is how long size bytes of the recorder's audio last.
 func audioLasts(size int64) time.Duration {
@@ -291,7 +298,9 @@ type recordingState struct {
 	// Transcribing are the recordings being transcribed; Finishing those
 	// among them whose words came live, now getting their timestamps.
 	Transcribing []string `json:"transcribing"`
-	Finishing    []string `json:"finishing"`
+	// TranscribingFiles are the file blocks being transcribed.
+	TranscribingFiles []string `json:"transcribing_files"`
+	Finishing         []string `json:"finishing"`
 	// Testing is a test of the microphone running, from Settings, and
 	// Heard what the last one heard, or why it heard nothing.
 	Testing bool   `json:"testing"`
@@ -309,7 +318,7 @@ func (c *Core) recState() recordingState {
 	out := recordingState{
 		Active: st.Active, Starting: st.Starting, Paused: st.Paused, PageID: st.PageID, BlockID: st.BlockID,
 		ID: st.ID, Levels: st.Levels, LiveText: st.LiveText, Engine: st.Engine, Error: st.Error,
-		ElapsedMs: r.Elapsed().Milliseconds(), Transcribing: []string{}, Finishing: []string{},
+		ElapsedMs: r.Elapsed().Milliseconds(), Transcribing: []string{}, TranscribingFiles: []string{}, Finishing: []string{},
 		Testing: c.micTesting, Heard: c.micHeard,
 	}
 	if n := len(out.Levels); n > levelsSent {
@@ -317,6 +326,9 @@ func (c *Core) recState() recordingState {
 	}
 	if out.Levels == nil {
 		out.Levels = []float64{}
+	}
+	for id := range r.TranscribingFiles {
+		out.TranscribingFiles = append(out.TranscribingFiles, id)
 	}
 	for id := range r.Transcribing {
 		out.Transcribing = append(out.Transcribing, id)
@@ -492,6 +504,33 @@ func (c *Core) RecordingAudio(id string, token int64) (_ string, err error) {
 	return c.core.Store.DownloadedAudioFrom(id, audio)
 }
 
+// transcriptFile is a recording's transcript as a file to share, as
+// RecordingTranscriptFile returns it.
+type transcriptFile struct {
+	Name string `json:"name"`
+	Text string `json:"text"`
+}
+
+// RecordingTranscriptFile returns a recording's transcript as a file of
+// format, txt, srt or vtt, named for title, the block's as it shows, as a
+// transcriptFile in JSON.
+func (c *Core) RecordingTranscriptFile(id, title, format string) (_ string, err error) {
+	defer catch(&err)
+	var rec store.Recording
+	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
+	if err != nil {
+		return "", err
+	}
+	return encode(transcriptFile{Name: export.SafeName(title) + "." + format, Text: recording.TranscriptFile(rec.Transcript, format)})
+}
+
+// RecordingAudioName is the name a recording's audio saves under, for
+// title, the block's as it shows.
+func RecordingAudioName(title string) string {
+	defer catch(nil)
+	return export.SafeName(title) + ".wav"
+}
+
 // Retranscribe transcribes a recording again, or for the first time,
 // with the speech settings as they are.
 func (c *Core) Retranscribe(id string) (err error) {
@@ -499,6 +538,18 @@ func (c *Core) Retranscribe(id string) (err error) {
 	c.q.do(func() {
 		s := c.core.Store.Settings()
 		err = c.core.Rec.Retranscribe(id, s.Stt, c.online(s))
+		c.tellRecording()
+	})
+	return err
+}
+
+// TranscribeFile transcribes audio file block blockID of page pageID with
+// the speech settings as they are, into its notes.
+func (c *Core) TranscribeFile(pageID, blockID string) (err error) {
+	defer catch(&err)
+	c.q.do(func() {
+		s := c.core.Store.Settings()
+		err = c.pageCore().TranscribeFile(pageID, blockID, s.Stt, c.online(s))
 		c.tellRecording()
 	})
 	return err

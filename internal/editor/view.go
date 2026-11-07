@@ -65,8 +65,11 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			if label := mediaEdit(e.node(e.menuBlock)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.Host.EditBlock(e.menuBlock)
 			}
-			if n := e.node(e.menuBlock); n.Type == "video" {
+			switch n := e.node(e.menuBlock); n.Type {
+			case "video":
 				e.Host.VideoMenu(m, n)
+			case "file":
+				e.Host.FileMenu(c, m, n)
 			}
 			if label := mediaLink(e.linkAtPos(e.menuAt)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.LinkToMedia(e.menuAt)
@@ -506,8 +509,10 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			e.Host.Embed(c, n, e.width-float32(depth)*indentStep)
 		case "video":
 			e.Host.Video(c, n, e.width-float32(depth)*indentStep)
-		case "link_preview", "file":
+		case "link_preview":
 			e.Host.Card(c, n)
+		case "file":
+			e.Host.File(c, n, e.width-float32(depth)*indentStep)
 		case "recording":
 			e.Host.Recording(c, n)
 		case "subpage":

@@ -272,12 +272,12 @@ func TestRecordingBlockFollowsChanges(t *testing.T) {
 	}
 }
 
-// A long transcript shows its first lines until it is opened, and closes
-// again; a short one shows whole.
+// A long transcript shows its first lines in a window until it is opened,
+// and closes again; a short one shows whole.
 func TestLongTranscriptFolds(t *testing.T) {
 	a := templatesApp(t)
 	var segs []store.Segment
-	for i := range doc.FoldedLines + 4 {
+	for i := range rollRows + 4 {
 		segs = append(segs, store.Segment{StartMs: i * 2000, EndMs: i*2000 + 1500, Text: fmt.Sprintf("Line %d.", i+1)})
 	}
 	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 30000, SttProvider: "soniox", Status: "ready", Transcript: segs}
@@ -288,7 +288,7 @@ func TestLongTranscriptFolds(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 900)
 	tt.Frame()
 	last := fmt.Sprintf("Line %d.", len(segs))
-	if !tt.HasText(fmt.Sprintf("Line %d.", doc.FoldedLines)) || tt.HasText(fmt.Sprintf("Line %d.", doc.FoldedLines+1)) {
+	if !tt.HasText(fmt.Sprintf("Line %d.", doc.FoldedLines)) || tt.HasText(last) {
 		t.Fatalf("folded, it shows %q", tt.Texts())
 	}
 	if err := tt.Click(locales.RecShowAll(len(segs))); err != nil {

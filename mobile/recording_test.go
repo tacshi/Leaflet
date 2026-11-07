@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -463,5 +464,70 @@ func TestStuckEngineIsGivenUpOn(t *testing.T) {
 	}
 	if _, err := e.File(path, "en"); !errors.Is(err, errStuck) || err.Error() != locales.RecErrOnDeviceStuck() {
 		t.Fatalf("File: %v", err)
+	}
+}
+
+// An audio file's transcript comes into its open page's block as a step of
+// its own, which the app is told is that block's, and the state says it
+// runs until then.
+func TestFileTranscribedIntoItsNotes(t *testing.T) {
+	c, ev := open(t)
+	c.UseMicrophone(&fakeMic{closed: make(chan struct{}, 1)})
+	c.UseTranscriber(&fakeTranscriber{heard: map[string]int{}, sinks: map[string]*TranscriptSink{}})
+	raw, _ := c.CreatePage(`{"title":"Meeting"}`)
+	var row pageRow
+	_ = json.Unmarshal([]byte(raw), &row)
+	src := filepath.Join(t.TempDir(), "call.m4a")
+	if err := os.WriteFile(src, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := c.core.Store.AddFile(src, "", row.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "f1", Type: "file", Data: map[string]any{"file_id": f.ID, "name": f.Name}}
+	if _, _, err := c.core.Store.SaveContent(row.ID, doc.FromBlocks([]*doc.Node{n})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.OpenPage(row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TranscribeFile(row.ID, "f1"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.After(5 * time.Second); ; {
+		select {
+		case u := <-ev.updates:
+			if u.reason != "notes:f1" {
+				continue
+			}
+			if !strings.Contains(u.content, "0:00 from the file") {
+				t.Errorf("content %s", u.content)
+			}
+			return
+		case <-deadline:
+			t.Fatal("the transcript never came")
+		}
+	}
+}
+
+// A transcript saves as a file named for its recording.
+func TestRecordingTranscriptFile(t *testing.T) {
+	c, _ := open(t)
+	if err := c.core.Store.PutRecording(store.Recording{ID: "r1", PageID: "p", Status: "ready",
+		Transcript: []store.Segment{{StartMs: 1000, EndMs: 2000, Text: "Hello."}}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.RecordingTranscriptFile("r1", "Stand/up", recording.TranscriptSrt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file transcriptFile
+	_ = json.Unmarshal([]byte(raw), &file)
+	if file.Name != "Stand-up.srt" || file.Text != "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n" {
+		t.Errorf("file %+v", file)
+	}
+	if got := RecordingAudioName("Stand/up"); got != "Stand-up.wav" {
+		t.Errorf("audio name %q", got)
 	}
 }

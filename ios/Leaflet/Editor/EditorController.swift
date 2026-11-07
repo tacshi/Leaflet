@@ -85,6 +85,20 @@ final class EditorController: NSObject, UITextViewDelegate {
     /// onRenameBlock asks for a new name for a block, named title now: a
     /// recording's, from its menu.
     var onRenameBlock: (@MainActor (DocNode, String) -> Void)?
+    /// followAt is where following along last scrolled the page.
+    private var followAt: CGFloat?
+    /// onShare shows the share sheet for a file.
+    var onShare: (@MainActor (SharedFile) -> Void)?
+    /// onOpenFile shows a file of the page with Quick Look, by its ID.
+    var onOpenFile: (@MainActor (String) -> Void)?
+    /// onEditSpeaker asks for a speaker's name in a file's notes: for from,
+    /// on all their lines, or for nil a new one for a line, by its place.
+    var onEditSpeaker: (@MainActor (DocNode, String?, Int) -> Void)?
+    /// onReplaceNotes asks before a transcript takes the place of the notes
+    /// of a file.
+    var onReplaceNotes: (@MainActor (DocNode) -> Void)?
+    /// client is the app's core, which brings files here.
+    var client: CoreClient?
     /// onEditNotes opens the sheet that writes a video's notes, and
     /// onEditLink the one that changes its link, from its menu.
     var onEditNotes: (@MainActor (DocNode) -> Void)?
@@ -191,8 +205,12 @@ final class EditorController: NSObject, UITextViewDelegate {
     /// merge) into the text, as DocumentSession.update does, and reports
     /// whether it went in.
     @discardableResult
-    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool = false) -> Bool {
-        session.update(content, tinted: tinted, byAgent: byAgent)
+    func update(
+        _ content: DocContent, tinted: Set<String>, byAgent: Bool = false, notesOf: String? = nil
+    )
+        -> Bool
+    {
+        session.update(content, tinted: tinted, byAgent: byAgent, notesOf: notesOf)
     }
 
     /// tint shows the blocks an agent run last changed lit.
@@ -219,7 +237,22 @@ final class EditorController: NSObject, UITextViewDelegate {
         // pictures.
         VideoPlayback.shared.stop(
             Set(text.blocks().filter { $0.info.type == "video" }.map { $0.info.id }))
+        FilePlayback.shared.stop(
+            Set(text.blocks().filter { $0.info.type == "file" }.map { $0.info.id }))
         textView.blocks.reset()
+    }
+
+    /// stopPlaying stops what plays in blocks that left the page: its view
+    /// may stay a while, for an undo, and would go on being heard.
+    func stopPlaying(_ gone: [BlockInfo]) {
+        let ids = Set(gone.map(\.id))
+        VideoPlayback.shared.stop(ids)
+        FilePlayback.shared.stop(ids)
+        let recordings = gone.filter { $0.type == "recording" }
+            .compactMap { $0.data["recording_id"]?.string }
+        if let playing = Recorder.shared.playing, recordings.contains(playing) {
+            Recorder.shared.stopPlaying()
+        }
     }
 
     /// emptyPageBlock is the block of an empty page, when it draws a
@@ -513,9 +546,55 @@ final class EditorController: NSObject, UITextViewDelegate {
             if let id = info.data["recording_id"]?.string {
                 Recorder.shared.play(id, from: TimeInterval(at))
             }
+        case "file":
+            if let file = info.data["file_id"]?.string {
+                FilePlayback.shared.play(block: blockID, file: file, at: at, client: client)
+            }
         default:
             break
         }
+    }
+
+    /// showsHead says the top of block id, where its player is, is in view:
+    /// a block with a long transcript may show when its player no longer does.
+    func showsHead(ofBlock id: String) -> Bool {
+        guard let frame = textView.blocks.frame(of: id) else { return false }
+        let top = textView.contentOffset.y + textView.adjustedContentInset.top
+        let bottom =
+            textView.contentOffset.y + textView.bounds.height
+            - textView.adjustedContentInset.bottom
+        return frame.minY + 110 > top && frame.minY < bottom
+    }
+
+    /// follow keeps the line being said a third of the way down the page,
+    /// at y in block id, for those who follow along. Someone who scrolled
+    /// since is left to read: it goes on from the line after next, once they
+    /// have stopped.
+    func follow(block id: String, y: CGFloat) {
+        guard UserDefaults.standard.bool(forKey: LineClock.followKey),
+            let frame = textView.blocks.placed(id), !textView.isDragging, !textView.isDecelerating
+        else { return }
+        if let followAt, abs(textView.contentOffset.y - followAt) > 2 {
+            self.followAt = nil
+            return
+        }
+        let top = -textView.adjustedContentInset.top
+        let bottom = max(
+            textView.contentSize.height + textView.adjustedContentInset.bottom
+                - textView.bounds.height, top)
+        let target = min(max(frame.minY + y - textView.bounds.height / 3, top), bottom)
+        followAt = target
+        textView.setContentOffset(
+            CGPoint(x: textView.contentOffset.x, y: target), animated: true)
+    }
+
+    /// recordingBlock is the block of the page that shows recording id.
+    func recordingBlock(_ id: String) -> DocNode? {
+        for (info, _) in text.blocks()
+        where info.type == "recording" && info.data["recording_id"]?.string == id {
+            return node(ofBlock: info.id)
+        }
+        return nil
     }
 
     /// setData gives a block without text new data, as its editor saved

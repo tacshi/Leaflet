@@ -89,3 +89,15 @@ func TestSonioxCloseDoesNotWait(t *testing.T) {
 		t.Errorf("Finish after Close took %v", took)
 	}
 }
+
+// A compressed file's size says little of how long it lasts: its wait
+// goes by the least bit rate of speech, up to a most.
+func TestFileWait(t *testing.T) {
+	hour := int64(3600 * 4000)
+	if got := fileWait(hour); got != 5*time.Minute+2*time.Hour {
+		t.Errorf("an hour at the least rate waits %v", got)
+	}
+	if got := fileWait(1 << 40); got != 6*time.Hour {
+		t.Errorf("a huge file waits %v", got)
+	}
+}

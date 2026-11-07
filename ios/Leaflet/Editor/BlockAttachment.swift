@@ -226,11 +226,26 @@ final class BlockViews {
         return host.view
     }
 
+    /// placed is where block id was last put in the text view, seen or not,
+    /// or nil for a block with no view now.
+    func placed(_ id: String) -> CGRect? { shown[id]?.view.frame }
+
+    /// frame is where block id shows in the text view, or nil out of view.
+    func frame(of id: String) -> CGRect? {
+        guard let view = shown[id]?.view, view.superview != nil, !view.isHidden else { return nil }
+        return view.frame
+    }
+
     /// samePlayer says two states of a block are a video of the same link,
-    /// which its player is made from.
+    /// or the same file, which its player is made from.
     private static func samePlayer(_ old: DocNode, _ new: DocNode) -> Bool {
-        old.type == "video" && new.type == "video" && old.id == new.id
-            && old.data?["url"] == new.data?["url"]
+        guard old.id == new.id, old.type == new.type else { return false }
+        return switch new.type {
+        case "video": old.data?["url"] == new.data?["url"]
+        // A file's notes arrive while it plays.
+        case "file": old.data?["file_id"] == new.data?["file_id"]
+        default: false
+        }
     }
 
     /// card is a block's view, as the page can be changed or not.

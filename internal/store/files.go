@@ -285,6 +285,13 @@ func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 	return local, nil
 }
 
+// FileWaitsUpload reports whether file id's bytes have yet to go up.
+func (s *Store) FileWaitsUpload(id string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+id).Scan(&n)
+	return n > 0, err
+}
+
 // DeleteFile deletes a file, which cannot be undone: its copy here goes
 // now, and its stored copy (in Storage, or iCloud Drive) once the
 // deletion has gone up. An upload still waiting is dropped. The file is

@@ -30,6 +30,7 @@ Go core as the desktop app.
 
 ### Write
 
+- A tap on a file in a page shows it with Quick Look.
 - A block editor of its own: headings, nested lists, to-dos with due dates,
   quotes, callouts, toggles, code with syntax highlighting, tables, charts,
   math, diagrams, pictures, videos, files, embeds, link cards, subpage
@@ -56,6 +57,18 @@ Go core as the desktop app.
 
 ### Record
 
+- A recording's audio, and its transcript as text, SRT or WebVTT, share from
+  its menu.
+- Audio and video files play in the page. Notes under a file work as a
+  video's do, and Transcribe puts an audio file's transcript there, with its
+  speakers' names. The file's menu hides them, and copies, inserts or
+  summarizes the transcript; a line's menu changes its speaker or renames
+  them on all their lines. Scrolled past its block, audio keeps a small
+  player at the top of the page. An audio file is one card, as a recording is. The
+  line being said is lit, a long transcript moves on with it in a small window until
+  opened, and transcripts can follow along. Audio plays at the
+  speed you choose, skips 15 seconds each way, and shows in Control Center and
+  on the lock screen, as videos do.
 - Recording blocks, from the device's microphone, going on with the screen
   locked, transcribed on the device or through Soniox or an
   OpenAI-compatible endpoint, showing the last two lines of the words as

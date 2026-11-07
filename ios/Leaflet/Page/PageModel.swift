@@ -70,10 +70,13 @@ final class PageModel {
     @ObservationIgnored private var sending = 0
     /// held is the newest change from outside that came while edits were
     /// on their way, which the editor shows once they are there.
-    @ObservationIgnored private var held: (content: DocContent, rev: Int64, agent: Bool)?
+    @ObservationIgnored private var held: (content: DocContent, rev: Int64, reason: String)?
     /// byAgent says the change from outside the editor shows is an agent
     /// run's, as the core said it.
     @ObservationIgnored private(set) var byAgent = false
+    /// notesOf is the file block whose transcript that change is, one step
+    /// to undo of its own.
+    @ObservationIgnored private(set) var notesOf: String?
     /// edited is the newest rev an edit left the page at, which has it: a
     /// change from outside at an older one, though it comes after the
     /// edit was taken, is from before it, and would take it away.
@@ -195,15 +198,16 @@ final class PageModel {
         if let left { edited = max(edited, left) }
         guard sending == 0, let held else { return }
         self.held = nil
-        if held.rev >= edited { show(held.content, at: held.rev, agent: held.agent) }
+        if held.rev >= edited { show(held.content, at: held.rev, reason: held.reason) }
     }
 
     /// show has the editor show content, the page at rev; agent says an
     /// agent's run changed it, which the editor's Undo then undoes.
-    private func show(_ content: DocContent, at rev: Int64, agent: Bool = false) {
+    private func show(_ content: DocContent, at rev: Int64, reason: String = "") {
         self.content = content
         self.rev = rev
-        byAgent = agent
+        byAgent = reason == "agent"
+        notesOf = reason.hasPrefix("notes:") ? String(reason.dropFirst(6)) : nil
         external += 1
         refreshOutline()
     }
@@ -279,9 +283,9 @@ final class PageModel {
         case .pageUpdated(let pageID, let c, let newRev, let reason, _) where pageID == id:
             guard newRev > (held?.rev ?? rev), newRev >= edited else { return }
             if sending > 0 {
-                held = (c, newRev, reason == "agent")
+                held = (c, newRev, reason)
             } else {
-                show(c, at: newRev, agent: reason == "agent")
+                show(c, at: newRev, reason: reason)
             }
         case .pageReadOnly(let pageID, let ro) where pageID == id:
             readOnly = ro

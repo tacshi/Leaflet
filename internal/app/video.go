@@ -1,17 +1,22 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"log"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
+	"leaflet/internal/mediaserver"
 	"leaflet/internal/rendered"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
@@ -21,9 +26,28 @@ import (
 // Video blocks show the video's picture until play is clicked, and then
 // its site's player, or a player of the file, in a web view of its own.
 
-// videoSession is the website data of the video players, kept in memory
-// only, which goes as the last player closes.
-var videoSession = sync.OnceValue(mygo.NewEphemeralSession)
+// videoSession is the website data of the videos' sites' players, which
+// goes as the first of them opens and as the last closes. It isn't kept in
+// memory alone: a web view keeps what plays in such a session from the
+// system, which then shows its own name in place of the video's.
+var videoSession = sync.OnceValue(func() *mygo.Session {
+	s := mygo.NewSession("video-player")
+	clearVideoData(s)
+	return s
+})
+
+// clearVideoData lets go of what s's sites stored.
+func clearVideoData(s *mygo.Session) {
+	if err := s.ClearData(mygo.SiteDataAll); err != nil {
+		log.Printf("video players' data: %v", err)
+	}
+}
+
+// fileSession is the website data of the players of files, which have none,
+// as their pages run no script. It isn't kept in memory as a video's is: a
+// web view keeps what plays in such a session from the system, which then
+// shows its own name in place of the file's.
+var fileSession = sync.OnceValue(func() *mygo.Session { return mygo.NewSession("file-player") })
 
 // videoInfo is what a video's site tells about it: its title and picture.
 type videoInfo struct{ title, thumbnail string }
@@ -144,8 +168,8 @@ func (a *App) playVideo(id string, v doc.Video) {
 	if a.win == nil {
 		return
 	}
-	// The player's cookies and storage stay in memory, apart from the
-	// other web views'. Its videos may float in picture in picture, which
+	// The player's cookies and storage stay apart from the other web
+	// views', until it closes. Its videos may float in picture in picture, which
 	// macOS otherwise keeps to Safari. The wheel over the player, which
 	// does not scroll, scrolls the page around it.
 	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#000000", ScrollToContainer: true,
@@ -172,6 +196,7 @@ func (a *App) playVideo(id string, v doc.Video) {
 	})
 	page.LoadHTML(rendered.VideoPage(web.KnownVideoPart(v)), rendered.VideoOrigin)
 	a.videos[id] = wv
+	a.sitePlayers = true
 	a.playAlone(id, "")
 	// Started from its own controls, as after a pause, it plays alone too.
 	page.OnAudibleChanged(func(audible bool) {
@@ -184,10 +209,169 @@ func (a *App) playVideo(id string, v doc.Video) {
 	})
 }
 
+// fileVideo is an audio or video file's player, as the rendered package's
+// scripts tell one.
+var fileVideo = doc.Video{Provider: "file"}
+
+// playFile puts file block n's player in its block, playing from at
+// seconds in: it comes first, where it is on another device. A file the
+// web view can't play says so in its block, which then opens it in
+// another app.
+func (a *App) playFile(n *doc.Node, at int) {
+	file, ok := a.fileByID(n.Str("file_id"))
+	if !ok || a.win == nil {
+		return
+	}
+	id := n.ID
+	kind := doc.FilePreviewKind(file.Name, file.MimeType)
+	if kind != doc.FileAudio && kind != doc.FileVideo {
+		return
+	}
+	delete(a.downloadFails, file.ID)
+	a.lost(file.LocalPath)
+	path := a.localFile(file, func() {
+		if a.page != nil && a.page.editor.HasBlock(id) && a.videos[id] == nil {
+			if n := a.page.editor.Content.Find(id); n != nil {
+				a.playFile(n, at)
+			}
+		}
+	})
+	if path == "" {
+		a.toast(locales.HostDownloading(file.Name))
+		return
+	}
+	address, err := a.media.Register(mediaserver.Item{Path: path, Type: doc.FileMediaType(file.Name, file.MimeType),
+		Page: rendered.FilePlayerPage(kind == doc.FileVideo, at), Policy: rendered.FilePlayerCSP,
+		Cover: leafletCover, CoverType: "image/png"})
+	if err != nil {
+		a.toast(locales.VideoCannotPlay(err.Error()))
+		return
+	}
+	// A loopback page is the app's own to MyGo in a development build:
+	// Untrusted keeps it from being one, as its file is anyone's.
+	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: mediaBackground(kind), ScrollToContainer: true,
+		Page: mygo.PageOptions{Session: fileSession(), PictureInPicture: true, Untrusted: true, Autoplay: mygo.AutoplayAllow}})
+	if err != nil {
+		a.media.Revoke(address)
+		a.toast(locales.VideoCannotPlay(err.Error()))
+		return
+	}
+	page := wv.Page()
+	page.OnWillNavigate(func(e *mygo.NavigateEvent) { e.PreventDefault() })
+	page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
+	nameFile(page, file.Name)
+	if err := page.LoadURL(address); err != nil {
+		wv.Destroy()
+		a.media.Revoke(address)
+		a.toast(locales.VideoCannotPlay(err.Error()))
+		return
+	}
+	a.videos[id] = wv
+	if a.fileMedia == nil {
+		a.fileMedia = map[string]string{}
+	}
+	a.fileMedia[id] = address
+	delete(a.fileFailed, id)
+	a.playAlone(id, "")
+	page.OnAudibleChanged(func(audible bool) {
+		if audible && a.videos[id] == wv {
+			a.playAlone(id, "")
+			if a.win != nil {
+				a.win.Invalidate()
+			}
+		}
+	})
+	a.watchPlayer(id, wv, kind == doc.FileAudio)
+}
+
+// nameFile has the player page is about to load tell the system its file's
+// name, once it has loaded.
+func nameFile(page *mygo.Page, name string) {
+	page.OnDidFinishLoad(func() {
+		// Eval waits for the page, so not on the UI thread.
+		go func() { _, _ = page.Eval(rendered.FileMetadata(name)) }()
+	})
+}
+
+// mediaBackground is the color behind a file's player: a video's black, or
+// none for an audio bar.
+func mediaBackground(kind string) string {
+	if kind == doc.FileVideo {
+		return "#000000"
+	}
+	return "#00000000"
+}
+
+// playerPoll is how often a file's player is asked how it is.
+const playerPoll = 500 * time.Millisecond
+
+// watchPlayer asks a file's player how it is as it plays: one that can't
+// read its file shows nothing to say so, so its block does, and where
+// audio has got to is for the player under the page.
+func (a *App) watchPlayer(id string, wv *mygo.WebView, audio bool) {
+	page := wv.Page()
+	stop := make(chan struct{})
+	if a.fileWatch == nil {
+		a.fileWatch = map[string]chan struct{}{}
+	}
+	a.fileWatch[id] = stop
+	guard.Go(func() {
+		var last fileStatus
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(playerPoll):
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			raw, err := page.EvalContext(ctx, rendered.FilePlayerStatus)
+			cancel()
+			said, ok := raw.(map[string]any)
+			if err != nil || !ok {
+				continue
+			}
+			if failed, _ := said["failed"].(bool); failed {
+				a.update(func() {
+					if a.videos[id] != wv {
+						return
+					}
+					a.closePlayer(id)
+					if a.fileFailed == nil {
+						a.fileFailed = map[string]bool{}
+					}
+					a.fileFailed[id] = true
+				})
+				return
+			}
+			if !audio {
+				continue
+			}
+			var st fileStatus
+			st.at, _ = said["at"].(float64)
+			st.length, _ = said["length"].(float64)
+			st.paused, _ = said["paused"].(bool)
+			st.rate, _ = said["rate"].(float64)
+			if st != last {
+				last = st
+				a.update(func() {
+					if a.now.block == id {
+						a.fileNow, a.fileNowAt = st, time.Now()
+					}
+					// Loading a file takes it back to its own speed.
+					if st.rate != a.speed() {
+						a.tellSpeed(wv)
+					}
+				})
+			}
+		}
+	})
+}
+
 // playAlone keeps one player of the open page playing, the one that starts
 // now, as one person listens to one at a time: the video of block video,
 // or the recording rec. The others pause.
 func (a *App) playAlone(video, rec string) {
+	a.setNowPlaying(video, rec)
 	for id := range a.videos {
 		if id != video {
 			a.pauseVideo(id)
@@ -210,7 +394,9 @@ func (a *App) pauseVideo(id string) {
 	}
 	var v doc.Video
 	if a.page != nil {
-		if n := a.page.editor.Content.Find(id); n != nil {
+		if n := a.page.editor.Content.Find(id); n != nil && n.Type == "file" {
+			v = fileVideo
+		} else if n != nil {
 			v, _ = doc.ParseVideoURL(n.Str("url"))
 		}
 	}
@@ -220,8 +406,44 @@ func (a *App) pauseVideo(id string) {
 		go func() { _, _ = page.Eval(script) }()
 		return
 	}
-	wv.Destroy()
-	delete(a.videos, id)
+	a.closePlayer(id)
+}
+
+// closePlayer takes away the player of block id, and for a file what
+// served it.
+func (a *App) closePlayer(id string) {
+	if wv := a.videos[id]; wv != nil {
+		wv.Destroy()
+		delete(a.videos, id)
+	}
+	if address, ok := a.fileMedia[id]; ok {
+		a.media.Revoke(address)
+		delete(a.fileMedia, id)
+	}
+	if stop := a.fileWatch[id]; stop != nil {
+		close(stop)
+		delete(a.fileWatch, id)
+	}
+	if a.now.block == id {
+		a.now = nowPlaying{}
+	}
+	a.clearSitePlayers()
+}
+
+// clearSitePlayers lets go of what the videos' sites stored, once none of
+// their players is left.
+func (a *App) clearSitePlayers() {
+	if !a.sitePlayers {
+		return
+	}
+	for id := range a.videos {
+		if a.fileMedia[id] == "" {
+			return
+		}
+	}
+	a.sitePlayers = false
+	// It waits for the web views, so not on the UI thread.
+	go clearVideoData(videoSession())
 }
 
 // seekVideo plays video block id of the open page from sec seconds in:
@@ -232,16 +454,27 @@ func (a *App) seekVideo(id string, sec int) {
 		return
 	}
 	n := a.page.editor.Content.Find(id)
-	if n == nil || n.Type != "video" {
+	if n == nil {
 		return
 	}
-	v, ok := doc.ParseVideoURL(n.Str("url"))
+	var v doc.Video
+	ok := false
+	switch n.Type {
+	case "video":
+		v, ok = doc.ParseVideoURL(n.Str("url"))
+	case "file":
+		v, ok = fileVideo, true
+	}
 	if !ok {
 		return
 	}
 	wv := a.videos[id]
 	if wv == nil {
-		a.playVideo(id, v.At(sec))
+		if n.Type == "file" {
+			a.playFile(n, sec)
+		} else {
+			a.playVideo(id, v.At(sec))
+		}
 		return
 	}
 	a.playAlone(id, "")
@@ -254,63 +487,117 @@ func (a *App) seekVideo(id string, sec int) {
 	page.LoadHTML(rendered.VideoPage(web.KnownVideoPart(v.At(sec))), rendered.VideoOrigin)
 }
 
-// noteLines are a video's notes in lines, read once for each text of them
-// as the block is drawn each frame.
-func (a *App) noteLines(notes string) []doc.NoteLine {
-	if lines, ok := a.notesRead[notes]; ok {
-		return lines
+// readNotes are a block's notes read in lines, and the longest of their
+// times, for the column they stand in.
+type readNotes struct {
+	notes  string
+	hidden bool
+	names  []string
+	lines  []doc.NoteLine
+	widest string
+}
+
+// noteLines reads block id's notes, once for each text of them: the block
+// is drawn each frame, and a transcript has thousands of lines.
+func (a *App) noteLines(n *doc.Node) readNotes {
+	notes, hidden := n.Str("notes"), n.Bool(doc.SpeakersHidden)
+	if r, ok := a.notesRead[n.ID]; ok && r.notes == notes && r.hidden == hidden && slices.Equal(r.names, doc.SpeakerNamesOf(n)) {
+		return r
+	}
+	r := readNotes{notes: notes, hidden: hidden, names: doc.SpeakerNamesOf(n)}
+	// An audio file names its speakers over their lines, as a recording does.
+	r.lines = doc.SpokenLines(notes, r.names, hidden || audioFile(n))
+	for _, l := range r.lines {
+		if t := doc.Clock(max(l.At, 0)); l.At >= 0 && len(t) > len(r.widest) {
+			r.widest = t
+		}
 	}
 	// What other notes the open pages had goes, now and then.
 	if a.notesRead == nil || len(a.notesRead) > 64 {
-		a.notesRead = map[string][]doc.NoteLine{}
+		a.notesRead = map[string]readNotes{}
 	}
-	lines := doc.NoteLines(notes)
-	a.notesRead[notes] = lines
-	return lines
+	a.notesRead[n.ID] = r
+	return r
 }
 
 // videoNotes draws a video's notes under its player, as a recording's
 // transcript is drawn: a line's time beside it, and a time in its text,
 // play the video from there. Long notes show their first lines until
 // opened. While the block is hovered, a page that can be changed offers
-// to edit them.
+// to edit them. An audio file's are its card's own, drawn as a recording's
+// transcript, and edit from its menu.
 func (a *App) videoNotes(c *ui.Context, n *doc.Node, hovered bool) {
 	pal := theme.Of(c)
-	lines := a.noteLines(n.Str("notes"))
+	audio := audioFile(n)
+	read := a.noteLines(n)
+	lines := read.lines
 	if len(lines) == 0 {
 		return
 	}
 	long := doc.FoldsTranscript(len(lines))
 	open := a.notesOpen[n.ID]
+	// What the audio is at, for a file's notes: a video's site doesn't say.
+	current := -1
+	if sec, _, heard := a.playhead(c, n.ID); heard {
+		current = doc.CurrentLine(lines, sec)
+	}
 	shown := lines
 	if long && !open {
 		shown = lines[:doc.FoldedLines]
 	}
 	// The times' column is as wide as the longest of them all, shown or
 	// folded away.
-	var times []string
-	for _, l := range lines {
-		if l.At >= 0 {
-			times = append(times, doc.Clock(l.At))
-		}
-	}
-	col := timeColumn(c, times, 13)
+	col := timeColumn(c, []string{read.widest}, map[bool]float32{true: 12, false: 13}[audio])
 	play := func(at int) { a.seekVideo(n.ID, at) }
 	// In the page's text size, as its text.
 	size := float32(a.settings.TextSize)
-	text := func(l doc.NoteLine) bool { return timedText(c, l.Parts, size, pal.Text, play) }
+	if audio {
+		size = 14
+	}
+	speakers := audio && !n.Bool(doc.SpeakersHidden)
+	text := func(l doc.NoteLine) bool {
+		if speakers && l.Speaker != "" {
+			ui.Text(c, l.Speaker).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
+		}
+		return timedText(c, l.Parts, size, pal.Text, play)
+	}
 	// A click on a line plays from it, so its text is not selectable; the
 	// notes copy from their dialog. They are in a panel of their own, as a
 	// video's description is on its site, tinted as a code block is.
-	ui.Column(c.Key("notes:"+n.ID)).Gap(4).Padding(10, 12).Radius(10).Background(pal.Code).Children(func() {
-		for i, l := range shown {
+	panel := ui.Column(c.Key("notes:" + n.ID))
+	timeSize := float32(13)
+	if audio {
+		panel.Gap(8)
+		timeSize = 12
+	} else {
+		panel.Gap(4).Padding(10, 12).Radius(10).Background(pal.Code)
+	}
+	panel.Children(func() {
+		line := func(i int, l doc.NoteLine) ui.Element {
 			var row ui.Element
 			if l.At < 0 {
-				row = ui.Row(c.Key(i)).Children(func() { text(l) })
+				row = ui.Column(c.Key(i)).Children(func() { text(l) })
 			} else {
-				row = timedRow(c, i, doc.Clock(l.At), col, 13, func() bool { return text(l) }, func() { play(l.At) })
+				row = timedRow(c, i, doc.Clock(l.At), col, timeSize, func() bool { return text(l) }, func() { play(l.At) })
 			}
 			row.PopoverMenu(func(m *ui.Menu) { a.noteMenu(c, m, n, l) })
+			return row
+		}
+		if audio && long && !open {
+			a.rollingLines(c, n.ID, current, len(lines), func(i int) ui.Element {
+				row := line(i, lines[i])
+				if i == current {
+					lightLine(c, row)
+				}
+				return row
+			})
+		} else {
+			for i, l := range shown {
+				row := line(i, l)
+				if i == current {
+					a.markLine(c, row, n.ID, i)
+				}
+			}
 		}
 		if long && foldButton(c, len(lines), open, col) {
 			if a.notesOpen == nil {
@@ -318,7 +605,7 @@ func (a *App) videoNotes(c *ui.Context, n *doc.Node, hovered bool) {
 			}
 			a.notesOpen[n.ID] = !open
 		}
-		if !a.canChangePage() {
+		if audio || !a.canChangePage() {
 			return
 		}
 		// In the panel's corner, over the first line's end, as a chart's
@@ -362,6 +649,11 @@ func (a *App) noteMenu(c *ui.Context, m *ui.Menu, n *doc.Node, l doc.NoteLine) {
 		}
 		m.Separator()
 	}
+	if n.Type == "file" {
+		a.speakerMenu(m, n, l)
+		a.fileMenu(c, m, n)
+		return
+	}
 	a.videoMenu(m, n)
 }
 
@@ -395,7 +687,7 @@ func (a *App) videoMenu(m *ui.Menu, n *doc.Node) {
 
 // openVideoNotes opens the dialog that writes the notes of video block n.
 func (d *dialogs) openVideoNotes(n *doc.Node) {
-	d.notesOpen, d.notesBlock, d.notesText = true, n.ID, n.Str("notes")
+	d.notesOpen, d.notesBlock, d.notesText, d.notesFile = true, n.ID, n.Str("notes"), n.Type == "file"
 }
 
 // videoNotesDialog writes the notes of a video block of the open page, as
@@ -404,7 +696,11 @@ func (a *App) videoNotesDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.notesOpen, 560, func() {
-		dialogHeader(c, locales.VideoNotesTitle(), locales.VideoNotesHint(), &d.notesOpen)
+		title, hint := locales.VideoNotesTitle(), locales.VideoNotesHint()
+		if d.notesFile {
+			title, hint = locales.CardNotesTitle(), locales.CardNotesHint()
+		}
+		dialogHeader(c, title, hint, &d.notesOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			ui.TextArea(c.Key("notes"), &d.notesText).Height(260).FontSize(14).Font(theme.PageFamily(d.notesText)).
 				Placeholder(locales.VideoNotesPlaceholder()).AutoFocus()
@@ -433,7 +729,7 @@ func (a *App) setVideoNotes(id, notes string) {
 		return
 	}
 	n := a.page.editor.Content.Find(id)
-	if n == nil || n.Type != "video" || n.Str("notes") == notes {
+	if n == nil || n.Type != "video" && n.Type != "file" || n.Str("notes") == notes {
 		return
 	}
 	a.page.editor.Edit(func(content *doc.Content) {
@@ -459,10 +755,9 @@ func videoAgent() string {
 
 // dropVideos stops the players of videos no longer in the open page.
 func (a *App) dropVideos() {
-	for id, v := range a.videos {
+	for id := range a.videos {
 		if a.page == nil || !a.page.editor.HasBlock(id) {
-			v.Destroy()
-			delete(a.videos, id)
+			a.closePlayer(id)
 		}
 	}
 }

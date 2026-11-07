@@ -105,7 +105,7 @@ struct BlockCard: View {
         // the desktop.
         case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         // As tall as it measured itself, or its header alone until then.
-        case "recording": BlockHeights.of(node.id, width: width) ?? scaled(64)
+        case "recording", "file": BlockHeights.of(node.id, width: width) ?? scaled(64)
         // As tall as it was made, or as its content, when that is taller,
         // up to 1200: an embed never scrolls within itself, as on the
         // desktop.
@@ -135,6 +135,8 @@ struct BlockCard: View {
             RecordingBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         case "link_preview":
             LinkCardBlock(node: node)
+        case "file":
+            FileBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         default:
             CardBlock(node: node)
         }
@@ -424,10 +426,16 @@ final class VideoPlayback {
         }
     }
 
-    /// stop takes the blocks of ids out of play, as their page closes.
+    /// stop takes the blocks of ids out of play, as their page closes or
+    /// they leave it, and silences their players.
     func stop(_ ids: Set<String>) {
+        let heard = !playing.isDisjoint(with: ids)
+        defer {
+            if heard, playing.isEmpty { WebPage.clearPlayers() }
+        }
         playing.subtract(ids)
         for id in ids {
+            views[id]?.view?.pauseAllMediaPlayback(completionHandler: nil)
             start[id] = nil
             loads[id] = nil
             seeks[id] = nil
@@ -443,6 +451,7 @@ final class VideoPlayback {
             weak.view?.pauseAllMediaPlayback(completionHandler: nil)
         }
         Recorder.shared.pausePlaying()
+        FilePlayback.shared.pause()
     }
 
     /// pauseAll pauses every player, as a recording starts.
@@ -500,8 +509,6 @@ struct VideoBlock: View {
     var onHeight: (@MainActor (CGSize) -> Void)?
     /// width is the block's, which the player's height follows.
     @State private var width: CGFloat = 0
-    /// open shows long notes whole.
-    @State private var open = false
     /// made is the block's player, as the core makes it off the main
     /// thread, a Bilibili video's asking its site for its part the first
     /// time, with the time it was loaded again for.
@@ -528,12 +535,16 @@ struct VideoBlock: View {
     }
 
     /// Line is a line of the notes, as the core reads them.
-    struct Line: Decodable {
+    struct Line: Decodable, Sendable {
         let at: Int
         var time: String?
+        /// line is its place among a file's notes' lines, and speaker who
+        /// it names.
+        var line: Int?
+        var speaker: String?
         let parts: [Part]
 
-        struct Part: Decodable {
+        struct Part: Decodable, Sendable {
             let text: String
             let at: Int
         }
@@ -595,7 +606,8 @@ struct VideoBlock: View {
             .frame(minHeight: control)
             .padding(.top, 4)
             if !lines.isEmpty {
-                notes(lines).padding(.top, 4)
+                NotesPanel(lines: lines, blockID: node.id, pageID: editor?.pageID) { play($0) }
+                    .padding(.top, 4)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -621,93 +633,19 @@ struct VideoBlock: View {
         playback.seek(node.id, link: link, at: at)
     }
 
-    /// notes are the video's notes, each line after its time, if it has
-    /// one, which a tap on the line plays from; a time in a line without
-    /// one plays from there. They are in the page's font and size, in a
-    /// panel of their own, as a video's description is on its site, tinted
-    /// as a code block is.
-    private func notes(_ lines: [Line]) -> some View {
-        let palette = BlockLook.palette
-        // The times' column is as wide as the longest of them, its digits
-        // all as wide.
-        let widest =
-            lines.compactMap(\.time).max { $0.count < $1.count }
-            .map { String($0.map { $0.isNumber ? "0" : $0 }) } ?? "0:00"
-        let folds = MobileFoldsTranscript(lines.count)
-        let shown = folds && !open ? Array(lines.prefix(Int(MobileFoldedLines))) : lines
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
-                Group {
-                    if let time = line.time, line.at >= 0 {
-                        TimedRow(time: time, widest: widest, style: .notes) {
-                            play(line.at)
-                        } content: {
-                            Text(text(line.parts, links: false))
-                                .multilineTextAlignment(.leading)
-                        }
-                    } else {
-                        // Its times are links, which play from there.
-                        Text(text(line.parts, links: true))
-                            .multilineTextAlignment(.leading)
-                            .environment(
-                                \.openURL,
-                                OpenURLAction { url in
-                                    guard url.scheme == Self.seekScheme,
-                                        let at = Int(url.host() ?? "")
-                                    else { return .systemAction }
-                                    play(at)
-                                    return .handled
-                                })
-                    }
-                }
-                .font(Fonts.pageText(size: BlockLook.textSize))
-                .foregroundStyle(palette.text)
-                .contextMenu { lineMenu(line) }
-            }
-            if folds {
-                FoldButton(open: $open, count: lines.count, indent: TimeStyle.notes.indent(widest))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.code, in: .rect(cornerRadius: 10))
-    }
-
-    /// seekScheme is the scheme of the links a time in a line is, to play
-    /// from: leaflet-seek://83.
-    private static let seekScheme = "leaflet-seek"
-
-    /// text is a line's text, its times in the accent, and, with links,
-    /// links that play from each.
-    private func text(_ parts: [Line.Part], links: Bool) -> AttributedString {
-        var out = AttributedString()
-        for p in parts {
-            var run = AttributedString(p.text)
-            if p.at >= 0 {
-                run.foregroundColor = BlockLook.palette.accent
-                if links { run.link = URL(string: "\(Self.seekScheme)://\(p.at)") }
-            }
-            out += run
-        }
-        return out
-    }
-
-    /// lineMenu is a line's menu, from a long press: a link to the moment
-    /// it is about, to put in another page or a chat.
-    @ViewBuilder private func lineMenu(_ line: Line) -> some View {
-        let at = line.at >= 0 ? line.at : line.parts.first { $0.at >= 0 }?.at
-        if let at, let page = editor?.pageID, !page.isEmpty {
-            Button(L.videoCopyMoment(time: MobileClock(at)), systemImage: "link") {
-                UIPasteboard.general.string = MobileMomentLink(page, node.id, at)
-            }
-        }
-    }
-
     /// lines are the notes of block, a line each, as the core reads them.
     static func lines(_ block: DocNode) -> [Line] {
-        let notes = MobileVideoNotes(block.data?["notes"]?.string ?? "")
-        return (try? JSONDecoder().decode([Line].self, from: Data(notes.utf8))) ?? []
+        lines(notes: block.data?["notes"]?.string ?? "")
+    }
+
+    /// lines are notes, a line each, as the core reads them.
+    nonisolated static func lines(notes: String) -> [Line] {
+        lines(json: MobileVideoNotes(notes))
+    }
+
+    /// lines reads lines as the core wrote them.
+    nonisolated static func lines(json: String) -> [Line] {
+        (try? JSONDecoder().decode([Line].self, from: Data(json.utf8))) ?? []
     }
 
     /// actions are what block offers now, for VoiceOver at the caret,
@@ -945,14 +883,34 @@ struct WebPage: UIViewRepresentable {
 
     /// store keeps nothing past the app's run, shared by the blocks' pages.
     @MainActor static let store = WKWebsiteDataStore.nonPersistent()
+    /// playerStore is the videos' sites' players' apart, whose data goes as
+    /// the first opens and as the last closes. It isn't kept in memory alone:
+    /// a web view keeps what plays in such a store from the system, which
+    /// then shows its own name in place of the video's.
+    @MainActor private static let playerStore: WKWebsiteDataStore = {
+        let id = UUID(uuidString: "6F2B1C3A-8D44-4E7B-9A51-2C7E0D3F1B64") ?? UUID()
+        let store = WKWebsiteDataStore(forIdentifier: id)
+        clear(store)
+        return store
+    }()
+
+    private static func clear(_ store: WKWebsiteDataStore) {
+        store.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast
+        ) {}
+    }
+
+    /// clearPlayers lets go of what the videos' sites stored.
+    @MainActor static func clearPlayers() { clear(playerStore) }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         // One store for all of them: each store of its own starts a web
-        // process of its own, which is what made blocks slow to show.
-        config.websiteDataStore = Self.store
+        // process of its own, which is what made blocks slow to show. A
+        // video's player opens only as it is asked for.
+        config.websiteDataStore = player == nil ? Self.store : Self.playerStore
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         // Safari's own end of the user agent, which WebKit's lacks: the

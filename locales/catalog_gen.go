@@ -2121,6 +2121,252 @@ func (msgs Messages) CardFileDetail(kind string, size string) string {
 	return Catalog.Format(msgs.locale, "cardFileDetail", map[string]any{"kind": kind, "size": size})
 }
 
+// CardPlayFile says "Play {name}"
+// in the language the app shows.
+//
+// Label of the button that plays an audio or video file in a page.
+func CardPlayFile(name string) string { return In(i18n.Locale()).CardPlayFile(name) }
+
+// CardPlayFile says "Play {name}"
+// in the language of msgs.
+//
+// Label of the button that plays an audio or video file in a page.
+func (msgs Messages) CardPlayFile(name string) string {
+	return Catalog.Format(msgs.locale, "cardPlayFile", map[string]any{"name": name})
+}
+
+// CardCannotPlay says "This file can’t play here. Open it in another app."
+// in the language the app shows.
+//
+// An audio or video file the app’s player can’t read.
+func CardCannotPlay() string { return In(i18n.Locale()).CardCannotPlay() }
+
+// CardCannotPlay says "This file can’t play here. Open it in another app."
+// in the language of msgs.
+//
+// An audio or video file the app’s player can’t read.
+func (msgs Messages) CardCannotPlay() string {
+	return Catalog.Format(msgs.locale, "cardCannotPlay", nil)
+}
+
+// CardOpenExternally says "Open in another app"
+// in the language the app shows.
+//
+// Opens a file in the app the system has for it.
+func CardOpenExternally() string { return In(i18n.Locale()).CardOpenExternally() }
+
+// CardOpenExternally says "Open in another app"
+// in the language of msgs.
+//
+// Opens a file in the app the system has for it.
+func (msgs Messages) CardOpenExternally() string {
+	return Catalog.Format(msgs.locale, "cardOpenExternally", nil)
+}
+
+// CardActions says "File actions"
+// in the language the app shows.
+//
+// Accessibility name of the … button of a file block.
+func CardActions() string { return In(i18n.Locale()).CardActions() }
+
+// CardActions says "File actions"
+// in the language of msgs.
+//
+// Accessibility name of the … button of a file block.
+func (msgs Messages) CardActions() string {
+	return Catalog.Format(msgs.locale, "cardActions", nil)
+}
+
+// CardNotesTitle says "File notes"
+// in the language the app shows.
+//
+// Title of the dialog that writes a file’s notes.
+func CardNotesTitle() string { return In(i18n.Locale()).CardNotesTitle() }
+
+// CardNotesTitle says "File notes"
+// in the language of msgs.
+//
+// Title of the dialog that writes a file’s notes.
+func (msgs Messages) CardNotesTitle() string {
+	return Catalog.Format(msgs.locale, "cardNotesTitle", nil)
+}
+
+// CardNotesHint says "Start a line with a time, as 1:23 or 1:02:03: for audio or video, a click on it plays the file from there."
+// in the language the app shows.
+//
+// Under cardNotesTitle.
+func CardNotesHint() string { return In(i18n.Locale()).CardNotesHint() }
+
+// CardNotesHint says "Start a line with a time, as 1:23 or 1:02:03: for audio or video, a click on it plays the file from there."
+// in the language of msgs.
+//
+// Under cardNotesTitle.
+func (msgs Messages) CardNotesHint() string {
+	return Catalog.Format(msgs.locale, "cardNotesHint", nil)
+}
+
+// CardHideSpeakers says "Hide speakers"
+// in the language the app shows.
+//
+// In a file block’s menu: shows its notes without the speakers’ names.
+func CardHideSpeakers() string { return In(i18n.Locale()).CardHideSpeakers() }
+
+// CardHideSpeakers says "Hide speakers"
+// in the language of msgs.
+//
+// In a file block’s menu: shows its notes without the speakers’ names.
+func (msgs Messages) CardHideSpeakers() string {
+	return Catalog.Format(msgs.locale, "cardHideSpeakers", nil)
+}
+
+// CardShowSpeakers says "Show speakers"
+// in the language the app shows.
+//
+// In a file block’s menu: shows the speakers’ names in its notes again.
+func CardShowSpeakers() string { return In(i18n.Locale()).CardShowSpeakers() }
+
+// CardShowSpeakers says "Show speakers"
+// in the language of msgs.
+//
+// In a file block’s menu: shows the speakers’ names in its notes again.
+func (msgs Messages) CardShowSpeakers() string {
+	return Catalog.Format(msgs.locale, "cardShowSpeakers", nil)
+}
+
+// CardChangeSpeaker says "Change speaker"
+// in the language the app shows.
+//
+// In the menu of a line of a transcript: says someone else said it.
+func CardChangeSpeaker() string { return In(i18n.Locale()).CardChangeSpeaker() }
+
+// CardChangeSpeaker says "Change speaker"
+// in the language of msgs.
+//
+// In the menu of a line of a transcript: says someone else said it.
+func (msgs Messages) CardChangeSpeaker() string {
+	return Catalog.Format(msgs.locale, "cardChangeSpeaker", nil)
+}
+
+// CardNewSpeaker says "New speaker…"
+// in the language the app shows.
+//
+// In Change speaker: gives the line a speaker the notes don’t have yet.
+func CardNewSpeaker() string { return In(i18n.Locale()).CardNewSpeaker() }
+
+// CardNewSpeaker says "New speaker…"
+// in the language of msgs.
+//
+// In Change speaker: gives the line a speaker the notes don’t have yet.
+func (msgs Messages) CardNewSpeaker() string {
+	return Catalog.Format(msgs.locale, "cardNewSpeaker", nil)
+}
+
+// CardRenameSpeaker says "Rename {name}…"
+// in the language the app shows.
+//
+// In the menu of a line of a transcript: names its speaker, on all their
+// lines.
+func CardRenameSpeaker(name string) string { return In(i18n.Locale()).CardRenameSpeaker(name) }
+
+// CardRenameSpeaker says "Rename {name}…"
+// in the language of msgs.
+//
+// In the menu of a line of a transcript: names its speaker, on all their
+// lines.
+func (msgs Messages) CardRenameSpeaker(name string) string {
+	return Catalog.Format(msgs.locale, "cardRenameSpeaker", map[string]any{"name": name})
+}
+
+// CardSpeakerName says "Speaker’s name"
+// in the language the app shows.
+//
+// Placeholder of the field that names a speaker.
+func CardSpeakerName() string { return In(i18n.Locale()).CardSpeakerName() }
+
+// CardSpeakerName says "Speaker’s name"
+// in the language of msgs.
+//
+// Placeholder of the field that names a speaker.
+func (msgs Messages) CardSpeakerName() string {
+	return Catalog.Format(msgs.locale, "cardSpeakerName", nil)
+}
+
+// CardGoToPlayer says "Go to {name}"
+// in the language the app shows.
+//
+// Accessibility name of the name in the small player under a page: shows
+// its block.
+func CardGoToPlayer(name string) string { return In(i18n.Locale()).CardGoToPlayer(name) }
+
+// CardGoToPlayer says "Go to {name}"
+// in the language of msgs.
+//
+// Accessibility name of the name in the small player under a page: shows
+// its block.
+func (msgs Messages) CardGoToPlayer(name string) string {
+	return Catalog.Format(msgs.locale, "cardGoToPlayer", map[string]any{"name": name})
+}
+
+// CardFollowAlong says "Follow along"
+// in the language the app shows.
+//
+// Scrolls a transcript to keep the line being said in view, while audio
+// plays.
+func CardFollowAlong() string { return In(i18n.Locale()).CardFollowAlong() }
+
+// CardFollowAlong says "Follow along"
+// in the language of msgs.
+//
+// Scrolls a transcript to keep the line being said in view, while audio
+// plays.
+func (msgs Messages) CardFollowAlong() string {
+	return Catalog.Format(msgs.locale, "cardFollowAlong", nil)
+}
+
+// CardSkipBack says "Back 15 seconds"
+// in the language the app shows.
+//
+// Button of an audio player: goes back 15 seconds.
+func CardSkipBack() string { return In(i18n.Locale()).CardSkipBack() }
+
+// CardSkipBack says "Back 15 seconds"
+// in the language of msgs.
+//
+// Button of an audio player: goes back 15 seconds.
+func (msgs Messages) CardSkipBack() string {
+	return Catalog.Format(msgs.locale, "cardSkipBack", nil)
+}
+
+// CardSkipForward says "Forward 15 seconds"
+// in the language the app shows.
+//
+// Button of an audio player: goes forward 15 seconds.
+func CardSkipForward() string { return In(i18n.Locale()).CardSkipForward() }
+
+// CardSkipForward says "Forward 15 seconds"
+// in the language of msgs.
+//
+// Button of an audio player: goes forward 15 seconds.
+func (msgs Messages) CardSkipForward() string {
+	return Catalog.Format(msgs.locale, "cardSkipForward", nil)
+}
+
+// CardSpeed says "Playback speed"
+// in the language the app shows.
+//
+// Name of the button of an audio player that shows its speed, as 1.5×, and
+// changes it.
+func CardSpeed() string { return In(i18n.Locale()).CardSpeed() }
+
+// CardSpeed says "Playback speed"
+// in the language of msgs.
+//
+// Name of the button of an audio player that shows its speed, as 1.5×, and
+// changes it.
+func (msgs Messages) CardSpeed() string {
+	return Catalog.Format(msgs.locale, "cardSpeed", nil)
+}
+
 // ExportRecording says "Recording"
 // in the language the app shows.
 //
@@ -10151,6 +10397,236 @@ func (msgs Messages) RecErrSonioxStatus(status string) string {
 	return Catalog.Format(msgs.locale, "recErrSonioxStatus", map[string]any{"status": status})
 }
 
+// RecExportAudio says "Export audio…"
+// in the language the app shows.
+//
+// In a recording block’s menu: saves its audio as a file.
+func RecExportAudio() string { return In(i18n.Locale()).RecExportAudio() }
+
+// RecExportAudio says "Export audio…"
+// in the language of msgs.
+//
+// In a recording block’s menu: saves its audio as a file.
+func (msgs Messages) RecExportAudio() string {
+	return Catalog.Format(msgs.locale, "recExportAudio", nil)
+}
+
+// RecExportTranscript says "Export transcript"
+// in the language the app shows.
+//
+// In a recording block’s menu: opens the kinds of file its transcript can
+// be saved as.
+func RecExportTranscript() string { return In(i18n.Locale()).RecExportTranscript() }
+
+// RecExportTranscript says "Export transcript"
+// in the language of msgs.
+//
+// In a recording block’s menu: opens the kinds of file its transcript can
+// be saved as.
+func (msgs Messages) RecExportTranscript() string {
+	return Catalog.Format(msgs.locale, "recExportTranscript", nil)
+}
+
+// RecExportText says "Text (.txt)"
+// in the language the app shows.
+//
+// A kind of file a transcript saves as: plain text.
+func RecExportText() string { return In(i18n.Locale()).RecExportText() }
+
+// RecExportText says "Text (.txt)"
+// in the language of msgs.
+//
+// A kind of file a transcript saves as: plain text.
+func (msgs Messages) RecExportText() string {
+	return Catalog.Format(msgs.locale, "recExportText", nil)
+}
+
+// RecExportSrt says "Subtitles (.srt)"
+// in the language the app shows.
+//
+// A kind of file a transcript saves as: SubRip subtitles.
+func RecExportSrt() string { return In(i18n.Locale()).RecExportSrt() }
+
+// RecExportSrt says "Subtitles (.srt)"
+// in the language of msgs.
+//
+// A kind of file a transcript saves as: SubRip subtitles.
+func (msgs Messages) RecExportSrt() string {
+	return Catalog.Format(msgs.locale, "recExportSrt", nil)
+}
+
+// RecExportVtt says "Web subtitles (.vtt)"
+// in the language the app shows.
+//
+// A kind of file a transcript saves as: WebVTT subtitles.
+func RecExportVtt() string { return In(i18n.Locale()).RecExportVtt() }
+
+// RecExportVtt says "Web subtitles (.vtt)"
+// in the language of msgs.
+//
+// A kind of file a transcript saves as: WebVTT subtitles.
+func (msgs Messages) RecExportVtt() string {
+	return Catalog.Format(msgs.locale, "recExportVtt", nil)
+}
+
+// RecExportTranscriptAs says "Export transcript: {kind}"
+// in the language the app shows.
+//
+// In the iOS recording menu: saves the transcript as one kind of file.
+func RecExportTranscriptAs(kind string) string { return In(i18n.Locale()).RecExportTranscriptAs(kind) }
+
+// RecExportTranscriptAs says "Export transcript: {kind}"
+// in the language of msgs.
+//
+// In the iOS recording menu: saves the transcript as one kind of file.
+func (msgs Messages) RecExportTranscriptAs(kind string) string {
+	return Catalog.Format(msgs.locale, "recExportTranscriptAs", map[string]any{"kind": kind})
+}
+
+// RecReplaceNotesTitle says "Replace the notes?"
+// in the language the app shows.
+//
+// Asked before a transcript takes the place of a file’s notes.
+func RecReplaceNotesTitle() string { return In(i18n.Locale()).RecReplaceNotesTitle() }
+
+// RecReplaceNotesTitle says "Replace the notes?"
+// in the language of msgs.
+//
+// Asked before a transcript takes the place of a file’s notes.
+func (msgs Messages) RecReplaceNotesTitle() string {
+	return Catalog.Format(msgs.locale, "recReplaceNotesTitle", nil)
+}
+
+// RecReplaceNotesMessage says "The transcript takes the place of this file’s notes. Undo brings them back."
+// in the language the app shows.
+//
+// Under recReplaceNotesTitle.
+func RecReplaceNotesMessage() string { return In(i18n.Locale()).RecReplaceNotesMessage() }
+
+// RecReplaceNotesMessage says "The transcript takes the place of this file’s notes. Undo brings them back."
+// in the language of msgs.
+//
+// Under recReplaceNotesTitle.
+func (msgs Messages) RecReplaceNotesMessage() string {
+	return Catalog.Format(msgs.locale, "recReplaceNotesMessage", nil)
+}
+
+// RecReplaceNotesAction says "Replace"
+// in the language the app shows.
+//
+// Confirms replacing a file’s notes with a transcript.
+func RecReplaceNotesAction() string { return In(i18n.Locale()).RecReplaceNotesAction() }
+
+// RecReplaceNotesAction says "Replace"
+// in the language of msgs.
+//
+// Confirms replacing a file’s notes with a transcript.
+func (msgs Messages) RecReplaceNotesAction() string {
+	return Catalog.Format(msgs.locale, "recReplaceNotesAction", nil)
+}
+
+// RecErrFileUploading says "This file is still uploading. Try again once it’s up."
+// in the language the app shows.
+//
+// Why a file can’t be transcribed on the server yet.
+func RecErrFileUploading() string { return In(i18n.Locale()).RecErrFileUploading() }
+
+// RecErrFileUploading says "This file is still uploading. Try again once it’s up."
+// in the language of msgs.
+//
+// Why a file can’t be transcribed on the server yet.
+func (msgs Messages) RecErrFileUploading() string {
+	return Catalog.Format(msgs.locale, "recErrFileUploading", nil)
+}
+
+// RecErrFileKind says "The on-device model can’t read this kind of audio. Choose Soniox or an endpoint for it."
+// in the language the app shows.
+//
+// Why the on-device engine refuses an audio file.
+func RecErrFileKind() string { return In(i18n.Locale()).RecErrFileKind() }
+
+// RecErrFileKind says "The on-device model can’t read this kind of audio. Choose Soniox or an endpoint for it."
+// in the language of msgs.
+//
+// Why the on-device engine refuses an audio file.
+func (msgs Messages) RecErrFileKind() string {
+	return Catalog.Format(msgs.locale, "recErrFileKind", nil)
+}
+
+// RecErrFileTranscribing says "This file is already being transcribed."
+// in the language the app shows.
+//
+// Why a file’s transcription can’t start.
+func RecErrFileTranscribing() string { return In(i18n.Locale()).RecErrFileTranscribing() }
+
+// RecErrFileTranscribing says "This file is already being transcribed."
+// in the language of msgs.
+//
+// Why a file’s transcription can’t start.
+func (msgs Messages) RecErrFileTranscribing() string {
+	return Catalog.Format(msgs.locale, "recErrFileTranscribing", nil)
+}
+
+// RecFileBlockGone says "The transcript is done, but its file is no longer in the page."
+// in the language the app shows.
+//
+// A transcription ended after its file block was deleted, or the page
+// can’t be changed any more.
+func RecFileBlockGone() string { return In(i18n.Locale()).RecFileBlockGone() }
+
+// RecFileBlockGone says "The transcript is done, but its file is no longer in the page."
+// in the language of msgs.
+//
+// A transcription ended after its file block was deleted, or the page
+// can’t be changed any more.
+func (msgs Messages) RecFileBlockGone() string {
+	return Catalog.Format(msgs.locale, "recFileBlockGone", nil)
+}
+
+// RecFileNotesCut says "The transcript was too long for the notes, so its end was left out."
+// in the language the app shows.
+//
+// A transcript longer than notes can hold.
+func RecFileNotesCut() string { return In(i18n.Locale()).RecFileNotesCut() }
+
+// RecFileNotesCut says "The transcript was too long for the notes, so its end was left out."
+// in the language of msgs.
+//
+// A transcript longer than notes can hold.
+func (msgs Messages) RecFileNotesCut() string {
+	return Catalog.Format(msgs.locale, "recFileNotesCut", nil)
+}
+
+// RecFileTranscribed says "Transcribed {name}"
+// in the language the app shows.
+//
+// A file’s transcript has gone into its notes.
+func RecFileTranscribed(name string) string { return In(i18n.Locale()).RecFileTranscribed(name) }
+
+// RecFileTranscribed says "Transcribed {name}"
+// in the language of msgs.
+//
+// A file’s transcript has gone into its notes.
+func (msgs Messages) RecFileTranscribed(name string) string {
+	return Catalog.Format(msgs.locale, "recFileTranscribed", map[string]any{"name": name})
+}
+
+// RecErrServerOld says "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-dev…"
+// in the language the app shows.
+//
+// The server’s functions are older than this app, and don’t know how to
+// transcribe a file.
+func RecErrServerOld() string { return In(i18n.Locale()).RecErrServerOld() }
+
+// RecErrServerOld says "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-dev…"
+// in the language of msgs.
+//
+// The server’s functions are older than this app, and don’t know how to
+// transcribe a file.
+func (msgs Messages) RecErrServerOld() string {
+	return Catalog.Format(msgs.locale, "recErrServerOld", nil)
+}
+
 // EditorPage says "Page"
 // in the language the app shows.
 //
@@ -17641,4 +18117,60 @@ func PanelScope() string { return In(i18n.Locale()).PanelScope() }
 // choosing what the chat asks about: this page, or all the user's pages.
 func (msgs Messages) PanelScope() string {
 	return Catalog.Format(msgs.locale, "panelScope", nil)
+}
+
+// PreviewTruncated says "Showing the first {size}. Open it in another app to see it all."
+// in the language the app shows.
+//
+// Above a preview of a long file; size is like 4 MB.
+func PreviewTruncated(size string) string { return In(i18n.Locale()).PreviewTruncated(size) }
+
+// PreviewTruncated says "Showing the first {size}. Open it in another app to see it all."
+// in the language of msgs.
+//
+// Above a preview of a long file; size is like 4 MB.
+func (msgs Messages) PreviewTruncated(size string) string {
+	return Catalog.Format(msgs.locale, "previewTruncated", map[string]any{"size": size})
+}
+
+// PreviewRowsCut says "Showing the first {count} rows."
+// in the language the app shows.
+//
+// Above a preview of a long table.
+func PreviewRowsCut(count int) string { return In(i18n.Locale()).PreviewRowsCut(count) }
+
+// PreviewRowsCut says "Showing the first {count} rows."
+// in the language of msgs.
+//
+// Above a preview of a long table.
+func (msgs Messages) PreviewRowsCut(count int) string {
+	return Catalog.Format(msgs.locale, "previewRowsCut", map[string]any{"count": count})
+}
+
+// PreviewEncoding says "Read as {name}, which may not be right."
+// in the language the app shows.
+//
+// Above a preview of text whose encoding was guessed.
+func PreviewEncoding(name string) string { return In(i18n.Locale()).PreviewEncoding(name) }
+
+// PreviewEncoding says "Read as {name}, which may not be right."
+// in the language of msgs.
+//
+// Above a preview of text whose encoding was guessed.
+func (msgs Messages) PreviewEncoding(name string) string {
+	return Catalog.Format(msgs.locale, "previewEncoding", map[string]any{"name": name})
+}
+
+// PreviewCannotShow says "This file can’t be shown here."
+// in the language the app shows.
+//
+// A file with a known name whose contents can’t be previewed.
+func PreviewCannotShow() string { return In(i18n.Locale()).PreviewCannotShow() }
+
+// PreviewCannotShow says "This file can’t be shown here."
+// in the language of msgs.
+//
+// A file with a known name whose contents can’t be previewed.
+func (msgs Messages) PreviewCannotShow() string {
+	return Catalog.Format(msgs.locale, "previewCannotShow", nil)
 }

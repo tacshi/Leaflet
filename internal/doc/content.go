@@ -491,7 +491,13 @@ func blockText(n *Node) string {
 			return strings.TrimSpace(n.Str("title") + "\n" + notes)
 		}
 		return n.Str("title")
-	case "link_preview", "file":
+	case "file":
+		// As a video's, for what is said in a recording it holds.
+		if notes := n.Str("notes"); notes != "" {
+			return strings.TrimSpace(cardTitle(n) + "\n" + notes)
+		}
+		return cardTitle(n)
+	case "link_preview":
 		return cardTitle(n)
 	case "math_equation", "diagram":
 		_, s := BlockSource(n)

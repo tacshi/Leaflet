@@ -44,6 +44,12 @@ func TestEndpoint(ctx context.Context, baseURL, model, apiKey string) error {
 // long recording is never all in memory, as it would be twice over in a
 // form built first.
 func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, apiKey, language string) ([]store.Segment, error) {
+	return transcribeEndpoint(ctx, baseURL, model, wav, size, "recording.wav", transcribeWait(size), apiKey, language)
+}
+
+// transcribeEndpoint is TranscribeEndpoint of audio named name, whose
+// extension says what it is to the server, waiting for wait at the most.
+func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, name string, wait time.Duration, apiKey, language string) ([]store.Segment, error) {
 	// The form's fields and the file's header, then the audio, then the
 	// form's end: its length is known before the audio is read, for the
 	// servers that take no body of unknown length.
@@ -60,7 +66,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 			return nil, err
 		}
 	}
-	if _, err := w.CreateFormFile("file", "recording.wav"); err != nil {
+	if _, err := w.CreateFormFile("file", name); err != nil {
 		return nil, err
 	}
 	head := form.Len()
@@ -69,7 +75,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 	}
 	tail := form.Bytes()[head:]
 	body := io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(wav, size), bytes.NewReader(tail))
-	ctx, cancel := context.WithTimeout(ctx, transcribeWait(size))
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", body)
 	if err != nil {
@@ -123,6 +129,15 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 // length more, as a server on a CPU can take longer than the audio lasts.
 func transcribeWait(size int64) time.Duration {
 	return 5*time.Minute + 2*time.Duration(size/(2*SampleRate))*time.Second
+}
+
+// fileWait is how long an endpoint gets to transcribe an audio file of
+// size bytes: as transcribeWait, but of audio that may be compressed, whose
+// length its size doesn't say. It takes the least bit rate speech has,
+// which makes a wait long for most, up to a most any file has.
+func fileWait(size int64) time.Duration {
+	const leastBytesASecond = 4000
+	return min(5*time.Minute+2*time.Duration(size/leastBytesASecond)*time.Second, 6*time.Hour)
 }
 
 // TestSonioxKey checks a Soniox API key against Soniox's API.

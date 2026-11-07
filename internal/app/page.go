@@ -117,6 +117,7 @@ func (a *App) pageView(c *ui.Context) {
 			a.runBar(c, run)
 		}
 	})
+	a.miniPlayer(c)
 }
 
 // breadcrumbs is MyGo's path of the page: its folder, the pages above it,

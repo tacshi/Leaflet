@@ -66,6 +66,8 @@ itself.
   description has them: a time in them plays that video from there. A link
   to a moment of a video or a recording plays it from that moment, from any
   page or a chat.
+- Files that open in the app: pictures, PDFs, text and code, Markdown and
+  tables. Quick Look shows the rest on iPhone and iPad.
 - Nested pages and folders, templates, duplicate pages, search, and export
   to Markdown and PDF.
 - Page history with named versions, and what changed since any of them,
@@ -110,7 +112,14 @@ itself.
 
 ### Record
 
-- Recording blocks with playback and a timestamped transcript.
+- Recording blocks with playback and a timestamped transcript, whose audio
+  and transcript save as files: WAV, and text, SRT or WebVTT.
+- Audio and video files that play in the page, and audio files transcribed
+  into their notes, whose times play from there, with speakers you can name,
+  correct line by line, or hide. Scrolled away, audio keeps a small player
+  with the page, the line being said lights up, it plays at the speed you
+  choose, with a 15-second skip each way, and the system's media controls and
+  keys drive it.
 - Real-time transcription with Soniox, or any OpenAI-compatible
   `/audio/transcriptions` endpoint, including one on your own network.
 - Transcription on the device itself, offline and without a key, with the

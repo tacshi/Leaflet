@@ -729,6 +729,92 @@
       }
     }
   },
+  "cardPlayFile": "Play {name}",
+  "@cardPlayFile": {
+    "description": "Label of the button that plays an audio or video file in a page.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "meeting.m4a"
+      }
+    }
+  },
+  "cardCannotPlay": "This file can’t play here. Open it in another app.",
+  "@cardCannotPlay": {
+    "description": "An audio or video file the app’s player can’t read."
+  },
+  "cardOpenExternally": "Open in another app",
+  "@cardOpenExternally": {
+    "description": "Opens a file in the app the system has for it."
+  },
+  "cardActions": "File actions",
+  "@cardActions": {
+    "description": "Accessibility name of the … button of a file block."
+  },
+  "cardNotesTitle": "File notes",
+  "@cardNotesTitle": {
+    "description": "Title of the dialog that writes a file’s notes."
+  },
+  "cardNotesHint": "Start a line with a time, as 1:23 or 1:02:03: for audio or video, a click on it plays the file from there.",
+  "@cardNotesHint": {
+    "description": "Under cardNotesTitle."
+  },
+  "cardHideSpeakers": "Hide speakers",
+  "@cardHideSpeakers": {
+    "description": "In a file block’s menu: shows its notes without the speakers’ names."
+  },
+  "cardShowSpeakers": "Show speakers",
+  "@cardShowSpeakers": {
+    "description": "In a file block’s menu: shows the speakers’ names in its notes again."
+  },
+  "cardChangeSpeaker": "Change speaker",
+  "@cardChangeSpeaker": {
+    "description": "In the menu of a line of a transcript: says someone else said it."
+  },
+  "cardNewSpeaker": "New speaker…",
+  "@cardNewSpeaker": {
+    "description": "In Change speaker: gives the line a speaker the notes don’t have yet."
+  },
+  "cardRenameSpeaker": "Rename {name}…",
+  "@cardRenameSpeaker": {
+    "description": "In the menu of a line of a transcript: names its speaker, on all their lines.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Speaker 1"
+      }
+    }
+  },
+  "cardSpeakerName": "Speaker’s name",
+  "@cardSpeakerName": {
+    "description": "Placeholder of the field that names a speaker."
+  },
+  "cardGoToPlayer": "Go to {name}",
+  "@cardGoToPlayer": {
+    "description": "Accessibility name of the name in the small player under a page: shows its block.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "meeting.m4a"
+      }
+    }
+  },
+  "cardFollowAlong": "Follow along",
+  "@cardFollowAlong": {
+    "description": "Scrolls a transcript to keep the line being said in view, while audio plays."
+  },
+  "cardSkipBack": "Back 15 seconds",
+  "@cardSkipBack": {
+    "description": "Button of an audio player: goes back 15 seconds."
+  },
+  "cardSkipForward": "Forward 15 seconds",
+  "@cardSkipForward": {
+    "description": "Button of an audio player: goes forward 15 seconds."
+  },
+  "cardSpeed": "Playback speed",
+  "@cardSpeed": {
+    "description": "Name of the button of an audio player that shows its speed, as 1.5×, and changes it."
+  },
   "exportRecording": "Recording",
   "@exportRecording": {
     "description": "The name of an exported recording's audio file, for a recording with no title."
@@ -3623,6 +3709,82 @@
       }
     }
   },
+  "recExportAudio": "Export audio…",
+  "@recExportAudio": {
+    "description": "In a recording block’s menu: saves its audio as a file."
+  },
+  "recExportTranscript": "Export transcript",
+  "@recExportTranscript": {
+    "description": "In a recording block’s menu: opens the kinds of file its transcript can be saved as."
+  },
+  "recExportText": "Text (.txt)",
+  "@recExportText": {
+    "description": "A kind of file a transcript saves as: plain text."
+  },
+  "recExportSrt": "Subtitles (.srt)",
+  "@recExportSrt": {
+    "description": "A kind of file a transcript saves as: SubRip subtitles."
+  },
+  "recExportVtt": "Web subtitles (.vtt)",
+  "@recExportVtt": {
+    "description": "A kind of file a transcript saves as: WebVTT subtitles."
+  },
+  "recExportTranscriptAs": "Export transcript: {kind}",
+  "@recExportTranscriptAs": {
+    "description": "In the iOS recording menu: saves the transcript as one kind of file.",
+    "placeholders": {
+      "kind": {
+        "type": "String",
+        "example": "Subtitles (.srt)"
+      }
+    }
+  },
+  "recReplaceNotesTitle": "Replace the notes?",
+  "@recReplaceNotesTitle": {
+    "description": "Asked before a transcript takes the place of a file’s notes."
+  },
+  "recReplaceNotesMessage": "The transcript takes the place of this file’s notes. Undo brings them back.",
+  "@recReplaceNotesMessage": {
+    "description": "Under recReplaceNotesTitle."
+  },
+  "recReplaceNotesAction": "Replace",
+  "@recReplaceNotesAction": {
+    "description": "Confirms replacing a file’s notes with a transcript."
+  },
+  "recErrFileUploading": "This file is still uploading. Try again once it’s up.",
+  "@recErrFileUploading": {
+    "description": "Why a file can’t be transcribed on the server yet."
+  },
+  "recErrFileKind": "The on-device model can’t read this kind of audio. Choose Soniox or an endpoint for it.",
+  "@recErrFileKind": {
+    "description": "Why the on-device engine refuses an audio file."
+  },
+  "recErrFileTranscribing": "This file is already being transcribed.",
+  "@recErrFileTranscribing": {
+    "description": "Why a file’s transcription can’t start."
+  },
+  "recFileBlockGone": "The transcript is done, but its file is no longer in the page.",
+  "@recFileBlockGone": {
+    "description": "A transcription ended after its file block was deleted, or the page can’t be changed any more."
+  },
+  "recFileNotesCut": "The transcript was too long for the notes, so its end was left out.",
+  "@recFileNotesCut": {
+    "description": "A transcript longer than notes can hold."
+  },
+  "recFileTranscribed": "Transcribed {name}",
+  "@recFileTranscribed": {
+    "description": "A file’s transcript has gone into its notes.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "meeting.m4a"
+      }
+    }
+  },
+  "recErrServerOld": "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-device model.",
+  "@recErrServerOld": {
+    "description": "The server’s functions are older than this app, and don’t know how to transcribe a file."
+  },
   "editorPage": "Page",
   "@editorPage": {
     "description": "Accessibility name of the page's editor."
@@ -6087,5 +6249,38 @@
   "panelScope": "Ask about",
   "@panelScope": {
     "description": "The accessible name of the agent chat's menu, beside the agent picker, choosing what the chat asks about: this page, or all the user's pages."
+  },
+  "previewTruncated": "Showing the first {size}. Open it in another app to see it all.",
+  "@previewTruncated": {
+    "description": "Above a preview of a long file; size is like 4 MB.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "4 MB"
+      }
+    }
+  },
+  "previewRowsCut": "Showing the first {count} rows.",
+  "@previewRowsCut": {
+    "description": "Above a preview of a long table.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "previewEncoding": "Read as {name}, which may not be right.",
+  "@previewEncoding": {
+    "description": "Above a preview of text whose encoding was guessed.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Shift-JIS"
+      }
+    }
+  },
+  "previewCannotShow": "This file can’t be shown here.",
+  "@previewCannotShow": {
+    "description": "A file with a known name whose contents can’t be previewed."
   }
 }

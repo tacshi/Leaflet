@@ -8,6 +8,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/live"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // textEditor is an editor with no view, as the iOS app's is to the core.
@@ -180,5 +181,68 @@ func TestEditPageLeavesWhatItCannotChange(t *testing.T) {
 		if row, _ := f.st.ContentRow(p.ID); !strings.HasPrefix(row.Content, `{"document": [`) {
 			t.Errorf("open %v: saved over with %s", open, row.Content)
 		}
+	}
+}
+
+func fileBlock(id, notes string) *doc.Node {
+	n := &doc.Node{ID: id, Type: "file", Data: map[string]any{"name": "call.m4a", "file_id": "f1"}}
+	if notes != "" {
+		n.Set("notes", notes)
+	}
+	return n
+}
+
+// A transcript goes in a closed page's file over what is stored, and in an
+// open page's as one step of its own, which the app is told of.
+func TestSetFileNotes(t *testing.T) {
+	f := newPagesFixture(t)
+	closed := f.page(t, "Closed", "", fileBlock("a", ""))
+	if err := f.SetFileNotes(closed.ID, "a", "0:05 Hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.Content(closed.ID).Find("a").Str("notes"); got != "0:05 Hello" {
+		t.Errorf("closed page: %q", got)
+	}
+	open := f.page(t, "Open", "", fileBlock("b", "old"))
+	ed := f.openPage(open.ID)
+	var steps []string
+	f.Step = func(page, block string) { steps = append(steps, page+"/"+block) }
+	if err := f.SetFileNotes(open.ID, "b", "0:05 Hello", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ed.c.Find("b").Str("notes"); got != "0:05 Hello" || ed.replaced != 0 {
+		t.Errorf("open page: %q, %d outside changes", got, ed.replaced)
+	}
+	if len(steps) != 1 || steps[0] != open.ID+"/b" {
+		t.Errorf("steps %q", steps)
+	}
+}
+
+// Notes written while a file transcribed stay, the transcript after them.
+func TestSetFileNotesKeepsNewWriting(t *testing.T) {
+	f := newPagesFixture(t)
+	p := f.page(t, "Notes", "", fileBlock("a", "written since"))
+	if err := f.SetFileNotes(p.ID, "a", "0:05 Hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.Content(p.ID).Find("a").Str("notes"); got != "written since\n\n0:05 Hello" {
+		t.Errorf("notes %q", got)
+	}
+}
+
+// A block gone by the time a transcript is done takes nothing, and says so,
+// open or not.
+func TestSetFileNotesBlockGone(t *testing.T) {
+	f := newPagesFixture(t)
+	p := f.page(t, "Notes", "", block("p1", "one"))
+	if err := f.SetFileNotes(p.ID, "gone", "0:05 Hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.openPage(p.ID)
+	if err := f.SetFileNotes(p.ID, "gone", "0:05 Hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.told) != 2 || f.told[0] != locales.RecFileBlockGone() {
+		t.Errorf("told %q", f.told)
 	}
 }

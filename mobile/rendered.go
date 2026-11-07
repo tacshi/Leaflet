@@ -87,6 +87,10 @@ type noteLine struct {
 	At    int        `json:"at"`
 	Time  string     `json:"time,omitempty"`
 	Parts []notePart `json:"parts"`
+	// Line is its place among the notes' lines, and Speaker who it names,
+	// for a file's.
+	Line    int    `json:"line"`
+	Speaker string `json:"speaker,omitempty"`
 }
 
 type notePart struct {
@@ -94,13 +98,83 @@ type notePart struct {
 	At   int    `json:"at"`
 }
 
+// FileKind says how the app shows a file of name and mime type, as
+// doc.FilePreviewKind.
+func FileKind(name, mime string) string {
+	defer catch(nil)
+	return doc.FilePreviewKind(name, mime)
+}
+
+// FileSpeakers returns the speakers notes name, as JSON, for names, the
+// names the user gave them, as JSON (doc.NoteSpeakers).
+func FileSpeakers(notes, names string) string {
+	defer catch(nil)
+	raw, _ := encode(doc.NoteSpeakers(notes, doc.SpeakerNamesFrom(names)))
+	return raw
+}
+
+// speakersEdit is notes after a change of speakers, and the names they use.
+type speakersEdit struct {
+	Notes string   `json:"notes"`
+	Names []string `json:"names"`
+}
+
+func encodeSpeakers(notes string, names []string) string {
+	if names == nil {
+		names = []string{}
+	}
+	raw, _ := encode(speakersEdit{Notes: notes, Names: names})
+	return raw
+}
+
+// RenameSpeaker has every line of from name to, and returns a speakersEdit
+// in JSON (doc.RenameSpeaker).
+func RenameSpeaker(notes, names, from, to string) string {
+	defer catch(nil)
+	return encodeSpeakers(doc.RenameSpeaker(notes, doc.SpeakerNamesFrom(names), from, to))
+}
+
+// SetLineSpeaker has line number line name to, and returns a speakersEdit
+// in JSON (doc.SetLineSpeaker).
+func SetLineSpeaker(notes, names string, line int, to string) string {
+	defer catch(nil)
+	return encodeSpeakers(doc.SetLineSpeaker(notes, doc.SpeakerNamesFrom(names), line, to))
+}
+
+// FileNotes returns a file block's notes in lines, as its block shows them,
+// each with its speaker and its place, as JSON (doc.SpokenLines).
+func FileNotes(notes, names string, hidden bool) string {
+	defer catch(nil)
+	return encodeLines(doc.SpokenLines(notes, doc.SpeakerNamesFrom(names), hidden))
+}
+
+// FileTranscriptText returns a file's notes as text to copy
+// (doc.NotesText).
+func FileTranscriptText(notes, names string, hidden bool) string {
+	defer catch(nil)
+	return doc.NotesText(notes, doc.SpeakerNamesFrom(names), hidden)
+}
+
+// FileTranscriptBlocks returns a file's notes as a transcript in JSON, as
+// blocks to put in its page (doc.NotesBlocks).
+func FileTranscriptBlocks(notes, names string, hidden bool) string {
+	defer catch(nil)
+	raw, _ := encode(transcript{Blocks: doc.NotesBlocks(notes, doc.SpeakerNamesFrom(names), hidden)})
+	return raw
+}
+
 // VideoNotes returns a video block's notes in lines, as its block shows
 // them, as JSON (doc.NoteLines).
 func VideoNotes(notes string) string {
 	defer catch(nil)
+	return encodeLines(doc.NoteLines(notes))
+}
+
+// encodeLines is lines of notes as JSON.
+func encodeLines(read []doc.NoteLine) string {
 	lines := []noteLine{}
-	for _, l := range doc.NoteLines(notes) {
-		nl := noteLine{At: l.At, Parts: []notePart{}}
+	for _, l := range read {
+		nl := noteLine{At: l.At, Line: l.Line, Speaker: l.Speaker, Parts: []notePart{}}
 		if l.At >= 0 {
 			nl.Time = doc.Clock(l.At)
 		}

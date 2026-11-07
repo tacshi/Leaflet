@@ -49,6 +49,9 @@ type Controller struct {
 
 	// The recording in progress, read and written on the main thread.
 	State State
+	// TranscribingFiles are the audio files transcribing here, as file IDs
+	// by their block's: on the main thread.
+	TranscribingFiles map[string]string
 	// stallPaused is the recording in progress paused by its microphone
 	// stalling, which Recovered resumes; on the main thread.
 	stallPaused bool
@@ -200,7 +203,8 @@ type Engine interface {
 	// at SampleRate, in language ("auto" for the device's). text takes
 	// the words so far, as they come.
 	Stream(language string, text func(string)) (Stream, error)
-	// File transcribes the WAV file at path.
+	// File transcribes the audio file at path, of a kind OnDeviceReads
+	// says it can.
 	File(path, language string) ([]store.Segment, error)
 }
 
@@ -1223,6 +1227,11 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 	if err != nil {
 		return nil, err
 	}
+	return segmentsOf(res), nil
+}
+
+// segmentsOf is the transcript in the stt function's answer.
+func segmentsOf(res map[string]any) []store.Segment {
 	var segs []store.Segment
 	list, _ := res["segments"].([]any)
 	for _, s := range list {
@@ -1234,7 +1243,142 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 		}
 		segs = append(segs, seg)
 	}
-	return segs, nil
+	return segs
+}
+
+// TranscribeFile transcribes an audio file, of block blockID, with the
+// settings given; it says why when the engine can't run now. done takes the
+// transcript, on the main thread. Call it on the main thread.
+func (r *Controller) TranscribeFile(f store.File, blockID string, stt store.SttSettings, online bool, done func([]store.Segment, error)) error {
+	if r.update == nil {
+		return errors.New(locales.RecErrWindowNotReady())
+	}
+	for block, file := range r.TranscribingFiles {
+		if block == blockID || file == f.ID {
+			return errors.New(locales.RecErrFileTranscribing())
+		}
+	}
+	if !doc.Transcribable(f.Name, f.MimeType) {
+		return errors.New(locales.RecErrFileKind())
+	}
+	if err := r.Usable(stt, online); err != nil {
+		return err
+	}
+	if stt.Provider == OnDevice && !OnDeviceReads(f.Name) {
+		return errors.New(locales.RecErrFileKind())
+	}
+	// The server reads the file from Storage, so it goes there first.
+	if onServer(stt) {
+		if !r.be.SignedIn() {
+			return errors.New(locales.RecErrSonioxSaved())
+		}
+		waits, err := r.st.FileWaitsUpload(f.ID)
+		if err != nil {
+			return err
+		}
+		if waits || f.StoragePath == "" {
+			return errors.New(locales.RecErrFileUploading())
+		}
+	}
+	if r.TranscribingFiles == nil {
+		r.TranscribingFiles = map[string]string{}
+	}
+	r.TranscribingFiles[blockID] = f.ID
+	guard.Go(func() {
+		segs, err := r.transcribeFile(context.Background(), f, stt)
+		r.update(func() {
+			delete(r.TranscribingFiles, blockID)
+			done(segs, err)
+		})
+	})
+	return nil
+}
+
+// onServer reports whether stt transcribes saved audio on the server.
+func onServer(stt store.SttSettings) bool {
+	local := stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL)
+	return stt.Provider != OnDevice && !local
+}
+
+func (r *Controller) transcribeFile(ctx context.Context, f store.File, stt store.SttSettings) ([]store.Segment, error) {
+	if onServer(stt) {
+		body := map[string]any{"action": "transcribe", "file_id": f.ID}
+		if stt.Language != "auto" && stt.Language != "" {
+			body["language"] = stt.Language
+		}
+		res, err := r.transcribed(ctx, body)
+		if err != nil {
+			// Functions from before files can be transcribed take the
+			// body for a recording's with no recording in it.
+			if strings.Contains(err.Error(), "recording_id is required") {
+				return nil, errors.New(locales.RecErrServerOld())
+			}
+			return nil, err
+		}
+		return segmentsOf(res), nil
+	}
+	path, err := r.fileHere(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	if stt.Provider == OnDevice {
+		e := r.waitEngine(ctx)
+		if e == nil {
+			return nil, errors.New(locales.RecErrOnDevice())
+		}
+		return e.File(path, stt.Language)
+	}
+	audio, size, err := openAudio(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = audio.Close() }()
+	return transcribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, size, "audio"+strings.ToLower(filepath.Ext(f.Name)), fileWait(size), EndpointKey(), stt.Language)
+}
+
+// fileHere is the path of file f on this device, downloaded first when it
+// was uploaded from another.
+func (r *Controller) fileHere(ctx context.Context, f store.File) (string, error) {
+	if f.LocalPath != "" {
+		if _, err := os.Stat(f.LocalPath); err == nil {
+			return f.LocalPath, nil
+		}
+	}
+	if f.StoragePath == "" {
+		return "", errors.New(locales.RecErrAudioMissing())
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	var from io.ReadCloser
+	var err error
+	if br, ok := r.Blobs.(blobReader); ok && r.Blobs.CanFetch() {
+		from, err = br.FetchReader(ctx, "files", f.StoragePath)
+	} else if r.be.SignedIn() {
+		from, err = r.be.Download(ctx, "files", f.StoragePath)
+	} else {
+		err = errors.New(locales.RecErrAudioMissing())
+	}
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = from.Close() }()
+	return r.st.DownloadedFileFrom(f.ID, from)
+}
+
+// FileTranscribed tells the server the app has file f's transcript, safe in
+// the page, so what Soniox kept of it can go. Told nothing, Soniox's own
+// retention ends it, and asking again costs nothing.
+func (r *Controller) FileTranscribed(f store.File, stt store.SttSettings) {
+	if stt.Provider != "soniox" {
+		return
+	}
+	guard.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if _, err := r.be.Invoke(ctx, "stt", map[string]any{"action": "transcribed", "file_id": f.ID}); err != nil {
+			log.Printf("recording: %v", err)
+		}
+	})
 }
 
 // stillEvery spaces the calls that ask for a recording the transcriber

@@ -1,8 +1,10 @@
 package recording
 
 import (
+	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
@@ -56,14 +58,15 @@ func Status(rec store.Recording) string {
 }
 
 // TranscriptBlocks is rec's transcript as blocks to put in its page: a
-// paragraph a line, tidied, each after its time in bold.
+// paragraph a line, tidied, each after its time in bold and its speaker's
+// name when it has one.
 func TranscriptBlocks(rec store.Recording) []*doc.Node {
 	nodes := []*doc.Node{}
 	for _, s := range Tidy(rec.Transcript) {
 		n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		n.SetDelta(doc.Delta{
 			{Text: FormatDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}},
-			{Text: s.Text},
+			{Text: spoken(s)},
 		})
 		nodes = append(nodes, n)
 	}
@@ -75,11 +78,104 @@ func TranscriptBlocks(rec store.Recording) []*doc.Node {
 func TranscriptText(rec store.Recording) string {
 	var lines []string
 	for _, s := range Tidy(rec.Transcript) {
-		if s.Speaker != "" {
-			lines = append(lines, locales.RecSpeakerLine(s.Speaker, s.Text))
-		} else {
-			lines = append(lines, s.Text)
-		}
+		lines = append(lines, spoken(s))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// TranscriptNotes is a transcript as a block's notes, tidied: a line each,
+// each after its time, which plays from there, and its speaker. What
+// doesn't fit in doc.MaxNotes goes, and cut says so.
+func TranscriptNotes(segs []store.Segment) (notes string, cut bool) {
+	var b strings.Builder
+	room := doc.MaxNotes
+	for _, s := range Tidy(segs) {
+		s.Text = strings.Join(strings.Fields(s.Text), " ")
+		if s.Text == "" {
+			continue
+		}
+		line := doc.Clock(s.StartMs/1000) + " " + spoken(s)
+		count := utf8.RuneCountInString(line) + 1
+		if count > room {
+			cut = true
+			break
+		}
+		room -= count
+		b.WriteString(line + "\n")
+	}
+	return doc.NormalizeNotes(b.String()), cut
+}
+
+// spoken is a line's text, after its speaker's name when it has one.
+func spoken(s store.Segment) string {
+	if s.Speaker != "" {
+		return locales.RecSpeakerLine(s.Speaker, s.Text)
+	}
+	return s.Text
+}
+
+// The kinds of file a transcript exports as.
+const (
+	// TranscriptTxt is plain text: a line each, after its time.
+	TranscriptTxt = "txt"
+	// TranscriptSrt is SubRip subtitles.
+	TranscriptSrt = "srt"
+	// TranscriptVtt is WebVTT subtitles, whose voices name the speakers.
+	TranscriptVtt = "vtt"
+)
+
+// cueLasts is how long a line stays on screen when its end isn't known.
+const cueLasts = 3000
+
+// TranscriptFile is a transcript as a file of format, tidied, with its
+// times and speakers. A cue's text is a single line, as players show it.
+func TranscriptFile(segs []store.Segment, format string) string {
+	lines := Tidy(segs)
+	var b strings.Builder
+	if format == TranscriptVtt {
+		b.WriteString("WEBVTT\n\n")
+	}
+	cue := 0
+	for i, s := range lines {
+		s.Text = strings.Join(strings.Fields(s.Text), " ")
+		if s.Text == "" {
+			continue
+		}
+		cue++
+		switch format {
+		case TranscriptSrt:
+			fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", cue, cueTime(s.StartMs, ","), cueTime(cueEnd(lines, i), ","), spoken(s))
+		case TranscriptVtt:
+			text := vttEscape.Replace(s.Text)
+			if s.Speaker != "" {
+				text = "<v " + vttEscape.Replace(locales.RecSpeaker(s.Speaker)) + ">" + text
+			}
+			fmt.Fprintf(&b, "%s --> %s\n%s\n\n", cueTime(s.StartMs, "."), cueTime(cueEnd(lines, i), "."), text)
+		default:
+			b.WriteString(FormatDuration(time.Duration(s.StartMs)*time.Millisecond) + "  " + spoken(s) + "\n")
+		}
+	}
+	return b.String()
+}
+
+// vttEscape keeps a line's text from reading as WebVTT's own markup.
+var vttEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// cueEnd is when line i of lines ends: as it says, or else when the next
+// starts, or a moment after it starts. Cues can't end before they start.
+func cueEnd(lines []store.Segment, i int) int {
+	s := lines[i]
+	if s.EndMs > s.StartMs {
+		return s.EndMs
+	}
+	if i+1 < len(lines) && lines[i+1].StartMs > s.StartMs {
+		return lines[i+1].StartMs
+	}
+	return s.StartMs + cueLasts
+}
+
+// cueTime is a time in a subtitle file: 00:01:05,250, with mark before
+// its milliseconds, as SubRip and WebVTT each have it.
+func cueTime(ms int, mark string) string {
+	return fmt.Sprintf("%02d:%02d:%02d%s%03d", ms/3600000, ms/60000%60, ms/1000%60, mark, ms%1000)
 }

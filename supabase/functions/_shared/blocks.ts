@@ -56,6 +56,8 @@ export interface BlockSpec {
   source?: string;
   /** For video: its link, its title, and its notes, a plain-text line each, a time starting a line playing it from there. */
   video?: { url: string; title?: string; notes?: string };
+  /** For replace_block on a file block: its notes, the file itself as it is. */
+  file?: { notes?: string };
   link?: { url: string };
   level?: number;
   checked?: boolean;
@@ -100,7 +102,7 @@ export interface BlockView {
   image?: { url: unknown; alt: unknown };
   video?: { url: unknown; title: unknown; notes?: unknown };
   link?: { url: unknown; title: unknown; description: unknown };
-  file?: { name: unknown; mime: unknown; size: unknown };
+  file?: { name: unknown; mime: unknown; size: unknown; notes?: unknown };
   recording?: Record<string, unknown>;
   page_id?: unknown;
 }
@@ -1405,8 +1407,17 @@ export function videoOf(link: string): VideoRef | null {
   return VIDEO_EXTS.has(goLower(pathExt(u.path))) && u.host !== "" ? ref("file") : null;
 }
 
-/** The most characters a video's notes hold (doc.MaxNotes). */
-export const MAX_NOTES = 20000;
+/** The most characters a block's notes hold (doc.MaxNotes). */
+export const MAX_NOTES = 200000;
+
+/** File block previous with the notes a replace_block's spec gives it, its file's own fields as they are (doc.FileWithNotes). */
+export function fileWithNotes(previous: NodeJSON, spec: BlockSpec): NodeJSON {
+  const part = spec.file ?? (spec as { notes?: string });
+  const notes = normalizeNotes(str(part.notes));
+  if ([...notes].length > MAX_NOTES) throw new SpecError(`A file's notes take at most ${MAX_NOTES} characters`);
+  const { notes: _, ...data } = previous.data ?? {};
+  return { ...structuredClone(previous), data: { ...structuredClone(data), ...(notes ? { notes } : {}) } };
+}
 
 /** A video's notes as a block keeps them (doc.NormalizeNotes): a line break for each of any kind, and no space around them. */
 export function normalizeNotes(s: string): string {
@@ -1880,7 +1891,12 @@ export function nodeView(
       view.link = { url: data.url, title: data.title, description: data.description };
       break;
     case "file":
-      view.file = { name: data.name, mime: data.mime, size: data.size };
+      view.file = {
+        name: data.name,
+        mime: data.mime,
+        size: data.size,
+        ...("notes" in data ? { notes: data.notes } : {}),
+      };
       break;
     case "recording": {
       // What the block has, as doc.BlockViews gives it, and what the
@@ -1939,9 +1955,13 @@ function blockText(node: NodeJSON): string {
       return notes ? trimSpace(str("title") + "\n" + notes) : str("title");
     }
     case "link_preview":
-    case "file":
-      // Its title or name, else its link (doc.cardTitle).
-      return ["title", "name", "url"].map((k) => trimSpace(str(k))).find(Boolean) ?? "";
+    case "file": {
+      // Its title or name, else its link (doc.cardTitle), and a file's
+      // notes, for what is said in a recording it holds.
+      const title = ["title", "name", "url"].map((k) => trimSpace(str(k))).find(Boolean) ?? "";
+      const notes = node.type === "file" ? str("notes") : "";
+      return notes ? trimSpace(title + "\n" + notes) : title;
+    }
     case "math_equation":
       return str("formula");
     case "diagram":

@@ -53,7 +53,7 @@ var Functions = []string{"agent", "providers", "stt", "account"}
 // FunctionsVersion orders the functions builds deploy: it goes up by one
 // with each change to them, as TestFunctionsVersion holds it to, so a build
 // deploys over older functions only, never over newer ones.
-const FunctionsVersion = 13
+const FunctionsVersion = 14
 
 // hashSecret begins the name of the project secret that says which
 // functions are deployed: the rest of the name is their FunctionsVersion

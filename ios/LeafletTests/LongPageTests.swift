@@ -145,8 +145,9 @@ struct LongPageTests {
     }
 
     /// A change from outside to one block of a long page puts that block
-    /// in alone: the others keep their paragraphs, and the page sent
-    /// after has the change.
+    /// in alone, and a block added goes in with the one before it: the
+    /// others keep their paragraphs, and the page sent after has the
+    /// change.
     @Test func aChangeFromOutsidePutsInOnlyWhatChanged() throws {
         var blocks = (0..<200).map { block("p\($0)", "paragraph", "Paragraph \($0)") }
         let c = editor(blocks)
@@ -156,7 +157,7 @@ struct LongPageTests {
         c.update(page(blocks), tinted: [])
         let after = c.text.blocks()
         #expect(after.count == 201)
-        for p in after where p.info.id != "p100" && p.info.id != "added" {
+        for p in after where !["p100", "p199", "added"].contains(p.info.id) {
             #expect(p.info === before[p.info.id], "\(p.info.id) put in again")
         }
         var sent: DocContent?

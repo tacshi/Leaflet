@@ -513,7 +513,8 @@ page is refused (403) before any of their key is spent, and a file that is
 not up yet, or gone, is 404. A call takes the file for its caller, whose key
 it spends (`stt_file_jobs`, by file and caller), so a second call of theirs
 is refused (409); one the platform stopped is taken again as a recording's
-is. No row holds the transcript, so what Soniox made stays there until the
+is, and the call it was taken from, should it go on, leaves it to the one
+that has it now. No row holds the transcript, so what Soniox made stays there until the
 app says it has it with `transcribed`: an app stopped before the answer
 reached it asks again for nothing. Told nothing, it goes by Soniox's
 retention. `still_transcribing` is as for a recording.
@@ -534,7 +535,12 @@ the origin as a URL parser reads it: a URL it reads its own way keeps a key
 only while it stays the very same. A `save` refuses (400) a `base_url` that
 is not printable ASCII, or has a backslash, which a URL parser takes for a
 slash. A local provider is never called from the server: `models`, `test`
-and a `transcribe` whose settings name one are refused (400).
+and a `transcribe` whose settings name one are refused (400). A key goes
+only where its row is as it goes: a `save` whose provider another save moved
+between its write of the row and of its key leaves the key off the other's
+address, and is refused (409), to be saved again; and `models`, `test`, a
+run or a `transcribe` whose provider a save moved as it read it sends
+nothing, the run failing, and the rest refused (409), to be asked again.
 
 ## 6. Sync
 
@@ -823,8 +829,16 @@ invite's id, not the account's, `email` the address as shared, and
 `display_name` empty), `page_invites()` (the
 caller's pending invites: `page_id, title, role, inviter_name, created_at`,
 of pages not deleted), `accept_page_invite(p_page_id)`,
-`decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`
-(authenticated), `get_provider_secret(p_provider_id)` (service role only),
+`decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret,
+p_base_url, p_preset)` (authenticated; with `p_base_url` and `p_preset`, which
+may be left out, it saves or clears the key only while the provider has
+them, and raises `provider_moved` otherwise),
+`get_provider_secret(p_provider_id, p_base_url, p_preset)` (service role
+only: the key, read with the row, only while the provider still has the base
+URL and preset its caller read, and is not local; `provider_moved`
+otherwise), `release_kept_recordings(p_user_id)` (service role only: the
+paths of the audio that stays as the account goes, as one `text[]`, which
+no `max_rows` cuts),
 `sign_out_device(p_device_id)` (one of the caller's devices: revoked, and
 its session ended; `device_not_found` otherwise).
 
@@ -855,8 +869,9 @@ Leaflet/
   names that start with a dot, and names that fit no pattern above, such as
   the copies iCloud makes of a batch or a device's folder
   ("0000000000000007 2.json"). The copies of space.json are read, as below.
-- **space.json** names the space the devices sync: every device files its
-  pages, folders and files under that `space_id`, whatever a row says. The
+- **space.json** names the space the devices sync: a device sends only the
+  rows of that `space_id`, and stores none of another: pages shared from
+  other accounts stay on the device that has them. The
   first device makes it from its own space, only where none is yet, as
   the file moves into place. When two made it at once, apart, the
   lowest `space_id` among `space*.json` wins; a device that made a losing
@@ -939,7 +954,11 @@ Leaflet/
   minutes for the devices' clocks, agent runs on the other devices, which
   read the other devices' device.json as they start, read none of the
   user's other pages into the page. A device's own leases are its own to
-  know. A device.json iCloud has not downloaded says none until it has. A
+  know. While a device.json cannot be read (not downloaded yet, cut
+  short, or of a newer format), that device may serve a link of any page,
+  and every page counts as linked; one that has not changed for longer
+  than a lease could count says none. A device writes its device.json
+  even when the rest of its pass fails, so its leases go on. A
   Leaflet from before writes no `public_links`, and reads none.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is

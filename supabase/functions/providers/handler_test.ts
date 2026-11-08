@@ -1,9 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { handle, type ProviderDeps } from "./handler.ts";
 import type { ChatResult } from "../_shared/openai.ts";
-import { Project } from "../_testing/project.ts";
+import { Project, type Row } from "../_testing/project.ts";
 
-/** Ann's OpenAI provider, its key saved, its default model gpt. */
+/**
+ * Ann's OpenAI provider, its key saved (key, which no client reads), its
+ * default model gpt; and the keys saved, in turn.
+ */
 function project(): { p: Project; secrets: string[] } {
   const p = new Project();
   p.user("ann", "ann-token");
@@ -19,15 +22,30 @@ function project(): { p: Project; secrets: string[] } {
     is_local: false,
     supports_tools: true,
     models: [],
+    key: "sk-saved",
   }];
   const secrets: string[] = [];
-  p.rpcs.set_provider_secret = (args) => {
-    secrets.push(String(args.p_secret));
+  // The row the key is for, as the database finds it: none moved from the
+  // base URL and preset the caller gives. A key is read of no local one.
+  const at = (args: Row, read = false): Row | undefined => {
     const saved = p.tables.model_providers.find((r) => r.id === args.p_provider_id);
-    if (saved) saved.has_secret = args.p_secret !== "";
+    if (
+      saved && args.p_base_url != null &&
+      (saved.base_url !== args.p_base_url || saved.preset !== args.p_preset || (read && saved.is_local))
+    ) {
+      throw new Error("provider_moved");
+    }
+    return saved;
+  };
+  p.rpcs.set_provider_secret = (args, caller) => {
+    const saved = at(args);
+    if (saved?.user_id !== caller) throw new Error("provider_not_found");
+    secrets.push(String(args.p_secret));
+    saved.key = args.p_secret || null;
+    saved.has_secret = args.p_secret !== "";
     return null;
   };
-  p.rpcs.get_provider_secret = () => "sk-saved";
+  p.rpcs.get_provider_secret = (args) => at(args, true)?.key ?? null;
   return { p, secrets };
 }
 
@@ -161,4 +179,65 @@ Deno.test("whether tools work is kept for the default model only", async () => {
   assertEquals(row(p).supports_tools, null);
   await call(p, d, { action: "test", provider_id: "openai" });
   assertEquals(row(p).supports_tools, false);
+});
+
+// A save that moves the provider and gives it a new key lands between a
+// call's read of the provider and its read of the key: the new key goes
+// nowhere, least of all to the old address, and the call is told to ask
+// again.
+Deno.test("a key saved as its provider is called goes not to its old address", async () => {
+  const { p } = project();
+  const read = p.rpcs.get_provider_secret;
+  p.rpcs.get_provider_secret = (args, caller) => {
+    Object.assign(row(p), { base_url: "https://elsewhere.example/v1", key: "sk-new" });
+    return read(args, caller);
+  };
+  const sent: unknown[] = [];
+  const d: ProviderDeps = {
+    ...deps(p),
+    listModels: (conn) => (sent.push(conn), Promise.resolve(["gpt"])),
+    chat: (conn) => (sent.push(conn), Promise.reject(new Error("unused"))),
+  };
+  for (const action of ["models", "test"]) {
+    Object.assign(row(p), { base_url: "https://api.openai.com/v1", key: "sk-saved" });
+    const res = await call(p, d, { action, provider_id: "openai" });
+    assertEquals(res.status, 409);
+  }
+  assertEquals(sent, []);
+});
+
+// Another save moves the provider between this save's write of its row
+// and of its key: the key, which was for the address this save wrote,
+// stays off the one the other did, and this save is told to go again.
+Deno.test("a key saved as another save moves its provider stays off that address", async () => {
+  const { p, secrets } = project();
+  const write = p.rpcs.set_provider_secret;
+  p.rpcs.set_provider_secret = (args, caller) => {
+    Object.assign(row(p), { base_url: "https://other.example/v1", key: null, has_secret: false });
+    return write(args, caller);
+  };
+  const res = await call(p, deps(p), {
+    action: "save",
+    provider: { id: "openai", preset: "openai", base_url: "https://new.example/v1", api_key: "sk-new" },
+  });
+  assertEquals(res.status, 409);
+  assertEquals([row(p).base_url, row(p).key, row(p).has_secret, secrets], [
+    "https://other.example/v1",
+    null,
+    false,
+    [],
+  ]);
+
+  // Made local as another save moves it with a key: that key stays.
+  p.rpcs.set_provider_secret = (args, caller) => {
+    Object.assign(row(p), { base_url: "https://other.example/v1", is_local: false, preset: "openai", key: "sk-b" });
+    return write(args, caller);
+  };
+  Object.assign(row(p), { key: "sk-a", has_secret: true });
+  const local = await call(p, deps(p), {
+    action: "save",
+    provider: { id: "openai", preset: "ollama", base_url: "http://localhost:11434/v1" },
+  });
+  assertEquals(local.status, 409);
+  assertEquals([row(p).base_url, row(p).key, secrets], ["https://other.example/v1", "sk-b", []]);
 });

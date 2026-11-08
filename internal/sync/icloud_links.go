@@ -2,6 +2,9 @@ package sync
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"strconv"
 	"strings"
@@ -145,27 +148,40 @@ func (s *Service) ownLinks(now time.Time) map[string]time.Time {
 
 // ICloudLinksElsewhere are the pages with a public link another device
 // says in its device.json that it serves, while iCloud sync is on, with
-// when each lease ends, by that device's clock. A device.json iCloud has
-// not downloaded yet, which it is asked to, says none until it has.
-func (s *Service) ICloudLinksElsewhere() map[string]time.Time {
+// when each lease ends, by that device's clock. A device that never wrote
+// one says none. Where the devices cannot be listed, or a device.json
+// cannot be read, as one iCloud has not downloaded yet (which it is asked
+// to), one cut short or one a newer Leaflet wrote, that device may serve
+// a link of any page: the error is ErrLinksUnknown then, with the links
+// read of the others, and every page counts as one that may have a link.
+// A device.json that has not changed for longer than a lease it says
+// could count (linksEnded) says none that still does.
+func (s *Service) ICloudLinksElsewhere() (map[string]time.Time, error) {
 	f := s.folder()
 	if !s.cloudOn.Load() || f.Root == "" {
-		return nil
+		return nil, nil
 	}
 	devices, err := f.Devices()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrLinksUnknown, err)
 	}
 	me := s.st.DeviceID()
 	out := map[string]time.Time{}
+	var unread error
 	for _, d := range devices {
 		rel, err := icloud.DevicePath(d)
 		if d == me || err != nil {
 			continue
 		}
 		var file deviceFile
-		if err := f.ReadJSON(rel, &file); err != nil {
-			continue
+		err = f.ReadJSON(rel, &file)
+		switch {
+		case err == nil:
+		case errors.Is(err, fs.ErrNotExist):
+			// It has taken no lease: one goes into device.json as it is
+			// taken.
+		case !s.linksEnded(rel):
+			unread = errors.Join(unread, fmt.Errorf("device %s: %w", d, err))
 		}
 		for page, until := range file.PublicLinks {
 			if until.After(out[page]) {
@@ -173,5 +189,25 @@ func (s *Service) ICloudLinksElsewhere() map[string]time.Time {
 			}
 		}
 	}
-	return out
+	if unread != nil {
+		return out, fmt.Errorf("%w: %w", ErrLinksUnknown, unread)
+	}
+	return out, nil
+}
+
+// ErrLinksUnknown is the public links the other devices serve not all
+// read (ICloudLinksElsewhere).
+var ErrLinksUnknown = errors.New("icloud: the public links another device serves could not be read")
+
+// iCloudLinkDrift is how far another device's clock may be off from this
+// one's, as the agents' runs allow for its leases.
+const iCloudLinkDrift = 15 * time.Minute
+
+// linksEnded reports whether a device.json, downloaded, has not changed
+// for longer than any lease it says could still count: a lease lasts
+// iCloudLinkLease from when it is written, by the writer's clock, which
+// the file's time and the lease are both by.
+func (s *Service) linksEnded(rel string) bool {
+	stamp, ok := s.folder().Stamp(rel)
+	return ok && cloudNow().Sub(stamp.ModTime) > iCloudLinkLease+2*iCloudLinkDrift
 }

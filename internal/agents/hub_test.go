@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,11 +50,17 @@ func TestDeliveryToAPageOpenedMidRun(t *testing.T) {
 	// The first op comes while the page is closed: nothing to apply it to.
 	ed := editor.New(page(), nil)
 	ops = append(ops, insertAfter("x1", "x2", "two"))
-	d.to(ed, ops)
+	if err := d.to(ed, ops); err != nil {
+		t.Fatal(err)
+	}
 	ops = append(ops, insertAfter("x2", "x3", "three"))
-	d.to(ed, ops)
+	if err := d.to(ed, ops); err != nil {
+		t.Fatal(err)
+	}
 	// The run ends with the page still open.
-	d.to(ed, ops)
+	if err := d.to(ed, ops); err != nil {
+		t.Fatal(err)
+	}
 	if got := ids(ed.Content); got != "h1,p1,x1,x2,x3,l1" {
 		t.Errorf("blocks %s", got)
 	}
@@ -70,7 +77,9 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	ed := editor.New(page(), nil)
 	ops := []doc.Op{insertAfter("p1", "x1", "one")}
 	d := &delivery{}
-	d.to(ed, ops)
+	if err := d.to(ed, ops); err != nil {
+		t.Fatal(err)
+	}
 	// Leaving the page saves the editor, with an edit of its own.
 	ed.Content.Children = append(ed.Content.Children, &doc.Node{ID: "mine", Type: "paragraph"})
 	if _, _, err := st.SaveContent(p.ID, ed.Content); err != nil {
@@ -206,6 +215,54 @@ func TestRunNotStoredWithoutItsSnapshot(t *testing.T) {
 	}
 }
 
+// An op on an open page that would take away a change the user made,
+// which cannot be kept in history first, is not applied, nor the ops after
+// it: they wait for a delivery that can keep it, and a run that ends
+// without one fails, as one on a closed page does.
+func TestOpenPageOpNotAppliedWithoutItsConflict(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	read := ed.Content.Copy()
+	n := &doc.Node{Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
+	ops := []doc.Op{read.ReplaceOp("p1", n), insertAfter("h1", "x1", "one")}
+	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("My way."))
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_conflict BEFORE INSERT ON page_history WHEN NEW.reason = 'conflict'
+		BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, openHost{ed: ed})
+	run := &Run{ID: "r1", Ops: ops}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	d := h.newDelivery(p.ID, run, local)
+	h.finish(h.Session(p.ID), run, Request{Instruction: "Rewrite"}, local, read, d, Result{Reply: "Rewrote it."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "My way." || ed.Content.Find("x1") != nil {
+		t.Errorf("p1 %q, blocks %s", got, ids(ed.Content))
+	}
+	if d.sent != 0 {
+		t.Errorf("%d ops count as delivered", d.sent)
+	}
+
+	if _, err := st.DB().Exec(`DROP TRIGGER reject_conflict`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.to(ed, ops); err != nil {
+		t.Fatal(err)
+	}
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the agent's way." || ed.Content.Find("x1") == nil {
+		t.Errorf("p1 %q, blocks %s", got, ids(ed.Content))
+	}
+	history, _ := st.History(p.ID)
+	if !slices.ContainsFunc(history, func(e store.HistoryEntry) bool {
+		return e.Reason == "conflict" && doc.MustDecode(e.Content).Find("p1").Delta().Plain() == "My way."
+	}) {
+		t.Errorf("the change the op took away is not in history: %+v", history)
+	}
+}
+
 // A run's ops stored over a block changed since the agent read it keep
 // that change in history (reason conflict) before saving over it; ops
 // that leave changed blocks alone keep nothing more.
@@ -314,7 +371,9 @@ func TestOpWhileComposingKeepsItsText(t *testing.T) {
 	rewrite.SetDelta(doc.Delta{{Text: "Ship the editor first.and more"}})
 	h := NewHub(st, nil, stubHost{})
 	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", IsLocal: true}})
-	d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read})
+	if err := d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read}, 0); err != nil {
+		t.Fatal(err)
+	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
 		t.Errorf("the agent's line is %q", got)
 	}
@@ -352,7 +411,9 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	_ = open.Doc() // a save
 	d := h.newDelivery(p.ID, &Run{ID: "r1"}, local)
 	d.read = before
-	d.apply(open, op)
+	if err := d.apply(open, op, 0); err != nil {
+		t.Fatal(err)
+	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
 		t.Errorf("the line of a run that read it before the composition is %q", got)
 	}
@@ -366,7 +427,9 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	op = rewrite("Ship the editor first.and morean, then the rest.")
 	d = h.newDelivery(p.ID, &Run{ID: "r2"}, local)
 	d.read = composing
-	d.apply(open, op)
+	if err := d.apply(open, op, 0); err != nil {
+		t.Fatal(err)
+	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more, then the rest." {
 		t.Errorf("the line of a run that read the composition is %q", got)
 	}
@@ -433,7 +496,9 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 			t.Fatal(err)
 		}
 		ops = append(ops, op)
-		d.to(ed, ops)
+		if err := d.to(ed, ops); err != nil {
+			t.Fatal(err)
+		}
 	}
 	block := func(typ, text string) *doc.Node {
 		n := &doc.Node{Type: typ}
@@ -498,7 +563,9 @@ func TestTakingOutAFilledInLinkCardKeepsNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 		ops = append(ops, op)
-		d.to(ed, ops)
+		if err := d.to(ed, ops); err != nil {
+			t.Fatal(err)
+		}
 	}
 	card := func(id string) *doc.Node {
 		return &doc.Node{ID: id, Type: "link_preview", Data: map[string]any{"url": "https://a.example"}}
@@ -540,7 +607,9 @@ func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Ops, run.Edits = []doc.Op{first}, []Edit{{}}
-	d.to(ed, run.Ops)
+	if err := d.to(ed, run.Ops); err != nil {
+		t.Fatal(err)
+	}
 
 	// The user types in p1 as the agent's call goes on streaming into it.
 	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Ship it mine"))
@@ -559,6 +628,52 @@ func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 	if text := ed.Content.Find("p1").Delta().Plain(); text != "Ship the agent's" {
 		t.Errorf("open page has %q", text)
+	}
+}
+
+// A change streamed into a block the user changed meanwhile, whose
+// recovery copy could not be kept, is not made, and the run ends failed:
+// its op counts as delivered, so finishing does not deliver it again.
+func TestStreamWithoutItsConflictFailsTheRun(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1"}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	d := h.newDelivery(p.ID, run, local)
+	work := ed.Content.Copy()
+	before := work.Copy()
+	block := func(text string) *doc.Node {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	first := work.ReplaceOp("p1", block("Ship"))
+	if err := work.Apply(first); err != nil {
+		t.Fatal(err)
+	}
+	run.Ops, run.Edits = []doc.Op{first}, []Edit{{}}
+	if err := d.to(ed, run.Ops); err != nil {
+		t.Fatal(err)
+	}
+
+	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Ship it mine"))
+	delta := work.ReplaceOp("p1", block("Ship the agent's"))
+	if err := work.Apply(delta); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_conflict BEFORE INSERT ON page_history WHEN NEW.reason = 'conflict'
+		BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h.revised(s, run, d, RunOptions{}, 0, &doc.Op{Op: "replace", ID: "p1", Node: work.Find("p1").Clone()}, "Rewrote a paragraph", []doc.Op{delta})
+	if text := ed.Content.Find("p1").Delta().Plain(); text != "Ship it mine" {
+		t.Errorf("open page has %q", text)
+	}
+	h.finish(s, run, Request{Instruction: "Rewrite"}, local, before, d, Result{Reply: "Rewrote it."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
 	}
 }
 
@@ -1505,8 +1620,8 @@ func (l *leaseServer) wait(t *testing.T, n int) []string {
 
 // Whether a page has a public link another device serves, the server
 // says by its own clock, which the device asks it to compare with; the
-// server gone, the lease it last gave stands, and none of a page it never
-// said one of.
+// server gone, the lease it last gave stands, and a page it never said
+// anything of counts as linked, as it may have one.
 func TestPublicLinkAsTheServerSays(t *testing.T) {
 	st := openStore(t)
 	l := &leaseServer{}
@@ -1523,12 +1638,94 @@ func TestPublicLinkAsTheServerSays(t *testing.T) {
 	}
 	// Offline the server is not asked, its last answer standing; gone, it
 	// stands too.
-	if !h.publicElsewhere(ctx, "p1", false) || h.publicElsewhere(ctx, "p2", false) {
-		t.Error("offline, the server's last answer was not kept")
+	if !h.publicElsewhere(ctx, "p1", false) || !h.publicElsewhere(ctx, "p2", false) {
+		t.Error("offline, the server's last answer was not kept, or a page it said nothing of counts as unlinked")
+	}
+	l.mu.Lock()
+	l.live = false
+	l.mu.Unlock()
+	if h.publicElsewhere(ctx, "p1", true) {
+		t.Error("a link the server says ended still counts")
 	}
 	hs.Close()
-	if !h.publicElsewhere(ctx, "p1", true) || h.publicElsewhere(ctx, "p2", true) {
-		t.Error("with the server gone, its last answer was not kept")
+	if h.publicElsewhere(ctx, "p1", true) || !h.publicElsewhere(ctx, "p2", true) {
+		t.Error("with the server gone, its last answer was not kept, or a page it said nothing of counts as unlinked")
+	}
+}
+
+// A workspace run's pages count as linked where the server has never
+// listed the space's and cannot be asked, but for those it gave a lease
+// of; once it has listed them, those it did not list have no link,
+// offline after too.
+func TestPublicLinksUnknownCountAsLinked(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := httptest.NewServer(&leaseServer{})
+	defer hs.Close()
+	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
+	ctx := context.Background()
+	space := st.Session().SpaceID
+	if !h.publicElsewhereIn(ctx, space, false)(p.ID) || !h.publicElsewhere(ctx, p.ID, false) {
+		t.Error("offline before the server listed the space, a page counts as unlinked")
+	}
+	if h.publicElsewhereIn(ctx, space, true)(p.ID) {
+		t.Error("a page the server did not list counts as linked")
+	}
+	if h.publicElsewhereIn(ctx, space, false)(p.ID) || h.publicElsewhere(ctx, p.ID, false) {
+		t.Error("offline after the server listed the space, a page it did not list counts as linked")
+	}
+}
+
+// A page whose members or comments the store cannot read counts as had by
+// others, and a run on it reads none of the user's other pages.
+func TestUnreadSharingCountsAsShared(t *testing.T) {
+	for _, table := range []string{"page_members", "comments"} {
+		st := openStore(t)
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := NewHub(st, nil, stubHost{})
+		if OthersHave(st, p) || !h.crossPage(p, store.Settings{AgentsReadOtherPages: true}) {
+			t.Fatalf("%s: a page of the user's alone counts as had by others", table)
+		}
+		if _, err := st.DB().Exec(`ALTER TABLE ` + table + ` RENAME TO hidden`); err != nil {
+			t.Fatal(err)
+		}
+		if !OthersHave(st, p) || h.crossPage(p, store.Settings{AgentsReadOtherPages: true}) {
+			t.Errorf("%s unread: the page counts as the user's alone", table)
+		}
+	}
+}
+
+// A page whose sharing the store cannot read may be the user's alone, so
+// moving it inside a shared page counts as showing it to others.
+func TestShowsToOthersWhenThePageIsUnread(t *testing.T) {
+	st := openStore(t)
+	parent, err := st.CreatePage(store.NewPageOptions{Title: "Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{parent.ID, p.ID} {
+		if err := st.SetMembers(id, []store.Member{{PageID: id, UserID: "u2", Role: "editor", Accepted: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ShowsToOthers(st, p, parent) {
+		t.Fatal("a page shared already counts as shown to others")
+	}
+	if _, err := st.DB().Exec(`ALTER TABLE page_members RENAME TO hidden`); err != nil {
+		t.Fatal(err)
+	}
+	if !ShowsToOthers(st, p, parent) {
+		t.Error("a page whose sharing is unread moves inside a shared page")
 	}
 }
 
@@ -1586,17 +1783,34 @@ func TestPublicLinkThroughICloud(t *testing.T) {
 		t.Errorf("leases %q", leased)
 	}
 	now := time.Now()
-	h.ICloudLinks = func() map[string]time.Time {
-		return map[string]time.Time{"p1": now.Add(time.Hour), "p2": now.Add(-iCloudLinkDrift / 2), "p3": now.Add(-2 * iCloudLinkDrift)}
-	}
+	leases := map[string]time.Time{"p1": now.Add(time.Hour), "p2": now.Add(-iCloudLinkDrift / 2), "p3": now.Add(-2 * iCloudLinkDrift)}
+	h.ICloudLinks = func() (map[string]time.Time, error) { return leases, nil }
 	ctx := context.Background()
 	for id, want := range map[string]bool{"p1": true, "p2": true, "p3": false, "p4": false} {
 		if got := h.publicElsewhere(ctx, id, true); got != want {
 			t.Errorf("%s: public %v, want %v", id, got, want)
 		}
 	}
-	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); len(got) != 2 || !got["p1"] || !got["p2"] {
-		t.Errorf("a workspace run's pages with a link: %v", got)
+	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); !got("p1") || !got("p2") || got("p3") || got("p4") {
+		t.Errorf("a workspace run's pages with a link: p1 %v, p2 %v, p3 %v, p4 %v", got("p1"), got("p2"), got("p3"), got("p4"))
+	}
+}
+
+// A device whose leases in iCloud Drive could not be read may serve a link
+// of any page: every page counts as linked, for the page alone and for a
+// workspace run's pages.
+func TestPublicLinkThroughICloudUnread(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, stubHost{})
+	h.ICloudLinks = func() (map[string]time.Time, error) {
+		return map[string]time.Time{}, errors.New("a device.json not downloaded")
+	}
+	ctx := context.Background()
+	if !h.publicElsewhere(ctx, "p4", true) {
+		t.Error("a page counts as unlinked while a device's links are unknown")
+	}
+	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); !got("p4") {
+		t.Error("a workspace run's page counts as unlinked while a device's links are unknown")
 	}
 }
 
@@ -1789,5 +2003,84 @@ func TestJobGoesUpClean(t *testing.T) {
 	}
 	if bytes.Contains(sent, []byte(`\u0000`)) || !bytes.Contains(sent, []byte("a�b")) || !bytes.Contains(sent, []byte("c�d")) {
 		t.Errorf("sent %s", sent)
+	}
+}
+
+// An op that could not apply, as one on a block the user deleted during
+// the run, is passed over, and Undo and Redo leave it out: the run's other
+// edits still undo, open page or closed.
+func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
+	for _, open := range []bool{true, false} {
+		st := openStore(t)
+		p, ed := openPage(t, st)
+		read := ed.Content.Copy()
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
+		ops := []doc.Op{insertAfter("h1", "x1", "one"), read.ReplaceOp("p1", n), insertAfter("x1", "x2", "two")}
+		// The user deletes p1 as the run works.
+		ed.Content.Children = slices.DeleteFunc(ed.Content.Children, func(n *doc.Node) bool { return n.ID == "p1" })
+		if _, _, err := st.SaveContent(p.ID, ed.Content); err != nil {
+			t.Fatal(err)
+		}
+		var host Host = stubHost{}
+		if open {
+			host = openHost{ed: ed}
+		}
+		h := NewHub(st, nil, host)
+		s := h.Session(p.ID)
+		run := &Run{ID: "r1", Ops: ops}
+		s.Runs = append(s.Runs, run)
+		local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+		h.finish(s, run, Request{Instruction: "Rewrite"}, local, read, h.newDelivery(p.ID, run, local), Result{Reply: "Done."}, nil, RunOptions{})
+		content := func() *doc.Content {
+			if open {
+				return ed.Content
+			}
+			return st.Content(p.ID)
+		}
+		if got := ids(content()); got != "h1,x1,x2,l1" {
+			t.Fatalf("open %v: blocks after the run %s", open, got)
+		}
+		if err := h.UndoRun(p.ID, run.ID); err != nil {
+			t.Fatalf("open %v: undo: %v", open, err)
+		}
+		if got := ids(content()); got != "h1,l1" {
+			t.Errorf("open %v: blocks after undo %s", open, got)
+		}
+		if err := h.RedoRun(p.ID, run.ID); err != nil {
+			t.Fatalf("open %v: redo: %v", open, err)
+		}
+		if got := ids(content()); got != "h1,x1,x2,l1" {
+			t.Errorf("open %v: blocks after redo %s", open, got)
+		}
+	}
+}
+
+// A run on an open page that could not keep its history snapshot leaves
+// the page as it is, as it arrives and at its end, as one on a closed page
+// does: there would be nothing to go back to.
+func TestOpenPageRunNotAppliedWithoutItsSnapshot(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_history BEFORE INSERT ON page_history WHEN NEW.reason = 'agent_run'
+		BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1"}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	before := ed.Content.Copy()
+	d := h.newDelivery(p.ID, run, local)
+	h.arrived(s, run, local, before, d, RunOptions{}, insertAfter("p1", "x1", "one"), "Added a line")
+	if ed.Content.Find("x1") != nil {
+		t.Error("an op went in without the page's snapshot")
+	}
+	h.finish(s, run, Request{Instruction: "Add a line"}, local, before, d, Result{Reply: "Added a line."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+	if ed.Content.Find("x1") != nil {
+		t.Error("the run's edits went in without the page's snapshot")
 	}
 }

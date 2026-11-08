@@ -41,6 +41,12 @@ final class Recorder {
     /// its transcription each read it: "transcribing" read first doesn't
     /// replace "ready" read after.
     @ObservationIgnored private var reads = Newest()
+    /// fetching brings loading's audio and starts it; stopPlaying cancels
+    /// it, so a recording asked for whose block has gone never starts, and
+    /// fetch tells it from one stopped before it, which may still be
+    /// finishing an await it can't be cancelled out of.
+    @ObservationIgnored private var fetching: Task<Void, Never>?
+    @ObservationIgnored private var fetch = 0
     @ObservationIgnored private let microphone = Microphone()
     /// ended hears the player reach the end, which it holds weakly.
     @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
@@ -283,10 +289,18 @@ final class Recorder {
         guard let client, loading == nil, !state.recording else { return }
         stopPlaying()
         loading = id
-        Task {
-            defer { loading = nil }
+        fetch += 1
+        let this = fetch
+        fetching = Task {
+            defer {
+                if fetch == this {
+                    loading = nil
+                    fetching = nil
+                }
+            }
             do {
                 let url = try await client.recordingAudio(id)
+                guard !Task.isCancelled, fetch == this else { return }
                 let audio = AVAudioSession.sharedInstance()
                 try audio.setCategory(.playback, mode: .spokenAudio)
                 try audio.setActive(true)
@@ -302,6 +316,7 @@ final class Recorder {
                 player = p
                 playing = id
             } catch {
+                guard !Task.isCancelled, fetch == this else { return }
                 toast?(L.recCouldNotPlay(error: error.localizedDescription))
             }
         }
@@ -328,7 +343,12 @@ final class Recorder {
     /// speedChanged plays the recording at the speed now asked for.
     func speedChanged() { player?.rate = PlaySpeed.current }
 
+    /// stopPlaying stops the recording playing, and one on its way.
     func stopPlaying() {
+        fetching?.cancel()
+        fetching = nil
+        fetch += 1
+        loading = nil
         let was = player
         player?.stop()
         player = nil

@@ -245,6 +245,9 @@ struct ProviderForm: View {
     @State private var webSession: ChatGPTWebSession?
     /// pageClosed is set as the person closes OpenAI's page.
     @State private var pageClosed = false
+    /// attempt numbers the sign-in begun here last, to give up or forget
+    /// that one only.
+    @State private var attempt: Int64?
 
     private var isAccount: Bool { draft.provider.isAccount }
 
@@ -391,7 +394,7 @@ struct ProviderForm: View {
         .onDisappear {
             // A sign-in made here and not saved is given up.
             webSession?.close()
-            if !saving { app.client?.forgetChatGPTSignIn() }
+            if !saving, let attempt { app.client?.forgetChatGPTSignIn(attempt) }
         }
     }
 
@@ -444,23 +447,24 @@ struct ProviderForm: View {
         Task {
             defer { signingIn = false }
             do {
-                let url = try await client.beginChatGPTSignIn(draft.provider.id)
+                let begun = try await client.beginChatGPTSignIn(draft.provider.id)
+                attempt = begun.attempt
                 let session = ChatGPTWebSession()
                 webSession = session
-                let shown = session.open(url) {
+                let shown = session.open(begun.url) {
                     // Closed before OpenAI answered, the sign-in is given
                     // up, and that is no failure. Its page says to close it
                     // once OpenAI has answered: the sign-in then has a
-                    // moment to finish first.
+                    // moment to finish first, and the core keeps one made.
                     pageClosed = true
                     Task {
                         try? await Task.sleep(for: .seconds(5))
-                        if !signedIn { client.cancelChatGPTSignIn() }
+                        client.cancelChatGPTSignIn(begun.attempt)
                     }
                 }
                 // A page that can't show leaves nothing to sign in with.
                 guard shown else {
-                    client.cancelChatGPTSignIn()
+                    client.cancelChatGPTSignIn(begun.attempt)
                     webSession = nil
                     failure = L.settingsChatGPTSignInFailed
                     return

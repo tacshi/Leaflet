@@ -225,9 +225,13 @@ func (s *Service) pullTable(ctx context.Context, table, columns string, apply fu
 // of the tree. The page of the loop whose move waits goes to the top level
 // here meanwhile, unqueued; its move gives way to the server's row once
 // refused (pushRow).
-func (s *Service) putServerPage(r map[string]any) error {
+func (s *Service) putServerPage(r map[string]any) error { return s.settleLoop(r, s.st.PutRemotePage) }
+
+// settleLoop stores a page from the server with put, as putServerPage
+// does, settling the loop of parents it makes.
+func (s *Service) settleLoop(r map[string]any, put func(map[string]any) error) error {
 	loop := s.st.ParentLoop(store.S(r, "id"), store.S(r, "parent_id"))
-	if err := s.st.PutRemotePage(r); err != nil || len(loop) == 0 {
+	if err := put(r); err != nil || len(loop) == 0 {
 		return err
 	}
 	for _, id := range loop {
@@ -384,7 +388,10 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 		s.st.Notify(step.table, "")
 	}
 	s.st.Notify("comments", "")
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	for _, id := range ids {
 		waiting[id] = true
 	}

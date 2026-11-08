@@ -70,7 +70,9 @@ const (
 // ResolveConflict settles conflict id as how says. The page keeps a version
 // from before in its history first, its edits saved, when its block
 // changes, open or not. One the user can no longer edit is put back
-// nothing, and stays to resolve. A page whose content this device doesn't
+// nothing, and stays to resolve, as does one whose page's edits, or the
+// version put back, could not be saved: the version chosen may be only
+// in the page open, and the conflict is all that keeps it. A page whose content this device doesn't
 // keep takes the block as an empty page, as a subpage's card goes into
 // one, rather than the version chosen being lost.
 func (p Pages) ResolveConflict(id string, how Resolution) error {
@@ -111,7 +113,11 @@ func (p Pages) ResolveConflict(id string, how Resolution) error {
 // data: the blocks under it as the merge found them are not put back
 // over those the page has now.
 func (p Pages) putBack(cf store.ConflictRow, node *doc.Node) error {
-	p.save(cf.PageID)
+	// Edits that could not be saved would be in no version kept, and the
+	// version put back is not stored over them.
+	if !p.save(cf.PageID) {
+		return errNotSaved()
+	}
 	if c := p.Store.Content(cf.PageID); c != nil {
 		if err := p.Store.AddHistory(cf.PageID, c, "conflict", "", locales.SettingsHistoryBeforeResolving()); err != nil {
 			return err

@@ -543,3 +543,34 @@ Deno.test("an endpoint's transcription leaves nothing behind", async () => {
   assertEquals(body.segments, [{ start_ms: 1000, end_ms: 2000, text: "Hi." }]);
   assertEquals(p.tables.stt_file_jobs, []);
 });
+
+// A save that moves the provider and gives it a new key lands between the
+// reads of the provider and of its key: the new key goes nowhere, least of
+// all to the old address, and nothing is claimed.
+Deno.test("a provider's key saved as it is read goes not to its old address", async () => {
+  const p = project({ provider: "openai-compatible", provider_id: "openai" });
+  p.rpcs.get_provider_secret = (args) => {
+    const saved = p.tables.model_providers[0];
+    Object.assign(saved, { base_url: "https://elsewhere.example/v1" });
+    if (args.p_base_url !== saved.base_url || args.p_preset !== saved.preset) throw new Error("provider_moved");
+    return "sk-new";
+  };
+  const sent: string[] = [];
+  const send: SttDeps["send"] = (raw) => (sent.push(String(raw)), Promise.resolve(Response.json({ text: "Hi" })));
+  const moved = await transcribe(p, deps(p, soniox().fetch, send));
+  assertEquals(moved.status, 409);
+  assertEquals([sent, rec(p).status], [[], "uploading"]);
+});
+
+// A call that let its claim go stale, and was taken over, leaves the row
+// to the call that has it now: neither cleared nor deleted under it.
+Deno.test("a file's claim another call took over stays theirs", async () => {
+  const p = withFile({ provider: "openai-compatible", provider_id: "openai" });
+  const later = new Date(Date.now() + 60_000).toISOString();
+  const send: SttDeps["send"] = () => {
+    p.tables.stt_file_jobs[0].claimed_at = later;
+    return Promise.resolve(Response.json({ text: "Hi." }));
+  };
+  assertEquals((await transcribeFile(p, deps(p, soniox().fetch, send))).status, 200);
+  assertEquals(p.tables.stt_file_jobs.map((j) => j.claimed_at), [later]);
+});

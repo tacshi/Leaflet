@@ -114,7 +114,10 @@ func (s *Service) waitForContent(pageIDs []string) error {
 			}
 		}
 	}
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	for _, id := range pageIDs {
 		waiting[id] = true
 	}
@@ -124,19 +127,24 @@ func (s *Service) waitForContent(pageIDs []string) error {
 // waiting are the pages whose content changed elsewhere and waits to be
 // brought up to date here: their row has not come yet, or, through iCloud
 // Drive, the version a batch named.
-func (s *Service) waiting() map[string]bool { return s.ids("sync.content_waiting") }
+func (s *Service) waiting() (map[string]bool, error) { return s.ids("sync.content_waiting") }
 
 func (s *Service) setWaiting(ids map[string]bool) error { return s.setIDs("sync.content_waiting", ids) }
 
-// ids reads a set of IDs kept under key.
-func (s *Service) ids(key string) map[string]bool {
+// ids reads a set of IDs kept under key. One that cannot be read is an
+// error, not an empty set, which the caller would write over it.
+func (s *Service) ids(key string) (map[string]bool, error) {
+	v, _, err := s.st.Lookup(key)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]bool{}
-	if v, ok := s.st.Value(key); ok && v != "" {
+	if v != "" {
 		for id := range strings.SplitSeq(v, ",") {
 			out[id] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 // setIDs keeps a set of IDs under key. A set as it is kept already is not
@@ -144,7 +152,7 @@ func (s *Service) ids(key string) map[string]bool {
 // that key_values changed, which a pass would otherwise do every time.
 func (s *Service) setIDs(key string, ids map[string]bool) error {
 	v := strings.Join(slices.Sorted(maps.Keys(ids)), ",")
-	if kept, ok := s.st.Value(key); ok && kept == v || !ok && v == "" {
+	if kept, ok, err := s.st.Lookup(key); err == nil && (ok && kept == v || !ok && v == "") {
 		return nil
 	}
 	return s.st.SetValue(key, v)

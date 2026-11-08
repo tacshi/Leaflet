@@ -19,7 +19,15 @@ $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 # relative to, though it then works in $RootDir.
 $CallerDir = (Get-Location -PSProvider FileSystem).ProviderPath
 $ConfigPath = Join-Path $RootDir 'mygo.json'
-$ConfigBackup = $null
+# ConfigLock names the build of this checkout that has mygo.json changed,
+# by its process, while it does; ConfigKept keeps the committed file
+# meanwhile, which Restore-Config puts back. ConfigRecover is held while a
+# build puts back what one that is gone left changed. release.sh holds
+# mygo.json by the same files.
+$ConfigLock = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.lock')
+$ConfigKept = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.committed')
+$ConfigRecover = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.recover')
+$ConfigHeld = $false
 
 # Need fails unless each command is on PATH.
 function Need([string[]]$Tools) {
@@ -33,22 +41,98 @@ function Check-Version([string]$Version) {
 	if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "the version must look like 1.2.3, not $Version" }
 }
 
-# Get-ConfigValue returns the value in mygo.json at the dotted keys $Key,
-# as in "version" or "updates.github".
-function Get-ConfigValue([string]$Key) {
-	$value = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+# Read-Config returns the value in the mygo.json at $Path at the dotted
+# keys $Key.
+function Read-Config([string]$Path, [string]$Key) {
+	$value = Get-Content -Raw $Path | ConvertFrom-Json
 	foreach ($part in $Key.Split('.')) { $value = $value.$part }
 	$value
 }
 
+# Get-ConfigValue returns the value in mygo.json at the dotted keys $Key,
+# as in "version" or "updates.github": as this build has it changed, or as
+# it is committed while another build has it changed.
+function Get-ConfigValue([string]$Key) {
+	if (-not $script:ConfigHeld -and (Test-Path -PathType Leaf $ConfigKept)) {
+		try { return Read-Config $ConfigKept $Key } catch { }
+	}
+	Read-Config $ConfigPath $Key
+}
+
+# New-Exclusive makes the file $Path, with $Text in it, and says whether it
+# did: it fails when the file is there, as another process made it.
+function New-Exclusive([string]$Path, [string]$Text) {
+	try {
+		$stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+	} catch [IO.IOException] {
+		return $false
+	}
+	try {
+		$bytes = [Text.Encoding]::ASCII.GetBytes($Text)
+		$stream.Write($bytes, 0, $bytes.Length)
+	} finally {
+		$stream.Dispose()
+	}
+	$true
+}
+
+# Read-Holder returns the process in the file $Path, or nothing.
+function Read-Holder([string]$Path) {
+	try { "$(Get-Content -Raw -ErrorAction Stop $Path)".Trim() } catch { '' }
+}
+
+# Hold-Config waits until no other build of this checkout has mygo.json
+# changed, and then holds it for this one, with the committed file kept in
+# ConfigKept, until Restore-Config: builds that overlapped would read each
+# other's changes, and one could put back another's as the committed file.
+# What a build that is gone, killed, left changed is put back first.
+function Hold-Config {
+	New-Item -ItemType Directory -Force (Split-Path $ConfigLock) | Out-Null
+	$said = $false
+	while (-not (New-Exclusive $ConfigLock "$PID`n")) {
+		$holder = Read-Holder $ConfigLock
+		$gone = $holder -match '^\d+$' -and -not (Get-Process -Id ([int]$holder) -ErrorAction SilentlyContinue)
+		if ($gone -and (Repair-Config $holder)) { continue }
+		if (-not $said) {
+			Info "waiting for another build of this checkout (process $holder), which has mygo.json changed; $ConfigLock names it"
+			$said = $true
+		}
+		Start-Sleep -Seconds 1
+	}
+	$script:ConfigHeld = $true
+	# Kept whole or not at all: a build killed as it copies has nothing
+	# changed yet to put back.
+	Copy-Item $ConfigPath "$ConfigKept.$PID"
+	Move-Item -Force "$ConfigKept.$PID" $ConfigKept
+}
+
+# Repair-Config puts back the committed mygo.json that the build $Holder,
+# by its process, which is gone, left changed, and lets go of its hold.
+# One build at a time does, and only while that build still holds it; it
+# fails when another is at it.
+function Repair-Config([string]$Holder) {
+	if (-not (New-Exclusive $ConfigRecover '')) { return $false }
+	try {
+		if ((Read-Holder $ConfigLock) -eq $Holder) {
+			if (Test-Path -PathType Leaf $ConfigKept) {
+				Warn 'a build that ended early left mygo.json changed; putting the committed one back'
+				Move-Item -Force $ConfigKept $ConfigPath
+			}
+			Remove-Item -Force $ConfigLock
+		}
+	} finally {
+		Remove-Item -Force -ErrorAction SilentlyContinue $ConfigRecover
+	}
+	$true
+}
+
 # Set-Config changes mygo.json for this run only: each argument is
 # <dotted key>=<value>, which sets the value, or -<dotted key>, which
-# removes the key. The first call keeps the committed file, which
-# Restore-Config puts back; call it from a finally block.
+# removes the key. The first call holds mygo.json for this build
+# (Hold-Config), and Restore-Config puts the committed file back; call it
+# from a finally block.
 function Set-Config([string[]]$Pairs) {
-	if (-not $script:ConfigBackup) {
-		$script:ConfigBackup = [IO.File]::ReadAllBytes($ConfigPath)
-	}
+	if (-not $script:ConfigHeld) { Hold-Config }
 	$config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 	foreach ($pair in $Pairs) {
 		$remove = $pair.StartsWith('-')
@@ -74,11 +158,13 @@ function Set-Config([string[]]$Pairs) {
 	[IO.File]::WriteAllText($ConfigPath, $json, [Text.UTF8Encoding]::new($false))
 }
 
-# Restore-Config puts back the mygo.json that Set-Config changed.
+# Restore-Config puts back the mygo.json that Set-Config changed, and lets
+# another build change it.
 function Restore-Config {
-	if ($script:ConfigBackup) {
-		[IO.File]::WriteAllBytes($ConfigPath, $script:ConfigBackup)
-		$script:ConfigBackup = $null
+	if ($script:ConfigHeld) {
+		if (Test-Path -PathType Leaf $ConfigKept) { Move-Item -Force $ConfigKept $ConfigPath }
+		Remove-Item -Force -ErrorAction SilentlyContinue $ConfigLock
+		$script:ConfigHeld = $false
 	}
 }
 

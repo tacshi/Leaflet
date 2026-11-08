@@ -65,10 +65,10 @@ func commentIn(q querier, id string) (Comment, error) {
 
 // HasGuestComments reports whether a page has a comment a visitor of its
 // public link posted, deleted ones too.
-func (s *Store) HasGuestComments(pageID string) bool {
+func (s *Store) HasGuestComments(pageID string) (bool, error) {
 	var n int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM comments WHERE page_id = ? AND author_kind = 'guest'`, pageID).Scan(&n)
-	return n > 0
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM comments WHERE page_id = ? AND author_kind = 'guest'`, pageID).Scan(&n)
+	return n > 0, err
 }
 
 // GuestCommented returns the pages HasGuestComments reports, all at once.

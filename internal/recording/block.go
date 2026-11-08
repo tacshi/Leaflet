@@ -106,6 +106,25 @@ func TranscriptNotes(segs []store.Segment) (notes string, cut bool) {
 	return doc.NormalizeNotes(b.String()), cut
 }
 
+// FitNotes is notes, a transcript as TranscriptNotes writes it, in room
+// characters: what doesn't fit goes, a line at a time from the end, and
+// cut says so. Room for none of it leaves "".
+func FitNotes(notes string, room int) (fit string, cut bool) {
+	if utf8.RuneCountInString(notes) <= room {
+		return notes, false
+	}
+	var b strings.Builder
+	for line := range strings.SplitSeq(notes, "\n") {
+		count := utf8.RuneCountInString(line) + 1
+		if count > room {
+			break
+		}
+		room -= count
+		b.WriteString(line + "\n")
+	}
+	return doc.NormalizeNotes(b.String()), true
+}
+
 // spoken is a line's text, after its speaker's name when it has one.
 func spoken(s store.Segment) string {
 	if s.Speaker != "" {

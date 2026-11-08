@@ -33,10 +33,13 @@ func HistoryLabel(h store.HistoryEntry) string {
 
 // NameVersion keeps page pageID as it is now, its edits saved first, as a
 // version named name. A page with no content, or a name of spaces, keeps
-// none.
+// none, and edits that could not be saved keep none either: the version
+// would be of the page as it was before them.
 func (p Pages) NameVersion(pageID, name string) error {
 	name = strings.TrimSpace(name)
-	p.save(pageID)
+	if !p.save(pageID) {
+		return errNotSaved()
+	}
 	c := p.Store.Content(pageID)
 	if c == nil || name == "" {
 		return nil
@@ -72,7 +75,11 @@ func (p Pages) RestoreVersion(pageID, id string) (kept, run string, err error) {
 	if old == nil {
 		return "", "", errors.New(locales.DialogHistoryVersionGone())
 	}
-	p.save(pageID)
+	// Edits that could not be saved would be in no version kept: the
+	// version is not put back over them.
+	if !p.save(pageID) {
+		return "", "", errNotSaved()
+	}
 	if cur := p.Store.Content(pageID); cur != nil {
 		label := locales.DialogHistoryBeforeRestoring(time.Now())
 		if err := p.Store.AddHistory(pageID, cur, "restore", "", label); err != nil {

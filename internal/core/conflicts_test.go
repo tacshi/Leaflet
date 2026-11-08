@@ -182,3 +182,29 @@ func TestResolveConflictWithNoContentHere(t *testing.T) {
 		t.Errorf("still %+v", rows)
 	}
 }
+
+// A conflict stays to resolve while the version chosen isn't stored: its
+// page's edits could not be saved before it, or the version put back
+// could not be.
+func TestResolveConflictNotSaved(t *testing.T) {
+	for _, typed := range []bool{false, true} {
+		f := newPagesFixture(t)
+		p := f.page(t, "Plans", "", block("b1", "Theirs"), block("b2", "Edited there"))
+		ed := f.openPage(p.ID)
+		if typed {
+			ed.c.Find("b2").SetDelta(doc.FromMarkdown("Edited there, typed"))
+			f.open[p.ID].Changed()
+		}
+		cf := f.conflict(t, p.ID, doc.Conflict{BlockID: "b1", Local: block("b1", "Mine"), Remote: block("b1", "Theirs"), LocalEditedAt: 1, RemoteEditedAt: 2})
+		f.fail(t)
+		if err := f.ResolveConflict(cf.ID, UseThisDevice); err == nil {
+			t.Errorf("typed %v: resolved", typed)
+		}
+		if rows, _ := f.st.Conflicts(); len(rows) != 1 {
+			t.Errorf("typed %v: conflicts %+v", typed, rows)
+		}
+		if got := f.st.Content(p.ID).PlainText(); got != "Theirs\nEdited there" {
+			t.Errorf("typed %v: stored %q", typed, got)
+		}
+	}
+}

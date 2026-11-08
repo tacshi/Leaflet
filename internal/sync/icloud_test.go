@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -353,6 +354,31 @@ func TestICloudMergesContent(t *testing.T) {
 	}
 }
 
+// Another device's version of a page whose merge's conflict cannot be
+// recorded is not recorded as merged either: the next sync merges it
+// again, and records the side this device's edit lost.
+func TestICloudMergeKeepsItsConflictsWithItsVersion(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Notes", para("x", "x0"))
+	syncAll(a, b)
+	a.edit(p.ID, "x", "mine")
+	nextStamp()
+	b.edit(p.ID, "x", "theirs")
+	b.sync()
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON conflicts BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.svc.SyncNow()
+	if _, err := a.st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if a.text(p.ID, "x") != "theirs" || a.conflicts() != 1 {
+		t.Errorf("x is %q, with %d conflicts", a.text(p.ID, "x"), a.conflicts())
+	}
+}
+
 // A device's version of a page that cannot be read here, as one a newer
 // Leaflet wrote, is not merged, and the page waits for it rather than
 // being taken for up to date: once it can be read, it merges.
@@ -377,8 +403,8 @@ func TestICloudUnreadablePageWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	if a.text(p.ID, "x") != "x0" || !a.svc.waiting()[p.ID] {
-		t.Fatalf("A has %q, waiting %v", a.text(p.ID, "x"), a.svc.waiting()[p.ID])
+	if a.text(p.ID, "x") != "x0" || !waitingOn(t, a.svc)[p.ID] {
+		t.Fatalf("A has %q, waiting %v", a.text(p.ID, "x"), waitingOn(t, a.svc)[p.ID])
 	}
 	file.Content = good
 	if err := b.svc.ICloud.WriteJSON(rel, file); err != nil {
@@ -595,6 +621,33 @@ func TestHoldingAnEntryAgainHoldsItOnce(t *testing.T) {
 	other := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Changed: []string{"parent_id"}}
 	if held = foldEntry(held, other); len(held) != 2 {
 		t.Errorf("held %d entries", len(held))
+	}
+}
+
+// Entries held for a row that cannot be read are not written over with
+// only the entry held next, nor let go as applied: they would be lost.
+func TestHeldEntriesUnreadAreKept(t *testing.T) {
+	d := newCloudDevice(t, cloudRoot(t))
+	key := heldKey("pages", "p")
+	if err := d.st.SetValue(key, `[{"kind": "row",`); err != nil {
+		t.Fatal(err)
+	}
+	e := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Row: map[string]any{"title": "x"}}
+	if err := d.svc.hold(e); err == nil {
+		t.Error("held over entries not read")
+	}
+	if err := d.svc.applyHeld(map[string]bool{}); err == nil {
+		t.Error("applied entries not read")
+	}
+	if v, _ := d.st.Value(key); v != `[{"kind": "row",` {
+		t.Errorf("held %q", v)
+	}
+	unreadableValue(t, d.st, key)
+	if err := d.svc.hold(e); err == nil {
+		t.Error("held over entries that could not be read")
+	}
+	if _, _, err := d.st.Lookup(key); err == nil {
+		t.Error("the entries were written over")
 	}
 }
 
@@ -1071,9 +1124,9 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	// Signing in turns iCloud sync off, and the file goes up from here.
 	a.svc.SetICloud(false)
 	const space = "00000000-0000-0000-0000-0000000000a2"
-	sess := a.st.Session()
-	sess.SpaceID = space
-	a.st.SetSession(sess)
+	if err := a.svc.moveInto(space, "My space", "00000000-0000-0000-0000-0000000000b1", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.svc.requeueAll(context.Background(), space); err == nil {
 		t.Error("requeueAll said all went")
 	}
@@ -1107,8 +1160,8 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	if !a.st.HasPending("files", f.ID) || !a.st.HasPending("storage", "files/"+f.ID) {
 		t.Error("file not queued once it came")
 	}
-	if len(a.svc.ids(movesKey)) != 0 {
-		t.Errorf("still waiting for %v", a.svc.ids(movesKey))
+	if len(idsOf(t, a.svc, movesKey)) != 0 {
+		t.Errorf("still waiting for %v", idsOf(t, a.svc, movesKey))
 	}
 }
 
@@ -1151,8 +1204,8 @@ func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	if len(a.svc.ids(movesKey)) != 0 {
-		t.Errorf("waits for %v", a.svc.ids(movesKey))
+	if len(idsOf(t, a.svc, movesKey)) != 0 {
+		t.Errorf("waits for %v", idsOf(t, a.svc, movesKey))
 	}
 	if got, _ := a.st.File(f.ID); store.OnDevice(got.LocalPath) {
 		t.Error("the file came from iCloud Drive to go back there")
@@ -1441,7 +1494,11 @@ func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 		time.Sleep(moveWait / 4)
 		deleted <- a.st.DeleteFile(kept)
 	}()
-	if err := a.svc.requeueAll(context.Background(), "00000000-0000-0000-0000-0000000000a2"); err == nil {
+	const space = "00000000-0000-0000-0000-0000000000a2"
+	if err := a.svc.moveInto(space, "My space", "00000000-0000-0000-0000-0000000000b1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.requeueAll(context.Background(), space); err == nil {
 		t.Error("requeueAll said all went")
 	}
 	if err := <-deleted; err != nil {
@@ -1474,7 +1531,7 @@ func TestICloudHeldChangeThatFailsLetsPullsGoOn(t *testing.T) {
 	if got := b.title(p.ID); got != "After" {
 		t.Errorf("B has %q", got)
 	}
-	if len(b.svc.held("comments", id)) != 1 {
+	if len(heldOf(t, b.svc, "comments", id)) != 1 {
 		t.Error("the change that did not apply is not held again")
 	}
 }
@@ -1767,7 +1824,7 @@ func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
 	if err := a.svc.cloudPull(context.Background(), a.st.DeviceID()); err != nil {
 		t.Fatal(err)
 	}
-	if a.svc.held("pages", p.ID) == nil {
+	if heldOf(t, a.svc, "pages", p.ID) == nil {
 		t.Fatal("B's move is not held")
 	}
 	space, _ := a.st.Value("icloud.space")
@@ -1812,7 +1869,7 @@ func TestICloudSendingAgainKeepsAHeldFileChange(t *testing.T) {
 	if err := a.svc.cloudPull(context.Background(), a.st.DeviceID()); err != nil {
 		t.Fatal(err)
 	}
-	if a.svc.held("files", f.ID) == nil {
+	if heldOf(t, a.svc, "files", f.ID) == nil {
 		t.Fatal("B's deletion is not held")
 	}
 	space, _ := a.st.Value("icloud.space")
@@ -1859,14 +1916,14 @@ func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
 		_ = a.svc.applyHeld(map[string]bool{})
 	}()
 	applyingHeld = func(icloud.Entry) {}
-	if a.svc.held("pages", p.ID) == nil {
+	if heldOf(t, a.svc, "pages", p.ID) == nil {
 		t.Fatal("the held move is gone")
 	}
 	a.sync()
 	if got, _ := a.st.Page(p.ID); got.Title != "Plan A" || got.ParentID != q.ID {
 		t.Errorf("page is %q under %q, want Plan A under %q", got.Title, got.ParentID, q.ID)
 	}
-	if a.svc.held("pages", p.ID) != nil {
+	if heldOf(t, a.svc, "pages", p.ID) != nil {
 		t.Error("still held once applied")
 	}
 }
@@ -2073,7 +2130,7 @@ func TestICloudPageFilesMergedAreNotReadAgain(t *testing.T) {
 	if c.text(p.ID, "a1") != "one, from A" || c.text(p.ID, "b1") != "two, from B" {
 		t.Errorf("C has %q, %q", c.text(p.ID, "a1"), c.text(p.ID, "b1"))
 	}
-	if w := c.svc.waiting(); w[p.ID] {
+	if w := waitingOn(t, c.svc); w[p.ID] {
 		t.Errorf("the page waits on B's file: %v", w)
 	}
 }
@@ -2126,7 +2183,7 @@ func TestICloudPageFilesAreReadAgainOnceTheirBasesGo(t *testing.T) {
 	}
 	syncAll(b)
 	if got := b.text(p.ID, "a1"); got != "one" {
-		t.Fatalf("after joining again B has %q, waiting for %v", got, b.svc.waiting())
+		t.Fatalf("after joining again B has %q, waiting for %v", got, waitingOn(t, b.svc))
 	}
 	c := b.st.Content(p.ID)
 	c.Children = append(c.Children, para("b1", "from B"))
@@ -2212,11 +2269,11 @@ func TestICloudPublicLinkLeases(t *testing.T) {
 	stop := a.svc.ICloudLease(p.ID)
 	leases(1)
 	a.sync()
-	links := b.svc.ICloudLinksElsewhere()
+	links := linksElsewhere(t, b)
 	if until := links[p.ID]; len(links) != 1 || until.Before(time.Now().Add(iCloudLinkLease-time.Minute)) {
 		t.Errorf("the other device reads %v", links)
 	}
-	if own := a.svc.ICloudLinksElsewhere(); len(own) != 0 {
+	if own := linksElsewhere(t, a); len(own) != 0 {
 		t.Errorf("the device serving the link reads its own: %v", own)
 	}
 	rel, err := icloud.DevicePath(a.st.DeviceID())
@@ -2236,17 +2293,17 @@ func TestICloudPublicLinkLeases(t *testing.T) {
 	stop()
 	leases(1)
 	a.sync()
-	if links := b.svc.ICloudLinksElsewhere(); len(links) != 1 {
+	if links := linksElsewhere(t, b); len(links) != 1 {
 		t.Errorf("with the link started again, the other device reads %v", links)
 	}
 	again()
 	leases(0)
 	a.sync()
-	if links := b.svc.ICloudLinksElsewhere(); len(links) != 0 {
+	if links := linksElsewhere(t, b); len(links) != 0 {
 		t.Errorf("once stopped, the other device reads %v", links)
 	}
 	b.svc.cloudOn.Store(false)
-	if links := b.svc.ICloudLinksElsewhere(); links != nil {
+	if links := linksElsewhere(t, b); links != nil {
 		t.Errorf("with iCloud sync off: %v", links)
 	}
 }
@@ -2266,14 +2323,14 @@ func TestICloudPublicLinkEndsWithICloudOff(t *testing.T) {
 		}
 	}
 	a.sync()
-	if links := b.svc.ICloudLinksElsewhere(); len(links) != 1 {
+	if links := linksElsewhere(t, b); len(links) != 1 {
 		t.Fatalf("the other device reads %v", links)
 	}
 	a.svc.SetICloud(false)
 	stop()
-	for deadline := time.Now().Add(5 * time.Second); len(b.svc.ICloudLinksElsewhere()) != 0; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); len(linksElsewhere(t, b)) != 0; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatalf("with iCloud sync off, the other device still reads %v", b.svc.ICloudLinksElsewhere())
+			t.Fatalf("with iCloud sync off, the other device still reads %v", linksElsewhere(t, b))
 		}
 	}
 }
@@ -2299,4 +2356,264 @@ func TestICloudPublicLinkLeaseRunsOut(t *testing.T) {
 	if left := d.st.ValuesWithPrefix(linkPrefix); len(left) != 1 || left["live"] == "" {
 		t.Errorf("leases kept %v", left)
 	}
+}
+
+// otherSpacePage stores a page of another account's space on d, as one
+// shared with the user stays after their session ended on its own, with
+// content d edited since.
+func otherSpacePage(t *testing.T, d *cloudDevice, title string) store.Page {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	id := doc.NewRowID()
+	if err := d.st.PutRemotePage(map[string]any{"id": id, "space_id": doc.NewRowID(), "title": title, "created_at": now, "updated_at": now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.st.SaveContent(id, &doc.Content{Children: []*doc.Node{para("s1", "not yours")}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := d.st.Page(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A page another account shared with the user stays out of iCloud Drive,
+// with its comments, files and recordings, as does the user's change to
+// it: the other devices would take it for one of the user's own.
+func TestICloudLeavesOtherSpacesOut(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	a.svc.KeepAudio = func() string { return "until_uploaded" }
+	shared := otherSpacePage(t, a, "Someone else's")
+	own := a.page("Mine")
+	comment, err := a.st.AddComment(shared.ID, "s1", "Noted", "", "", "user", "You")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "plan.pdf")
+	if err := os.WriteFile(src, []byte("%PDF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := a.st.AddFile(src, "", shared.ID, "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wav := filepath.Join(t.TempDir(), "rec.wav")
+	if err := os.WriteFile(wav, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := a.st.CreateRecording(shared.ID, "s1", "", "", wav, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if b.title(own.ID) != "Mine" {
+		t.Fatalf("B has %q of A's own page", b.title(own.ID))
+	}
+	if _, err := b.st.Page(shared.ID); !store.IsNotFound(err) {
+		t.Errorf("B has the other account's page: %v", err)
+	}
+	if _, err := b.st.Comment(comment.ID); !store.IsNotFound(err) {
+		t.Errorf("B has its comment: %v", err)
+	}
+	if _, err := b.st.File(file.ID); !store.IsNotFound(err) {
+		t.Errorf("B has its file: %v", err)
+	}
+	if _, err := b.st.Recording(rec.ID); !store.IsNotFound(err) {
+		t.Errorf("B has its recording: %v", err)
+	}
+	rel, _ := icloud.PagePath(a.st.DeviceID(), shared.ID)
+	if a.svc.ICloud.Exists(rel) {
+		t.Error("its content is in iCloud Drive")
+	}
+	if blob, _ := icloud.FileBlobPath(file.ID, file.Name); a.svc.ICloud.Exists(blob) {
+		t.Error("its file is in iCloud Drive")
+	}
+	if blob, _ := icloud.RecordingBlobPath(rec.ID); a.svc.ICloud.Exists(blob) {
+		t.Error("its audio is in iCloud Drive")
+	}
+	// A keeps them as they were, in their space.
+	if p, err := a.st.Page(shared.ID); err != nil || p.SpaceID != shared.SpaceID {
+		t.Errorf("A's copy: %+v, %v", p, err)
+	}
+	if f, err := a.st.File(file.ID); err != nil || f.SpaceID != file.SpaceID {
+		t.Errorf("A's file: %+v, %v", f, err)
+	}
+}
+
+// A row of another space that a device wrote to iCloud Drive, as a
+// Leaflet from before did, is not stored: neither as a page of the
+// space the devices sync, nor over a page of another space here.
+func TestICloudRefusesRowsOfOtherSpaces(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	syncAll(a, b)
+	theirs := otherSpacePage(t, b, "Shared with B")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	stray := doc.NewRowID()
+	comment := doc.NewRowID()
+	at := time.Now().UnixMilli()
+	row := func(table, id string, r map[string]any) icloud.Entry {
+		r["id"], r["created_at"], r["updated_at"] = id, now, now
+		return icloud.Entry{Kind: "row", Table: table, ID: id, At: at, By: a.st.DeviceID(), Row: r}
+	}
+	batch := icloud.Batch{Format: icloud.Format, Device: a.st.DeviceID(), Seq: a.svc.intValue("icloud.seq") + 1, WrittenAt: time.Now().UTC(), Entries: []icloud.Entry{
+		row("pages", stray, map[string]any{"space_id": doc.NewRowID(), "title": "Not yours"}),
+		row("pages", theirs.ID, map[string]any{"space_id": a.st.Session().SpaceID, "title": "Renamed"}),
+		row("comments", comment, map[string]any{"page_id": theirs.ID, "block_id": "s1", "body": "Hi", "author_kind": "user"}),
+		{Kind: "content", PageID: theirs.ID, Version: at},
+	}}
+	raw := (&doc.Content{Children: []*doc.Node{para("s1", "not yours"), para("s2", "added")}}).Encode()
+	rel, _ := icloud.PagePath(a.st.DeviceID(), theirs.ID)
+	if err := a.svc.ICloud.WriteJSON(rel, icloud.PageFile{Format: icloud.Format, PageID: theirs.ID, Version: at, Content: json.RawMessage(raw)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.writeBatch(a.st.DeviceID(), batch); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if text := b.text(theirs.ID, "s2"); text != "" {
+		t.Errorf("B's page of another space has %q from A", text)
+	}
+	if _, err := b.st.Page(stray); !store.IsNotFound(err) {
+		t.Errorf("B stored another space's page: %v", err)
+	}
+	if p, err := b.st.Page(theirs.ID); err != nil || p.Title != "Shared with B" || p.SpaceID != theirs.SpaceID {
+		t.Errorf("B's page of another space: %+v, %v", p, err)
+	}
+	if _, err := b.st.Comment(comment); !store.IsNotFound(err) {
+		t.Errorf("B stored a comment on another space's page: %v", err)
+	}
+	if cur := b.svc.intValue("icloud.cursor." + a.st.DeviceID()); cur != batch.Seq {
+		t.Errorf("B is at batch %d of A's, not past %d", cur, batch.Seq)
+	}
+}
+
+// linksElsewhere are the public links the other devices say d's in
+// iCloud Drive that they serve, all of them read.
+func linksElsewhere(t *testing.T, d *cloudDevice) map[string]time.Time {
+	t.Helper()
+	links, err := d.svc.ICloudLinksElsewhere()
+	if err != nil {
+		t.Fatalf("links unknown: %v", err)
+	}
+	return links
+}
+
+// A device.json that cannot be read, as one iCloud has not downloaded,
+// one cut short or one a newer Leaflet wrote, may say a link of any page:
+// the links are unknown then, as they are when the devices cannot be
+// listed. One that has not changed for longer than any lease it says
+// lasts has none that still counts.
+func TestICloudLinksOfADeviceNotReadAreUnknown(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	syncAll(a, b)
+	rel, err := icloud.DevicePath(a.st.DeviceID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	good, err := os.ReadFile(path) // #nosec G304 -- a file of the test's own folder.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.svc.ICloudLinksElsewhere(); err != nil {
+		t.Fatalf("with device.json read: %v", err)
+	}
+	unknown := func(how string) {
+		t.Helper()
+		if links, err := b.svc.ICloudLinksElsewhere(); err == nil {
+			t.Errorf("%s: links %v, known", how, links)
+		}
+	}
+	for how, data := range map[string]string{"cut short": `{"format": 1, "id": "`, "newer": `{"format": 99}`} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		unknown(how)
+		old := time.Now().Add(-iCloudLinkLease - 2*iCloudLinkRenew - time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		if links, err := b.svc.ICloudLinksElsewhere(); err != nil || len(links) != 0 {
+			t.Errorf("%s, written long ago: %v, %v", how, links, err)
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".device.json.icloud"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unknown("not downloaded")
+	if err := os.Remove(filepath.Join(filepath.Dir(path), ".device.json.icloud")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	devices := filepath.Join(root, "devices")
+	if err := os.Chmod(devices, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(devices, 0o750) }) // #nosec G302 -- the test's own folder.
+	if runtime.GOOS != "windows" {
+		unknown("devices not listed")
+	}
+}
+
+// A lease kept since device.json was last written goes into it though
+// the pass fails after this device knows its ID.
+func TestICloudLeaseIsWrittenThoughThePassFails(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Shared", para("a1", "one"))
+	syncAll(a, b)
+	until := time.Now().Add(iCloudLinkLease)
+	if err := a.st.SetValue(linkPrefix+"lease", p.ID+"|"+strconv.FormatInt(until.UnixMilli(), 10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.setInt("icloud.device_at", 0); err != nil {
+		t.Fatal(err)
+	}
+	a.edit(p.ID, "a1", "two")
+	stopped, stop := context.WithCancel(context.Background())
+	stop()
+	if err := a.svc.cloudPass(stopped); err == nil {
+		t.Fatal("the pass went on, stopped")
+	}
+	if links := linksElsewhere(t, b); links[p.ID].IsZero() {
+		t.Errorf("the other device reads %v", links)
+	}
+}
+
+// idsOf is the set of IDs svc keeps under key.
+func idsOf(t *testing.T, svc *Service, key string) map[string]bool {
+	t.Helper()
+	ids, err := svc.ids(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
+// waitingOn are the pages whose content waits on svc.
+func waitingOn(t *testing.T, svc *Service) map[string]bool {
+	t.Helper()
+	return idsOf(t, svc, "sync.content_waiting")
+}
+
+// heldOf are the entries svc holds for a row.
+func heldOf(t *testing.T, svc *Service, table, id string) []icloud.Entry {
+	t.Helper()
+	held, err := svc.held(table, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return held
 }

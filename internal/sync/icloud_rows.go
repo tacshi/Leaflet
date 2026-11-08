@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -62,7 +63,11 @@ func (s *Service) newestSeen(table, id string, row map[string]any) (store.RowVer
 	if err != nil {
 		return newest, err
 	}
-	for _, e := range s.held(table, id) {
+	held, err := s.held(table, id)
+	if err != nil {
+		return newest, err
+	}
+	for _, e := range held {
 		if v := version(e); v.After(newest) {
 			newest = v
 		}
@@ -86,7 +91,8 @@ func (s *Service) newestHad(table, id string, row map[string]any) (store.RowVers
 // applyRow applies a row entry of another device's: each column it
 // changed whose change here is older. A row this device has none of
 // comes whole; its columns the entry did not change count as older than
-// any change, so whichever comes applies.
+// any change, so whichever comes applies. A row of another space than
+// the one the devices sync is not stored (otherSpace).
 func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	v := version(e)
 	whole, err := s.st.RowVersion(e.Table, e.ID)
@@ -102,7 +108,8 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	}
 	var newer []string
 	for _, c := range cols {
-		if _, ok := e.Row[c]; !ok || c == "id" || c == "updated_at" {
+		// A row stays in the space it was made in.
+		if _, ok := e.Row[c]; !ok || c == "id" || c == "updated_at" || c == "space_id" {
 			continue
 		}
 		had, err := s.colVersion(e.Table, e.ID, c, whole)
@@ -115,6 +122,16 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	}
 	if len(newer) == 0 {
 		return nil
+	}
+	// The devices sync one space: a row of another, or on a page of
+	// another here, as one shared with the user by another account, is
+	// not stored, as it would be the user's own here, or would change
+	// what is another's.
+	if other, err := s.otherSpace(e.Table, e.ID, e.Row, false); err != nil || other {
+		if other {
+			log.Printf("icloud: %s %s: of another space, not stored", e.Table, e.ID)
+		}
+		return err
 	}
 	// The change waiting here wins on the columns it changed, and goes
 	// with a version after this one; the others apply once it has gone.
@@ -136,11 +153,6 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		}
 	}
 	r["id"] = e.ID
-	// The devices sync one space: a row from before a device joined it
-	// has the device's own.
-	if _, ok := r["space_id"]; ok {
-		r["space_id"] = s.st.Session().SpaceID
-	}
 	// Another device's change, which the server may not have: the row is no
 	// longer the server's copy, and goes up as this device's pages join an
 	// account (newerThere).
@@ -162,15 +174,23 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 func heldKey(table, id string) string { return heldPrefix + table + "." + id }
 
 // held are the entries of other devices' waiting for a row's change here
-// to go.
-func (s *Service) held(table, id string) []icloud.Entry {
-	v, ok := s.st.Value(heldKey(table, id))
-	if !ok {
-		return nil
+// to go. Entries that cannot be read are an error, not none: written over
+// or let go, they would be lost.
+func (s *Service) held(table, id string) ([]icloud.Entry, error) {
+	v, ok, err := s.st.Lookup(heldKey(table, id))
+	if err != nil || !ok {
+		return nil, err
 	}
+	return parseHeld(v)
+}
+
+// parseHeld reads entries held for a row as key_values keeps them.
+func parseHeld(raw string) ([]icloud.Entry, error) {
 	var out []icloud.Entry
-	_ = json.Unmarshal([]byte(v), &out)
-	return out
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("entries held: %w", err)
+	}
+	return out, nil
 }
 
 // hold keeps entries of one row until its change here has gone.
@@ -179,7 +199,10 @@ func (s *Service) hold(entries ...icloud.Entry) error {
 		return nil
 	}
 	table, id := entries[0].Table, entries[0].ID
-	held := s.held(table, id)
+	held, err := s.held(table, id)
+	if err != nil {
+		return err
+	}
 	for _, e := range entries {
 		held = foldEntry(held, e)
 	}
@@ -191,9 +214,9 @@ func (s *Service) hold(entries ...icloud.Entry) error {
 }
 
 // applyHeld applies the entries held for rows whose change has gone since.
-// A row's that do not all apply stay held, and the other rows' still
-// apply. They go once they have applied, not before, as a stop in between
-// would lose them: one applied again changes nothing.
+// A row's that do not all apply, or cannot be read, stay held, and the
+// other rows' still apply. They go once they have applied, not before, as
+// a stop in between would lose them: one applied again changes nothing.
 func (s *Service) applyHeld(changed map[string]bool) error {
 	var failed error
 	for key, raw := range s.st.ValuesWithPrefix(heldPrefix) {
@@ -201,9 +224,7 @@ func (s *Service) applyHeld(changed map[string]bool) error {
 		if s.st.HasPending(table, id) {
 			continue
 		}
-		var held []icloud.Entry
-		_ = json.Unmarshal([]byte(raw), &held)
-		var err error
+		held, err := parseHeld(raw)
 		for _, e := range held {
 			if e.Kind != "row" || e.Table != table || e.ID != id || !synced(table) || e.Row == nil {
 				continue

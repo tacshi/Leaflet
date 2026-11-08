@@ -53,12 +53,16 @@ final class ICloudSync {
     func picked(_ url: URL, syncing: Bool) async {
         let on = syncing || onAfterPicking
         onAfterPicking = false
+        let before: URL?
         do {
-            try folder.use(url)
+            before = try folder.use(url)
         } catch {
             failure = error.localizedDescription
             return
         }
+        // The core moves to the new folder between passes, so a pass under
+        // way still reads and writes the one before until turn returns.
+        defer { before?.stopAccessingSecurityScopedResource() }
         folderName = url.lastPathComponent
         lost = false
         client?.useICloudFolder(folder.root)

@@ -47,7 +47,7 @@ func TestFileFromAnotherDeviceDownloads(t *testing.T) {
 		t.Fatal("no file")
 	}
 	done := make(chan struct{})
-	if path := a.localFile(f, func() { close(done) }); path != "" {
+	if path := a.localFile(f, func(bool) { close(done) }); path != "" {
 		t.Fatalf("on this device already at %s", path)
 	}
 	select {
@@ -59,7 +59,7 @@ func TestFileFromAnotherDeviceDownloads(t *testing.T) {
 		t.Errorf("asked for %s", asked)
 	}
 	f, _ = a.fileByID(id)
-	path := a.localFile(f, func() { t.Error("downloaded twice") })
+	path := a.localFile(f, func(bool) { t.Error("downloaded twice") })
 	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" { // #nosec G304 -- the file the test just downloaded.
 		t.Errorf("%s has %q, %v", path, data, err)
 	}
@@ -155,5 +155,57 @@ func TestUpdatesWaitForTheWindow(t *testing.T) {
 	a.update(func() { ran = true })
 	if ran || len(a.early) != 1 {
 		t.Errorf("ran %v, %d waiting", ran, len(a.early))
+	}
+}
+
+// A file opened again while it downloads shows once the download is done,
+// and one whose download fails says so, not loading for good.
+func TestPreviewWaitsForTheDownloadUnderway(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		st, err := store.OpenMemory(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		if _, err := st.LoadSession(nil); err != nil {
+			t.Fatal(err)
+		}
+		const id = "00000000-0000-0000-0000-0000000000df"
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if fails {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte("hello"))
+		}))
+		t.Cleanup(hs.Close)
+		at := time.Now().UTC().Format(time.RFC3339Nano)
+		if err := st.PutRemoteFile(map[string]any{"id": id, "space_id": st.Session().SpaceID, "name": "notes.txt",
+			"storage_path": "space/" + id + "/notes.txt", "mime_type": "text/plain", "size_bytes": 5.0, "created_at": at, "updated_at": at}); err != nil {
+			t.Fatal(err)
+		}
+		be := remote.SignedInForTest(hs.URL, st, "u1")
+		a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+		a.reloadAll()
+		posted := make(chan func(), 8)
+		a.post = func(fn func()) { posted <- fn }
+		f, _ := a.fileByID(id)
+		a.previewFile(f)
+		a.previewFile(f)
+		p := a.preview
+		for p.loading {
+			select {
+			case fn := <-posted:
+				fn()
+			case <-time.After(5 * time.Second):
+				t.Fatalf("failing %v: the preview is still loading", fails)
+			}
+		}
+		if p.failed != fails {
+			t.Errorf("failing %v: the preview failed %v", fails, p.failed)
+		}
+		if !fails && p.code == nil {
+			t.Errorf("the file downloaded shows as %+v", p)
+		}
 	}
 }

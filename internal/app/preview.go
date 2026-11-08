@@ -59,11 +59,11 @@ func (a *App) previewFile(f store.File) {
 	a.preview = p
 	delete(a.downloadFails, f.ID)
 	a.lost(f.LocalPath)
-	path := a.localFile(f, func() {
+	path := a.localFile(f, func(ok bool) {
 		if a.preview != p {
 			return
 		}
-		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
+		if f, found := a.fileByID(f.ID); ok && found && f.LocalPath != "" {
 			a.loadPreview(p, f.LocalPath)
 		} else {
 			p.loading, p.failed = false, true
@@ -74,7 +74,7 @@ func (a *App) previewFile(f store.File) {
 		return
 	}
 	a.toast(locales.HostDownloading(f.Name))
-	if !a.downloads[f.ID] {
+	if _, downloading := a.downloads[f.ID]; !downloading {
 		p.loading, p.failed = false, true
 	}
 }

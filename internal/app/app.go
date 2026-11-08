@@ -192,9 +192,10 @@ type App struct {
 	// commentMD is how comments show: md's links, with mentions marked.
 	commentMD markdown.Options
 	images    *imageCache
-	// downloads are the files downloading from the server, and
-	// downloadFails when those that failed to last did.
-	downloads     map[string]bool
+	// downloads are the files downloading from the server, with what
+	// waits for each, and downloadFails when those that failed to last
+	// did.
+	downloads     map[string][]func(bool)
 	downloadFails map[string]time.Time
 	// fetchingCopy is set while a copy of a page is being made: what it
 	// needs downloading (copyable), then its files and recordings' audio
@@ -202,7 +203,10 @@ type App struct {
 	// downloaded for it, which goes once the copy has its own.
 	fetchingCopy bool
 	fetchedAudio []string
-	embeds       map[string]*mygo.WebView
+	// leaving is set while the account's pages are cleared from this
+	// device (leave): the open page takes no typing meanwhile.
+	leaving bool
+	embeds  map[string]*mygo.WebView
 	// embedIn is what each embed's web view last loaded its page from,
 	// and embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in; embedToPage the views that give
@@ -798,6 +802,18 @@ func (a *App) reloadAll() {
 	}
 }
 
+// reread sets *list to what read returns. A read that failed leaves the
+// list as it was, not empty: an empty one would show no pages, draw the
+// open page as Home, or stop what is shared.
+func reread[T any](list *[]T, read func() ([]T, error)) {
+	l, err := read()
+	if err != nil {
+		log.Printf("read: %v", err)
+		return
+	}
+	*list = l
+}
+
 // reload rereads what a change touched.
 func (a *App) reload(ch store.Change) {
 	all := ch.Table == "*"
@@ -811,12 +827,8 @@ func (a *App) reload(ch store.Change) {
 		a.recs = nil
 	}
 	if all || ch.Table == "pages" || ch.Table == "page_contents" {
-		if pages, err := a.st.Pages(); err == nil {
-			a.pages = pages
-		}
-		if templates, err := a.st.Templates(); err == nil {
-			a.templates = templates
-		}
+		reread(&a.pages, a.st.Pages)
+		reread(&a.templates, a.st.Templates)
 		// What was typed on a page gone, and not sent, goes with it.
 		// The workspace agent's draft is of no page, and stays.
 		maps.DeleteFunc(a.drafts, func(id string, _ *pageDrafts) bool { return id != agents.WorkspaceID && a.pageByID(id) == nil })
@@ -824,11 +836,14 @@ func (a *App) reload(ch store.Change) {
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {
 				// The page went, deleted elsewhere: what was typed into it
-				// is saved first, for restoring it to bring back. A page
-				// removed from this device, its share withdrawn, has
-				// nothing to restore.
-				if _, err := a.st.Page(a.page.id); err == nil {
-					a.flush()
+				// is saved first, for restoring it to bring back, or, when
+				// it cannot be saved, kept in its history, as edits to
+				// content that can't be read are. A page removed from this
+				// device, its share withdrawn, has nothing to restore.
+				if _, err := a.st.Page(a.page.id); err == nil && !a.flush() {
+					if err := a.st.AddHistory(a.page.id, a.page.editor.Doc(), "autosave", "", "Autosave"); err != nil {
+						log.Printf("page %s: %v", a.page.id, err)
+					}
 				}
 				a.discardPage()
 				a.route = Route{Kind: "home"}
@@ -844,13 +859,13 @@ func (a *App) reload(ch store.Change) {
 		}
 	}
 	if all || ch.Table == "folders" {
-		a.folders, _ = a.st.Folders()
+		reread(&a.folders, a.st.Folders)
 	}
 	if all || ch.Table == "key_values" {
 		a.goneStarters = nil
 	}
 	if all || ch.Table == "files" {
-		a.files, _ = a.st.Files()
+		reread(&a.files, a.st.Files)
 		// A file downloaded, added or gone is looked for again.
 		clear(a.present)
 	}
@@ -869,7 +884,7 @@ func (a *App) reload(ch store.Change) {
 		a.pending = a.st.PendingCount()
 	}
 	if all || ch.Table == "conflicts" || ch.Table == "pages" {
-		a.conflicts, _ = a.st.Conflicts()
+		reread(&a.conflicts, a.st.Conflicts)
 	}
 	if all || ch.Table == "session" {
 		a.session = a.st.Session()
@@ -879,12 +894,12 @@ func (a *App) reload(ch store.Change) {
 		a.page.setThreads(a.st.Threads(a.page.id))
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
-		a.page.members, _ = a.st.Members(a.page.id)
+		reread(&a.page.members, func() ([]store.Member, error) { return a.st.Members(a.page.id) })
 	}
 	// Whether the page can be edited follows its members, the pages it is
 	// under, which may share it, and whose the session is.
-	if a.page != nil && (all || ch.Table == "page_members" || ch.Table == "pages" || ch.Table == "session") {
-		a.page.live.SetReadOnly(!a.canEdit(a.page.id) || a.page.live.Unreadable())
+	if all || ch.Table == "page_members" || ch.Table == "pages" || ch.Table == "session" {
+		a.pageEditable()
 	}
 	a.pubChanged(ch)
 	if a.win != nil {
@@ -1142,7 +1157,7 @@ func (a *App) loadPage(id string) {
 	}
 	lp, content := live.Open(a.st, id, live.Options{
 		Post:    a.update,
-		CanEdit: func() bool { return a.canEdit(id) },
+		CanEdit: func() bool { return a.canEdit(id) && !a.leaving },
 		Notify:  a.toast,
 		Saved:   func() { a.sync.KickPush() },
 	})
@@ -1157,10 +1172,10 @@ func (a *App) loadPage(id string) {
 	ed.OnSelect = a.viewChanged
 	ps.editor = ed
 	lp.Attach(pageEditor{ed})
-	lp.SetReadOnly(!a.canEdit(id) || lp.Unreadable())
 	ps.setThreads(a.st.Threads(id))
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
+	a.pageEditable()
 	a.sync.SetOpen(id, true)
 	_ = a.st.SetValue(store.LastPageKey, id)
 	a.viewChanged()
@@ -1201,6 +1216,15 @@ func (a *App) discardPage() {
 	a.dropEmbeds()
 	a.dropVideos()
 	a.dropPlayers()
+}
+
+// pageEditable makes the open page read-only or not: read-only when the
+// user may not change it, its content can't be read, or the account's
+// pages are being cleared from this device (leave).
+func (a *App) pageEditable() {
+	if a.page != nil {
+		a.page.live.SetReadOnly(!a.canEdit(a.page.id) || a.page.live.Unreadable() || a.leaving)
+	}
 }
 
 // canEdit reports whether the user may change a page.
@@ -1362,7 +1386,7 @@ func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 		a.toast(locales.AppErrorCreatePage(err.Error()))
 		return
 	}
-	a.pages, _ = a.st.Pages()
+	reread(&a.pages, a.st.Pages)
 	if parent != "" {
 		a.treeOpen("page", parent)
 	}
@@ -1373,7 +1397,7 @@ func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 		if _, err := a.st.DeletePage(p.ID); err != nil {
 			log.Printf("page %s: %v", p.ID, err)
 		}
-		a.pages, _ = a.st.Pages()
+		reread(&a.pages, a.st.Pages)
 		return
 	}
 	if parent != "" {
@@ -1434,7 +1458,7 @@ func (a *App) deletePage(id string) {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
 	}
-	a.pages, _ = a.st.Pages()
+	reread(&a.pages, a.st.Pages)
 	if a.route.Kind == "page" {
 		for _, d := range ids {
 			if d == a.route.ID {
@@ -1448,7 +1472,7 @@ func (a *App) deletePage(id string) {
 			a.toast(locales.AppErrorRestore(err.Error()))
 			return
 		}
-		a.pages, _ = a.st.Pages()
+		reread(&a.pages, a.st.Pages)
 	})
 }
 

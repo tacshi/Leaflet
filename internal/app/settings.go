@@ -18,6 +18,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/core"
+	"leaflet/internal/export"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -541,24 +542,33 @@ func (a *App) exportAll() {
 	if !a.flush() {
 		return
 	}
-	folders, files := slices.Clone(a.folders), slices.Clone(a.files)
+	folders, files, kept := slices.Clone(a.folders), slices.Clone(a.files), a.keeper()
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
 		if path == "" {
 			return
 		}
-		missing, err := a.writeExport(path, folders, files)
-		a.update(func() {
-			switch {
-			case err != nil:
-				a.toast(locales.SettingsExportFailed(err.Error()))
-			case missing > 0:
-				a.toast(locales.SettingsExportedMissing(missing, filepath.Base(path)))
-			default:
-				a.toast(locales.SettingsExported(filepath.Base(path)))
-			}
-		})
+		report, err := a.writeExport(path, kept, folders, files)
+		a.update(func() { a.exported(path, report, err) })
 	}()
+}
+
+// exported says how an export of every page to path went: the pages it
+// left out, and apart, those that went as this device last had them, as
+// they could not be brought up to date.
+func (a *App) exported(path string, report export.Report, err error) {
+	switch {
+	case err != nil:
+		a.toast(locales.SettingsExportFailed(err.Error()))
+		return
+	case report.Missing > 0:
+		a.toast(locales.SettingsExportedMissing(report.Missing, filepath.Base(path)))
+	default:
+		a.toast(locales.SettingsExported(filepath.Base(path)))
+	}
+	if report.Stale > 0 {
+		a.toast(locales.SettingsExportedStale(report.Stale))
+	}
 }
 
 // signOut uploads the changes waiting, then signs out and removes the
@@ -586,10 +596,16 @@ func (a *App) leave(clear func() error, synced bool) {
 	if !a.flush() && synced {
 		return
 	}
+	// The open page, saved, takes no more typing until the pages are
+	// cleared: what was typed meanwhile would go with them unsaved.
+	a.leaving = true
+	a.pageEditable()
 	c := a.core()
 	go func() {
 		unsynced, err := c.Leave(clear, synced)
 		a.update(func() {
+			a.leaving = false
+			a.pageEditable()
 			if unsynced > 0 {
 				a.account.unsynced = unsynced
 				return
@@ -843,9 +859,9 @@ func (a *App) editProvider(p *store.Provider) {
 			return
 		}
 		a.form.reading = false
-		if a.form.apiKey == "" {
-			a.form.apiKey = key
-		}
+		// The key kept fills the field only through keyFollowsAddress:
+		// not over a key typed (or cleared) meanwhile, and only while the
+		// address is still at its origin, so it goes to no other server.
 		a.form.keptKey, a.form.keptURL = key, base
 		a.keyFollowsAddress()
 		if g != nil && a.form.chatgpt == nil {

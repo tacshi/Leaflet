@@ -1216,32 +1216,49 @@ func graphemes(rs []rune) []int {
 	return append(out, len(rs))
 }
 
+// wordStart is where a step back a word from off goes, in whole grapheme
+// clusters, so an emoji goes with its variation selector, as "‼️", or a
+// keycap whole: past spaces, then the clusters of a word; or, where off
+// follows a punctuation mark, the one cluster before it.
 func wordStart(rs []rune, off int) int {
-	i := off
-	for i > 0 && unicode.IsSpace(rs[i-1]) {
+	gs := graphemes(rs)
+	k := 0 // the clusters before off
+	for k < len(gs) && gs[k] < off {
+		k++
+	}
+	i := k
+	for i > 0 && unicode.IsSpace(rs[gs[i-1]]) {
 		i--
 	}
-	for i > 0 && !unicode.IsSpace(rs[i-1]) && !unicode.IsPunct(rs[i-1]) {
+	for i > 0 && !unicode.IsSpace(rs[gs[i-1]]) && !unicode.IsPunct(rs[gs[i-1]]) {
 		i--
 	}
-	if i == off && i > 0 {
+	if gs[i] == off && i > 0 {
 		i--
 	}
-	return i
+	return gs[i]
 }
 
+// wordEnd is where a step on a word from off goes, as wordStart steps
+// back.
 func wordEnd(rs []rune, off int) int {
-	i := off
-	for i < len(rs) && unicode.IsSpace(rs[i]) {
+	gs := graphemes(rs)
+	last := len(gs) - 1 // the end, which starts no cluster
+	k := 0              // the first cluster from off
+	for k < last && gs[k] < off {
+		k++
+	}
+	i := k
+	for i < last && unicode.IsSpace(rs[gs[i]]) {
 		i++
 	}
-	for i < len(rs) && !unicode.IsSpace(rs[i]) && !unicode.IsPunct(rs[i]) {
+	for i < last && !unicode.IsSpace(rs[gs[i]]) && !unicode.IsPunct(rs[gs[i]]) {
 		i++
 	}
-	if i == off && i < len(rs) {
+	if gs[i] == off && i < last {
 		i++
 	}
-	return i
+	return gs[i]
 }
 
 // wordAt returns the word around an offset, in whole grapheme clusters,

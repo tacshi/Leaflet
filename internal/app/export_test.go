@@ -59,7 +59,7 @@ func TestExportOnlyOwnFiles(t *testing.T) {
 	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
 	out := filepath.Join(t.TempDir(), "export.zip")
-	if _, err := a.writeExport(out, a.folders, a.files); err != nil {
+	if _, err := a.writeExport(out, a.keeper(), a.folders, a.files); err != nil {
 		t.Fatal(err)
 	}
 	r, err := zip.OpenReader(out)
@@ -87,7 +87,7 @@ func TestExportKeepsTranscripts(t *testing.T) {
 	}
 	c := doc.Empty()
 	c.Children = []*doc.Node{{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}}}
-	md := doc.PageMarkdown("Notes", a.withTranscripts(c), doc.MarkdownOptions{})
+	md := doc.PageMarkdown("Notes", a.withTranscripts("p", c), doc.MarkdownOptions{})
 	if !strings.Contains(md, "Standup") || !strings.Contains(md, "We ship on Friday.") {
 		t.Errorf("markdown %q", md)
 	}
@@ -248,7 +248,7 @@ func TestExportZipTakesAudio(t *testing.T) {
 	a.reloadAll()
 	files, _ := st.Files()
 	out := filepath.Join(t.TempDir(), "export.zip")
-	if _, err := a.writeExport(out, nil, files); err != nil {
+	if _, err := a.writeExport(out, a.keeper(), nil, files); err != nil {
 		t.Fatal(err)
 	}
 	got := readZip(t, out)

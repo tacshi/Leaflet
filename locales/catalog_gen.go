@@ -10567,18 +10567,34 @@ func (msgs Messages) RecErrFileTranscribing() string {
 	return Catalog.Format(msgs.locale, "recErrFileTranscribing", nil)
 }
 
+// RecErrFileElsewhere says "This file belongs to another page, so it can’t be transcribed here."
+// in the language the app shows.
+//
+// Why a file block’s transcription can’t start: the file it names was
+// added to another page.
+func RecErrFileElsewhere() string { return In(i18n.Locale()).RecErrFileElsewhere() }
+
+// RecErrFileElsewhere says "This file belongs to another page, so it can’t be transcribed here."
+// in the language of msgs.
+//
+// Why a file block’s transcription can’t start: the file it names was
+// added to another page.
+func (msgs Messages) RecErrFileElsewhere() string {
+	return Catalog.Format(msgs.locale, "recErrFileElsewhere", nil)
+}
+
 // RecFileBlockGone says "The transcript is done, but its file is no longer in the page."
 // in the language the app shows.
 //
-// A transcription ended after its file block was deleted, or the page
-// can’t be changed any more.
+// A transcription ended after its file block was deleted or given another
+// file, or the page can’t be changed any more.
 func RecFileBlockGone() string { return In(i18n.Locale()).RecFileBlockGone() }
 
 // RecFileBlockGone says "The transcript is done, but its file is no longer in the page."
 // in the language of msgs.
 //
-// A transcription ended after its file block was deleted, or the page
-// can’t be changed any more.
+// A transcription ended after its file block was deleted or given another
+// file, or the page can’t be changed any more.
 func (msgs Messages) RecFileBlockGone() string {
 	return Catalog.Format(msgs.locale, "recFileBlockGone", nil)
 }
@@ -10595,6 +10611,22 @@ func RecFileNotesCut() string { return In(i18n.Locale()).RecFileNotesCut() }
 // A transcript longer than notes can hold.
 func (msgs Messages) RecFileNotesCut() string {
 	return Catalog.Format(msgs.locale, "recFileNotesCut", nil)
+}
+
+// RecFileNotesFull says "The transcript is done, but the file’s notes are full, so none of it was added."
+// in the language the app shows.
+//
+// A transcription ended with no room left in the file’s notes, written
+// there meanwhile, for any of it.
+func RecFileNotesFull() string { return In(i18n.Locale()).RecFileNotesFull() }
+
+// RecFileNotesFull says "The transcript is done, but the file’s notes are full, so none of it was added."
+// in the language of msgs.
+//
+// A transcription ended with no room left in the file’s notes, written
+// there meanwhile, for any of it.
+func (msgs Messages) RecFileNotesFull() string {
+	return Catalog.Format(msgs.locale, "recFileNotesFull", nil)
 }
 
 // RecFileTranscribed says "Transcribed {name}"
@@ -12517,6 +12549,26 @@ func SettingsExportedMissing(count int, name string) string {
 // could not be downloaded, with the file's name.
 func (msgs Messages) SettingsExportedMissing(count int, name string) string {
 	return Catalog.Format(msgs.locale, "settingsExportedMissing", map[string]any{"count": count, "name": name})
+}
+
+// SettingsExportedStale says "{count, plural, one {# page could not be brought up to date, so it went as this device last had it} other {# pages co…"
+// in the language the app shows.
+//
+// A notification after exporting every page, beside the one saying it was
+// exported, when some pages this device does not keep up to date could not
+// be downloaded, and went as the copy this device had, which may be out of
+// date.
+func SettingsExportedStale(count int) string { return In(i18n.Locale()).SettingsExportedStale(count) }
+
+// SettingsExportedStale says "{count, plural, one {# page could not be brought up to date, so it went as this device last had it} other {# pages co…"
+// in the language of msgs.
+//
+// A notification after exporting every page, beside the one saying it was
+// exported, when some pages this device does not keep up to date could not
+// be downloaded, and went as the copy this device had, which may be out of
+// date.
+func (msgs Messages) SettingsExportedStale(count int) string {
+	return Catalog.Format(msgs.locale, "settingsExportedStale", map[string]any{"count": count})
 }
 
 // SettingsDeleteAccount says "Delete account"

@@ -818,3 +818,101 @@ func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
 		}
 	}
 }
+
+// A page deleted while its files come for a copy is not copied once they
+// have.
+func TestCopyOfAPageDeletedMeanwhile(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/files/") {
+			_, _ = w.Write([]byte("%PDF"))
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	for _, copyIt := range []func(*App, store.Page){(*App).duplicatePage, (*App).saveAsTemplate} {
+		a := templatesApp(t)
+		a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+		a.sync = syncsvc.New(a.st, a.backend)
+		posted := make(chan func(), 4)
+		a.post = func(fn func()) { posted <- fn }
+		p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+		f := store.File{ID: doc.NewRowID(), SpaceID: a.st.Session().SpaceID, PageID: p.ID, Name: "plan.pdf", MimeType: "application/pdf",
+			CreatedAt: time.Now(), UpdatedAt: time.Now()}
+		f.StoragePath = f.SpaceID + "/" + f.ID + "/plan.pdf"
+		if err := a.st.PutFile(f); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+			{ID: "b1", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+		})); err != nil {
+			t.Fatal(err)
+		}
+		a.reloadAll()
+		copyIt(a, *a.pageByID(p.ID))
+		if _, err := a.st.DeletePage(p.ID); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("the file never came")
+		}
+		if a.fetchingCopy {
+			t.Error("a page deleted meanwhile is being copied")
+		}
+		if all, _ := a.st.Pages(); len(all) != 0 {
+			t.Errorf("pages %+v", all)
+		}
+		if ts, _ := a.st.Templates(); len(ts) != 0 {
+			t.Errorf("templates %+v", ts)
+		}
+	}
+}
+
+// A page closed while a template's copy is made for it still takes the
+// template's blocks, with the subpages the copy made under it.
+func TestTemplateFillsAPageClosedDuringTheCopy(t *testing.T) {
+	a := templatesApp(t)
+	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true,
+		Content: doc.FromBlocks([]*doc.Node{textNode("Problem"), textNode("Goals")})})
+	if _, err := a.st.CreatePage(store.NewPageOptions{ParentID: prd.ID, Title: "FAQ"}); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
+	a.reloadAll()
+	a.newPage("", "")
+	blank := a.page.id
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	tmpl, ok := a.templateByKey("template:" + prd.ID)
+	if !ok {
+		t.Fatalf("no template in %+v", a.templateChoices())
+	}
+	if !a.applyTemplate(tmpl) {
+		t.Fatal("the template was not taken")
+	}
+	a.openPage(other.ID)
+	for a.fetchingCopy {
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("the copy was never made")
+		}
+	}
+	if got := a.st.Content(blank).PlainText(); got != "Problem\nGoals" {
+		t.Errorf("the page closed holds %q", got)
+	}
+	kids, _ := a.st.Pages()
+	var under []string
+	for _, k := range kids {
+		if k.ParentID == blank {
+			under = append(under, k.Title)
+		}
+	}
+	if len(under) != 1 || under[0] != "FAQ" {
+		t.Errorf("subpages %v", under)
+	}
+}

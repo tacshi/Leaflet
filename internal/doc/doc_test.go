@@ -1128,6 +1128,13 @@ func TestEscapeBlockStart(t *testing.T) {
 		" $$":          " \\$$",
 		"　| a":         "　\\| a",
 		"\v</details>": "\v\\</details>",
+		"===":          `\===`,
+		"--  ":         `\--  `,
+		"= =":          "= =",
+		"<!-- x -->":   `\<!-- x -->`,
+		"<div>":        `\<div>`,
+		"<?x":          `\<?x`,
+		"<3":           "<3",
 		"plain":        "plain",
 	} {
 		if got := EscapeBlockStart(in); got != want {

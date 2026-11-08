@@ -36,7 +36,7 @@ func (a *App) duplicatePage(p store.Page) {
 	o := templates.Duplicate(a.st, p)
 	var cp store.Page
 	a.copyPage(failed, func() (err error) { cp, err = a.st.CopyPage(p.ID, o); return }, func() {
-		a.pages, _ = a.st.Pages()
+		reread(&a.pages, a.st.Pages)
 		if cp.ParentID != "" {
 			a.linkSubpage(cp.ParentID, cp.ID, p.ID)
 		}
@@ -45,9 +45,10 @@ func (a *App) duplicatePage(p store.Page) {
 	})
 }
 
-// again runs fn on page id as it is now, unless it is gone.
+// again runs fn on page id as it is now, unless it is gone: not on this
+// device, or deleted.
 func (a *App) again(id string, fn func(store.Page)) {
-	if p, err := a.st.Page(id); err == nil {
+	if p, err := a.st.Page(id); err == nil && p.DeletedAt.IsZero() {
 		fn(p)
 	}
 }
@@ -158,7 +159,7 @@ func (a *App) saveAsTemplate(p store.Page) {
 		t, err = a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
 		return
 	}, func() {
-		a.templates, _ = a.st.Templates()
+		reread(&a.templates, a.st.Templates)
 		a.toastAction(locales.TemplateSaved(t.DisplayTitle()), locales.CommonEdit(), func() { a.openPage(t.ID) })
 	})
 }
@@ -181,7 +182,7 @@ func (a *App) deletedStarters() map[string]bool {
 // reloadTemplates reads the templates and the starters deleted again, as
 // a starter made the user's own changes both.
 func (a *App) reloadTemplates() {
-	a.templates, _ = a.st.Templates()
+	reread(&a.templates, a.st.Templates)
 	a.goneStarters = nil
 }
 
@@ -227,8 +228,8 @@ func (a *App) editTemplate(t templates.Choice) {
 // templateBlocks gives use the blocks page id takes from a template, on
 // the main thread: a starter's at once, or a copy's of a template, whose
 // subpages it copies under the page, once the copy is made off the main
-// thread, if the page is still open. When it has none to give it says why,
-// and reports false.
+// thread, if the page is still open; a page closed meanwhile takes them
+// as stored. When it has none to give it says why, and reports false.
 func (a *App) templateBlocks(t templates.Choice, id string, again func(), use func([]*doc.Node)) bool {
 	if t.Starter != nil {
 		use(t.Starter.Nodes())
@@ -253,12 +254,29 @@ func (a *App) templateBlocks(t templates.Choice, id string, again func(), use fu
 	}
 	var blocks []*doc.Node
 	return a.copyPage(failed, func() (err error) { blocks, err = templates.Blocks(a.st, t, id); return }, func() {
-		a.pages, _ = a.st.Pages()
+		reread(&a.pages, a.st.Pages)
 		if len(a.children(id)) > 0 {
 			a.treeOpen("page", id)
 		}
 		if open() {
 			use(blocks)
+			return
+		}
+		// The page closed while the copy was made, which put the
+		// template's subpages under it already: it takes the blocks as
+		// stored, so they are not left without them.
+		if len(blocks) == 0 {
+			return
+		}
+		if err := a.st.UpdateContent(id, func(c *doc.Content, _ bool) (bool, error) {
+			if c.IsEmpty() {
+				c.Children = blocks
+			} else {
+				c.Children = append(c.Children, blocks...)
+			}
+			return true, nil
+		}); err != nil {
+			failed(err)
 		}
 	})
 }
@@ -348,8 +366,8 @@ func (a *App) defaultTemplateMenu(m *ui.Menu, label, place, current string, disa
 			a.toast(locales.TemplateDefaultFailed(err.Error()))
 			return
 		}
-		a.pages, _ = a.st.Pages()
-		a.folders, _ = a.st.Folders()
+		reread(&a.pages, a.st.Pages)
+		reread(&a.folders, a.st.Folders)
 		a.toast(done)
 	}
 	m.Submenu(label, func(m *ui.Menu) {

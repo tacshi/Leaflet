@@ -155,3 +155,24 @@ func TestTranscriptNotesCut(t *testing.T) {
 		t.Errorf("cut %v, %d characters, %d lines", cut, utf8.RuneCountInString(notes), len(doc.NoteLines(notes)))
 	}
 }
+
+// A transcript fits in the room given by whole lines, the last ones going,
+// and says when any went; with room for none, none is left.
+func TestFitNotes(t *testing.T) {
+	notes := "0:05 Hello\n0:06 Bye"
+	for _, c := range []struct {
+		room int
+		fit  string
+		cut  bool
+	}{
+		{100, notes, false},
+		{len(notes), notes, false},
+		{len(notes) - 1, "0:05 Hello", true},
+		{5, "", true},
+		{-2, "", true},
+	} {
+		if fit, cut := FitNotes(notes, c.room); fit != c.fit || cut != c.cut {
+			t.Errorf("room %d: %q, cut %v", c.room, fit, cut)
+		}
+	}
+}

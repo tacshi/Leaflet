@@ -608,7 +608,7 @@ func (r *runner) cat(args []string) error {
 			titles[q.ID] = q.Title
 		}
 	}
-	return r.print(doc.PageMarkdown(p.Title, export.WithTranscripts(r.st, c), doc.MarkdownOptions{PageTitle: func(id string) string { return titles[id] }}))
+	return r.print(doc.PageMarkdown(p.Title, export.WithTranscripts(r.st, p.ID, c), doc.MarkdownOptions{PageTitle: func(id string) string { return titles[id] }}))
 }
 
 // readWhole prints read_page's answer for the whole page, its parts in

@@ -106,7 +106,7 @@ func TestFailedWritesNotifyNoOne(t *testing.T) {
 	}
 	fail(t, s, "UPDATE", "pages")
 	fail(t, s, "DELETE", "model_providers")
-	fail(t, s, "DELETE", "conflicts")
+	fail(t, s, "UPDATE", "conflicts")
 	fail(t, s, "DELETE", "spaces")
 	var told []string
 	s.Subscribe(func(c Change) { told = append(told, c.Table) })
@@ -206,5 +206,32 @@ func TestFileCopiesAreWholeOrNone(t *testing.T) {
 	data, _ := os.ReadFile(f.LocalPath)
 	if len(left) != 1 || string(data) != "hello again" || f.SizeBytes != 5 {
 		t.Errorf("left %v, %q, size %d", left, data, f.SizeBytes)
+	}
+}
+
+// A conflict met again, as a merge tried again meets it, is recorded once;
+// one taken back goes.
+func TestHoldConflictsOnce(t *testing.T) {
+	st := open(t)
+	p, err := st.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := doc.Conflict{BlockID: "a"}
+	first, err := st.HoldConflicts(p.ID, []doc.Conflict{c})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first hold: %v, %v", first, err)
+	}
+	if again, err := st.HoldConflicts(p.ID, []doc.Conflict{c}); err != nil || len(again) != 0 {
+		t.Fatalf("held again: %v, %v", again, err)
+	}
+	if rows, _ := st.Conflicts(); len(rows) != 1 {
+		t.Fatalf("%d conflicts, want 1", len(rows))
+	}
+	if err := st.DropConflicts(first); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := st.Conflicts(); len(rows) != 0 {
+		t.Errorf("%d conflicts after dropping, want 0", len(rows))
 	}
 }

@@ -106,7 +106,7 @@ func (a *App) newRecordingPage() {
 		a.toast(locales.AppErrorCreatePage(err.Error()))
 		return
 	}
-	a.pages, _ = a.st.Pages()
+	reread(&a.pages, a.st.Pages)
 	a.openPage(p.ID)
 	a.startRecording(p.ID)
 }

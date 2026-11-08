@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"leaflet/internal/recording"
 )
 
 // fake is a helper that answers as leaflet-speech does: a stream's words
@@ -220,5 +222,37 @@ func TestSendToAnEndedHelperKeepsNothing(t *testing.T) {
 	s.mu.Unlock()
 	if queued != 0 || s.Lost() == nil {
 		t.Errorf("%d chunks queued, lost %v", queued, s.Lost())
+	}
+}
+
+// A file is given as long as its audio lasts, and more: a WAV by its
+// length, however long, as other files, whose length isn't read, are.
+func TestFileWaitFollowsTheAudio(t *testing.T) {
+	dir := t.TempDir()
+	wav := func(name string, data int64) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, recording.WavFromPCM(nil), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Truncate(path, 44+data); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	threeHours := int64(3 * 3600 * 2 * recording.SampleRate)
+	if got := fileWait(wav("long.wav", threeHours)); got < 3*time.Hour {
+		t.Errorf("three hours of WAV given %v", got)
+	}
+	short := fileWait(wav("short.WAV", 2*recording.SampleRate))
+	if short < time.Minute || short > 30*time.Minute {
+		t.Errorf("a second of WAV given %v", short)
+	}
+	// A WAV whose format can't be read is given what other files are.
+	broken := filepath.Join(dir, "broken.wav")
+	if err := os.WriteFile(broken, []byte("not a wav"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, other := fileWait(broken), fileWait(filepath.Join(dir, "a.m4a")); got != other || other < 3*time.Hour {
+		t.Errorf("an unreadable WAV given %v, another file %v", got, other)
 	}
 }

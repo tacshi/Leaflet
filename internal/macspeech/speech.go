@@ -5,10 +5,12 @@ package macspeech
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -44,14 +46,10 @@ func Find(dir string) *Helper {
 	return &Helper{path: path}
 }
 
-// File transcribes the audio file at path: a recording's, in half an hour
-// at the most, or another's, of any length.
+// File transcribes the audio file at path, a recording's or another's,
+// in fileWait at the most.
 func (h *Helper) File(path, language string) ([]store.Segment, error) {
-	wait := 30 * time.Minute
-	if !strings.EqualFold(filepath.Ext(path), ".wav") {
-		wait = 3 * time.Hour
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	ctx, cancel := context.WithTimeout(context.Background(), fileWait(path))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.path, "file", language, path) // #nosec G204 -- the app's own helper, on the recording's own file.
 	out, err := cmd.StdoutPipe()
@@ -66,6 +64,65 @@ func (h *Helper) File(path, language string) ([]store.Segment, error) {
 		ferr = err
 	}
 	return recording.Tidy(segs), ferr
+}
+
+// fileWait is how long the helper gets to transcribe the file at path:
+// twice as long as a WAV's audio lasts, read from its size at its format's
+// byte rate as the stream's Finish does, and five minutes more; three
+// hours for another file, or a WAV whose format can't be read, whose
+// length isn't known.
+func fileWait(path string) time.Duration {
+	const other = 3 * time.Hour
+	if !strings.EqualFold(filepath.Ext(path), ".wav") {
+		return other
+	}
+	data, rate := wavFormat(path)
+	if rate <= 0 {
+		return other
+	}
+	return time.Duration(2*data/rate)*time.Second + 5*time.Minute
+}
+
+// wavFormat reads the WAV file at path for the bytes of audio in it, all
+// past its fmt chunk, and the byte rate they play at: 0 when it has none
+// to read. The data chunk's own count is left alone, as a recording cut
+// short leaves it 0 and one past 4 GB leaves it short.
+func wavFormat(path string) (data, rate int64) {
+	f, err := os.Open(path) // #nosec G304 -- the audio file to transcribe.
+	if err != nil {
+		return 0, 0
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, 0
+	}
+	var head [12]byte
+	if _, err := io.ReadFull(f, head[:]); err != nil || string(head[0:4]) != "RIFF" || string(head[8:12]) != "WAVE" {
+		return 0, 0
+	}
+	// The chunks before fmt are few and small, where there are any.
+	at := int64(12)
+	for range 16 {
+		var chunk [8]byte
+		if _, err := f.ReadAt(chunk[:], at); err != nil {
+			return 0, 0
+		}
+		size := int64(binary.LittleEndian.Uint32(chunk[4:]))
+		if string(chunk[0:4]) == "fmt " {
+			var format [16]byte
+			if size < 16 {
+				return 0, 0
+			}
+			if _, err := f.ReadAt(format[:], at+8); err != nil {
+				return 0, 0
+			}
+			end := at + 8 + size + size&1
+			return max(fi.Size()-end, 0), int64(binary.LittleEndian.Uint32(format[8:12]))
+		}
+		at += 8 + size + size&1
+	}
+	return 0, 0
 }
 
 // read reads the helper's answers until its transcript, passing the words

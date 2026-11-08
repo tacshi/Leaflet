@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
 
@@ -129,5 +130,40 @@ func TestStoreMergeOfNothing(t *testing.T) {
 		return nil, nil
 	}, put); err != nil || kept {
 		t.Errorf("a page with no content kept %v: %v", kept, err)
+	}
+}
+
+// unreadableValue has the value kept under key fail to read, as a disk
+// that fails part way does, though it can still be written.
+func unreadableValue(t *testing.T, st *store.Store, key string) {
+	t.Helper()
+	for _, q := range []string{
+		`ALTER TABLE key_values RENAME TO key_values_kept`,
+		`CREATE TABLE key_values (key TEXT PRIMARY KEY, value TEXT)`,
+		`INSERT INTO key_values SELECT key, value FROM key_values_kept`,
+		`DROP TABLE key_values_kept`,
+	} {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.DB().Exec(`INSERT INTO key_values (key, value) VALUES (?, NULL)
+		ON CONFLICT(key) DO UPDATE SET value = NULL`, key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A set of pages that wait for their content, which cannot be read, is
+// not written over with only the pages added to it: they would stop
+// waiting.
+func TestWaitingPagesUnreadAreNotWrittenOver(t *testing.T) {
+	st := openStore(t)
+	svc := New(st, remote.New(remote.Settings{}, st))
+	unreadableValue(t, st, "sync.content_waiting")
+	if err := svc.waitForContent([]string{"p1"}); err == nil {
+		t.Error("pages added to a set not read")
+	}
+	if _, _, err := st.Lookup("sync.content_waiting"); err == nil {
+		t.Error("the set was written over")
 	}
 }

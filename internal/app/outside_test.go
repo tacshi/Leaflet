@@ -423,6 +423,61 @@ func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
 	}
 }
 
+// The open page deleted on another device as its edits cannot be saved
+// keeps them in its history, for restoring it to bring back.
+func TestPageDeletedElsewhereKeepsWhatCouldNotSave(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := a.st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	typed := &doc.Node{ID: "t1", Type: "paragraph"}
+	typed.SetDelta(doc.FromMarkdown("typed"))
+	a.page.editor.Content.Children = append(a.page.editor.Content.Children, typed)
+	a.page.live.Changed()
+	for _, q := range []string{
+		`CREATE TRIGGER full_insert BEFORE INSERT ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+		`CREATE TRIGGER full_update BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+	} {
+		if _, err := a.st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := store.PageToRemote(p)
+	row["deleted_at"] = "2026-10-30T00:00:00Z"
+	if err := a.st.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages", PageID: p.ID})
+	if a.page != nil {
+		t.Fatal("the deleted page stayed open")
+	}
+	hist, err := a.st.History(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := false
+	for _, h := range hist {
+		if c, err := doc.Decode(h.Content); err == nil && c.Find("t1") != nil {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("what was typed went with the page: history %+v", hist)
+	}
+}
+
 // A title typed into the open page as it is deleted elsewhere is saved
 // with what was typed, for restoring the page to bring back.
 func TestPageDeletedElsewhereKeepsTheTypedTitle(t *testing.T) {

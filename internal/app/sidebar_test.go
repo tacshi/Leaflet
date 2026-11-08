@@ -1078,3 +1078,38 @@ func middleOf(t *testing.T, tt *ui.Tester, s string) (x, y float32) {
 	}
 	return r.X + r.W/2, r.Y + r.H/2
 }
+
+// Lists that fail to read again stay as they were: the sidebar keeps its
+// pages and folders, not emptied by a read that failed.
+func TestListsStayWhenAReadFails(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{
+		{ID: "t1", Type: "todo_list", Data: map[string]any{"checked": false}},
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreateFolder("Work"); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	todos := len(a.todoList())
+	for _, table := range []string{"pages", "folders", "files"} {
+		if _, err := a.st.DB().Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_gone`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reload(store.Change{Table: "*"})
+	a.todosStale = true
+	if len(a.pages) != 1 || len(a.folders) != 1 || a.pageByID(p.ID) == nil || a.page == nil {
+		t.Errorf("pages %d, folders %d, open %v", len(a.pages), len(a.folders), a.page != nil)
+	}
+	if got := len(a.todoList()); got != todos {
+		t.Errorf("%d to-dos, were %d", got, todos)
+	}
+	reread(&a.pages, a.st.Pages)
+	if len(a.pages) != 1 {
+		t.Errorf("pages %d", len(a.pages))
+	}
+}

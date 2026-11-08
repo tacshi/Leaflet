@@ -33,7 +33,10 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 	for table := range changed {
 		s.st.Notify(table, "")
 	}
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -267,7 +270,10 @@ func (s *Service) putCloudPage(r map[string]any) error {
 // another device, if this device keeps them: open, all pages kept
 // offline, or this one kept. Others wait until they are opened.
 func (s *Service) refreshWaiting(ctx context.Context) error {
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	allOffline := s.st.Settings().AllPagesOffline
 	// A page whose file iCloud has not brought yet waits for it, and is no
 	// failure; another page's error still is.
@@ -313,6 +319,12 @@ func wantKey(peer, pageID string) string { return "icloud.want." + peer + "." + 
 // merged and from what it published, so the devices end up with one
 // version, the same whichever merged first.
 func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content, error) {
+	// A page of another space than the devices sync, as one shared with
+	// the user by another account, takes no other device's version: none
+	// of theirs is of it.
+	if p, err := s.st.Page(pageID); err == nil && p.SpaceID != s.st.Session().SpaceID {
+		return s.st.Content(pageID), nil
+	}
 	me := s.st.DeviceID()
 	peers, err := s.devices(me)
 	if err != nil {
@@ -452,11 +464,14 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 		return ""
 	}
 	// The merge is stored and queued together, so it cannot be left here
-	// only.
+	// only, and with the version merged and its conflicts: once that
+	// version is recorded, it is never merged again, so a conflict not
+	// recorded with it would never be met again.
+	from := store.PeerContent{Peer: peer, Version: file.Version, Content: string(file.Content)}
 	var merged *doc.Content
 	var conflicts []doc.Conflict
 	queued := false
-	_, _, err = s.storeMerge(pageID, func(local store.ContentRow, kept bool) (*doc.Content, error) {
+	_, next, err := s.storeMerge(pageID, func(local store.ContentRow, kept bool) (*doc.Content, error) {
 		merged, conflicts, queued = theirs, nil, false
 		if !kept {
 			return theirs, nil
@@ -475,26 +490,19 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	}, func(over string, c *doc.Content) error {
 		l := label(c.Encode())
 		queued = l != ""
-		return s.st.PutMergedContentOver(pageID, over, c, l)
+		return s.st.PutMergedContentOver(pageID, over, c, l, from, s.ownConflicts(me, peer, pageID, file, conflicts)...)
 	})
 	if err != nil {
 		return err
 	}
-	if err := s.st.PutPeerContent(peer, pageID, file.Version, string(file.Content)); err != nil {
-		return err
-	}
-	for _, c := range s.ownConflicts(me, peer, pageID, file, conflicts) {
-		if err := s.st.AddConflict(pageID, c); err != nil {
-			return err
-		}
-	}
 	// Content this device had as merged, so stored nothing, is queued
-	// here.
-	if l := label(merged.Encode()); !queued && l != "" {
-		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, l, pageID); err != nil {
+	// with the version merged.
+	if next == nil {
+		l := label(merged.Encode())
+		queued = l != ""
+		if err := s.st.PeerMerged(pageID, from, l, s.ownConflicts(me, peer, pageID, file, conflicts)...); err != nil {
 			return err
 		}
-		queued = true
 	}
 	if queued {
 		s.Kick()

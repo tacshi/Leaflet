@@ -28,7 +28,7 @@ func TestMarkDownloaded(t *testing.T) {
 func TestExportIsQuarantined(t *testing.T) {
 	a := templatesApp(t)
 	out := filepath.Join(t.TempDir(), "export.zip")
-	if _, err := a.writeExport(out, a.folders, a.files); err != nil {
+	if _, err := a.writeExport(out, a.keeper(), a.folders, a.files); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := unix.Getxattr(out, "com.apple.quarantine", nil); err != nil {

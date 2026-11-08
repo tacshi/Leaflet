@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"leaflet/internal/store"
 )
@@ -217,5 +219,52 @@ func TestRecoverInterruptedGivesWayToAFinishedTranscription(t *testing.T) {
 	}
 	if over[server.ID] != "transcribing" || over[cut.ID] != nil {
 		t.Errorf("queued over %v", over)
+	}
+}
+
+// timed stands in for sync, and keeps how long each fetch was given.
+type timed struct{ gave *time.Duration }
+
+func (timed) Uploads() bool  { return true }
+func (timed) CanFetch() bool { return true }
+func (t timed) Fetch(ctx context.Context, bucket, path string) ([]byte, error) {
+	_, err := t.FetchReader(ctx, bucket, path)
+	return nil, err
+}
+
+func (t timed) FetchReader(ctx context.Context, _, _ string) (io.ReadCloser, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		*t.gave = time.Until(deadline)
+	}
+	return nil, errors.New("fetched")
+}
+
+// Long audio fetched to transcribe on this device is given as long as it
+// takes over a slow connection, not a few minutes for any length.
+func TestLongAudioHasTimeToDownload(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	var gave time.Duration
+	c := NewController(st, nil)
+	c.Blobs = timed{&gave}
+	ctx := context.Background()
+	// Three hours, 345 MB.
+	_, _ = c.storedAudio(ctx, store.Recording{ID: "r1", AudioPath: "u1/r1.wav", DurationMs: 3 * 3600 * 1000})
+	if gave < 2*time.Hour {
+		t.Errorf("three hours of a recording given %v to download", gave)
+	}
+	gave = 0
+	_, _ = c.fileHere(ctx, store.File{ID: "f1", StoragePath: "u1/f1.wav", SizeBytes: 345 << 20})
+	if gave < 2*time.Hour {
+		t.Errorf("a file of 345 MB given %v to download", gave)
+	}
+	// Short audio keeps the few minutes it had.
+	gave = 0
+	_, _ = c.fileHere(ctx, store.File{ID: "f2", StoragePath: "u1/f2.m4a", SizeBytes: 1 << 20})
+	if gave < 4*time.Minute {
+		t.Errorf("a file of 1 MB given %v to download", gave)
 	}
 }

@@ -261,7 +261,7 @@ func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	if len(threads) != 1 || threads[0].Root.AuthorName != "Sam" {
 		t.Errorf("threads %+v", threads)
 	}
-	if w := svc.waiting(); !w[root] || !w[child] {
+	if w := waitingOn(t, svc); !w[root] || !w[child] {
 		t.Errorf("content not asked for: %v", w)
 	}
 	// The next pull has nothing new.
@@ -499,7 +499,7 @@ func TestASharedTreeComesWhole(t *testing.T) {
 	if _, err := st.Page(id(depth - 1)); err != nil {
 		t.Errorf("the deepest page did not come: %v", err)
 	}
-	if waiting := svc.waiting(); len(waiting) != depth {
+	if waiting := waitingOn(t, svc); len(waiting) != depth {
 		t.Errorf("%d pages wait for their content", len(waiting))
 	}
 }

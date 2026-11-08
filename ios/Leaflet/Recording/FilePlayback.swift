@@ -119,6 +119,13 @@ final class FilePlayback {
     /// failed is a block whose file the player can't read.
     private(set) var failed: Set<String> = []
     @ObservationIgnored private var watching: NSKeyValueObservation?
+    /// fetching brings loading's file and readies its player; stop cancels
+    /// it, so a file asked for on a page that has closed, or of a block
+    /// gone, never starts.
+    @ObservationIgnored private var fetching: Task<Void, Never>?
+    /// fetch tells the fetching of now from one stopped before it, which
+    /// may still be finishing an await it can't be cancelled out of.
+    @ObservationIgnored private var fetch = 0
 
     private init() {}
 
@@ -138,16 +145,27 @@ final class FilePlayback {
         guard let client, loading == nil else { return }
         stop()
         loading = id
-        Task {
-            defer { loading = nil }
+        fetch += 1
+        let this = fetch
+        fetching = Task {
+            defer {
+                if fetch == this {
+                    loading = nil
+                    fetching = nil
+                }
+            }
             do {
                 let url = URL(fileURLWithPath: try await client.localFile(fileID))
+                guard current(this) else { return }
                 let asset = AVURLAsset(url: url)
-                guard try await asset.load(.isPlayable) else {
+                let readable = try await asset.load(.isPlayable)
+                guard current(this) else { return }
+                guard readable else {
                     failed.insert(id)
                     return
                 }
                 let picture = await Self.cover(of: asset)
+                guard current(this) else { return }
                 let session = AVAudioSession.sharedInstance()
                 try session.setCategory(.playback, mode: .spokenAudio)
                 try session.setActive(true)
@@ -157,6 +175,7 @@ final class FilePlayback {
                 if let at {
                     await made.seek(to: CMTime(seconds: Double(at), preferredTimescale: 600))
                 }
+                guard current(this) else { return }
                 watching = made.observe(\.timeControlStatus) { [weak self] player, _ in
                     let on = player.timeControlStatus != .paused
                     Task { @MainActor in self?.playing = on }
@@ -166,10 +185,14 @@ final class FilePlayback {
                 block = id
                 resume(made)
             } catch {
-                failed.insert(id)
+                if current(this) { failed.insert(id) }
             }
         }
     }
+
+    /// current says fetching this is still the one asked for: checked after
+    /// each of its awaits, as stop may have come while it waited.
+    private func current(_ this: Int) -> Bool { !Task.isCancelled && fetch == this }
 
     /// cover is the picture asset holds: an album's or an episode's.
     private static func cover(of asset: AVURLAsset) async -> UIImage? {
@@ -217,8 +240,13 @@ final class FilePlayback {
         if playing { player?.rate = PlaySpeed.current }
     }
 
-    /// stop lets the file playing go, as its page closes.
+    /// stop lets the file playing go, as its page closes, and one on its
+    /// way.
     func stop() {
+        fetching?.cancel()
+        fetching = nil
+        fetch += 1
+        loading = nil
         player?.pause()
         watching = nil
         player = nil
@@ -227,9 +255,9 @@ final class FilePlayback {
         playing = false
     }
 
-    /// stop lets the file playing go if it is of blocks.
+    /// stop lets the file playing, or on its way, go if it is of blocks.
     func stop(_ blocks: Set<String>) {
-        if let block, blocks.contains(block) { stop() }
+        if let playing = block ?? loading, blocks.contains(playing) { stop() }
         failed.subtract(blocks)
     }
 }

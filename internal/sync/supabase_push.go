@@ -337,7 +337,10 @@ func (s *Service) giveWay(ctx context.Context, e store.OutboxEntry, refused erro
 }
 
 // takeServer stores a row from the server over this device's change to
-// it, as the pulls do, and reports the change done.
+// it, as the pulls do, and reports the change done. The change leaves the
+// queue as the row is stored, or not at all (store.TakeRemote); a change
+// made here since keeps it queued, and the row stays out, as the pulls
+// leave it.
 func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[string]any) (bool, error) {
 	if e.Entity == "comments" {
 		names, err := s.authorNames(ctx, []map[string]any{row})
@@ -346,12 +349,14 @@ func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[s
 		}
 		row["author_name"] = names[store.S(row, "author_id")]
 	}
-	// Off the queue first, so the row goes in; a change made here since
-	// keeps it queued, and the row stays out, as the pulls leave it.
-	if err := s.st.Dequeue(e); err != nil {
-		return false, err
+	take := func(r map[string]any) error { return s.st.TakeRemote(e, r) }
+	var err error
+	if e.Entity == "pages" {
+		err = s.settleLoop(row, take)
+	} else {
+		err = take(row)
 	}
-	if err := s.putRow(e.Entity, row, s.putServerPage); err != nil {
+	if err != nil {
 		return false, err
 	}
 	s.st.Notify(e.Entity, e.PageID)

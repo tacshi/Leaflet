@@ -229,6 +229,48 @@ func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 	}
 }
 
+// A refused page change stays queued while the server's page cannot be
+// stored over it: gone from the queue first, it would be neither sent
+// nor replaced.
+func TestRefusedPageChangeStaysQueuedWhenTheServersCannotStore(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.RenamePage(p.ID, "My plan"); err != nil {
+		t.Fatal(err)
+	}
+	server := store.PageToRemote(p)
+	server["title"] = "Their plan"
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PATCH":
+			_, _ = w.Write([]byte("[]"))
+		case "POST":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"42501","message":"new row violates row-level security policy"}`))
+		case "GET":
+			_ = json.NewEncoder(w).Encode([]map[string]any{server})
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Page(p.ID); !st.HasPending("pages", p.ID) || got.Title != "My plan" {
+		t.Errorf("queued %v, title %q", st.HasPending("pages", p.ID), got.Title)
+	}
+}
+
 // A file's move goes up as only that, so it does not undo a deletion made
 // elsewhere meanwhile.
 func TestFilePushSendsOnlyItsChanges(t *testing.T) {

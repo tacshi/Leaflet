@@ -34,8 +34,10 @@ final class ICloudFolder {
     }
 
     /// use keeps folder, as the user picked it, in place of the one
-    /// before.
-    func use(_ folder: URL) throws {
+    /// before. It returns the folder before, still accessed: the core may
+    /// be in a pass through it until it moves to the new one, and the
+    /// caller stops accessing it once the core has.
+    func use(_ folder: URL) throws -> URL? {
         guard folder.startAccessingSecurityScopedResource() else {
             throw CocoaError(.fileReadNoPermission, userInfo: [NSURLErrorKey: folder])
         }
@@ -46,10 +48,11 @@ final class ICloudFolder {
             folder.stopAccessingSecurityScopedResource()
             throw error
         }
-        picked?.stopAccessingSecurityScopedResource()
+        let before = picked
         defaults.set(bookmark, forKey: Self.key)
         picked = folder
         lost = false
+        return before
     }
 
     /// resolve opens the folder of the bookmark kept, if there is one. A

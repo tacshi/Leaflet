@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
@@ -14,6 +16,18 @@ func hexColor(s string) ui.Color {
 		return ui.Color{}
 	}
 	return ui.Hex(s)
+}
+
+// colorHex is a color as runs keep it, as hexColor reads it: "" for
+// none.
+func colorHex(c ui.Color) string {
+	switch c.A {
+	case 0:
+		return ""
+	case 255:
+		return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+	}
+	return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
 }
 
 // SetColor colors the selected text, or what is typed next; "" takes the

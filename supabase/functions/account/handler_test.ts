@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { ownAudioPath } from "./handler.ts";
+import { handle, ownAudioPath } from "./handler.ts";
+import { Project, Whole } from "../_testing/project.ts";
 
 // Only a recording's own path, {created_by}/{id}.{ext}, is removed with
 // the pages it is on: a row naming another path would have the service
@@ -15,4 +16,42 @@ Deno.test("a recording's audio is removed only at its own path", () => {
   assertEquals(ownAudioPath("bob/", "bob", "rec"), false);
   assertEquals(ownAudioPath("/rec.wav", null, "rec"), false);
   assertEquals(ownAudioPath("gone/rec.wav", null, "rec"), true);
+});
+
+/** Ann, by her account's ID: Auth's admin API takes no other. */
+const ANN = "a0000000-0000-4000-8000-000000000001";
+
+// The audio of every recording Ann made on others' pages stays as her
+// account goes, however many there are: the paths to keep come whole, not
+// as rows the Data API stops at a thousand of (max_rows). Her own audio
+// goes.
+Deno.test("an account's kept recordings all stay, past a thousand", async () => {
+  const p = new Project({ maxRows: 1000 });
+  p.user(ANN, "ann-token");
+  p.tables.spaces = [{ id: "ann-space", owner_id: ANN }];
+  const kept = Array.from({ length: 1500 }, (_, i) => `${ANN}/kept-${String(i).padStart(4, "0")}.wav`);
+  p.objects.recordings = new Map([...kept, `${ANN}/own.wav`].map((path) => [path, new Uint8Array(1)]));
+  p.rpcs.release_kept_recordings = (args, caller) => {
+    assertEquals([args.p_user_id, caller], [ANN, "service"]);
+    return new Whole(kept);
+  };
+  const res = await handle(p.request("ann-token", { action: "delete" }), p.clients());
+  assertEquals([res.status, await res.json()], [200, { ok: true }]);
+  assertEquals([...p.objects.recordings.keys()].sort(), kept);
+  assertEquals(p.deletedUsers, [ANN]);
+});
+
+// An answer that is no list of paths keeps nothing it could name: the
+// account stays, and its audio with it, rather than all of it going.
+Deno.test("an account whose audio to keep is not known stays", async () => {
+  const p = new Project();
+  p.user(ANN, "ann-token");
+  p.tables.spaces = [];
+  p.objects.recordings = new Map([[`${ANN}/kept.wav`, new Uint8Array(1)]]);
+  p.rpcs.release_kept_recordings = () => ({ path: `${ANN}/kept.wav` });
+  const res = await handle(p.request("ann-token", { action: "delete" }), p.clients());
+  assertEquals(res.status, 500);
+  await res.body?.cancel();
+  assertEquals([...p.objects.recordings.keys()], [`${ANN}/kept.wav`]);
+  assertEquals(p.deletedUsers, []);
 });

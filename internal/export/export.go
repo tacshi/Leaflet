@@ -7,9 +7,11 @@ package export
 import (
 	"archive/zip"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path"
@@ -27,32 +29,81 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
-	syncsvc "leaflet/internal/sync"
 	"leaflet/locales"
 )
 
 // Source is what an export reads: the store, sync, to download the pages
-// this device does not keep, and recordings, for audio not on it. Rec may
-// be nil, and the zip then takes no audio.
+// this device does not keep up to date, and recordings, for audio not on
+// it. Rec may be nil, and the zip then takes no audio. Kept says which
+// pages this device keeps up to date.
 type Source struct {
 	Store *store.Store
-	Sync  *syncsvc.Service
+	Sync  Syncer
 	Rec   *recording.Controller
+	Kept  Keeper
+}
+
+// Syncer brings a page's content down as the other devices have it, as
+// *sync.Service does.
+type Syncer interface {
+	// Hold runs fn between sync's passes.
+	Hold(fn func())
+	// CanSync reports whether there is somewhere to bring content from now.
+	CanSync() bool
+	// RefreshContent brings a page's content down and returns it.
+	RefreshContent(ctx context.Context, pageID string) (*doc.Content, error)
+}
+
+// Keeper says which pages this device keeps as the other devices have
+// them, up to date as they change elsewhere, as it was when the export
+// started: the export runs off the app's main thread, where it is known.
+type Keeper struct {
+	// SyncOn is there being something to sync with: without it, every
+	// page on this device is as it is anywhere.
+	SyncOn bool
+	// Pulled are the pages sync brings down as they change, as they are
+	// open or served by a public link.
+	Pulled []string
+	// AllOffline keeps every page on this device.
+	AllOffline bool
+}
+
+// Keeps reports whether this device keeps page p's content up to date: an
+// export takes it as it is here, and brings any other page down first.
+func (k Keeper) Keeps(p store.Page) bool {
+	return !k.SyncOn || slices.Contains(k.Pulled, p.ID) || p.KeepOffline || k.AllOffline
+}
+
+// errCantSync is a page an export could not bring down, as there is
+// nowhere to bring it from now.
+var errCantSync = errors.New("export: nowhere to bring the page from")
+
+// Report is how an export of every page went.
+type Report struct {
+	// Missing counts the pages left out: those this device does not have
+	// and could not download.
+	Missing int
+	// Stale counts the pages that could not be brought up to date, which
+	// went as this device last had them, perhaps without what changed
+	// elsewhere since.
+	Stale int
 }
 
 // All writes every page, templates in a folder of their own, to file, and
-// returns how many pages it left out: those this device does not keep and
-// could not download. It runs off the main thread, so it is given the
-// folders and files as they were when it started. A zip cut short goes.
-func All(file string, src Source, allFolders []store.Folder, allFiles []store.File) (int, error) {
+// reports the pages it left out and those it could not bring up to date.
+// It runs off the main thread, so it is given the folders and files as
+// they were when it started. A zip cut short leaves what was at file as
+// it was.
+func All(file string, src Source, allFolders []store.Folder, allFiles []store.File) (Report, error) {
+	var report Report
 	st := src.Store
 	pages, err := st.Pages()
 	if err != nil {
-		return 0, err
+		return report, err
 	}
 	templates, err := st.Templates()
 	if err != nil {
-		return 0, err
+		return report, err
 	}
 	// Templates go in a folder of their own.
 	const templatesFolder = "\x00templates"
@@ -63,39 +114,47 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 		}
 		pages = append(pages, t)
 	}
-	// A page this device does not keep comes down first, as when it is
-	// opened.
-	missing := 0
+	// A page this device does not keep up to date comes down first, as
+	// when it is exported alone: the copy here may be one from before it
+	// changed elsewhere. One that can't come goes as this device has it.
+	fresh := map[string]*doc.Content{}
 	for _, p := range pages {
-		if st.Content(p.ID) != nil {
+		cached := st.Content(p.ID)
+		if cached != nil && src.Kept.Keeps(p) {
 			continue
 		}
 		var c *doc.Content
-		src.Sync.Hold(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-			c, err = src.Sync.RefreshContent(ctx, p.ID)
-		})
-		if err != nil || c == nil {
-			missing++
+		err := errCantSync
+		if src.Sync.CanSync() {
+			src.Sync.Hold(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				c, err = src.Sync.RefreshContent(ctx, p.ID)
+			})
 		}
-	}
-	f, err := os.Create(file) // #nosec G304 -- the file the user picked to export to.
-	if err != nil {
-		return 0, err
+		switch {
+		case err == nil && c != nil:
+			fresh[p.ID] = c
+		case cached != nil:
+			report.Stale++
+		default:
+			report.Missing++
+		}
 	}
 	localPath, open := OwnFiles(allFiles)
 	// Recordings' audio goes in files/ too, from a folder of the export's
 	// own that goes once the zip is written.
 	audio, err := os.MkdirTemp(st.Dir, "export-")
 	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(file)
-		return 0, err
+		return Report{}, err
 	}
 	defer func() { _ = os.RemoveAll(audio) }()
 	content := func(id string) *doc.Content {
-		return withAudio(src, WithTranscripts(st, st.Content(id)), audio)
+		c, ok := fresh[id]
+		if !ok {
+			c = st.Content(id)
+		}
+		return withAudio(src, id, WithTranscripts(st, id, c), audio)
 	}
 	openFile := func(path string) (io.ReadCloser, error) {
 		if InFolder(audio, path) {
@@ -103,29 +162,25 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 		}
 		return open(path)
 	}
-	err = Zip(f, pages, folders, content, localPath, openFile)
-	if cerr := f.Close(); err == nil {
-		err = cerr
+	if err := Write(file, func(w io.Writer) error { return Zip(w, pages, folders, content, localPath, openFile) }); err != nil {
+		return Report{}, err
 	}
-	if err != nil {
-		_ = os.Remove(file)
-		return 0, err
-	}
-	return missing, nil
+	return report, nil
 }
 
-// WithTranscripts is a page's content to export: a copy, each recording's
-// transcript after its block as lines of text, as Insert transcript puts
-// them. The block alone names the recording, and its words are the
-// recording's, kept apart from the page.
-func WithTranscripts(st *store.Store, c *doc.Content) *doc.Content {
+// WithTranscripts is page pageID's content c to export: a copy, each of
+// its recordings' transcript after its block as lines of text, as Insert
+// transcript puts them. The block alone names the recording, and its words
+// are the recording's, kept apart from the page. A block of another page's
+// recording, as one pasted from it, keeps its words to that page.
+func WithTranscripts(st *store.Store, pageID string, c *doc.Content) *doc.Content {
 	if c == nil {
 		return nil
 	}
 	c = c.Copy()
 	for _, n := range recordings(c) {
 		rec, err := st.Recording(n.Str("recording_id"))
-		if err != nil {
+		if err != nil || rec.PageID != pageID {
 			continue
 		}
 		if lines := recording.TranscriptBlocks(rec); len(lines) > 0 {
@@ -171,10 +226,26 @@ func Moments(c *doc.Content) func(string) string {
 	}
 }
 
-// Save writes what r gives to path, the file the user chose: to a file
-// beside it first, so a save cut short leaves what was at path as it was.
-func Save(path string, r io.Reader) (err error) {
-	f, err := os.CreateTemp(filepath.Dir(path), ".leaflet-*")
+// Save writes what r gives to path, the file the user chose, as Write
+// does.
+func Save(path string, r io.Reader) error {
+	return Write(path, func(w io.Writer) error {
+		_, err := io.Copy(w, r)
+		return err
+	})
+}
+
+// Write has write fill the file at path, the file the user chose: a file
+// beside it first, which then takes its place, so a write cut short leaves
+// what was at path as it was. A file it replaces keeps its permissions; a
+// new one has those of any new file the user makes.
+func Write(path string, write func(w io.Writer) error) (err error) {
+	perm := fs.FileMode(0o666)
+	old, statErr := os.Stat(path)
+	if statErr == nil {
+		perm = old.Mode().Perm()
+	}
+	f, err := createBeside(path, perm)
 	if err != nil {
 		return err
 	}
@@ -183,34 +254,51 @@ func Save(path string, r io.Reader) (err error) {
 			_ = os.Remove(f.Name())
 		}
 	}()
-	_, err = io.Copy(f, r)
+	err = write(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		return err
 	}
-	// CreateTemp's file is the user's alone; a saved file is like any other.
-	if err = os.Chmod(f.Name(), 0o644); err != nil { // #nosec G302 -- a file the user saves, readable like any other they save.
-		return err
+	// The process's umask may have taken permissions the file replaced
+	// had.
+	if statErr == nil {
+		if err = os.Chmod(f.Name(), perm); err != nil {
+			return err
+		}
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// createBeside creates a new file of its own in path's folder, with perm
+// as the umask leaves it, for Write to fill. Beside path, it takes its
+// place in one step.
+func createBeside(path string, perm fs.FileMode) (*os.File, error) {
+	for {
+		name := filepath.Join(filepath.Dir(path), ".leaflet-"+rand.Text())
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm) // #nosec G302 G304 -- a file beside the one the user picked, with its permissions.
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
 }
 
 // audioOf names, in a file block withAudio adds, its recording's block.
 const audioOf = "audio_of"
 
-// withAudio is WithTranscripts for a zip: each recording's audio follows
-// its block as a file, named for the recording, which the zip takes into
-// files/. Audio not on this device downloads, into dir; a recording whose
-// audio can't come has its block and transcript alone.
-func withAudio(src Source, c *doc.Content, dir string) *doc.Content {
+// withAudio is WithTranscripts for a zip: each of page pageID's
+// recordings' audio follows its block as a file, named for the recording,
+// which the zip takes into files/. Audio not on this device downloads,
+// into dir; a recording whose audio can't come has its block and
+// transcript alone, and so does another page's recording.
+func withAudio(src Source, pageID string, c *doc.Content, dir string) *doc.Content {
 	if c == nil || src.Rec == nil {
 		return c
 	}
 	for _, n := range recordings(c) {
 		rec, err := src.Store.Recording(n.Str("recording_id"))
-		if err != nil {
+		if err != nil || rec.PageID != pageID {
 			continue
 		}
 		title := n.Str("title")

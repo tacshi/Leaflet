@@ -482,6 +482,23 @@ func TestWordAtTakesClusters(t *testing.T) {
 	}
 }
 
+// A word deleted or stepped over goes in whole grapheme clusters: an
+// emoji with its variation selector, as "‼️", or a keycap, as "#️⃣", goes
+// whole, not a code point of it.
+func TestWordStepsTakeClusters(t *testing.T) {
+	rs := []rune("a ‼️ #️⃣ x")
+	for _, tc := range []struct{ off, start, end int }{
+		{0, 0, 1}, {1, 0, 2}, {2, 0, 4}, {4, 2, 5}, {5, 4, 8}, {8, 5, 10}, {9, 8, 10}, {10, 9, 10},
+	} {
+		if got := wordStart(rs, tc.off); got != tc.start {
+			t.Errorf("word start from %d: %d, %q", tc.off, got, string(rs[got:tc.off]))
+		}
+		if got := wordEnd(rs, tc.off); got != tc.end {
+			t.Errorf("word end from %d: %d, %q", tc.off, got, string(rs[tc.off:got]))
+		}
+	}
+}
+
 // Copy writes the blocks as CommonMark nests them, as an export does: a
 // bullet under "1. " three columns in, which pastes back nested, and a
 // toggle with its children in its <details>.
@@ -819,13 +836,19 @@ func TestPieSlicesBesideDiffer(t *testing.T) {
 }
 
 // A frame in which an edit is made as the blocks build, as typing in a
-// table's cell, costs as much more for a longer page, not the square.
+// table's cell, costs as much more for a longer page, not the square:
+// eight times the blocks take well under the 64 times of the square. The
+// keys are timed by turns on the two pages, so a busy machine slows both
+// alike, the fastest of each taken; a comparison that still fails is
+// timed again, twice at most, as the square's would fail each time.
 func TestEditWhileBuildingIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times frames")
 	}
-	frame := func(n int) time.Duration {
-		table, _ := doc.TableNode([][]string{{"A"}, {"a1"}}, "")
+	// page is a page of n paragraphs after a table, with the caret in its
+	// cell; key types a letter there, and returns how long it took.
+	page := func(n int) (table *doc.Node, key func() time.Duration) {
+		table, _ = doc.TableNode([][]string{{"A"}, {"a1"}}, "")
 		kids := []*doc.Node{table}
 		for i := range n {
 			kids = append(kids, newText("paragraph", doc.Delta{{Text: fmt.Sprintf("line %d with some words", i)}}))
@@ -839,19 +862,31 @@ func TestEditWhileBuildingIsLinear(t *testing.T) {
 			t.Fatal(err)
 		}
 		tt.Frame()
-		best := time.Duration(math.MaxInt64)
-		for range 5 {
+		return table, func() time.Duration {
 			runtime.GC()
 			start := time.Now()
 			tt.Type("x")
-			best = min(best, time.Since(start))
+			return time.Since(start)
 		}
-		if got := doc.TableRows(table)[1][0]; strings.Count(got, "x") != 5 {
+	}
+	smallTable, smallKey := page(1000)
+	largeTable, largeKey := page(8000)
+	const attempts, keys = 3, 9
+	var small, large time.Duration
+	for range attempts {
+		small, large = time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+		for range keys {
+			small, large = min(small, smallKey()), min(large, largeKey())
+		}
+		if large <= 24*small {
+			break
+		}
+	}
+	for _, table := range []*doc.Node{smallTable, largeTable} {
+		if got := doc.TableRows(table)[1][0]; got == "a1" || strings.TrimRight(got, "x") != "a1" {
 			t.Fatalf("the cell took %q", got)
 		}
-		return best
 	}
-	small, large := frame(1000), frame(8000)
 	if large > 24*small {
 		t.Errorf("a key in a cell over 1000 blocks takes %v, over 8000 %v", small, large)
 	}

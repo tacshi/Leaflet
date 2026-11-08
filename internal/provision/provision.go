@@ -53,7 +53,7 @@ var Functions = []string{"agent", "providers", "stt", "account"}
 // FunctionsVersion orders the functions builds deploy: it goes up by one
 // with each change to them, as TestFunctionsVersion holds it to, so a build
 // deploys over older functions only, never over newer ones.
-const FunctionsVersion = 14
+const FunctionsVersion = 15
 
 // hashSecret begins the name of the project secret that says which
 // functions are deployed: the rest of the name is their FunctionsVersion
@@ -84,6 +84,13 @@ func deployedVersion(secrets []supabaseapi.Secret) (version int, found bool) {
 	}
 	return version, found
 }
+
+// retired drops what older functions call and these no longer do, once
+// these are deployed. The migrations, which run before the deploy, keep
+// it till then, so a project whose functions are older than its
+// migrations, as the deploy goes on, or after one that failed until the
+// next start deploys them, keeps working on the functions it has.
+const retired = "drop function if exists public.get_provider_secret(uuid);"
 
 // uploadLimit is the largest upload the buckets take (a long recording);
 // a plan with a lower cap keeps its own.
@@ -354,11 +361,12 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 
 // Setup brings a project up to this version of Leaflet: it applies the
 // migrations it lacks, closes its sign-ups, and deploys the functions
-// when the project's are older, by FunctionsVersion. Ones of the same
-// version stay, whatever their hash, so two builds never take turns
-// deploying; only a development build deploys its own over them, as they
-// change while it is worked on. A migration another device applied
-// meanwhile, setting the project up at the same time, counts as done.
+// when the project's are older, by FunctionsVersion, then drops what only
+// older ones called (retired). Ones of the same version stay, whatever
+// their hash, so two builds never take turns deploying; only a
+// development build deploys its own over them, as they change while it is
+// worked on. A migration another device applied meanwhile, setting the
+// project up at the same time, counts as done.
 // Sign-ups it could not close for now leave it ErrSignUpsOpen, and a
 // Realtime that has not made its messages yet ErrRealtimeWaits, once the
 // rest is done: it runs again until neither does. progress reports steps
@@ -426,6 +434,8 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		}
 		step()
 	}
+	// Best effort: what is left behind, no function calls any more.
+	_ = api.Query(ctx, ref, retired)
 	var old []string
 	for _, s := range secrets {
 		if strings.HasPrefix(s.Name, hashSecret) && s.Name != name {

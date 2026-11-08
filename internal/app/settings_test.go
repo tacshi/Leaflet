@@ -900,7 +900,8 @@ func TestConflictOffersTheVersionNotKept(t *testing.T) {
 		t.Errorf("conflicts %+v", a.conflicts)
 	}
 
-	if err := a.st.AddConflict(p.ID, doc.Conflict{BlockID: "b1", Local: para("Mine"), Remote: para("Theirs"),
+	// Another conflict of the block: the one handled is not met again.
+	if err := a.st.AddConflict(p.ID, doc.Conflict{BlockID: "b1", Local: para("Mine again"), Remote: para("Theirs again"),
 		LocalEditedAt: now - 1000, RemoteEditedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -911,5 +912,58 @@ func TestConflictOffersTheVersionNotKept(t *testing.T) {
 	}
 	if got := tt.Menu(); !slices.Contains(got, locales.SettingsUseThisDevice()) || slices.Contains(got, locales.SettingsUseOtherDevice()) {
 		t.Errorf("menu %q", got)
+	}
+}
+
+// A key typed and cleared while the kept one is still being read stays
+// cleared: the kept key read late does not fill the field, nor go to the
+// address typed meanwhile.
+func TestKeptKeyReadLateLeavesATypedKey(t *testing.T) {
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	t.Cleanup(func() {
+		if a.form.keyTimer != nil {
+			a.form.keyTimer.Stop()
+		}
+	})
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	heard := make(chan string, 8)
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		heard <- r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(other.Close)
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000cf", Preset: "custom", Name: "Mine", BaseURL: "https://saved.example/v1",
+		AuthKind: "api_key", DefaultModel: "m", IsLocal: true}
+	if err := a.st.PutProvider(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.SetLocalKey(p.ID, "sk-kept"); err != nil {
+		t.Fatal(err)
+	}
+	a.editProvider(&p)
+	// Typed and cleared, and another address typed, before the key comes.
+	a.form.apiKey, a.form.keyTyped, a.form.baseURL = "", true, other.URL
+	for a.form.reading {
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("the key never came")
+		}
+	}
+	if a.form.apiKey != "" {
+		t.Errorf("the key cleared came back as %q", a.form.apiKey)
+	}
+	a.fetchModels()
+	select {
+	case got := <-heard:
+		if strings.Contains(got, "sk-kept") {
+			t.Errorf("another address heard %q", got)
+		}
+	case <-time.After(300 * time.Millisecond):
 	}
 }

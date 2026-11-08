@@ -6,7 +6,14 @@
 
 import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2.118.0";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
-import { type Clients, loadProvider, type ProviderRow, providerSecret, requireUser } from "../_shared/supabase.ts";
+import {
+  type Clients,
+  loadProvider,
+  providerMoved,
+  type ProviderRow,
+  providerSecret,
+  requireUser,
+} from "../_shared/supabase.ts";
 import {
   type chatCompletion,
   type Connection,
@@ -163,11 +170,23 @@ async function save(
     id = (data as { id: string }).id;
   }
 
-  // After the row: a key saved with a move is the new address's.
+  // After the row: a key saved with a move is the new address's. It goes on
+  // only while the row is where this save put it: another save of the
+  // provider at once may have moved it since, and its key, or its address,
+  // is not this one's to change.
   const secret = local ? (dropKey ? "" : undefined) : input.api_key?.trim();
   if (secret !== undefined) {
-    const { error } = await uc.rpc("set_provider_secret", { p_provider_id: id, p_secret: secret });
-    if (error) throw new Error(error.message);
+    const { error } = await uc.rpc("set_provider_secret", {
+      p_provider_id: id,
+      p_secret: secret,
+      p_base_url: row.base_url,
+      p_preset: row.preset,
+    });
+    if (error) {
+      throw providerMoved(error)
+        ? new HttpError(409, "This provider was changed elsewhere as it was saved. Save it again.")
+        : new Error(error.message);
+    }
   }
   return await loadProvider(uc, id!);
 }
@@ -182,7 +201,7 @@ async function connection(
     if (row.is_local || LOCAL_PRESETS.has(row.preset)) {
       throw new HttpError(400, "Local providers are reached from your device, not from the server");
     }
-    const apiKey = body.api_key || await providerSecret(sc, row.id);
+    const apiKey = body.api_key || await providerSecret(sc, row);
     return { conn: { baseUrl: normalizeBaseUrl(row.base_url, row.preset), apiKey, preset: row.preset }, row };
   }
   const preset = body.preset;

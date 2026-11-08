@@ -429,7 +429,7 @@ async function providerOf(uc: SupabaseClient, sc: SupabaseClient, job: Job) {
   if (provider.is_local || LOCAL_PRESETS.has(provider.preset)) {
     throw new Error("Local models run on your device, not on the server");
   }
-  const apiKey = await providerSecret(sc, provider.id);
+  const apiKey = await providerSecret(sc, provider);
   if (provider.auth_kind !== "none" && !apiKey) {
     throw new Error(`Add an API key for ${provider.name || provider.preset} in Settings › Agent providers`);
   }

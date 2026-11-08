@@ -581,7 +581,7 @@ func (c *Core) SaveProvider(provider string) (err error) {
 	}
 	c.q.do(func() { c.defaultAgent(p.ID) })
 	if account {
-		c.ForgetChatGPTSignIn()
+		c.forgetChatGPTSignIn()
 	}
 	return nil
 }

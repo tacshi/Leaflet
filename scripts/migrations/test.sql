@@ -134,9 +134,15 @@ reset role;
 set local role service_role;
 do $$
 begin
-  if array(select public.release_kept_recordings('b0000000-0000-0000-0000-000000000002'))
+  if public.release_kept_recordings('b0000000-0000-0000-0000-000000000002')
     is distinct from array['b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav'] then
     raise exception 'the kept recording''s audio was not released';
+  end if;
+  -- One array, in one row: the Data API answers a function's rows only up
+  -- to max_rows, and the audio past them would go with the account.
+  if (select p.proretset or p.prorettype <> 'text[]'::regtype from pg_proc p
+      where p.oid = 'public.release_kept_recordings(uuid)'::regprocedure) then
+    raise exception 'the kept recordings'' paths come as rows';
   end if;
   if (select owner from storage.objects where name like 'b0000000-0000-0000-0000-000000000002/%') is not null then
     raise exception 'the audio is still the account''s';

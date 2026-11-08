@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // ToMarkdown writes rich text in the small inline markdown dialect agents
@@ -17,7 +19,11 @@ import (
 // back as written. A format over several runs is
 // one span, the others nested in it, so runs side by side read back as
 // they were.
-func (d Delta) ToMarkdown() string {
+func (d Delta) ToMarkdown() string { return d.markdown(escapeText, LinkDestination) }
+
+// markdown writes d as ToMarkdown does, its text escaped by escape and
+// its links' urls written by dest.
+func (d Delta) markdown(escape, dest func(string) string) string {
 	var toks []mdToken
 	var open []mdMark
 	runs := trimSpans(d.Compact())
@@ -65,7 +71,7 @@ func (d Delta) ToMarkdown() string {
 			if name == "" {
 				name = strings.TrimPrefix(r.Text, "@")
 			}
-			toks = append(toks, mdToken{text: "[@" + escapeText(name) + "](" + LinkDestination(MentionLink(m.Kind, m.ID)) + ")"})
+			toks = append(toks, mdToken{text: "[@" + escape(name) + "](" + dest(MentionLink(m.Kind, m.ID)) + ")"})
 		case r.Attrs.Code:
 			// Code spans side by side differ only in what Markdown can't
 			// say: they are one span, as backticks touching would not
@@ -76,7 +82,7 @@ func (d Delta) ToMarkdown() string {
 				toks = append(toks, mdToken{text: r.Text, code: true})
 			}
 		default:
-			toks = append(toks, mdToken{text: escapeText(r.Text)})
+			toks = append(toks, mdToken{text: escape(r.Text)})
 		}
 	}
 	for i := len(open) - 1; i >= 0; i-- {
@@ -100,7 +106,7 @@ func (d Delta) ToMarkdown() string {
 		case t.mark.kind == '[' && t.open:
 			b.WriteString("[")
 		case t.mark.kind == '[':
-			b.WriteString("](" + LinkDestination(t.mark.href) + ")")
+			b.WriteString("](" + dest(t.mark.href) + ")")
 		case t.mark.kind == 'c' && t.open:
 			b.WriteString(colorOpen + t.mark.href + `">`)
 		case t.mark.kind == 'c':
@@ -414,8 +420,22 @@ func hasRunes(s []rune, prefix string) bool {
 // escapeText escapes the characters that would read as markup: all the
 // markers but a _ inside a word, which can't start or end italics, and the
 // < of a color's tags.
-func escapeText(s string) string {
-	runes := []rune(s)
+func escapeText(s string) string { return escapeMarkup(s, false) }
+
+// escapeCommonMark is escapeText for a CommonMark reader, which reads
+// more as markup than Leaflet does: an & that starts an entity or a
+// numeric character reference, as &amp; or &#65;, and a < that could
+// start an autolink or HTML, before a letter, a /, a ! or a ?, or before
+// an email address, as <1@x.io>.
+func escapeCommonMark(s string) string { return escapeMarkup(s, true) }
+
+// escapeMarkup is escapeText, or escapeCommonMark where commonMark is set.
+func escapeMarkup(s string, commonMark bool) string {
+	var runes []rune
+	var at []int // where each rune is in s
+	for i, c := range s {
+		runes, at = append(runes, c), append(at, i)
+	}
 	var b strings.Builder
 	for i, c := range runes {
 		switch c {
@@ -426,13 +446,46 @@ func escapeText(s string) string {
 				b.WriteByte('\\')
 			}
 		case '<':
-			if hasRunes(runes[i:], colorOpen) || hasRunes(runes[i:], colorClose) {
+			if hasRunes(runes[i:], colorOpen) || hasRunes(runes[i:], colorClose) ||
+				commonMark && i+1 < len(runes) && (htmlStart(runes[i+1]) || emailAutolink(runes[i+1:])) {
+				b.WriteByte('\\')
+			}
+		case '&':
+			if commonMark && startsReference(s[at[i]:]) {
 				b.WriteByte('\\')
 			}
 		}
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// startsReference reports whether s starts with an entity or a numeric
+// character reference CommonMark reads, as &amp; or &#65;.
+func startsReference(s string) bool {
+	n, _ := parser.Entity(s)
+	return n > 0
+}
+
+// htmlStart reports whether c after a < could make it the start of HTML
+// or an autolink in CommonMark: a tag's name, its closing /, a comment's
+// or a declaration's !, or a processing instruction's ?.
+func htmlStart(c rune) bool {
+	return c < 0x80 && (unicode.IsLetter(c) || c == '/' || c == '!' || c == '?')
+}
+
+// emailAutolink reports whether s, after a <, starts as an email address
+// CommonMark makes an autolink of: the characters of its name, then an @.
+func emailAutolink(s []rune) bool {
+	for i, c := range s {
+		switch {
+		case c == '@':
+			return i > 0
+		case c >= 0x80 || !unicode.IsLetter(c) && !unicode.IsDigit(c) && !strings.ContainsRune(".!#$%&'*+/=?^_`{|}~-", c):
+			return false
+		}
+	}
+	return false
 }
 
 // codeSpan writes code between more backticks than any run of them in it,
@@ -474,9 +527,9 @@ func (d Delta) ReadableMarkdown() string {
 	// Text can read back other than it was where Markdown can't say it, as
 	// a format over a space between runs of another: what it reads back as
 	// is written instead, so the same Markdown comes out each time.
-	md := out.Uncolored().ToMarkdown()
+	md := out.Uncolored().commonMark()
 	for range 3 {
-		again := FromMarkdown(md).ToMarkdown()
+		again := FromMarkdown(md).commonMark()
 		if again == md {
 			break
 		}
@@ -484,6 +537,9 @@ func (d Delta) ReadableMarkdown() string {
 	}
 	return md
 }
+
+// commonMark is ToMarkdown escaped for a CommonMark reader.
+func (d Delta) commonMark() string { return d.markdown(escapeCommonMark, commonMarkDestination) }
 
 // Uncolored is d without its colors and highlights.
 func (d Delta) Uncolored() Delta {
@@ -518,22 +574,45 @@ func mentionOf(href string) (kind, id string, ok bool) {
 // A backtick is written as a url can hold one: what looks for code spans
 // around a link, in a table's row or a toggle's summary, reads Markdown
 // before it reads links.
-func LinkDestination(href string) string {
+func LinkDestination(href string) string { return linkDestination(href, false) }
+
+// commonMarkDestination is LinkDestination for a CommonMark reader, which
+// reads an entity or a numeric character reference in a url as the
+// character it stands for: the & that starts one is escaped.
+func commonMarkDestination(href string) string { return linkDestination(href, true) }
+
+// linkDestination is LinkDestination, or commonMarkDestination where
+// commonMark is set.
+func linkDestination(href string, commonMark bool) string {
 	href = strings.ReplaceAll(href, "`", "%60")
-	if !strings.ContainsAny(href, "()<>\\ \t\n") {
-		return href
+	angled := strings.ContainsAny(href, "()<>\\ \t\n")
+	if angled {
+		href = strings.NewReplacer("\\", "\\\\", "<", "\\<", ">", "\\>", "\n", "%0A").Replace(href)
 	}
-	r := strings.NewReplacer("\\", "\\\\", "<", "\\<", ">", "\\>", "\n", "%0A")
-	return "<" + r.Replace(href) + ">"
+	if commonMark && strings.Contains(href, "&") {
+		var b strings.Builder
+		for i := range len(href) {
+			if href[i] == '&' && startsReference(href[i:]) {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(href[i])
+		}
+		href = b.String()
+	}
+	if angled {
+		return "<" + href + ">"
+	}
+	return href
 }
 
 // EscapeBlockStart escapes what at the start of a block's text would
 // read as another kind of block: a heading's #, a list item's marker, a
-// quote's >, a table's |, a math block's $$, a rule, a toggle's
-// <details> or <summary>, or the ! that would make a link a picture.
-// They are looked for past spaces of any kind, as a no-break or an
-// ideographic space, which ParseLines passes over before a $$ or a
-// </details>.
+// quote's >, a table's |, a math block's $$, a rule, a line only of ='s
+// or -'s, which makes the line before it a heading, a tag, a comment or
+// another start of HTML, as a toggle's <details>, or the ! that would
+// make a link a picture. They are looked for past spaces of any kind, as
+// a no-break or an ideographic space, which ParseLines passes over
+// before a $$ or a </details>.
 func EscapeBlockStart(md string) string {
 	s := strings.TrimLeftFunc(md, unicode.IsSpace)
 	lead := md[:len(md)-len(s)]
@@ -543,7 +622,8 @@ func EscapeBlockStart(md string) string {
 	case s == "":
 		return md
 	case len(hashes) < len(s) && len(s)-len(hashes) <= 6 && (hashes == "" || hashes[0] == ' '),
-		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), strings.HasPrefix(s, "!["), IsRule(s), toggleTag(s),
+		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), strings.HasPrefix(s, "!["), IsRule(s), underline(s),
+		s[0] == '<' && len(s) > 1 && htmlStart(rune(s[1])),
 		(s[0] == '-' || s[0] == '+') && (len(s) == 1 || s[1] == ' '):
 		return lead + "\\" + s
 	case len(digits) < len(s) && len(s)-len(digits) <= 9 && digits != "" && (digits[0] == '.' || digits[0] == ')') &&
@@ -554,15 +634,23 @@ func EscapeBlockStart(md string) string {
 	return md
 }
 
-// toggleTag reports whether s starts with a tag ParseLines reads a toggle
-// by.
-func toggleTag(s string) bool {
-	for _, tag := range []string{"<details", "</details", "<summary"} {
-		if _, ok := cutFold(s, tag); ok {
-			return true
-		}
+// underline reports whether a line is only ='s or only -'s, and spaces
+// after them, as CommonMark underlines a heading with.
+func underline(s string) bool {
+	s = strings.TrimRight(s, " \t")
+	return s != "" && (strings.Trim(s, "=") == "" || strings.Trim(s, "-") == "")
+}
+
+// headingMarkdown escapes the # that starts a run of them ending a
+// heading's Markdown, or making all of it, after a space: CommonMark
+// takes that run for the heading's closing #s, and leaves it out.
+func headingMarkdown(md string) string {
+	s := strings.TrimRight(md, " \t")
+	rest := strings.TrimRight(s, "#")
+	if rest == s || rest != "" && !strings.HasSuffix(rest, " ") && !strings.HasSuffix(rest, "\t") {
+		return md
 	}
-	return false
+	return rest + "\\" + md[len(rest):]
 }
 
 // FromMarkdown reads the inline markdown dialect.

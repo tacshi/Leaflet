@@ -3763,13 +3763,21 @@
   "@recErrFileTranscribing": {
     "description": "Why a file’s transcription can’t start."
   },
+  "recErrFileElsewhere": "This file belongs to another page, so it can’t be transcribed here.",
+  "@recErrFileElsewhere": {
+    "description": "Why a file block’s transcription can’t start: the file it names was added to another page."
+  },
   "recFileBlockGone": "The transcript is done, but its file is no longer in the page.",
   "@recFileBlockGone": {
-    "description": "A transcription ended after its file block was deleted, or the page can’t be changed any more."
+    "description": "A transcription ended after its file block was deleted or given another file, or the page can’t be changed any more."
   },
   "recFileNotesCut": "The transcript was too long for the notes, so its end was left out.",
   "@recFileNotesCut": {
     "description": "A transcript longer than notes can hold."
+  },
+  "recFileNotesFull": "The transcript is done, but the file’s notes are full, so none of it was added.",
+  "@recFileNotesFull": {
+    "description": "A transcription ended with no room left in the file’s notes, written there meanwhile, for any of it."
   },
   "recFileTranscribed": "Transcribed {name}",
   "@recFileTranscribed": {
@@ -4418,6 +4426,16 @@
       "name": {
         "type": "String",
         "example": "Leaflet pages.zip"
+      }
+    }
+  },
+  "settingsExportedStale": "{count, plural, one {# page could not be brought up to date, so it went as this device last had it} other {# pages could not be brought up to date, so they went as this device last had them}}",
+  "@settingsExportedStale": {
+    "description": "A notification after exporting every page, beside the one saying it was exported, when some pages this device does not keep up to date could not be downloaded, and went as the copy this device had, which may be out of date.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
       }
     }
   },

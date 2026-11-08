@@ -423,6 +423,11 @@ struct SpeechSettingsView: View {
                 Text(L.settingsKeepAudioAlways).tag("always")
             }
         }
+        Section {
+            VoiceNotesFolderPicker()
+        } footer: {
+            Text(LI.voiceNotesHint)
+        }
     }
 
     /// heard says how the test of the microphone goes, or what it heard:
@@ -477,4 +482,28 @@ private struct ProviderPage<Content: View>: View {
     @ViewBuilder let content: (DismissAction) -> Content
 
     var body: some View { content(dismiss) }
+}
+
+/// VoiceNotesFolderPicker chooses the folder Record Voice Note records in,
+/// from the Action Button, Control Center or Siri: the Voice Notes folder,
+/// made as the first voice note needs it, until another is chosen.
+private struct VoiceNotesFolderPicker: View {
+    @Environment(AppModel.self) private var app
+    @AppStorage(VoiceNotes.folderKey) private var folder = ""
+
+    var body: some View {
+        let folders = app.library.folders.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        // One deleted is the Voice Notes folder's again, as recording does.
+        let chosen =
+            folder == VoiceNotes.topLevel || folders.contains(where: { $0.id == folder })
+            ? folder : ""
+        Picker(LI.voiceNotesGoIn, selection: Binding(get: { chosen }, set: { folder = $0 })) {
+            if chosen.isEmpty { Text(LI.voiceNotesFolder).tag("") }
+            Text(L.dialogMoveTopLevel).tag(VoiceNotes.topLevel)
+            ForEach(folders) { Text($0.name).tag($0.id) }
+        }
+        .pickerStyle(.navigationLink)
+    }
 }

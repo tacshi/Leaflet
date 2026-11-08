@@ -76,6 +76,11 @@ Go core as the desktop app.
   be renamed, summarized by an agent or deleted from its menu, and its
   notice of what went wrong closed. How long audio stays on the device once
   uploaded is a choice in Settings.
+- Record Voice Note, on the Action Button, in Control Center, on the Lock
+  Screen or from Siri, records in a page of its own, in a Voice Notes folder
+  or the one chosen in Settings, without opening the app; pressed again, it
+  stops. A recording shows as a Live Activity, on the Lock Screen and in the
+  Dynamic Island, with its time, Pause and Stop.
 
 ### Sync and settings
 

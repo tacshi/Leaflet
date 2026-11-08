@@ -27,6 +27,14 @@ struct RootView: View {
         scene.open(target.pageID, at: target.blockID)
     }
 
+    /// openVoiceNote opens the page of a voice note started from outside
+    /// the app, in the window in front.
+    private func openVoiceNote() {
+        guard app.activeScene === scene, let id = app.voiceNote else { return }
+        app.voiceNote = nil
+        scene.open(id)
+    }
+
     var body: some View {
         let palette = Palette.of(accent: app.accent, mode: app.theme, scheme: scheme)
         @Bindable var scene = scene
@@ -137,6 +145,7 @@ struct RootView: View {
             // one it opened for, which it keeps as its own.
             scene.open(savedPage ?? opening)
             openReminder()
+            openVoiceNote()
             #if DEBUG
                 // -LeafletOpen <title> opens the page of that title, to
                 // look at it on a simulator without a tap.
@@ -164,6 +173,7 @@ struct RootView: View {
         }
         .onChange(of: scene.selection) { savedPage = scene.selection }
         .onChange(of: ReminderInbox.shared.target) { openReminder() }
+        .onChange(of: app.voiceNote) { openVoiceNote() }
         .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }
         .onChange(of: app.library.pages.map(\.id)) { _, ids in
@@ -183,6 +193,7 @@ struct RootView: View {
             case .active:
                 app.activeScene = scene
                 app.foreground(scene)
+                openVoiceNote()
             case .background: app.background(scene)
             default: break
             }

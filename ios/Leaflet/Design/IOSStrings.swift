@@ -207,4 +207,33 @@ enum LI {
                 "The tag editor: VoiceOver's name of the button that takes the tag (%@) off the page."
         )
     }
+    static var voiceNotesFolder: String {
+        String(
+            localized: "Voice Notes", bundle: L.bundle,
+            comment:
+                "The folder voice notes go in, made as the first one is recorded from the Action Button, Control Center or Siri."
+        )
+    }
+    static var voiceNoteNotStarted: String {
+        String(
+            localized: "The recording didn't start. Try again.", bundle: L.bundle,
+            comment:
+                "Record Voice Note, from the Action Button or Siri: the microphone never came on.")
+    }
+    static var voiceNotesGoIn: String {
+        String(
+            localized: "Voice Notes Go In", bundle: L.bundle,
+            comment:
+                "Settings › Speech to text: the folder that voice notes recorded from the Action Button, Control Center or Siri go in."
+        )
+    }
+    static var voiceNotesHint: String {
+        String(
+            localized:
+                "Record Voice Note records in a page of its own. Put it on the Action Button in Settings › Action Button, or add it to Control Center or the Lock Screen.",
+            bundle: L.bundle,
+            comment:
+                "Settings › Speech to text, under Voice Notes Go In: where to find Leaflet's Record Voice Note control."
+        )
+    }
 }

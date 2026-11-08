@@ -238,6 +238,17 @@ extension CoreClient {
         }
     }
 
+    /// recordNewPage records into a page of its own, named after when it
+    /// began, in folderID, or at the top level when it is "", its block at
+    /// the page's end: no editor shows it, as for the Action Button.
+    nonisolated(nonsending) func recordNewPage(folderID: String, provider: String = "")
+        async throws -> PageRow
+    {
+        try await call(PageRow.self) { core in
+            try Self.answer { e in core.recordNewPage(folderID, provider: provider, error: e) }
+        }
+    }
+
     /// speechChoices returns the speech providers a transcription on page
     /// can be picked from, and the one marked.
     nonisolated(nonsending) func speechChoices(_ pageID: String) async throws -> SpeechChoices {

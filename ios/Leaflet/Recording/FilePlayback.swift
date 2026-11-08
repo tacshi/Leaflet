@@ -17,14 +17,14 @@ final class PlayerSettings {
 
     private init() {
         let defaults = UserDefaults.standard
-        let stored = defaults.double(forKey: PlaySpeed.key)
+        let stored = defaults.double(forKey: PlaySpeed.defaultsKey)
         speed = PlaySpeed.all.contains(stored) ? stored : 1
         following = defaults.bool(forKey: LineClock.followKey)
     }
 
     func setSpeed(_ speed: Double) {
         self.speed = speed
-        UserDefaults.standard.set(speed, forKey: PlaySpeed.key)
+        UserDefaults.standard.set(speed, forKey: PlaySpeed.defaultsKey)
     }
 
     func toggleFollowing() {
@@ -37,7 +37,7 @@ final class PlayerSettings {
 /// reading as normal, and how far a skip goes.
 @MainActor
 enum PlaySpeed {
-    static let key = "player.speed"
+    static let defaultsKey = "player.speed"
     static let all: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2]
     static let skip: Double = 15
 

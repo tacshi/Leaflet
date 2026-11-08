@@ -141,6 +141,86 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	}
 }
 
+// RecordNewPage records into a page of its own, in the folder asked for,
+// with no editor to put its block in: the block goes at the page's end.
+// One that can't start leaves no page behind.
+func TestRecordNewPage(t *testing.T) {
+	c, _ := open(t)
+	raw, err := c.CreateFolder("Voice notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var folder folderRow
+	_ = json.Unmarshal([]byte(raw), &folder)
+	pages := func() int {
+		n := 0
+		all, _ := c.core.Store.Pages()
+		for _, p := range all {
+			if p.DeletedAt.IsZero() {
+				n++
+			}
+		}
+		return n
+	}
+	had := pages()
+
+	if _, err := c.RecordNewPage(folder.ID, ""); err == nil {
+		t.Fatal("recorded without a microphone")
+	}
+	if n := pages(); n != had {
+		t.Fatalf("a recording that never began left a page: %d, had %d", n, had)
+	}
+
+	mic := &fakeMic{closed: make(chan struct{}, 1)}
+	c.UseMicrophone(mic)
+	before := time.Now()
+	raw, err = c.RecordNewPage(folder.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row pageRow
+	_ = json.Unmarshal([]byte(raw), &row)
+	// Named after when it began, which a minute may have turned over.
+	named := row.Title == locales.RecBlockTitle(before) || row.Title == locales.RecBlockTitle(time.Now())
+	if row.FolderID != folder.ID || !named {
+		t.Fatalf("page %+v", row)
+	}
+	var block *doc.Node
+	c.q.do(func() {
+		content := c.core.Store.Content(row.ID)
+		if n := len(content.Children); n > 0 {
+			block = content.Children[n-1]
+		}
+	})
+	if block == nil || block.Type != "recording" || block.Str("recording_id") == "" {
+		t.Fatalf("last block %+v", block)
+	}
+	var st recordingState
+	for deadline := time.Now().Add(5 * time.Second); !st.Active; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("never started: %+v", st)
+		}
+		raw, _ = c.RecordingState()
+		_ = json.Unmarshal([]byte(raw), &st)
+	}
+	if st.PageID != row.ID || st.BlockID != block.ID {
+		t.Fatalf("state %+v, block %s", st, block.ID)
+	}
+	if _, err := c.RecordNewPage("", ""); err == nil {
+		t.Fatal("a second recording started over the first")
+	}
+	if n := pages(); n != had+1 {
+		t.Fatalf("%d pages, want the recording's alone beside the %d there were", n, had)
+	}
+
+	c.StopRecording()
+	select {
+	case <-mic.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the microphone was never let go")
+	}
+}
+
 // A recording started before the last one's microphone has stopped gets
 // a session of its own: the last one's Stop and Close, late, are for it
 // alone, and its last audio goes to its own file.

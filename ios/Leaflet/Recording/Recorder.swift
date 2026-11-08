@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import LeafletCore
+import UIKit
 
 /// Recorder is recording as the app's views see it: the recording in
 /// progress, the recordings the open pages' blocks show, and the one
@@ -39,6 +40,8 @@ final class Recorder {
     private(set) var speech: [String: SpeechChoices] = [:]
 
     @ObservationIgnored private var client: CoreClient?
+    /// attaching gives the core the microphone, which a recording needs.
+    @ObservationIgnored private var attaching: Task<Void, Never>?
     @ObservationIgnored private var speechAsked: Set<String> = []
     @ObservationIgnored private var toast: ((String) -> Void)?
     @ObservationIgnored private var asked: Set<String> = []
@@ -53,6 +56,9 @@ final class Recorder {
     @ObservationIgnored private var fetching: Task<Void, Never>?
     @ObservationIgnored private var fetch = 0
     @ObservationIgnored private let microphone = Microphone()
+    /// finishing is the time iOS gives the app in the background while
+    /// recordings transcribe, as one stopped from the Live Activity does.
+    @ObservationIgnored private var finishing = UIBackgroundTaskIdentifier.invalid
     /// ended hears the player reach the end, which it holds weakly.
     @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
         self?.changes += 1
@@ -66,7 +72,7 @@ final class Recorder {
     func attach(_ client: CoreClient, toast: @escaping (String) -> Void) {
         self.client = client
         self.toast = toast
-        Task {
+        attaching = Task {
             if DeviceTranscriber.isAvailable {
                 await client.useTranscriber(DeviceTranscriber())
             }
@@ -75,8 +81,15 @@ final class Recorder {
                 update(s)
                 update(levels: s.levels)
             }
+            // A Live Activity an earlier launch left, ended as it
+            // recorded, goes: update tells it nothing while none records.
+            if !state.recording { RecordingActivity.shared.end() }
         }
     }
+
+    /// ready waits for the core to have the microphone, as an intent run
+    /// as the app launches records at once.
+    func ready() async { await attaching?.value }
 
     /// elapsed is how long the recording in progress has run, now.
     func elapsed(at now: Date) -> TimeInterval {
@@ -97,10 +110,34 @@ final class Recorder {
         guard same != old else { return }
         state = s
         at = Date()
+        RecordingActivity.shared.sync(s, at: at)
+        holdOn(s)
         if !s.error.isEmpty, s.error != old.error { toast?(s.error) }
         // A recording stopped, or a transcription ended: their rows change.
         let done = Set(old.transcribing + [old.id]).subtracting(s.transcribing + [s.id])
         for id in done where !id.isEmpty { Task { await load(id) } }
+    }
+
+    /// holdOn keeps the app running in the background while recordings
+    /// transcribe, for as long as iOS lets it: one stopped from the Live
+    /// Activity, with the app away, stops the microphone that kept it
+    /// running. One cut short goes on as the app comes back.
+    private func holdOn(_ s: RecordingState) {
+        let busy = !s.transcribing.isEmpty || !s.finishing.isEmpty
+        if busy, finishing == .invalid {
+            finishing = UIApplication.shared.beginBackgroundTask(withName: "Transcribe") {
+                [weak self] in
+                MainActor.assumeIsolated { self?.letGo() }
+            }
+        } else if !busy {
+            letGo()
+        }
+    }
+
+    private func letGo() {
+        guard finishing != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(finishing)
+        finishing = .invalid
     }
 
     /// update takes the latest levels of the recording in progress.

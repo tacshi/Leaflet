@@ -3,6 +3,9 @@
 # limits, which golangci-lint's defaults leave out of the Go as well.
 included:
   - Leaflet
+  # What the app shares with its widgets, and the widgets.
+  - Shared
+  - Widgets
   - LeafletTests
   # The speech package the app shares with the Mac's speech helper.
   - ../speech

@@ -398,6 +398,52 @@ func (c *Core) StartRecording(pageID, provider string) (_ string, err error) {
 	return encode(node)
 }
 
+// RecordNewPage starts a recording in a page of its own, named after when
+// it began, in folderID, or at the top level when it is "", as the
+// desktop's New Recording does, with a transcript by provider, or the one
+// SpeechChoices marks when it is "". No editor shows the page: its block
+// goes at its end, for a recording started from outside the app, as the
+// Action Button's. It returns the page as a pageRow.
+func (c *Core) RecordNewPage(folderID, provider string) (_ string, err error) {
+	defer catch(&err)
+	keys := c.speechKeys()
+	var row pageRow
+	c.q.do(func() {
+		if c.core.Rec.Active() {
+			err = errors.New(locales.RecErrAlreadyRecording())
+			return
+		}
+		var p store.Page
+		p, err = c.core.Store.CreatePage(store.NewPageOptions{FolderID: folderID, Title: locales.RecBlockTitle(time.Now())})
+		if err != nil {
+			return
+		}
+		row = c.rowOf(p)
+		s := c.core.Store.Settings()
+		err = c.core.Rec.Start(p.ID, c.sttFor(p.ID, provider, keys), c.online(s), func(n *doc.Node) {
+			// The recording goes on, as on the desktop, though its block
+			// couldn't be saved: its audio is kept all the same.
+			if ierr := c.editContent(p.ID, func(content *doc.Content) bool {
+				return content.Insert(doc.Position{At: "end"}, n) == nil
+			}); ierr != nil {
+				c.ev.notice(locales.RecCouldNotSave(ierr.Error()))
+			}
+		})
+		if err != nil {
+			// A recording that never began leaves no empty page behind.
+			if _, derr := c.core.Store.DeletePage(p.ID); derr != nil {
+				log.Printf("page %s: delete after a failed recording: %v", p.ID, derr)
+			}
+			return
+		}
+		c.tellRecording()
+	})
+	if err != nil {
+		return "", err
+	}
+	return encode(row)
+}
+
 // StopRecording ends the recording, saves its audio and transcribes it.
 func (c *Core) StopRecording() {
 	defer catch(nil)

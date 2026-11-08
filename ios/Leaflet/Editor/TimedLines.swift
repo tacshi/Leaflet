@@ -357,8 +357,8 @@ private struct LinePlace: View {
 final class LineClock {
     /// followKey keeps whether transcripts follow the audio, and space is
     /// the block's own, where a line's place is.
-    static let followKey = "player.follow"
-    static let space = "file-block"
+    nonisolated static let followKey = "player.follow"
+    nonisolated static let space = "file-block"
 
     private(set) var line: Int?
 

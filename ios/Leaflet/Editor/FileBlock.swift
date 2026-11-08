@@ -220,13 +220,30 @@ struct FileBlock: View {
     }
 
     /// status is the line under an audio file's name: what runs for it, else
-    /// its kind and size.
+    /// its kind and size, and the engine that made the transcript its notes
+    /// have.
     private var status: String {
         if Recorder.shared.state.transcribingFiles.contains(node.id) { return L.recTranscribing }
         guard let size = node.data?["size"]?.int, size > 0 else { return "" }
         let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
         let type = (name as NSString).pathExtension.uppercased()
-        return type.isEmpty ? bytes : L.cardFileDetail(kind: type, size: bytes)
+        let detail = type.isEmpty ? bytes : L.cardFileDetail(kind: type, size: bytes)
+        guard let engine = Self.engine(node.data?["transcribed_by"]?.string),
+            !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return detail }
+        return L.cardTranscribedBy(detail: detail, engine: engine)
+    }
+
+    /// engine names the speech provider that made a transcript, as
+    /// recording.EngineName does, or nil for none.
+    static func engine(_ provider: String?) -> String? {
+        switch provider {
+        case nil, "": nil
+        case "soniox": "Soniox"
+        case "moss": "MOSS"
+        case "on-device": L.recEngineOnDevice
+        default: L.commonEndpoint
+        }
     }
 
     private func card(_ playback: FilePlayback) -> some View {
@@ -294,10 +311,7 @@ struct FileBlock: View {
     private var menu: some View {
         let items = Self.menuItems(node, canEdit: canEdit, editor: editor)
         return Menu {
-            ForEach(items, id: \.title) { item in
-                Button(item.title, systemImage: item.symbol, action: item.run)
-                    .disabled(!item.enabled)
-            }
+            ForEach(items, id: \.title) { BlockMenuItem(item: $0) }
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: control, height: control)
@@ -374,15 +388,15 @@ struct FileBlock: View {
         if kind(block) == "audio" {
             let running = Recorder.shared.state.transcribingFiles.contains(block.id)
             out.append(
-                BlockAction(
-                    title: notes ? L.recTranscribeAgain : L.recTranscribe,
-                    symbol: "captions.bubble",
+                .transcribe(
+                    notes ? L.recTranscribeAgain : L.recTranscribe, page: editor?.pageID,
                     enabled: canEdit && !running
-                ) {
+                ) { provider in
                     if notes {
-                        editor?.onReplaceNotes?(block)
+                        editor?.onReplaceNotes?(block, provider)
                     } else if let page = editor?.pageID {
-                        Recorder.shared.transcribeFile(page: page, block: block.id)
+                        Recorder.shared.transcribeFile(
+                            page: page, block: block.id, provider: provider)
                     }
                 })
         }

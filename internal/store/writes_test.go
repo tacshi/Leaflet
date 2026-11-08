@@ -179,6 +179,24 @@ func TestDefaultModelOfAProviderGoneIsNone(t *testing.T) {
 	}
 }
 
+// A speech provider the app knows stays as saved; one it does not reads as
+// an endpoint.
+func TestSpeechProviders(t *testing.T) {
+	s := open(t)
+	for provider, want := range map[string]string{
+		"moss": "moss", "soniox": "soniox", "on-device": "on-device", "whisperd": "openai-compatible",
+	} {
+		settings := s.Settings()
+		settings.Stt.Provider = provider
+		if err := s.SaveSettings(settings); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Settings().Stt.Provider; got != want {
+			t.Errorf("%s reads as %s, want %s", provider, got, want)
+		}
+	}
+}
+
 // A file copied into the app is whole or not there: one that cannot be
 // read to the end leaves nothing, and one that can leaves only itself, as
 // does one downloaded over it.

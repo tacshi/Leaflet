@@ -73,14 +73,16 @@ enum EditorAccessibility {
                 }
             }
             if node.type == "file" {
-                for action in FileBlock.actions(node, canEdit: editable, editor: editor) {
+                for action in FileBlock.actions(node, canEdit: editable, editor: editor)
+                    .flatMap(\.flat)
+                {
                     offer(action.title) { _ in action.run() }
                 }
             }
             if node.type == "recording", let id = node.data?["recording_id"]?.string {
                 for action in RecordingBlock.actions(
-                    id, block: node, canEdit: editable, editor: editor)
-                {
+                    id, block: node, canEdit: editable, editor: editor
+                ).flatMap(\.flat) {
                     offer(action.title) { _ in action.run() }
                 }
             }

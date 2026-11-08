@@ -193,28 +193,29 @@ func fileBlock(id, notes string) *doc.Node {
 }
 
 // A transcript goes in a closed page's file over what is stored, and in an
-// open page's as one step of its own, which the app is told of.
+// open page's as one step of its own, which the app is told of, with the
+// engine that made it.
 func TestSetFileNotes(t *testing.T) {
 	f := newPagesFixture(t)
 	closed := f.page(t, "Closed", "", fileBlock("a", ""))
-	if written, cut, err := f.SetFileNotes(closed.ID, "a", "f1", "0:05 Hello", ""); written != NotesSaved || cut || err != nil {
+	if written, cut, err := f.SetFileNotes(closed.ID, "a", "f1", "0:05 Hello", "", "moss"); written != NotesSaved || cut || err != nil {
 		t.Fatal(written, cut, err)
 	}
-	if got := f.st.Content(closed.ID).Find("a").Str("notes"); got != "0:05 Hello" {
-		t.Errorf("closed page: %q", got)
+	if n := f.st.Content(closed.ID).Find("a"); n.Str("notes") != "0:05 Hello" || n.Str(doc.TranscribedBy) != "moss" {
+		t.Errorf("closed page: %v", n.Data)
 	}
 	open := f.page(t, "Open", "", fileBlock("b", "old"))
 	ed := f.openPage(open.ID)
 	var steps []string
 	f.Step = func(page, block string) { steps = append(steps, page+"/"+block) }
-	if written, cut, err := f.SetFileNotes(open.ID, "b", "f1", "0:05 Hello", "old"); written != NotesSaved || cut || err != nil {
+	if written, cut, err := f.SetFileNotes(open.ID, "b", "f1", "0:05 Hello", "old", "moss"); written != NotesSaved || cut || err != nil {
 		t.Fatal(written, cut, err)
 	}
 	if got := ed.c.Find("b").Str("notes"); got != "0:05 Hello" || ed.replaced != 0 {
 		t.Errorf("open page: %q, %d outside changes", got, ed.replaced)
 	}
-	if got := f.st.Content(open.ID).Find("b").Str("notes"); got != "0:05 Hello" {
-		t.Errorf("open page stored %q", got)
+	if n := f.st.Content(open.ID).Find("b"); n.Str("notes") != "0:05 Hello" || n.Str(doc.TranscribedBy) != "moss" {
+		t.Errorf("open page stored %v", n.Data)
 	}
 	if len(steps) != 1 || steps[0] != open.ID+"/b" {
 		t.Errorf("steps %q", steps)
@@ -225,7 +226,7 @@ func TestSetFileNotes(t *testing.T) {
 func TestSetFileNotesKeepsNewWriting(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", fileBlock("a", "written since"))
-	if written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", ""); written != NotesSaved || cut || err != nil {
+	if written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", "", "moss"); written != NotesSaved || cut || err != nil {
 		t.Fatal(written, cut, err)
 	}
 	if got := f.st.Content(p.ID).Find("a").Str("notes"); got != "written since\n\n0:05 Hello" {
@@ -244,7 +245,7 @@ func TestSetFileNotesBlockGone(t *testing.T) {
 		}
 		for _, at := range []struct{ block, file string }{{"gone", "f1"}, {"a", "f2"}} {
 			f.told = nil
-			if written, _, err := f.SetFileNotes(p.ID, at.block, at.file, "0:05 Hello", ""); written != NotesGone || err != nil {
+			if written, _, err := f.SetFileNotes(p.ID, at.block, at.file, "0:05 Hello", "", "moss"); written != NotesGone || err != nil {
 				t.Errorf("open %v, %v: %v, %v", open, at, written, err)
 			}
 			if len(f.told) != 1 || f.told[0] != locales.RecFileBlockGone() {
@@ -280,7 +281,7 @@ func TestSetFileNotesNotSaved(t *testing.T) {
 			f.openPage(p.ID)
 		}
 		f.fail(t)
-		if written, _, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", ""); written != NotesFailed || err == nil {
+		if written, _, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello", "", "moss"); written != NotesFailed || err == nil {
 			t.Errorf("open %v: %v, %v", open, written, err)
 		}
 		if got := f.st.Content(p.ID).Find("a").Str("notes"); got != "" {
@@ -300,12 +301,12 @@ func TestSetFileNotesFitsAfterNewWriting(t *testing.T) {
 		if open {
 			f.openPage(p.ID)
 		}
-		written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello\n0:06 And a line too long to fit", "")
+		written, cut, err := f.SetFileNotes(p.ID, "a", "f1", "0:05 Hello\n0:06 And a line too long to fit", "", "moss")
 		got := f.st.Content(p.ID).Find("a").Str("notes")
 		if written != NotesSaved || !cut || err != nil || got != since+"\n\n0:05 Hello" {
 			t.Errorf("open %v: %v, cut %v, %v, %d characters ending %q", open, written, cut, err, len(got), got[len(got)-20:])
 		}
-		written, _, err = f.SetFileNotes(p.ID, "b", "f1", "0:05 Hello", "")
+		written, _, err = f.SetFileNotes(p.ID, "b", "f1", "0:05 Hello", "", "moss")
 		if written != NotesFailed || err == nil || err.Error() != locales.RecFileNotesFull() {
 			t.Errorf("open %v: notes full: %v, %v", open, written, err)
 		}

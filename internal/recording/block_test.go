@@ -59,6 +59,7 @@ func TestStatus(t *testing.T) {
 		{store.Recording{Status: "failed", SttProvider: "soniox"}, locales.RecTranscriptionFailed()},
 		{store.Recording{Status: "ready", DurationMs: minute}, locales.RecStatus("1:05", locales.RecAudioOnly())},
 		{store.Recording{Status: "ready", DurationMs: minute, SttProvider: "soniox"}, locales.RecStatus("1:05", "Soniox")},
+		{store.Recording{Status: "ready", DurationMs: minute, SttProvider: Moss}, locales.RecStatus("1:05", "MOSS")},
 		{store.Recording{Status: "ready", DurationMs: minute, SttProvider: OnDevice}, locales.RecStatus("1:05", locales.RecEngineOnDevice())},
 		{store.Recording{Status: "ready", DurationMs: minute, SttProvider: "openai-compatible"}, locales.RecStatus("1:05", locales.CommonEndpoint())},
 	}
@@ -173,6 +174,19 @@ func TestFitNotes(t *testing.T) {
 	} {
 		if fit, cut := FitNotes(notes, c.room); fit != c.fit || cut != c.cut {
 			t.Errorf("room %d: %q, cut %v", c.room, fit, cut)
+		}
+	}
+}
+
+// Each provider names its engine as a transcript's line says what made
+// it; none names none.
+func TestEngineName(t *testing.T) {
+	for provider, want := range map[string]string{
+		"": "", "soniox": "Soniox", Moss: "MOSS", OnDevice: locales.RecEngineOnDevice(),
+		"openai-compatible": locales.CommonEndpoint(),
+	} {
+		if got := EngineName(provider); got != want {
+			t.Errorf("EngineName(%q) = %q, want %q", provider, got, want)
 		}
 	}
 }

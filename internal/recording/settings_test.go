@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,25 +17,118 @@ import (
 	"leaflet/locales"
 )
 
-// Transcription is not set up without the device's engine, a Soniox key
-// or an endpoint's address; set up, the status says where it runs.
-func TestEngineStatus(t *testing.T) {
-	notSetUp := locales.RecSttNotSetUp()
+// Settings says which providers are set up, by name, or that none is.
+func TestSummary(t *testing.T) {
 	for _, c := range []struct {
-		stt              store.SttSettings
-		soniox, onDevice bool
-		want             string
+		stt  store.SttSettings
+		keys Keys
+		want string
 	}{
-		{store.SttSettings{Provider: OnDevice}, true, false, notSetUp},
-		{store.SttSettings{Provider: OnDevice}, false, true, locales.RecEngineOnDevice()},
-		{store.SttSettings{Provider: "soniox"}, false, true, notSetUp},
-		{store.SttSettings{Provider: "soniox"}, true, false, locales.RecEngineSonioxCloud()},
-		{store.SttSettings{Provider: "openai-compatible", BaseURL: "  "}, true, true, notSetUp},
-		{store.SttSettings{Provider: "openai-compatible", BaseURL: "http://localhost:8000/v1", Model: "whisper"}, false, false, locales.RecEngineLocal("whisper")},
+		{store.SttSettings{}, Keys{}, locales.RecSttNotSetUp()},
+		{store.SttSettings{BaseURL: "  "}, Keys{}, locales.RecSttNotSetUp()},
+		{store.SttSettings{}, Keys{SonioxOnServer: true, MossHere: true}, "Soniox, MOSS"},
+		{store.SttSettings{BaseURL: "http://localhost:8000/v1"}, Keys{OnDevice: true}, locales.RecSttOnDevice() + ", " + locales.CommonEndpoint()},
 	} {
-		if got := EngineStatus(c.stt, c.soniox, c.onDevice); got != c.want {
-			t.Errorf("%+v, soniox %v, on device %v: %q, want %q", c.stt, c.soniox, c.onDevice, got, c.want)
+		if got := Summary(c.stt, c.keys); got != c.want {
+			t.Errorf("%+v, %+v: %q, want %q", c.stt, c.keys, got, c.want)
 		}
+	}
+}
+
+// Signed in, Soniox's key counts as on the server once this device saved
+// it there, or chose Soniox; signed out, only the one here counts.
+func TestKeysOf(t *testing.T) {
+	soniox := store.SttSettings{Provider: "soniox"}
+	saved := store.SttSettings{Provider: Moss, SonioxOnServer: true}
+	if k := KeysOf(soniox, false, false, true, false); !k.SonioxOnServer {
+		t.Error("Soniox chosen, signed in: no key on the server")
+	}
+	if k := KeysOf(saved, false, true, true, false); !k.SonioxOnServer || !k.MossHere {
+		t.Errorf("saved on the server: %+v", k)
+	}
+	if k := KeysOf(saved, false, false, false, true); k.SonioxOnServer || !k.OnDevice {
+		t.Errorf("signed out: %+v", k)
+	}
+	if k := KeysOf(store.SttSettings{Provider: Moss}, false, false, true, false); k.SonioxOnServer {
+		t.Error("never saved on the server, nor chosen: a key there")
+	}
+}
+
+// The list has the providers set up in its order, the others to add, but
+// never the device's engine where it has none; Soniox's key on the server
+// alone can't be removed from here.
+func TestSpeechProviders(t *testing.T) {
+	stt := store.SttSettings{Provider: Moss, BaseURL: "http://localhost:8000/v1", Model: "whisper", SonioxModel: "stt-rt-v5"}
+	set, addable := SpeechProviders(stt, Keys{SonioxOnServer: true, MossHere: true})
+	var ids []string
+	for _, p := range set {
+		ids = append(ids, p.ID)
+	}
+	if strings.Join(ids, " ") != "soniox moss openai-compatible" {
+		t.Errorf("set up %v", ids)
+	}
+	if set[0].Name != "Soniox · stt-rt-v5" || set[0].Removable || set[0].Place != locales.RecSttSonioxOnServer() {
+		t.Errorf("Soniox on the server %+v", set[0])
+	}
+	if set[2].Name != locales.CommonEndpoint()+" · whisper" || !set[2].Removable {
+		t.Errorf("endpoint %+v", set[2])
+	}
+	if len(addable) != 0 {
+		t.Errorf("addable %+v", addable)
+	}
+	set, addable = SpeechProviders(store.SttSettings{}, Keys{OnDevice: true, SonioxHere: true})
+	if len(set) != 2 || set[0].ID != OnDevice || set[0].Removable || !set[1].Removable {
+		t.Errorf("set up %+v", set)
+	}
+	if len(addable) != 2 || addable[0].ID != Moss || addable[1].ID != Endpoint {
+		t.Errorf("addable %+v", addable)
+	}
+}
+
+// Naming a provider not set up, the settings take the first that is; one
+// set up stays, and none set up changes nothing.
+func TestPreferSetUp(t *testing.T) {
+	stt := store.SttSettings{Provider: "soniox"}
+	if !PreferSetUp(&stt, Keys{MossHere: true}) || stt.Provider != Moss {
+		t.Errorf("took %q", stt.Provider)
+	}
+	if PreferSetUp(&stt, Keys{MossHere: true, OnDevice: true}) || stt.Provider != Moss {
+		t.Errorf("one set up changed to %q", stt.Provider)
+	}
+	stt = store.SttSettings{Provider: Moss}
+	if PreferSetUp(&stt, Keys{}) || stt.Provider != Moss {
+		t.Errorf("none set up changed to %q", stt.Provider)
+	}
+}
+
+// Removing a provider takes its key from this device, or an endpoint's
+// address and key, and the settings take another set up.
+func TestRemoveProvider(t *testing.T) {
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	for _, set := range []func() error{
+		func() error { return SetMossKey("mk") }, func() error { return SetLocalSonioxKey("sk") },
+		func() error { return SetEndpointKey("ek") },
+	} {
+		if err := set(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stt := store.SttSettings{Provider: Moss, BaseURL: "http://localhost:8000/v1", Model: "whisper", ProviderID: "p"}
+	keys, err := RemoveProvider(Moss, &stt, Keys{MossHere: true, SonioxHere: true})
+	if err != nil || MossKey() != "" || keys.MossHere || stt.Provider != "soniox" {
+		t.Errorf("MOSS: %v, key %q, %+v, now %q", err, MossKey(), keys, stt.Provider)
+	}
+	if _, err := RemoveProvider(Endpoint, &stt, keys); err != nil || stt.BaseURL != "" || stt.Model != "" || stt.ProviderID != "" || EndpointKey() != "" {
+		t.Errorf("endpoint: %v, %+v, key %q", err, stt, EndpointKey())
+	}
+	keys, err = RemoveProvider("soniox", &stt, keys)
+	if err != nil || LocalSonioxKey() != "" || keys.SonioxHere {
+		t.Errorf("Soniox: %v, key %q", err, LocalSonioxKey())
+	}
+	// A key already gone is no failure.
+	if _, err := RemoveProvider(Moss, &stt, keys); err != nil {
+		t.Errorf("again: %v", err)
 	}
 }
 
@@ -216,5 +310,40 @@ func TestSaveSonioxKey(t *testing.T) {
 	}
 	if got := LocalSonioxKey(); got != "sk-here" {
 		t.Errorf("the key here became %q", got)
+	}
+}
+
+// There is no default: a transcription takes the provider picked for it,
+// kept as its page's; unpicked, the one last picked on its page, else
+// anywhere, else the first set up.
+func TestPickingAProvider(t *testing.T) {
+	r, _, _ := newTestController(t)
+	keys := Keys{SonioxHere: true, MossHere: true}
+	stt := store.SttSettings{Provider: Moss}
+	if got := r.Choice("p1", stt, keys); got != Moss {
+		t.Errorf("unpicked: %q", got)
+	}
+	out, last := r.For("p1", "soniox", stt, keys)
+	if out.Provider != "soniox" || !last {
+		t.Errorf("picked: %q, last %v", out.Provider, last)
+	}
+	if got := r.Choice("p1", stt, keys); got != "soniox" {
+		t.Errorf("the page's pick: %q", got)
+	}
+	if got := r.Choice("p2", stt, keys); got != Moss {
+		t.Errorf("another page: %q", got)
+	}
+	if out, last := r.For("p2", "", stt, keys); out.Provider != Moss || last {
+		t.Errorf("unpicked on another page: %q, last %v", out.Provider, last)
+	}
+	// A pick whose key went since gives way to one set up.
+	if got := r.Choice("p1", stt, Keys{MossHere: true}); got != Moss {
+		t.Errorf("Soniox gone: %q", got)
+	}
+	if got := r.Choice("p3", store.SttSettings{Provider: Endpoint}, Keys{OnDevice: true}); got != OnDevice {
+		t.Errorf("none picked set up: %q", got)
+	}
+	if got := Choices(stt, keys); len(got) != 2 || got[0].ID != "soniox" || got[1].ID != Moss {
+		t.Errorf("choices %+v", got)
 	}
 }

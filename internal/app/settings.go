@@ -113,11 +113,21 @@ func (a *App) settingsWidth(c *ui.Context) float32 {
 }
 
 func heading(c *ui.Context, title, desc string) {
+	headingWith(c, title, desc, nil)
+}
+
+// headingWith is heading with action, as a button, at its right.
+func headingWith(c *ui.Context, title, desc string, action func()) {
 	pal := theme.Of(c)
-	ui.Column(c).Gap(4).Children(func() {
-		ui.Text(c, title).FontSize(22).FontWeight(700).TextColor(pal.Text)
-		if desc != "" {
-			ui.Text(c, desc).FontSize(13.5).TextColor(pal.TextMuted)
+	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).Gap(4).Children(func() {
+			ui.Text(c, title).FontSize(22).FontWeight(700).TextColor(pal.Text)
+			if desc != "" {
+				ui.Text(c, desc).FontSize(13.5).TextColor(pal.TextMuted)
+			}
+		})
+		if action != nil {
+			action()
 		}
 	})
 }
@@ -706,7 +716,35 @@ func (f *providerForm) cancelSignIn() {
 
 func (a *App) modelsSettings(c *ui.Context) {
 	pal := theme.Of(c)
-	heading(c, locales.SettingsSectionProviders(), locales.SettingsProvidersDesc())
+	headingWith(c, locales.SettingsSectionProviders(), locales.SettingsProvidersDesc(), func() {
+		add := primary(c, "add", "plus", locales.SettingsAddProvider())
+		add.Menu(func(m *ui.Menu) {
+			// One ChatGPT sign-in is enough: its row edits it.
+			signedIn := false
+			for _, p := range a.providers {
+				signedIn = signedIn || p.AuthKind == "account"
+			}
+			group := ""
+			for _, p := range agents.Presets {
+				if p.Auth == "account" && signedIn {
+					continue
+				}
+				if p.Group != group {
+					if group != "" {
+						m.Separator()
+					}
+					group = p.Group
+				}
+				label := p.Name
+				if p.Auth == "account" {
+					label = locales.SettingsSignInWith(p.Name)
+				}
+				if m.Item(label).Chosen() {
+					a.newProvider(p)
+				}
+			}
+		})
+	})
 	card(c, "providers", func() {
 		if len(a.providers) == 0 {
 			settingRow(c, "none", locales.SettingsNoProviders(), locales.SettingsNoProvidersDesc(), true, nil)
@@ -743,66 +781,12 @@ func (a *App) modelsSettings(c *ui.Context) {
 				a.editProvider(&p)
 			}
 		}
-	})
-	ui.Row(c).Gap(8).Children(func() {
-		add := primary(c, "add", "plus", locales.SettingsAddProvider())
-		add.Menu(func(m *ui.Menu) {
-			// One ChatGPT sign-in is enough: its row edits it.
-			signedIn := false
-			for _, p := range a.providers {
-				signedIn = signedIn || p.AuthKind == "account"
-			}
-			group := ""
-			for _, p := range agents.Presets {
-				if p.Auth == "account" && signedIn {
-					continue
-				}
-				if p.Group != group {
-					if group != "" {
-						m.Separator()
-					}
-					group = p.Group
-				}
-				label := p.Name
-				if p.Auth == "account" {
-					label = locales.SettingsSignInWith(p.Name)
-				}
-				if m.Item(label).Chosen() {
-					a.newProvider(p)
-				}
-			}
-		})
-	})
-	if len(a.providers) > 0 {
-		label(c, locales.SettingsDefaults())
-		card(c, "defaults", func() {
-			// The default picks a provider; its model is the one set on the
-			// provider above, so the model is chosen in one place.
-			var choices []string
-			names := map[string]string{}
-			for _, o := range a.hub.Options() {
-				ch := store.ModelChoice{ProviderID: o.Provider.ID}.Encode()
-				choices = append(choices, ch)
-				names[ch] = o.Name()
-			}
-			cur := ""
-			if def, ok := a.settings.Default(); ok {
-				cur = store.ModelChoice{ProviderID: def.ProviderID}.Encode()
-			}
-			if !contains(choices, cur) && len(choices) > 0 {
-				cur = choices[0]
-			}
-			was := cur
-			if len(choices) > 1 {
-				settingRow(c, "default", locales.SettingsDefaultAgent(), locales.SettingsDefaultAgentDesc(), true, func() {
-					if selectBox(c, "default", &cur, choices, func(s string) string { return names[s] }, 240); cur != was {
-						a.settings.DefaultModel = cur
-						a.saveSettings()
-					}
-				})
-			}
+		// How agents run, under the providers they run on. There is no
+		// default agent: each page's chat picks its own, and the one last
+		// picked is the one a page not picked for yet asks.
+		if len(a.providers) > 0 {
 			r := a.settings.AgentsReadOtherPages
-			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), len(choices) < 2, func() {
+			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), false, func() {
 				if ui.Switch(c.Key("cross"), &r).Changed() {
 					a.settings.AgentsReadOtherPages = r
 					a.saveSettings()
@@ -815,8 +799,8 @@ func (a *App) modelsSettings(c *ui.Context) {
 					a.saveSettings()
 				}
 			})
-		})
-	}
+		}
+	})
 	if a.form.open {
 		a.providerDialog(c)
 		a.removeAlert(c)

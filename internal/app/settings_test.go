@@ -366,43 +366,38 @@ func TestDevicesThatFailToLoad(t *testing.T) {
 	}
 }
 
-// A provider's model is chosen in its own dialog; the default agent picks
-// only the provider, and only once there are two to pick from.
-func TestDefaultAgentPicksAProvider(t *testing.T) {
+// There is no default agent to pick in Settings: each page's chat picks
+// its own, and the one last picked, kept by its provider alone, is the one
+// a page not picked for yet asks, with the model set on its provider.
+func TestNoDefaultAgent(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	put := func(p store.Provider) {
-		t.Helper()
+	for _, p := range []store.Provider{
+		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true},
+		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true},
+	} {
 		if err := a.st.PutProvider(p); err != nil {
 			t.Fatal(err)
 		}
 	}
-	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
 	a.reloadAll()
 	tt := ui.NewTester(func(c *ui.Context) { a.modelsSettings(c) }, 900, 800)
 	tt.Frame()
-	if tt.HasText(locales.SettingsDefaultAgent()) {
-		t.Error("a default to pick with one provider")
+	if tt.HasText("Default agent") {
+		t.Error("a default agent to pick")
 	}
-
-	put(store.Provider{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true})
-	a.reloadAll()
-	// A default from before names a model, which the provider's own
-	// model now overrides.
+	if !tt.HasText(locales.SettingsReadOtherPages()) || !tt.HasText("Studio · qwen") {
+		t.Errorf("the providers and how agents run, in %v", tt.Texts())
+	}
+	// One picked before names a model, which the provider's own model now
+	// overrides.
 	a.settings.DefaultModel = store.ModelChoice{ProviderID: "studio", Model: "old"}.Encode()
-	tt.Frame()
-	if !tt.HasText(locales.SettingsDefaultAgent()) || !tt.HasText("Studio") {
-		t.Fatalf("no default to pick in %v", tt.Texts())
-	}
-	if tt.HasText("Studio · old") {
-		t.Error("the default still names a model")
-	}
 	o, err := a.hub.Resolve(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if o.Provider.ID != "studio" || o.Model != "qwen" {
-		t.Errorf("default runs %s · %s, want studio · qwen", o.Provider.ID, o.Model)
+		t.Errorf("a page not picked for asks %s · %s, want studio · qwen", o.Provider.ID, o.Model)
 	}
 }
 

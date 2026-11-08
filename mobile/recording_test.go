@@ -77,19 +77,19 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	}
 	var row pageRow
 	_ = json.Unmarshal([]byte(raw), &row)
-	if _, err := c.StartRecording(row.ID); err == nil {
+	if _, err := c.StartRecording(row.ID, ""); err == nil {
 		t.Fatal("recorded into a page that isn't open")
 	}
 	if _, err := c.OpenPage(row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.StartRecording(row.ID); err == nil {
+	if _, err := c.StartRecording(row.ID, ""); err == nil {
 		t.Fatal("recorded without a microphone")
 	}
 	mic := &fakeMic{closed: make(chan struct{}, 1)}
 	c.UseMicrophone(mic)
 
-	raw, err = c.StartRecording(row.ID)
+	raw, err = c.StartRecording(row.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestRecordingsShareTheMicrophoneApart(t *testing.T) {
 	c.UseMicrophone(mic)
 	record := func() string {
 		t.Helper()
-		raw, err := c.StartRecording(row.ID)
+		raw, err := c.StartRecording(row.ID, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -284,7 +284,7 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 	if _, err := c.OpenPage(row.ID); err != nil {
 		t.Fatal(err)
 	}
-	raw, err = c.StartRecording(row.ID)
+	raw, err = c.StartRecording(row.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 	if rec := ready("heard 32000"); rec.SttProvider != recording.OnDevice {
 		t.Fatalf("recording %+v", rec)
 	}
-	if err := c.Retranscribe(id); err != nil {
+	if err := c.Retranscribe(id, ""); err != nil {
 		t.Fatal(err)
 	}
 	ready("from the file")
@@ -492,7 +492,7 @@ func TestFileTranscribedIntoItsNotes(t *testing.T) {
 	if _, err := c.OpenPage(row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.TranscribeFile(row.ID, "f1"); err != nil {
+	if err := c.TranscribeFile(row.ID, "f1", ""); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.After(5 * time.Second); ; {

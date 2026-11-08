@@ -292,7 +292,7 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 	case "file":
 		a.uploadIntoPage()
 	case "recording":
-		a.startRecording(ps.id)
+		a.startRecording(ps.id, "")
 	}
 }
 

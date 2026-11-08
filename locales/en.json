@@ -729,6 +729,20 @@
       }
     }
   },
+  "cardTranscribedBy": "{detail} · {engine}",
+  "@cardTranscribedBy": {
+    "description": "An audio file's card, under the name: its type and size, then the engine that transcribed it (Soniox, MOSS, On this device, Endpoint).",
+    "placeholders": {
+      "detail": {
+        "type": "String",
+        "example": "M4A · 1.2 MB"
+      },
+      "engine": {
+        "type": "String",
+        "example": "MOSS"
+      }
+    }
+  },
   "cardPlayFile": "Play {name}",
   "@cardPlayFile": {
     "description": "Label of the button that plays an audio or video file in a page.",
@@ -3662,9 +3676,72 @@
   "@recErrNoWords": {
     "description": "Error of a microphone test that heard nothing."
   },
-  "recErrSonioxSaved": "Soniox transcribes as you record here; saved audio needs a Leaflet server.",
-  "@recErrSonioxSaved": {
-    "description": "Error when retranscribing with Soniox while signed out."
+  "recErrSonioxFailed": "Soniox could not transcribe this audio. {details}",
+  "@recErrSonioxFailed": {
+    "description": "Error when Soniox fails to transcribe saved audio sent from this device, with Soniox's own message (may be empty).",
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrSetUpMoss": "Add a MOSS API key in Settings › Speech to text.",
+  "@recErrSetUpMoss": {
+    "description": "Error when transcribing with MOSS before a key is saved on this device."
+  },
+  "recErrMossRejected": "MOSS rejected this key",
+  "@recErrMossRejected": {
+    "description": "Error when MOSS refuses the API key."
+  },
+  "recErrMossBalance": "Your MOSS account has no balance left.",
+  "@recErrMossBalance": {
+    "description": "Error when MOSS says the account is out of credit."
+  },
+  "recErrMossTooLarge": "MOSS takes files up to 512 MB.",
+  "@recErrMossTooLarge": {
+    "description": "Error when the audio is too large for MOSS."
+  },
+  "recErrMossStatus": "MOSS answered {status} {details}",
+  "@recErrMossStatus": {
+    "description": "Error of a MOSS call, with the HTTP status and MOSS's message (may be empty).",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "500 Internal Server Error"
+      },
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrMossFailed": "MOSS could not transcribe this audio. {details}",
+  "@recErrMossFailed": {
+    "description": "Error when MOSS fails to transcribe audio, with MOSS's own message (may be empty).",
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "recSttMossKey": "MOSS API key",
+  "@recSttMossKey": {
+    "description": "Settings › Speech to text: the label of the MOSS key field."
+  },
+  "recSttMossDesc": "Transcribes when a recording stops, with speakers; key kept on this device",
+  "@recSttMossDesc": {
+    "description": "Settings › Speech to text: what MOSS does, and where its key is kept."
+  },
+  "recSttOnDevicePlace": "Private and offline, without a key",
+  "@recSttOnDevicePlace": {
+    "description": "Settings › Speech to text: the providers list, under the device's own engine."
+  },
+  "recSttNoProviders": "No speech providers yet",
+  "@recSttNoProviders": {
+    "description": "Settings › Speech to text: the providers list when none is set up."
+  },
+  "recSttNoProvidersDesc": "Add Soniox or MOSS with an API key, or an endpoint such as a transcription server on your network.",
+  "@recSttNoProvidersDesc": {
+    "description": "Settings › Speech to text: under the empty providers list."
   },
   "recErrTranscribing": "This recording is being transcribed.",
   "@recErrTranscribing": {
@@ -4594,18 +4671,6 @@
         "example": "ChatGPT"
       }
     }
-  },
-  "settingsDefaults": "Defaults",
-  "@settingsDefaults": {
-    "description": "Settings › Agent providers: the heading over the default agent."
-  },
-  "settingsDefaultAgent": "Default agent",
-  "@settingsDefaultAgent": {
-    "description": "Settings › Agent providers › Defaults."
-  },
-  "settingsDefaultAgentDesc": "Used unless you pick another",
-  "@settingsDefaultAgentDesc": {
-    "description": "Settings › Agent providers › Defaults › Default agent."
   },
   "settingsReadOtherPages": "Let agents read your other pages",
   "@settingsReadOtherPages": {

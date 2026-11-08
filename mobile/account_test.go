@@ -347,7 +347,7 @@ func TestSignOutWaitsForARecording(t *testing.T) {
 	}
 	mic := &fakeMic{closed: make(chan struct{}, 1)}
 	c.UseMicrophone(mic)
-	raw, err := c.StartRecording(page.ID)
+	raw, err := c.StartRecording(page.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}

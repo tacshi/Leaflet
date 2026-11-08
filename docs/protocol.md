@@ -465,8 +465,8 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | | `{ action: "test", provider_id? , base_url?, api_key?, preset?, model }` | `{ ok, models: [id], supports_tools, message }` |
 | | `{ action: "delete", id }` | `{ ok }` |
 | `stt` | `{ action: "soniox_key" }` | `{ api_key, expires_at }` (short-lived Soniox key) |
-| | `{ action: "transcribe", recording_id, language? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
-| | `{ action: "transcribe", file_id, language? }` | `{ segments: [...] }`, saved in no row |
+| | `{ action: "transcribe", recording_id, language?, provider? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
+| | `{ action: "transcribe", file_id, language?, provider? }` | `{ segments: [...] }`, saved in no row |
 | | `{ action: "transcribed", file_id }` | `{ ok }` |
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
@@ -477,6 +477,12 @@ by its `base_url`, or the address of its `preset` without one. A provider's
 and again once the default changes: a test of another model answers for that
 model and leaves it as it is, and a run of another model is offered tools,
 going without them if the model refuses them.
+
+`transcribe` takes `provider`, `soniox` or `openai-compatible`, as the one
+the app picked for this transcription, in place of the provider in
+`stt_settings`, whose other fields (an endpoint's address, model and key)
+still apply: the app has no default, and its settings reach the server a
+moment after a pick. Any other provider leaves the settings' own.
 
 `transcribe` saves the transcript, and the recording's status as it goes, as
 the caller: someone who can only view the recording's page is refused (403)

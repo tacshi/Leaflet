@@ -108,7 +108,7 @@ struct Transcript: Decodable, Sendable {
 
 /// SttSettings are the speech-to-text choice, as the core keeps it.
 struct SttSettings: Codable, Equatable, Sendable {
-    /// provider is "openai-compatible", "soniox" or "on-device".
+    /// provider is "openai-compatible", "soniox", "moss" or "on-device".
     var provider: String
     var modelSize: String
     var runOn: String
@@ -121,6 +121,8 @@ struct SttSettings: Codable, Equatable, Sendable {
     var providerID: String?
     var sonioxModel: String
     var languageHints: [String]?
+    /// sonioxOnServer says this device saved a Soniox key on the server.
+    var sonioxOnServer: Bool?
 
     enum CodingKeys: String, CodingKey {
         case provider, language, model
@@ -132,6 +134,7 @@ struct SttSettings: Codable, Equatable, Sendable {
         case providerID = "provider_id"
         case sonioxModel = "soniox_model"
         case languageHints = "language_hints"
+        case sonioxOnServer = "soniox_on_server"
     }
 }
 
@@ -140,6 +143,8 @@ struct SpeechSettings: Codable, Sendable {
     var stt: SttSettings
     var endpointKey: String
     var sonioxSaved: Bool
+    /// mossSaved says this device's keychain has a MOSS key.
+    var mossSaved: Bool
     var signedIn: Bool
     /// onDevice says the device can transcribe by itself.
     var onDevice: Bool
@@ -147,6 +152,10 @@ struct SpeechSettings: Codable, Sendable {
     var localEndpoint: Bool
     /// status says where transcription runs, or that it is not set up.
     var status: String
+    /// providers are the speech providers set up, and addable those to
+    /// add.
+    var providers: [SpeechProvider]
+    var addable: [SpeechProvider]
     var languages: [Language]
     /// keepAudio is how long recordings' audio stays here once uploaded:
     /// until_uploaded, 30_days or always.
@@ -158,13 +167,43 @@ struct SpeechSettings: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case stt, status, languages
+        case stt, status, languages, providers, addable
         case keepAudio = "keep_audio"
         case endpointKey = "endpoint_key"
         case sonioxSaved = "soniox_saved"
+        case mossSaved = "moss_saved"
         case signedIn = "signed_in"
         case onDevice = "on_device"
         case localEndpoint = "local_endpoint"
+    }
+}
+
+/// SpeechChoices are the speech providers a transcription on a page can
+/// be picked from, and current, the one marked: last picked there.
+struct SpeechChoices: Codable, Equatable, Sendable {
+    var choices: [SpeechProvider]
+    var current: String
+}
+
+/// SpeechProvider is a speech provider as Settings lists it.
+struct SpeechProvider: Codable, Hashable, Identifiable, Sendable {
+    /// id is "on-device", "soniox", "moss" or "openai-compatible".
+    var id: String
+    /// name is what the list calls it, with its model where it has one.
+    var name: String
+    /// place says where it runs and where its key is kept.
+    var place: String?
+    var removable: Bool?
+
+    /// name is a provider's name, without its model, as
+    /// recording.ProviderName has it.
+    static func name(of id: String) -> String {
+        switch id {
+        case "on-device": L.recSttOnDevice
+        case "soniox": "Soniox"
+        case "moss": "MOSS"
+        default: L.commonEndpoint
+        }
     }
 }
 
@@ -188,11 +227,22 @@ extension CoreClient {
         }
     }
 
-    /// startRecording records into an open page, returning the block for
-    /// the editor to put at the caret.
-    nonisolated(nonsending) func startRecording(_ pageID: String) async throws -> DocNode {
+    /// startRecording records into an open page, transcribed by provider,
+    /// or the one marked for the page when it is "", returning the block
+    /// for the editor to put at the caret.
+    nonisolated(nonsending) func startRecording(_ pageID: String, provider: String) async throws
+        -> DocNode
+    {
         try await call(DocNode.self) { core in
-            try Self.answer { e in core.startRecording(pageID, error: e) }
+            try Self.answer { e in core.startRecording(pageID, provider: provider, error: e) }
+        }
+    }
+
+    /// speechChoices returns the speech providers a transcription on page
+    /// can be picked from, and the one marked.
+    nonisolated(nonsending) func speechChoices(_ pageID: String) async throws -> SpeechChoices {
+        try await call(SpeechChoices.self) { core in
+            try Self.answer { e in core.speechChoices(pageID, error: e) }
         }
     }
 
@@ -232,12 +282,14 @@ extension CoreClient {
     }
 
     /// transcribeFile transcribes audio file block of page into its notes.
-    nonisolated(nonsending) func transcribeFile(page: String, block: String) async throws {
-        try await call { try $0.transcribeFile(page, blockID: block) }
+    nonisolated(nonsending) func transcribeFile(page: String, block: String, provider: String)
+        async throws
+    {
+        try await call { try $0.transcribeFile(page, blockID: block, provider: provider) }
     }
 
-    nonisolated(nonsending) func retranscribe(_ id: String) async throws {
-        try await call { try $0.retranscribe(id) }
+    nonisolated(nonsending) func retranscribe(_ id: String, provider: String) async throws {
+        try await call { try $0.retranscribe(id, provider: provider) }
     }
 
     /// dismissRecordingError lets go of what went wrong with a recording,
@@ -285,7 +337,16 @@ extension CoreClient {
         }
     }
 
-    /// testEndpoint and testSoniox return words for the engine working.
+    /// saveMossKey keeps a MOSS key on this device, returning where it
+    /// went.
+    nonisolated(nonsending) func saveMossKey(_ key: String) async throws -> String {
+        try await call(waiting: true) { core in
+            try Self.answer { e in core.saveMossKey(key, error: e) }
+        }
+    }
+
+    /// testEndpoint, testSoniox and testMoss return words for the engine
+    /// working.
     nonisolated(nonsending) func testEndpoint(url: String, model: String, key: String) async throws
         -> String
     {
@@ -298,6 +359,17 @@ extension CoreClient {
         try await call(waiting: true) { core in
             try Self.answer { e in core.testSoniox(key, error: e) }
         }
+    }
+
+    nonisolated(nonsending) func testMoss(_ key: String) async throws -> String {
+        try await call(waiting: true) { core in
+            try Self.answer { e in core.testMoss(key, error: e) }
+        }
+    }
+
+    /// removeSpeechProvider takes a speech provider off Settings' list.
+    nonisolated(nonsending) func removeSpeechProvider(_ id: String) async throws {
+        try await call { try $0.removeSpeechProvider(id) }
     }
 
     nonisolated(nonsending) func testMicrophone() async throws {

@@ -108,7 +108,7 @@ func (a *App) newRecordingPage() {
 	}
 	reread(&a.pages, a.st.Pages)
 	a.openPage(p.ID)
-	a.startRecording(p.ID)
+	a.startRecording(p.ID, "")
 }
 
 // updateEvery is how long a running app waits to look for a newer version

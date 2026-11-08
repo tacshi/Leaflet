@@ -140,12 +140,140 @@ func fileWait(size int64) time.Duration {
 	return min(5*time.Minute+2*time.Duration(size/leastBytesASecond)*time.Second, 6*time.Hour)
 }
 
+// sonioxAPI is Soniox's REST API; tests point it at their own server.
+var sonioxAPI = "https://api.soniox.com/v1"
+
+// sonioxPoll is how long TranscribeSoniox waits between asking Soniox
+// whether it is done. Tests shorten it.
+var sonioxPoll = 2 * time.Second
+
+// sonioxAsyncModel is the model saved audio is transcribed with when the
+// one chosen is a real-time one, which Soniox's files don't take.
+const sonioxAsyncModel = "stt-async-v3"
+
+// TranscribeSoniox transcribes size bytes of audio from audio, named name,
+// whose extension says what it is, with Soniox's files and transcriptions
+// and the key on this device: it goes up as it is read, never all in
+// memory. What went to Soniox is removed from it once it is done.
+func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, size int64, name string, hints []string, speakers bool) ([]store.Segment, error) {
+	if !strings.HasPrefix(model, "stt-async") {
+		model = sonioxAsyncModel
+	}
+	call := func(ctx context.Context, method, path string, body []byte, out any) error {
+		req, err := http.NewRequestWithContext(ctx, method, sonioxAPI+path, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return sonioxDo(req, key, out)
+	}
+	remove := func(path string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = call(ctx, "DELETE", path, nil, nil)
+	}
+
+	// The form's head, then the audio, then its end, of a length known
+	// before the audio is read.
+	var form bytes.Buffer
+	w := multipart.NewWriter(&form)
+	if _, err := w.CreateFormFile("file", name); err != nil {
+		return nil, err
+	}
+	head := form.Len()
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	tail := form.Bytes()[head:]
+	up, cancel := context.WithTimeout(ctx, transferWait(size))
+	req, err := http.NewRequestWithContext(up, "POST", sonioxAPI+"/files",
+		io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(audio, size), bytes.NewReader(tail)))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	req.ContentLength = int64(head) + size + int64(len(tail))
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	var file struct {
+		ID string `json:"id"`
+	}
+	err = sonioxDo(req, key, &file)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	defer remove("/files/" + file.ID)
+
+	create, _ := json.Marshal(map[string]any{
+		"model": model, "file_id": file.ID, "language_hints": hints, "enable_speaker_diarization": speakers,
+	})
+	var job struct {
+		ID string `json:"id"`
+	}
+	if err := call(ctx, "POST", "/transcriptions", create, &job); err != nil {
+		return nil, err
+	}
+	defer remove("/transcriptions/" + job.ID)
+
+	wait, cancel := context.WithTimeout(ctx, fileWait(size))
+	defer cancel()
+	for {
+		var info struct {
+			Status       string `json:"status"`
+			ErrorMessage string `json:"error_message"`
+		}
+		if err := call(wait, "GET", "/transcriptions/"+job.ID, nil, &info); err != nil {
+			return nil, err
+		}
+		if info.Status == "completed" {
+			break
+		}
+		if info.Status == "error" {
+			return nil, errors.New(locales.RecErrSonioxFailed(info.ErrorMessage))
+		}
+		select {
+		case <-wait.Done():
+			return nil, wait.Err()
+		case <-time.After(sonioxPoll):
+		}
+	}
+	var transcript struct {
+		Tokens []Token `json:"tokens"`
+	}
+	if err := call(wait, "GET", "/transcriptions/"+job.ID+"/transcript", nil, &transcript); err != nil {
+		return nil, err
+	}
+	return TokensToSegments(transcript.Tokens), nil
+}
+
+// sonioxDo sends req to Soniox with key, and reads its answer into out,
+// unless out is nil.
+func sonioxDo(req *http.Request, key string, out any) error {
+	req.Header.Set("Authorization", "Bearer "+key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	switch {
+	case res.StatusCode == 401 || res.StatusCode == 403:
+		return errors.New(locales.RecErrSonioxRejected())
+	case res.StatusCode >= 400:
+		return errors.New(locales.RecErrSonioxStatus(res.Status))
+	case out == nil:
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(out)
+}
+
 // TestSonioxKey checks a Soniox API key against Soniox's API.
 func TestSonioxKey(ctx context.Context, key string) error {
 	if strings.TrimSpace(key) == "" {
 		return errors.New(locales.RecErrPasteKey())
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.soniox.com/v1/models", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", sonioxAPI+"/models", nil)
 	if err != nil {
 		return err
 	}
@@ -198,7 +326,10 @@ func SetEndpointKey(key string) error {
 // SetLocalSonioxKey keeps a Soniox key in the keychain, or removes it.
 func SetLocalSonioxKey(key string) error {
 	if key == "" {
-		return keychain.Delete("stt.soniox.key")
+		if err := keychain.Delete("stt.soniox.key"); !errors.Is(err, keychain.ErrNotFound) {
+			return err
+		}
+		return nil
 	}
 	return keychain.Set("stt.soniox.key", []byte(key))
 }

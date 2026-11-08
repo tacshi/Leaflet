@@ -45,16 +45,27 @@ func Status(rec store.Recording) string {
 		return locales.RecTranscriptionFailed()
 	}
 	length := FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)
-	engine := locales.CommonEndpoint()
-	switch rec.SttProvider {
-	case "":
+	engine := EngineName(rec.SttProvider)
+	if engine == "" {
 		engine = locales.RecAudioOnly()
-	case "soniox":
-		engine = "Soniox"
-	case OnDevice:
-		engine = locales.RecEngineOnDevice()
 	}
 	return locales.RecStatus(length, engine)
+}
+
+// EngineName is the engine of the speech settings' provider, as a
+// transcript's line says what made it, or "" for none.
+func EngineName(provider string) string {
+	switch provider {
+	case "":
+		return ""
+	case "soniox":
+		return "Soniox"
+	case Moss:
+		return "MOSS"
+	case OnDevice:
+		return locales.RecEngineOnDevice()
+	}
+	return locales.CommonEndpoint()
 }
 
 // TranscriptBlocks is rec's transcript as blocks to put in its page: a

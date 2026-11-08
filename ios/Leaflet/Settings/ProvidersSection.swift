@@ -2,8 +2,8 @@ import AuthenticationServices
 import SwiftUI
 
 /// ProvidersSection is Settings › Agent providers: the services agents run
-/// on, adding one from the desktop's presets, and the defaults agents run
-/// with.
+/// on, adding one from the desktop's presets from its header, and under
+/// them how agents run.
 struct ProvidersSection: View {
     /// editing is the provider Settings shows the form of, pushed on its
     /// navigation: a sheet from a row of the settings' form doesn't stay.
@@ -14,13 +14,18 @@ struct ProvidersSection: View {
     @Environment(\.palette) private var palette
     @State private var providers: [AgentProvider] = []
     @State private var presets: [ProviderPreset] = []
-    @State private var defaultAgent = ""
     @Environment(SettingsPrompt.self) private var prompt
     @State private var failure: String?
 
     var body: some View {
         @Bindable var app = app
         Section {
+            if providers.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L.settingsNoProviders)
+                    Text(L.settingsNoProvidersDesc).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             ForEach(providers) { p in
                 Button {
                     editing = ProviderForm.Draft(
@@ -36,25 +41,13 @@ struct ProvidersSection: View {
                         .tint(.red)
                 }
             }
-            Menu(L.settingsAddProvider) {
-                // The groups apart, unnamed, as the desktop's menu has them.
-                ForEach(groups, id: \.self) { group in
-                    Section {
-                        ForEach(addable.filter { $0.group == group }) { preset in
-                            Button(
-                                preset.auth == "account"
-                                    ? L.settingsSignInWith(name: preset.name) : preset.name
-                            ) {
-                                editing = ProviderForm.Draft(preset: preset)
-                            }
-                        }
-                    }
-                }
-            }
+            // How agents run, under the providers they run on, as the
+            // desktop has them.
+            if !providers.isEmpty { defaults }
         } header: {
             // On the header, a view of its own: on the section, it would go
             // on each of its rows, a read of the providers each.
-            Text(L.settingsSectionProviders)
+            HeaderWithAction(title: L.settingsSectionProviders) { addMenu }
                 .task(id: version) { await load() }
                 // Signed in or out here, or a provider changed on another
                 // device: signing out takes the account's providers away.
@@ -70,46 +63,48 @@ struct ProvidersSection: View {
                 Text(L.settingsProvidersDesc)
             }
         }
+    }
 
-        if !providers.isEmpty {
-            // As the desktop's Defaults: the agent pages run, and how
-            // agents run.
-            Section(L.settingsDefaults) {
-                if providers.count > 1 {
-                    // Kept as the user picks it, and only then: load()
-                    // showing the first provider for a default the core
-                    // cleared, its provider removed, keeps none.
-                    Picker(
-                        selection: Binding(
-                            get: { defaultAgent },
-                            set: { value in
-                                defaultAgent = value
-                                if !value.isEmpty { app.save(["default_model": value]) }
-                            })
-                    ) {
-                        ForEach(providers) { p in
-                            Text("\(p.name) · \(p.defaultModel)").tag(p.id + "|")
+    /// addMenu adds a provider from the desktop's presets.
+    private var addMenu: some View {
+        Menu {
+            // The groups apart, unnamed, as the desktop's menu has them.
+            ForEach(groups, id: \.self) { group in
+                Section {
+                    ForEach(addable.filter { $0.group == group }) { preset in
+                        Button(
+                            preset.auth == "account"
+                                ? L.settingsSignInWith(name: preset.name) : preset.name
+                        ) {
+                            editing = ProviderForm.Draft(preset: preset)
                         }
-                    } label: {
-                        Text(L.settingsDefaultAgent)
-                        Text(L.settingsDefaultAgentDesc)
                     }
                 }
-                Toggle(isOn: $app.agentsReadOtherPages) {
-                    Text(L.settingsReadOtherPages)
-                    Text(L.settingsReadOtherPagesDesc)
-                }
-                .onChange(of: app.agentsReadOtherPages) { _, on in
-                    app.save(["agents_read_other_pages": on])
-                }
-                Toggle(isOn: $app.agentsUseWeb) {
-                    Text(L.settingsUseWeb)
-                    Text(L.settingsUseWebDesc)
-                }
-                .onChange(of: app.agentsUseWeb) { _, on in
-                    app.save(["agents_use_web": on])
-                }
             }
+        } label: {
+            Label(L.settingsAddProvider, systemImage: "plus")
+        }
+    }
+
+    /// defaults are how agents run. There is no default agent: each page's
+    /// chat picks its own, and the one last picked is the one a page not
+    /// picked for yet asks.
+    @ViewBuilder
+    private var defaults: some View {
+        @Bindable var app = app
+        Toggle(isOn: $app.agentsReadOtherPages) {
+            Text(L.settingsReadOtherPages)
+            Text(L.settingsReadOtherPagesDesc)
+        }
+        .onChange(of: app.agentsReadOtherPages) { _, on in
+            app.save(["agents_read_other_pages": on])
+        }
+        Toggle(isOn: $app.agentsUseWeb) {
+            Text(L.settingsUseWeb)
+            Text(L.settingsUseWebDesc)
+        }
+        .onChange(of: app.agentsUseWeb) { _, on in
+            app.save(["agents_use_web": on])
         }
     }
 
@@ -154,17 +149,6 @@ struct ProvidersSection: View {
         guard let client = app.client else { return }
         providers = (try? await client.providers()) ?? []
         if presets.isEmpty { presets = (try? await client.presets()) ?? [] }
-        if let raw = try? await client.settings(),
-            let s = try? JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
-        {
-            // The default names a provider, whose model is set on it; with
-            // none, the first, as the desktop shows it.
-            let id = (s["default_model"]?.string ?? "").split(separator: "|").first.map(String.init)
-            defaultAgent =
-                providers.first { $0.id == id }.map { $0.id + "|" } ?? providers.first.map {
-                    $0.id + "|"
-                } ?? ""
-        }
     }
 
     /// askRemove asks before removing p, as the desktop does.
@@ -606,6 +590,24 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
             // open found it before it started the session, which asks.
             guard let anchor else { fatalError("ChatGPTWebSession asked for a window before open") }
             return anchor
+        }
+    }
+}
+
+/// HeaderWithAction is a settings section's header with an action at its
+/// right, as Add a provider is.
+struct HeaderWithAction<Action: View>: View {
+    let title: String
+    @ViewBuilder let action: () -> Action
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+            Spacer()
+            action()
+                .font(.subheadline.weight(.semibold))
+                .textCase(nil)
+                .labelStyle(.titleAndIcon)
         }
     }
 }

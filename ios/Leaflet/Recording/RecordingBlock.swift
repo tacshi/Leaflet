@@ -185,12 +185,11 @@ struct RecordingBlock: View {
                     editor?.onSummarize?(block, L.recSummarizePrompt(title: title(block, row)))
                 },
                 // Not while a transcription runs, which the new one would race.
-                BlockAction(
-                    title: empty ? L.recTranscribe : L.recTranscribeAgain,
-                    symbol: "captions.bubble",
+                .transcribe(
+                    empty ? L.recTranscribe : L.recTranscribeAgain, page: editor?.pageID,
                     enabled: canEdit && !recorder.state.transcribing.contains(id)
-                ) {
-                    recorder.retranscribe(id)
+                ) { provider in
+                    recorder.retranscribe(id, page: editor?.pageID, provider: provider)
                 },
                 // The block goes as one step to undo; its recording stays, for
                 // the undo to bring back.
@@ -228,15 +227,9 @@ struct RecordingBlock: View {
         let palette = BlockLook.palette
         return Menu {
             let items = Self.menuItems(id, block: node, row, canEdit: canEdit, editor: editor)
-            ForEach(items.filter { !$0.destructive }, id: \.title) { item in
-                Button(item.title, systemImage: item.symbol, action: item.run)
-                    .disabled(!item.enabled)
-            }
+            ForEach(items.filter { !$0.destructive }, id: \.title) { BlockMenuItem(item: $0) }
             Divider()
-            ForEach(items.filter(\.destructive), id: \.title) { item in
-                Button(item.title, systemImage: item.symbol, role: .destructive, action: item.run)
-                    .disabled(!item.enabled)
-            }
+            ForEach(items.filter(\.destructive), id: \.title) { BlockMenuItem(item: $0) }
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: control, height: control)
@@ -248,7 +241,6 @@ struct RecordingBlock: View {
     /// transcript is the recording's lines, each after its time: a tap on
     /// either plays from it.
     private func transcript(_ row: RecordingRow) -> some View {
-        let palette = BlockLook.palette
         let widest = row.durationMs >= 3_600_000 ? "0:00:00" : "00:00"
         let folds = row.folded > 0 && row.folded < row.transcript.count
         let lines = row.transcript

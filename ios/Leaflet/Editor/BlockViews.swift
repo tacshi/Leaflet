@@ -39,7 +39,69 @@ struct BlockAction {
     var symbol = ""
     var enabled = true
     var destructive = false
+    /// choices, when it has them, are what it offers instead of run, as a
+    /// submenu: the speech providers a transcription is picked from.
+    var choices: [BlockAction] = []
     let run: @MainActor () -> Void
+
+    /// flat is the action as VoiceOver offers it: each of its choices
+    /// after its title, or itself.
+    var flat: [BlockAction] {
+        guard !choices.isEmpty else { return [self] }
+        return choices.map { c in
+            BlockAction(title: "\(title): \(c.title)", enabled: c.enabled, run: c.run)
+        }
+    }
+
+    /// transcribe is the item transcribing on page, as title says: with
+    /// more than one speech provider set up, its choices pick the one,
+    /// that last picked there checked, as there is no default. run takes
+    /// the provider picked, or "" for the one marked.
+    @MainActor static func transcribe(
+        _ title: String, page: String?, enabled: Bool,
+        run: @escaping @MainActor (String) -> Void
+    ) -> BlockAction {
+        let picked = page.flatMap { Recorder.shared.choices(for: $0) }
+        var choices: [BlockAction] = []
+        if let picked, picked.choices.count > 1 {
+            choices = picked.choices.map { p in
+                BlockAction(
+                    title: p.name, symbol: p.id == picked.current ? "checkmark" : "",
+                    enabled: enabled
+                ) { run(p.id) }
+            }
+        }
+        return BlockAction(
+            title: title, symbol: "captions.bubble", enabled: enabled, choices: choices
+        ) { run("") }
+    }
+}
+
+/// BlockMenuItem is a block menu's item: a button, or a submenu of its
+/// choices.
+struct BlockMenuItem: View {
+    let item: BlockAction
+
+    var body: some View {
+        if item.choices.isEmpty {
+            Button(
+                item.title, systemImage: item.symbol, role: item.destructive ? .destructive : nil,
+                action: item.run
+            )
+            .disabled(!item.enabled)
+        } else {
+            Menu(item.title, systemImage: item.symbol) {
+                ForEach(item.choices, id: \.title) { c in
+                    if c.symbol.isEmpty {
+                        Button(c.title, action: c.run)
+                    } else {
+                        Button(c.title, systemImage: c.symbol, action: c.run)
+                    }
+                }
+            }
+            .disabled(!item.enabled)
+        }
+    }
 }
 
 /// BlockCard shows a block without text.

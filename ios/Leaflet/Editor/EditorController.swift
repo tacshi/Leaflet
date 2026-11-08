@@ -96,7 +96,8 @@ final class EditorController: NSObject, UITextViewDelegate {
     var onEditSpeaker: (@MainActor (DocNode, String?, Int) -> Void)?
     /// onReplaceNotes asks before a transcript takes the place of the notes
     /// of a file.
-    var onReplaceNotes: (@MainActor (DocNode) -> Void)?
+    /// It takes the speech provider picked, or "" for the one marked.
+    var onReplaceNotes: (@MainActor (DocNode, String) -> Void)?
     /// client is the app's core, which brings files here.
     var client: CoreClient?
     /// onEditNotes opens the sheet that writes a video's notes, and

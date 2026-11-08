@@ -31,8 +31,9 @@ struct SpeechSection: View {
 }
 
 /// SpeechSettingsView is Settings › Speech to text, as on the desktop: the
-/// engine that transcribes recordings, its key, the language, and a test
-/// of the microphone.
+/// speech providers set up, each with its own page of settings, the
+/// language, and a test of the microphone. There is no default: each
+/// transcription picks its provider.
 struct SpeechSettingsView: View {
     @Binding var status: String
     @Environment(AppModel.self) private var app
@@ -48,6 +49,7 @@ struct SpeechSettingsView: View {
     @State private var savedKey = ""
     @FocusState private var keyFocused: Bool
     @State private var sonioxKey = ""
+    @State private var mossKey = ""
     @State private var providers: [AgentProvider] = []
     @State private var testing = false
     @State private var saving = false
@@ -56,6 +58,8 @@ struct SpeechSettingsView: View {
     /// onDevice are the languages the device's own engine transcribes, by
     /// code, once it has said.
     @State private var onDevice: Set<String>?
+    /// adding is the provider being added, whose page shows.
+    @State private var adding: String?
 
     var body: some View {
         Form {
@@ -67,6 +71,10 @@ struct SpeechSettingsView: View {
         .themedForm(palette)
         .navigationTitle(L.recSttTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // A provider being added, from the Add menu: its page, as its row's.
+        .navigationDestination(item: $adding) { id in
+            if let stt = Binding($stt) { providerPage(id, stt) }
+        }
         .task {
             if DeviceTranscriber.isAvailable { onDevice = await DeviceTranscriber.languages() }
         }
@@ -119,40 +127,128 @@ struct SpeechSettingsView: View {
         loaded?.status = s.status
         loaded?.localEndpoint = s.localEndpoint
         loaded?.sonioxSaved = s.sonioxSaved
+        loaded?.mossSaved = s.mossSaved
+        loaded?.providers = s.providers
+        loaded?.addable = s.addable
+        // The core takes the first provider set up when the one chosen is
+        // not, as when the first one's key is saved.
+        if stt?.provider != s.stt.provider { stt?.provider = s.stt.provider }
         status = s.status
     }
 
     @ViewBuilder
     private func engine(_ s: SpeechSettings, _ stt: Binding<SttSettings>) -> some View {
         Section {
-            Picker(L.recSttTranscription, selection: stt.provider) {
-                if s.onDevice || stt.wrappedValue.provider == "on-device" {
-                    Text(L.recSttOnDevice).tag("on-device")
+            if s.providers.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L.recSttNoProviders)
+                    Text(L.recSttNoProvidersDesc).font(.caption).foregroundStyle(.secondary)
                 }
-                Text(verbatim: "Soniox").tag("soniox")
-                Text(L.commonEndpoint).tag("openai-compatible")
             }
-            .pickerStyle(.segmented)
-            .onChange(of: stt.wrappedValue.provider) { result = nil }
-            switch stt.wrappedValue.provider {
-            case "on-device":
-                Text(L.recSttOnDeviceDesc).font(.footnote).foregroundStyle(.secondary)
-            case "soniox":
-                soniox(s, stt)
-            default:
-                endpoint(s, stt)
+            ForEach(s.providers) { p in
+                NavigationLink {
+                    providerPage(p.id, stt)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(p.name).foregroundStyle(.primary)
+                        Text(p.place ?? "").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .swipeActions {
+                    if p.removable == true {
+                        Button(L.commonRemove, role: .destructive) {
+                            Task { await remove(p.id) }
+                        }
+                        .tint(.red)
+                    }
+                }
+            }
+            // Each transcription picks its provider: speakers are labelled by
+            // those that can, Soniox and MOSS.
+            if s.providers.contains(where: { ["soniox", "moss"].contains($0.id) }) {
+                Toggle(L.recSttSpeakers, isOn: stt.speakerLabels)
             }
         } header: {
-            Text(L.recSttTranscription)
-        } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(s.status)
-                if let result {
-                    Text(result.text).foregroundStyle(
-                        result.ok ? palette.okText : palette.dangerText)
+            HeaderWithAction(title: L.recSttTranscription) {
+                Menu {
+                    ForEach(s.addable) { p in
+                        Button(p.name) {
+                            result = nil
+                            adding = p.id
+                        }
+                    }
+                } label: {
+                    Label(L.settingsAddProvider, systemImage: "plus")
                 }
+                .disabled(s.addable.isEmpty)
+            }
+        } footer: {
+            if let result {
+                Text(result.text).foregroundStyle(result.ok ? palette.okText : palette.dangerText)
             }
         }
+    }
+
+    /// providerPage is a speech provider's own settings: its key, address
+    /// or model, a test of them, and removing it.
+    private func providerPage(_ id: String, _ stt: Binding<SttSettings>) -> some View {
+        ProviderPage { dismiss in
+            Form {
+                Section {
+                    if let s = loaded {
+                        switch id {
+                        case "on-device":
+                            Text(L.recSttOnDeviceDesc).font(.footnote).foregroundStyle(.secondary)
+                        case "soniox":
+                            soniox(s, stt)
+                        case "moss":
+                            moss(s, stt)
+                        default:
+                            endpoint(s, stt)
+                        }
+                    }
+                } footer: {
+                    if let result {
+                        Text(result.text).foregroundStyle(
+                            result.ok ? palette.okText : palette.dangerText)
+                    }
+                }
+                if loaded?.providers.first(where: { $0.id == id })?.removable == true {
+                    Section {
+                        Button(L.commonRemove, role: .destructive) {
+                            Task {
+                                await remove(id)
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+            }
+            .themedForm(palette)
+            .navigationTitle(SpeechProvider.name(of: id))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    /// remove takes a provider off the list, its key off this device.
+    private func remove(_ id: String) async {
+        do {
+            try await app.client?.removeSpeechProvider(id)
+            if id == "openai-compatible" {
+                endpointKey = ""
+                savedKey = ""
+            }
+            result = nil
+        } catch {
+            result = (false, error.localizedDescription)
+        }
+        // The address the core cleared, which the fields here still have.
+        if let s = try? await app.client?.speechSettings() {
+            stt?.baseURL = s.stt.baseURL
+            stt?.model = s.stt.model
+            stt?.providerID = s.stt.providerID
+        }
+        await refresh()
     }
 
     @ViewBuilder
@@ -238,7 +334,40 @@ struct SpeechSettingsView: View {
         }
         .buttonStyle(.borderless)
         field(L.commonModel, "stt-rt-v5", stt.sonioxModel)
-        Toggle(L.recSttSpeakers, isOn: stt.speakerLabels)
+    }
+
+    @ViewBuilder
+    private func moss(_ s: SpeechSettings, _ stt: Binding<SttSettings>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SecureField(
+                L.recSttMossKey, text: $mossKey,
+                prompt: Text(s.mossSaved ? L.recSttKeySaved : L.recSttPasteKey)
+            )
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            Text(L.recSttMossDesc).font(.footnote).foregroundStyle(.secondary)
+        }
+        HStack {
+            let key = mossKey
+            testButton { try await $0.testMoss(key) }
+            Spacer()
+            Button(L.commonSave) {
+                saving = true
+                Task {
+                    defer { saving = false }
+                    do {
+                        let place = try await app.client?.saveMossKey(mossKey) ?? ""
+                        mossKey = ""
+                        result = (true, place)
+                        await refresh()
+                    } catch {
+                        result = (false, error.localizedDescription)
+                    }
+                }
+            }
+            .disabled(saving || mossKey.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .buttonStyle(.borderless)
     }
 
     /// languages are those the language picker offers: on the device, only
@@ -339,4 +468,13 @@ struct SpeechSettingsView: View {
         }
         .disabled(testing)
     }
+}
+
+/// ProviderPage is a pushed page that can go back by itself, as removing
+/// its provider does.
+private struct ProviderPage<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    @ViewBuilder let content: (DismissAction) -> Content
+
+    var body: some View { content(dismiss) }
 }

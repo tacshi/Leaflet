@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
@@ -205,6 +206,10 @@ func (a *App) audioBlock(c *ui.Context, n *doc.Node) {
 					status = locales.RecTranscribing()
 				case found:
 					status = fileDetail(file.Name, file.SizeBytes)
+					// What made the transcript, while the notes have one.
+					if engine := recording.EngineName(n.Str(doc.TranscribedBy)); engine != "" && strings.TrimSpace(n.Str("notes")) != "" {
+						status = locales.CardTranscribedBy(status, engine)
+					}
 				}
 				ui.Text(c, status).FontSize(12).TextColor(pal.TextMuted)
 			})
@@ -354,13 +359,13 @@ func (a *App) fileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) {
 	if notes {
 		label = locales.RecTranscribeAgain()
 	}
-	if m.Item(label).Disabled(!a.canChangePage() || a.rec.TranscribingFiles[n.ID] != "").Chosen() {
+	a.transcribeItem(m, a.openPageID(), label, !a.canChangePage() || a.rec.TranscribingFiles[n.ID] != "", func(provider string) {
 		if notes {
-			a.fileToTranscribe = n.ID
+			a.fileToTranscribe, a.fileTranscribeWith = n.ID, provider
 		} else {
-			a.transcribeFile(n.ID)
+			a.transcribeFile(n.ID, provider)
 		}
-	}
+	})
 }
 
 // setSpeakersHidden shows file block id's notes with or without the
@@ -489,12 +494,12 @@ func (a *App) speakerDialog(c *ui.Context) {
 }
 
 // transcribeFile transcribes audio file block id of the open page into its
-// notes, with the speech settings as they are.
-func (a *App) transcribeFile(id string) {
+// notes, with provider, or the one marked for the page when it is "".
+func (a *App) transcribeFile(id, provider string) {
 	if a.page == nil {
 		return
 	}
-	if err := a.pageCore().TranscribeFile(a.page.id, id, a.settings.Stt, a.online && !a.settings.WorkOffline); err != nil {
+	if err := a.pageCore().TranscribeFile(a.page.id, id, a.sttFor(a.page.id, provider), a.online && !a.settings.WorkOffline); err != nil {
 		a.toast(err.Error())
 	}
 }
@@ -508,7 +513,7 @@ func (a *App) replaceNotesAlert(c *ui.Context) {
 	open := true
 	if ui.AlertDialog(c, &open, locales.RecReplaceNotesTitle(), locales.RecReplaceNotesMessage(),
 		locales.CommonCancel(), locales.RecReplaceNotesAction()) == 1 {
-		a.transcribeFile(a.fileToTranscribe)
+		a.transcribeFile(a.fileToTranscribe, a.fileTranscribeWith)
 	}
 	if !open {
 		a.fileToTranscribe = ""

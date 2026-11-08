@@ -18,11 +18,31 @@ struct RecordControl: View {
         if state.recording, !state.testing {
             pill(recorder, state)
         } else {
-            Button(L.pageRecord, systemImage: "record.circle") {
-                recorder.start(pageID: pageID, editor: editor)
+            // With more than one speech provider set up, recording asks
+            // which transcribes it: there is no default.
+            if let picked = recorder.choices(for: pageID), picked.choices.count > 1 {
+                Menu(L.pageRecord, systemImage: "record.circle") {
+                    ForEach(picked.choices) { p in
+                        Button {
+                            recorder.start(pageID: pageID, editor: editor, provider: p.id)
+                        } label: {
+                            if p.id == picked.current {
+                                Label(p.name, systemImage: "checkmark")
+                            } else {
+                                Text(p.name)
+                            }
+                        }
+                    }
+                }
+                .tint(Color.primary)
+                .disabled(!canRecord || state.recording)
+            } else {
+                Button(L.pageRecord, systemImage: "record.circle") {
+                    recorder.start(pageID: pageID, editor: editor)
+                }
+                .tint(Color.primary)
+                .disabled(!canRecord || state.recording)
             }
-            .tint(Color.primary)
-            .disabled(!canRecord || state.recording)
         }
     }
 

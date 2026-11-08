@@ -24,6 +24,9 @@ const (
 	// SpeakerNames is the data key of the names the user gave speakers in
 	// a block's notes.
 	SpeakerNames = "speaker_names"
+	// TranscribedBy is the data key of the engine that wrote the
+	// transcript in a file block's notes, as the speech settings name it.
+	TranscribedBy = "transcribed_by"
 )
 
 // maxSpeakerName is the most characters a speaker's name takes.

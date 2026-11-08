@@ -106,6 +106,8 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   文件可用“快速查看”打开。
 - 使用 Soniox 或任何兼容 OpenAI 的 `/audio/transcriptions` 端点进行实时
   转写，包括你自己网络中的端点。
+- 通过 MOSS 转写并区分说话人，MOSI API 密钥保存在设备上：录音结束后转写，
+  也可以转写音频文件。
 - 用系统自带的语音识别在设备上转写，离线可用，无需密钥：适用于 macOS 26
   或更高版本的 Mac，以及 iPhone 和 iPad。
 
@@ -362,7 +364,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/agents` | 兼容 OpenAI 的客户端、预设、提示词、页面工具、循环和中枢 |
 | `internal/mcp` | `leaflet mcp`：供应用外智能体使用的页面工具 |
 | `internal/cli` | 基于这些工具的 `leaflet` 命令行 |
-| `internal/recording` | 采集、WAV、Soniox 流式传输和端点转写 |
+| `internal/recording` | 采集、WAV、Soniox 流式传输、MOSS 和端点转写 |
 | `internal/macspeech`、`speech` | 用设备自带的语音识别转写：`speech` 是一个 Swift 包，iOS 应用和 Mac 应用附带的助手 `leaflet-speech` 都由它构建 |
 | `internal/theme` | 颜色、字体和图标 |
 | `locales` | 各语言的应用文本，以及由其生成的 Go 代码 |

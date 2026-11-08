@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/coder/websocket"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -1074,4 +1076,55 @@ func TestTranscribeFileOnAnOlderServer(t *testing.T) {
 	if _, err := r.transcribeFile(context.Background(), f, store.SttSettings{Provider: "soniox"}); err == nil || err.Error() != locales.RecErrServerOld() {
 		t.Errorf("told %v", err)
 	}
+}
+
+// Signed out, with a Soniox key on this device, an audio file goes to
+// Soniox from here: there is no server to ask.
+func TestTranscribeFileWithSonioxHere(t *testing.T) {
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	if err := SetLocalSonioxKey("sk-here"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/files":
+			_, _ = io.WriteString(w, `{"id":"f1"}`)
+		case "/transcriptions":
+			_, _ = io.WriteString(w, `{"id":"t1"}`)
+		case "/transcriptions/t1":
+			_, _ = io.WriteString(w, `{"status":"completed"}`)
+		case "/transcriptions/t1/transcript":
+			_, _ = io.WriteString(w, `{"tokens":[{"text":"Hello.","start_ms":100,"end_ms":900}]}`)
+		}
+	}))
+	defer srv.Close()
+	api := sonioxAPI
+	sonioxAPI = srv.URL
+	defer func() { sonioxAPI = api }()
+
+	r, st, _ := newTestController(t)
+	src := filepath.Join(t.TempDir(), "Uncertainty.m4a")
+	if err := os.WriteFile(src, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan []store.Segment, 1)
+	stt := store.SttSettings{Provider: "soniox", SonioxModel: "stt-rt-v3"}
+	if err := r.TranscribeFile(f, "b", stt, true, func(segs []store.Segment, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+		got <- segs
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if segs := waitTranscript(t, got); len(segs) != 1 || segs[0].Text != "Hello." {
+		t.Errorf("segments %+v", segs)
+	}
+	// Soniox has nothing left of it to be told about.
+	r.FileTranscribed(f, stt)
 }

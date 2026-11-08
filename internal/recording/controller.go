@@ -32,6 +32,11 @@ type Controller struct {
 	input  Capture
 	update func(func())
 
+	// picked is the speech provider last picked to transcribe on each
+	// page, by its ID, guarded by pickMu: Choice marks it.
+	pickMu sync.Mutex
+	picked map[string]string
+
 	// Blobs is where audio goes up to for the other devices, and comes
 	// from when it is not on this one: the sync service. Without it,
 	// audio goes to Supabase when signed in.
@@ -385,6 +390,9 @@ func EngineLabel(s store.SttSettings) string {
 	if s.Provider == OnDevice {
 		return locales.RecEngineOnDevice()
 	}
+	if s.Provider == Moss {
+		return locales.RecEngineCloud("MOSS")
+	}
 	name := s.Model
 	if name == "" {
 		name = locales.RecEngineServer()
@@ -413,6 +421,14 @@ func Usable(s store.SttSettings, online, signedIn bool) error {
 			return errors.New(locales.RecErrNeedsConnection())
 		}
 		return nil
+	case s.Provider == Moss:
+		if MossKey() == "" {
+			return errors.New(locales.RecErrSetUpMoss())
+		}
+		if !online {
+			return errors.New(locales.RecErrNeedsConnection())
+		}
+		return nil
 	case !signedIn:
 		return errors.New(locales.RecErrSignInOrServer())
 	case !online:
@@ -435,6 +451,8 @@ func model(stt store.SttSettings) string {
 	switch stt.Provider {
 	case "soniox":
 		return stt.SonioxModel
+	case Moss:
+		return mossModel
 	case OnDevice:
 		return ""
 	}
@@ -646,11 +664,7 @@ func (r *Controller) startSoniox(session string, stt store.SttSettings) {
 	}
 	if err == nil {
 		var s *Soniox
-		hints := stt.LanguageHints
-		if _, ok := Languages[stt.Language]; ok {
-			hints = []string{stt.Language}
-		}
-		s, err = DialSoniox(ctx, key, stt.SonioxModel, hints, stt.SpeakerLabels)
+		s, err = DialSoniox(ctx, key, stt.SonioxModel, sonioxHints(stt), stt.SpeakerLabels)
 		if err == nil {
 			// The words of a stream still finishing after the next
 			// recording started are not that one's.
@@ -1009,7 +1023,11 @@ func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSet
 			defer func() { _ = f.Close() }()
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			segs, err = TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(), stt.Language)
+			if stt.Provider == Moss {
+				segs, err = TranscribeMoss(ctx, MossKey(), f, size, "test.wav", false)
+			} else {
+				segs, err = TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(), stt.Language)
+			}
 		}
 	}
 	if err != nil {
@@ -1042,11 +1060,6 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	}
 	if err := r.Usable(stt, online); err != nil {
 		return err
-	}
-	// Soniox transcribes saved audio through the server; with only a key
-	// on this device it works while recording.
-	if stt.Provider == "soniox" && !r.be.SignedIn() {
-		return errors.New(locales.RecErrSonioxSaved())
 	}
 	rec, err := r.st.UpdateRecording(id, func(rec *store.Recording) {
 		rec.Status, rec.Error, rec.SttProvider, rec.SttModel = "transcribing", "", stt.Provider, model(stt)
@@ -1190,7 +1203,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 	if stt.Provider == OnDevice {
 		return r.transcribeOnDevice(ctx, rec, path, stt.Language)
 	}
-	if stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL) {
+	if !onServer(stt) {
 		f, size, err := openAudio(path)
 		if err != nil && rec.AudioPath != "" {
 			fetched, ferr := r.storedAudio(ctx, rec)
@@ -1204,6 +1217,12 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 			return nil, err
 		}
 		defer func() { _ = f.Close() }()
+		switch stt.Provider {
+		case "soniox":
+			return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, f, size, "recording.wav", sonioxHints(stt), stt.SpeakerLabels)
+		case Moss:
+			return TranscribeMoss(ctx, MossKey(), f, size, "recording.wav", stt.SpeakerLabels)
+		}
 		return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(), stt.Language)
 	}
 	if !r.be.SignedIn() {
@@ -1233,7 +1252,9 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 			return nil, err
 		}
 	}
-	body := map[string]any{"action": "transcribe", "recording_id": rec.ID}
+	// The provider picked, which the server's copy of the settings may not
+	// have yet.
+	body := map[string]any{"action": "transcribe", "recording_id": rec.ID, "provider": stt.Provider}
 	if stt.Language != "auto" && stt.Language != "" {
 		body["language"] = stt.Language
 	}
@@ -1284,7 +1305,7 @@ func (r *Controller) TranscribeFile(f store.File, blockID string, stt store.SttS
 	// The server reads the file from Storage, so it goes there first.
 	if onServer(stt) {
 		if !r.be.SignedIn() {
-			return errors.New(locales.RecErrSonioxSaved())
+			return errors.New(locales.RecErrSignIn())
 		}
 		waits, err := r.st.FileWaitsUpload(f.ID)
 		if err != nil {
@@ -1308,15 +1329,31 @@ func (r *Controller) TranscribeFile(f store.File, blockID string, stt store.SttS
 	return nil
 }
 
-// onServer reports whether stt transcribes saved audio on the server.
+// onServer reports whether stt transcribes saved audio on the server:
+// not the device's own engine, an endpoint on this network, MOSS, or
+// Soniox with a key kept on this device, which the audio goes to from
+// here.
 func onServer(stt store.SttSettings) bool {
 	local := stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL)
-	return stt.Provider != OnDevice && !local
+	return stt.Provider != OnDevice && stt.Provider != Moss && !local && !sonioxHere(stt)
+}
+
+// sonioxHere reports whether stt is Soniox with a key on this device.
+func sonioxHere(stt store.SttSettings) bool {
+	return stt.Provider == "soniox" && LocalSonioxKey() != ""
+}
+
+// sonioxHints are the languages Soniox listens for with stt.
+func sonioxHints(stt store.SttSettings) []string {
+	if _, ok := Languages[stt.Language]; ok {
+		return []string{stt.Language}
+	}
+	return stt.LanguageHints
 }
 
 func (r *Controller) transcribeFile(ctx context.Context, f store.File, stt store.SttSettings) ([]store.Segment, error) {
 	if onServer(stt) {
-		body := map[string]any{"action": "transcribe", "file_id": f.ID}
+		body := map[string]any{"action": "transcribe", "file_id": f.ID, "provider": stt.Provider}
 		if stt.Language != "auto" && stt.Language != "" {
 			body["language"] = stt.Language
 		}
@@ -1347,7 +1384,14 @@ func (r *Controller) transcribeFile(ctx context.Context, f store.File, stt store
 		return nil, err
 	}
 	defer func() { _ = audio.Close() }()
-	return transcribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, size, "audio"+strings.ToLower(filepath.Ext(f.Name)), fileWait(size), EndpointKey(), stt.Language)
+	name := "audio" + strings.ToLower(filepath.Ext(f.Name))
+	switch stt.Provider {
+	case "soniox":
+		return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, audio, size, name, sonioxHints(stt), stt.SpeakerLabels)
+	case Moss:
+		return TranscribeMoss(ctx, MossKey(), audio, size, name, stt.SpeakerLabels)
+	}
+	return transcribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, size, name, fileWait(size), EndpointKey(), stt.Language)
 }
 
 // fileHere is the path of file f on this device, downloaded first when it
@@ -1383,7 +1427,7 @@ func (r *Controller) fileHere(ctx context.Context, f store.File) (string, error)
 // the page, so what Soniox kept of it can go. Told nothing, Soniox's own
 // retention ends it, and asking again costs nothing.
 func (r *Controller) FileTranscribed(f store.File, stt store.SttSettings) {
-	if stt.Provider != "soniox" {
+	if stt.Provider != "soniox" || !onServer(stt) {
 		return
 	}
 	guard.Go(func() {

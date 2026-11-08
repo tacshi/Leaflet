@@ -2,24 +2,28 @@ package store
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
 // SttSettings are the speech-to-text choice and recording options, which
 // the server mirrors in stt_settings.
 type SttSettings struct {
-	// Provider is soniox | openai-compatible | on-device, the device's own
-	// engine, which only iOS has.
-	Provider       string   `json:"provider"`
-	ModelSize      string   `json:"model_size"`
-	RunOn          string   `json:"run_on"`   // auto | gpu | cpu
-	Language       string   `json:"language"` // auto, or an ISO 639-1 code
-	LiveTranscript bool     `json:"live_transcript"`
-	SpeakerLabels  bool     `json:"speaker_labels"`
-	BaseURL        string   `json:"base_url"`
-	Model          string   `json:"model"`
-	ProviderID     string   `json:"provider_id,omitempty"`
-	SonioxModel    string   `json:"soniox_model"`
+	// Provider is soniox | moss | openai-compatible | on-device, the
+	// device's own engine.
+	Provider       string `json:"provider"`
+	ModelSize      string `json:"model_size"`
+	RunOn          string `json:"run_on"`   // auto | gpu | cpu
+	Language       string `json:"language"` // auto, or an ISO 639-1 code
+	LiveTranscript bool   `json:"live_transcript"`
+	SpeakerLabels  bool   `json:"speaker_labels"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model"`
+	ProviderID     string `json:"provider_id,omitempty"`
+	SonioxModel    string `json:"soniox_model"`
+	// SonioxOnServer says a Soniox key was saved on the server from this
+	// device, signed in.
+	SonioxOnServer bool     `json:"soniox_on_server,omitempty"`
 	LanguageHints  []string `json:"language_hints"`
 }
 
@@ -111,7 +115,7 @@ func (s *Store) Settings() Settings {
 	if out.PanelWidth == 0 {
 		out.PanelWidth = 360
 	}
-	if out.Stt.Provider != "soniox" && out.Stt.Provider != "openai-compatible" && out.Stt.Provider != "on-device" {
+	if !slices.Contains([]string{"soniox", "moss", "openai-compatible", "on-device"}, out.Stt.Provider) {
 		out.Stt.Provider = "openai-compatible"
 	}
 	// A default whose provider is gone, as one removed on another device,

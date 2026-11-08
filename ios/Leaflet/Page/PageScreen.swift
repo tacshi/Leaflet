@@ -99,7 +99,10 @@ struct PageScreen: View {
                                 }
                             }
                         }
-                        c.onReplaceNotes = { [weak scene] in scene?.replacingNotes = $0 }
+                        c.onReplaceNotes = { [weak scene] in
+                            scene?.replacingNotes = $0
+                            scene?.replacingWith = $1
+                        }
                         c.onEditSpeaker = { [weak scene] node, from, place in
                             scene?.blockName = from ?? ""
                             scene?.speakerEdit = SpeakerEdit(node: node, from: from, place: place)

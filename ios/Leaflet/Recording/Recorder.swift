@@ -34,7 +34,12 @@ final class Recorder {
     /// tell, for the views to read it again.
     private(set) var changes = 0
 
+    /// speech are the speech providers a transcription on each page asked
+    /// for can be picked from, and the one marked, by page.
+    private(set) var speech: [String: SpeechChoices] = [:]
+
     @ObservationIgnored private var client: CoreClient?
+    @ObservationIgnored private var speechAsked: Set<String> = []
     @ObservationIgnored private var toast: ((String) -> Void)?
     @ObservationIgnored private var asked: Set<String> = []
     /// reads numbers the reads of each recording, as a stop and the end of
@@ -106,18 +111,41 @@ final class Recorder {
     // MARK: Recording
 
     /// start records into the page, putting its block at the editor's
-    /// caret.
-    func start(pageID: String, editor: EditorController?) {
+    /// caret, transcribed by provider, or the one marked for the page when
+    /// it is "".
+    func start(pageID: String, editor: EditorController?, provider: String = "") {
         guard let client, !state.recording else { return }
         stopPlaying()
         Task {
             do {
-                let node = try await client.startRecording(pageID)
+                let node = try await client.startRecording(pageID, provider: provider)
                 editor?.insertBlock(node)
             } catch {
                 toast?(error.localizedDescription)
             }
+            await loadChoices(pageID)
         }
+    }
+
+    // MARK: Speech providers
+
+    /// choices returns the speech providers a transcription on page can be
+    /// picked from, and the one marked, reading them the first time: there
+    /// is no default, so with more than one, each transcription asks.
+    func choices(for page: String) -> SpeechChoices? {
+        if speechAsked.insert(page).inserted { Task { await loadChoices(page) } }
+        return speech[page]
+    }
+
+    /// reloadChoices reads the choices again, as the settings or the
+    /// session change: a key saved or removed changes them.
+    func reloadChoices() {
+        for page in speechAsked { Task { await loadChoices(page) } }
+    }
+
+    private func loadChoices(_ page: String) async {
+        guard let client, let c = try? await client.speechChoices(page) else { return }
+        if speech[page] != c { speech[page] = c }
     }
 
     func stop() {
@@ -172,27 +200,32 @@ final class Recorder {
         }
     }
 
-    func retranscribe(_ id: String) {
+    /// retranscribe transcribes recording id, on page, again, with
+    /// provider, or the one marked for the page when it is "".
+    func retranscribe(_ id: String, page: String?, provider: String) {
         guard let client else { return }
         Task {
             do {
-                try await client.retranscribe(id)
+                try await client.retranscribe(id, provider: provider)
                 await load(id)
             } catch {
                 toast?(error.localizedDescription)
             }
+            if let page { await loadChoices(page) }
         }
     }
 
-    /// transcribeFile transcribes audio file block of page into its notes.
-    func transcribeFile(page: String, block: String) {
+    /// transcribeFile transcribes audio file block of page into its notes,
+    /// with provider, or the one marked for the page when it is "".
+    func transcribeFile(page: String, block: String, provider: String = "") {
         guard let client else { return }
         Task {
             do {
-                try await client.transcribeFile(page: page, block: block)
+                try await client.transcribeFile(page: page, block: block, provider: provider)
             } catch {
                 toast?(error.localizedDescription)
             }
+            await loadChoices(page)
         }
     }
 

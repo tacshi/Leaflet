@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"strings"
 
 	"leaflet/internal/agents"
@@ -24,10 +25,10 @@ type agentState struct {
 	Options   []agentOption `json:"options"`
 	Available bool          `json:"available"`
 	// Current is the agent the chat asks: the one picked for the page,
-	// else the default; nil while none can run.
+	// else the one last picked anywhere; nil while none can run.
 	Current *agentChoice `json:"current,omitempty"`
-	// DefaultAgent is the agent asked where none is named, as Settings
-	// sets it; nil while none can run.
+	// DefaultAgent is the agent asked where none is named: the one last
+	// picked; nil while none can run.
 	DefaultAgent *agentChoice `json:"default_agent,omitempty"`
 	// Past are the page's earlier conversations, the latest first.
 	Past []pastConversation `json:"past"`
@@ -152,11 +153,17 @@ func (c *Core) options() []agentOption {
 }
 
 // SelectAgent picks the agent and model the page's chat asks, as the
-// desktop panel's picker does.
+// desktop panel's picker does. There is no default to set: the agent last
+// picked is the one a page not picked for yet asks.
 func (c *Core) SelectAgent(pageID, providerID, model string) {
 	defer catch(nil)
 	c.q.do(func() {
 		c.core.Hub.Session(pageID).Selected = &store.ModelChoice{ProviderID: providerID, Model: model}
+		s := c.core.Store.Settings()
+		s.DefaultModel = store.ModelChoice{ProviderID: providerID}.Encode()
+		if err := c.core.Store.SaveSettings(s); err != nil {
+			log.Printf("agent picked: %v", err)
+		}
 	})
 	c.ev.agentsChanged(pageID)
 }

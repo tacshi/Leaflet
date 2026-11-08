@@ -10,6 +10,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -33,8 +34,15 @@ func (a *App) pageView(c *ui.Context) {
 		}
 		tools(c, func() {
 			if !a.rec.Active() && !ps.editor.ReadOnly {
-				if iconButton(c, "record", "record", locales.PageRecord()).Clicked() {
-					a.startRecording(ps.id)
+				// With more than one provider set up, recording asks which
+				// transcribes it: there is no default.
+				record := iconButton(c, "record", "record", locales.PageRecord())
+				if len(recording.Choices(a.settings.Stt, a.speechKeys())) > 1 {
+					record.PopoverMenuButton(func(m *ui.Menu) {
+						a.transcribeItems(m, ps.id, func(provider string) { a.startRecording(ps.id, provider) })
+					}, endMenu)
+				} else if record.Clicked() {
+					a.startRecording(ps.id, "")
 				}
 			}
 			// A public link needs no server, so every page but a template

@@ -42,7 +42,8 @@ struct FileDialogs: ViewModifier {
                 Button(L.commonCancel, role: .cancel) {}
                 Button(L.recReplaceNotesAction, role: .destructive) {
                     if let page = scene.editor?.pageID {
-                        Recorder.shared.transcribeFile(page: page, block: node.id)
+                        Recorder.shared.transcribeFile(
+                            page: page, block: node.id, provider: scene.replacingWith)
                     }
                 }
             } message: { _ in

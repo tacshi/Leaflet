@@ -154,6 +154,9 @@ final class SceneModel {
     /// replacingNotes is a file block whose notes a transcript is to
     /// replace, while that is asked.
     var replacingNotes: DocNode?
+    /// replacingWith is the speech provider it was picked to take, or ""
+    /// for the one marked.
+    var replacingWith = ""
     /// editingNotes is a video block whose notes are being written, and
     /// editingLink one whose link is being changed.
     var editingNotes: DocNode?

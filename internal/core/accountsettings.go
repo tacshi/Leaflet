@@ -117,7 +117,7 @@ func (c *Core) DeleteAccount() error {
 	if c.Hub != nil {
 		c.Hub.ForgetProviders(ctx)
 	}
-	for _, forget := range []func(string) error{recording.SetEndpointKey, recording.SetLocalSonioxKey} {
+	for _, forget := range []func(string) error{recording.SetEndpointKey, recording.SetLocalSonioxKey, recording.SetMossKey} {
 		if err := forget(""); err != nil {
 			log.Printf("forget a speech key: %v", err)
 		}

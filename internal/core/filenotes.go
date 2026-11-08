@@ -46,7 +46,7 @@ func (p Pages) TranscribeFile(pageID, blockID string, stt store.SttSettings, onl
 			p.notify(locales.RecErrNoWords())
 			return
 		}
-		written, less, err := p.SetFileNotes(pageID, blockID, f.ID, notes, was)
+		written, less, err := p.SetFileNotes(pageID, blockID, f.ID, notes, was, stt.Provider)
 		switch written {
 		case NotesGone:
 			// SetFileNotes said so.
@@ -81,15 +81,16 @@ const (
 	NotesFailed
 )
 
-// SetFileNotes writes notes, the transcript of file fileID, in file block
-// blockID of page pageID, whose notes were was when it was asked for.
+// SetFileNotes writes notes, the transcript of file fileID that engine by
+// made (a speech provider), in file block blockID of page pageID, whose
+// notes were was when it was asked for.
 // Notes written since stay, the transcript after them, as much of it as
 // the notes have room for: a transcript that took a while takes no one's
 // writing. On an open page it is one step to undo. It reports what came of
 // it, and cut, whether the transcript was cut to fit after notes written
 // since. A block gone by then, or one that holds another file, or a page
 // that can no longer be changed, is said so.
-func (p Pages) SetFileNotes(pageID, blockID, fileID, notes, was string) (written NotesWritten, cut bool, err error) {
+func (p Pages) SetFileNotes(pageID, blockID, fileID, notes, was, by string) (written NotesWritten, cut bool, err error) {
 	// merged is n's notes with the transcript, and whether it was cut.
 	merged := func(n *doc.Node) (string, bool, error) {
 		now := n.Str("notes")
@@ -124,6 +125,7 @@ func (p Pages) SetFileNotes(pageID, blockID, fileID, notes, was string) (written
 		}
 		next := n.Clone()
 		next.Set("notes", text)
+		next.Set(doc.TranscribedBy, by)
 		if err := lp.ApplyOps([]doc.Op{{Op: "replace", ID: blockID, Node: next, PrevNode: n.Clone()}}); err != nil {
 			return NotesFailed, false, err
 		}
@@ -151,6 +153,7 @@ func (p Pages) SetFileNotes(pageID, blockID, fileID, notes, was string) (written
 			return false
 		}
 		n.Set("notes", text)
+		n.Set(doc.TranscribedBy, by)
 		return true
 	})
 	switch {

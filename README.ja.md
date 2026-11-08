@@ -118,6 +118,8 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   iPad では、そのほかのファイルも Quick Look で表示できます。
 - Soniox、または自分のネットワーク内のものを含む任意の OpenAI 互換
   `/audio/transcriptions` エンドポイントによるリアルタイム文字起こし。
+- MOSS による話者付きの文字起こし（MOSI の API キーはデバイスに保存）：録音
+  を止めたあとと、音声ファイルで使えます。
 - システム自身の音声認識による、デバイス上での文字起こし（オフライン、キー
   不要）：macOS 26 以降の Mac と、iPhone と iPad で使えます。
 
@@ -399,7 +401,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
 | `internal/cli` | それらのツールを使う `leaflet` コマンドライン |
-| `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、エンドポイントでの文字起こし |
+| `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、MOSS、エンドポイントでの文字起こし |
 | `internal/macspeech`、`speech` | デバイス自身の音声認識による文字起こし。`speech` は Swift パッケージで、iOS アプリと、Mac アプリに同梱するヘルパー `leaflet-speech` がこれでビルドされます |
 | `internal/theme` | 色、フォント、アイコン |
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |

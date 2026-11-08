@@ -375,19 +375,21 @@ func (c *Core) RecordingState() (_ string, err error) {
 // online reports whether the core may reach the network; on the queue.
 func (c *Core) online(s store.Settings) bool { return c.plat.Online() && !s.WorkOffline }
 
-// StartRecording records into an open page, with a transcript when the
-// speech settings can make one. It returns the recording's block, as
-// JSON, for the app's editor to put in the page at the caret.
-func (c *Core) StartRecording(pageID string) (_ string, err error) {
+// StartRecording records into an open page, with a transcript by
+// provider, or the one SpeechChoices marks when it is "", when that can
+// make one. It returns the recording's block, as JSON, for the app's
+// editor to put in the page at the caret.
+func (c *Core) StartRecording(pageID, provider string) (_ string, err error) {
 	defer catch(&err)
 	var node *doc.Node
+	keys := c.speechKeys()
 	c.q.do(func() {
 		if c.pages[pageID] == nil {
 			err = errNotOpen
 			return
 		}
 		s := c.core.Store.Settings()
-		err = c.core.Rec.Start(pageID, s.Stt, c.online(s), func(n *doc.Node) { node = n })
+		err = c.core.Rec.Start(pageID, c.sttFor(pageID, provider, keys), c.online(s), func(n *doc.Node) { node = n })
 		c.tellRecording()
 	})
 	if err != nil {
@@ -532,27 +534,83 @@ func RecordingAudioName(title string) string {
 }
 
 // Retranscribe transcribes a recording again, or for the first time,
-// with the speech settings as they are.
-func (c *Core) Retranscribe(id string) (err error) {
+// with provider, or the one SpeechChoices marks for its page when it is "".
+func (c *Core) Retranscribe(id, provider string) (err error) {
 	defer catch(&err)
+	keys := c.speechKeys()
 	c.q.do(func() {
 		s := c.core.Store.Settings()
-		err = c.core.Rec.Retranscribe(id, s.Stt, c.online(s))
+		rec, rerr := c.core.Store.Recording(id)
+		if rerr != nil {
+			err = rerr
+			return
+		}
+		err = c.core.Rec.Retranscribe(id, c.sttFor(rec.PageID, provider, keys), c.online(s))
 		c.tellRecording()
 	})
 	return err
 }
 
 // TranscribeFile transcribes audio file block blockID of page pageID with
-// the speech settings as they are, into its notes.
-func (c *Core) TranscribeFile(pageID, blockID string) (err error) {
+// provider, or the one SpeechChoices marks when it is "", into its notes.
+func (c *Core) TranscribeFile(pageID, blockID, provider string) (err error) {
 	defer catch(&err)
+	keys := c.speechKeys()
 	c.q.do(func() {
 		s := c.core.Store.Settings()
-		err = c.pageCore().TranscribeFile(pageID, blockID, s.Stt, c.online(s))
+		err = c.pageCore().TranscribeFile(pageID, blockID, c.sttFor(pageID, provider, keys), c.online(s))
 		c.tellRecording()
 	})
 	return err
+}
+
+// speechChoices are the providers a transcription on a page can be picked
+// from, and the one its list marks.
+type speechChoices struct {
+	Choices []recording.SpeechProvider `json:"choices"`
+	Current string                     `json:"current"`
+}
+
+// SpeechChoices returns the providers a transcription on page pageID can
+// be picked from, as speechChoices: with more than one, the app asks
+// which, marking the one last picked there.
+func (c *Core) SpeechChoices(pageID string) (_ string, err error) {
+	defer catch(&err)
+	keys := c.speechKeys()
+	var out speechChoices
+	c.q.do(func() {
+		stt := c.core.Store.Settings().Stt
+		out.Choices = recording.Choices(stt, keys)
+		out.Current = c.core.Rec.Choice(pageID, stt, keys)
+	})
+	return encode(out)
+}
+
+// speechKeys are the speech keys kept; off the queue, as the keychain can
+// take a while.
+func (c *Core) speechKeys() recording.Keys {
+	var stt store.SttSettings
+	var signedIn, onDevice bool
+	c.q.do(func() {
+		stt, signedIn, onDevice = c.core.Store.Settings().Stt, c.core.Remote.SignedIn(), c.core.Rec.Engine != nil
+	})
+	return recording.KeysOf(stt, recording.LocalSonioxKey() != "", recording.MossKey() != "", signedIn, onDevice)
+}
+
+// sttFor is the speech settings a transcription on page pageID takes, with
+// provider picked, or the one marked when it is "": one picked is kept as
+// the one last picked anywhere. On the queue.
+func (c *Core) sttFor(pageID, provider string, keys recording.Keys) store.SttSettings {
+	s := c.core.Store.Settings()
+	stt, last := c.core.Rec.For(pageID, provider, s.Stt, keys)
+	if last {
+		s.Stt.Provider = provider
+		if err := c.core.Store.SaveSettings(s); err != nil {
+			log.Printf("speech settings: %v", err)
+		}
+		c.core.Rec.MirrorSettings(s.Stt)
+	}
+	return stt
 }
 
 // DismissRecordingError lets go of what went wrong with a recording, which
@@ -599,15 +657,21 @@ type speechSettings struct {
 	EndpointKey string `json:"endpoint_key"`
 	// SonioxSaved says this device's keychain has a Soniox key.
 	SonioxSaved bool `json:"soniox_saved"`
-	SignedIn    bool `json:"signed_in"`
+	// MossSaved says this device's keychain has a MOSS key.
+	MossSaved bool `json:"moss_saved"`
+	SignedIn  bool `json:"signed_in"`
 	// LocalEndpoint says the endpoint is on this device's network: its
 	// key is this device's; a cloud one's comes from an agent provider.
 	LocalEndpoint bool `json:"local_endpoint"`
 	// OnDevice says the device has an engine of its own.
 	OnDevice bool `json:"on_device"`
-	// Status says where transcription runs, or that it is not set up.
-	Status    string           `json:"status"`
-	Languages []speechLanguage `json:"languages"`
+	// Status says which providers are set up, or that none is.
+	Status string `json:"status"`
+	// Providers are the speech providers set up, in the list's order, and
+	// Addable those that can be added.
+	Providers []recording.SpeechProvider `json:"providers"`
+	Addable   []recording.SpeechProvider `json:"addable"`
+	Languages []speechLanguage           `json:"languages"`
 	// KeepAudio is how long recordings' audio stays on this device once
 	// uploaded: until_uploaded, 30_days or always.
 	KeepAudio string `json:"keep_audio"`
@@ -625,8 +689,11 @@ func (c *Core) SpeechSettings() (_ string, err error) {
 	})
 	out.EndpointKey = recording.EndpointKey()
 	out.SonioxSaved = recording.LocalSonioxKey() != ""
+	out.MossSaved = recording.MossKey() != ""
 	out.LocalEndpoint = recording.IsLocalEndpoint(out.Stt.BaseURL)
-	out.Status = recording.EngineStatus(out.Stt, out.SonioxSaved || out.SignedIn, out.OnDevice)
+	keys := recording.KeysOf(out.Stt, out.SonioxSaved, out.MossSaved, out.SignedIn, out.OnDevice)
+	out.Status = recording.Summary(out.Stt, keys)
+	out.Providers, out.Addable = recording.SpeechProviders(out.Stt, keys)
 	for _, code := range recording.LanguageCodes() {
 		out.Languages = append(out.Languages, speechLanguage{Code: code, Name: recording.LanguageName(code)})
 	}
@@ -651,22 +718,55 @@ func (c *Core) SetKeepAudio(keep string) (err error) {
 // SaveSpeechSettings keeps the speech settings, a store.SttSettings as
 // JSON, and mirrors them to the server, signed in. The JSON is the whole
 // of the settings: a field it leaves out is cleared, as the app leaves
-// out a provider ID it chose none for, and language hints it emptied.
+// out a provider ID it chose none for, and language hints it emptied;
+// only whether a Soniox key went to the server stays, which the app
+// doesn't show. Naming a provider not set up, they take the first that is.
 func (c *Core) SaveSpeechSettings(stt string) (err error) {
 	defer catch(&err)
 	var next store.SttSettings
 	if err := json.Unmarshal([]byte(stt), &next); err != nil {
 		return err
 	}
+	return c.saveStt(func(stt *store.SttSettings) error {
+		// What the app doesn't show it keeps as it was.
+		next.SonioxOnServer = stt.SonioxOnServer
+		*stt = next
+		return nil
+	})
+}
+
+// saveStt changes the speech settings with change, has them transcribe
+// with a provider set up when the one they name is not, keeps them, and
+// mirrors them to the server, signed in.
+func (c *Core) saveStt(change func(*store.SttSettings) error) (err error) {
+	var next store.SttSettings
 	c.q.do(func() {
 		s := c.core.Store.Settings()
-		s.Stt = next
+		if err = change(&s.Stt); err != nil {
+			return
+		}
+		keys := recording.KeysOf(s.Stt, recording.LocalSonioxKey() != "", recording.MossKey() != "",
+			c.core.Remote.SignedIn(), c.core.Rec.Engine != nil)
+		recording.PreferSetUp(&s.Stt, keys)
+		next = s.Stt
 		err = c.core.Store.SaveSettings(s)
 	})
 	if err == nil {
 		c.core.Rec.MirrorSettings(next)
 	}
 	return err
+}
+
+// RemoveSpeechProvider takes a speech provider off Settings' list: its key
+// goes from this device, or an endpoint's address from the settings.
+func (c *Core) RemoveSpeechProvider(id string) (err error) {
+	defer catch(&err)
+	return c.saveStt(func(stt *store.SttSettings) error {
+		keys := recording.KeysOf(*stt, recording.LocalSonioxKey() != "", recording.MossKey() != "",
+			c.core.Remote.SignedIn(), c.core.Rec.Engine != nil)
+		_, err := recording.RemoveProvider(id, stt, keys)
+		return err
+	})
 }
 
 // SetEndpointKey keeps the key of an endpoint on this device's network
@@ -685,13 +785,52 @@ func (c *Core) SaveSonioxKey(key string) (_ string, err error) {
 		return "", nil
 	}
 	onServer, err := c.core.Rec.SaveSonioxKey(key)
-	switch {
-	case err != nil:
+	if err != nil {
 		return "", err
-	case onServer:
+	}
+	// The first provider set up transcribes.
+	if err := c.saveStt(func(stt *store.SttSettings) error {
+		stt.SonioxOnServer = stt.SonioxOnServer || onServer
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	if onServer {
 		return locales.RecSttSavedOnServer(), nil
 	}
 	return locales.RecSttSavedOnDevice(), nil
+}
+
+// SaveMossKey keeps a MOSS key in this device's keychain. It returns where
+// it went, in words for the user.
+func (c *Core) SaveMossKey(key string) (_ string, err error) {
+	defer catch(&err)
+	if key = strings.TrimSpace(key); key == "" {
+		return "", nil
+	}
+	if err := recording.SetMossKey(key); err != nil {
+		return "", errors.New(locales.RecSttKeyNotSaved(err.Error()))
+	}
+	// The first provider set up transcribes.
+	if err := c.saveStt(func(*store.SttSettings) error { return nil }); err != nil {
+		return "", err
+	}
+	return locales.RecSttSavedOnDevice(), nil
+}
+
+// TestMoss tries a MOSS key, or this device's saved one when key is "".
+// It returns words to show for it working.
+func (c *Core) TestMoss(key string) (_ string, err error) {
+	defer catch(&err)
+	if key = strings.TrimSpace(key); key == "" {
+		key = recording.MossKey()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := recording.TestMossKey(ctx, key); err != nil {
+		return "", err
+	}
+	return locales.RecSttItWorks(), nil
 }
 
 // TestEndpoint tries an OpenAI-compatible endpoint with a second of

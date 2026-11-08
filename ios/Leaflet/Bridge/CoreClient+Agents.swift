@@ -98,10 +98,11 @@ struct AgentState: Codable, Sendable {
     var running: Bool
     var options: [Option]
     var available: Bool
-    /// current is the agent the chat asks, picked or the default.
+    /// current is the agent the chat asks: the one picked for the page,
+    /// else the one last picked anywhere.
     var current: Choice?
-    /// defaultAgent is the agent asked where none is named, as Settings
-    /// sets it.
+    /// defaultAgent is the agent asked where none is named: the one last
+    /// picked.
     var defaultAgent: Choice?
     /// past are the page's earlier conversations, the latest first.
     var past: [Past] = []

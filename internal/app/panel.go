@@ -242,7 +242,7 @@ func (a *App) focusBlocks() []string {
 
 // agentPicker is the menu choosing the agent the chat asks, named alone:
 // each runs the model Settings › Agent providers chose for it, which its
-// item says.
+// item says. The one picked is the one pages not picked for yet ask.
 func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.Option) {
 	current, err := a.hub.Resolve(sess.Selected)
 	name := locales.PanelNoAgent()
@@ -253,6 +253,10 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 		for _, o := range options {
 			if m.Item(o.Label()).Radio(err == nil && current.Provider.ID == o.Provider.ID).Chosen() {
 				sess.Selected = &store.ModelChoice{ProviderID: o.Provider.ID}
+				// There is no default to set: the agent last picked is the
+				// one a page not picked for yet asks.
+				a.settings.DefaultModel = store.ModelChoice{ProviderID: o.Provider.ID}.Encode()
+				a.saveSettings()
 			}
 		}
 		m.Separator()

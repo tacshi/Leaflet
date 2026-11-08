@@ -197,6 +197,9 @@ final class AppModel {
         switch event {
         case .changed(let table, let pageID):
             if ["pages", "page_contents", "*"].contains(table) { remind(after: .seconds(2)) }
+            // A speech key saved or removed, or signing in or out, changes
+            // the providers a transcription is picked from.
+            if ["key_values", "session", "*"].contains(table) { Recorder.shared.reloadChoices() }
             if ["pages", "folders", "spaces", "session"].contains(table) {
                 Task { await reload() }
             } else if table == "files" {

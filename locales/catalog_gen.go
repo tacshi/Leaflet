@@ -2121,6 +2121,24 @@ func (msgs Messages) CardFileDetail(kind string, size string) string {
 	return Catalog.Format(msgs.locale, "cardFileDetail", map[string]any{"kind": kind, "size": size})
 }
 
+// CardTranscribedBy says "{detail} · {engine}"
+// in the language the app shows.
+//
+// An audio file's card, under the name: its type and size, then the engine
+// that transcribed it (Soniox, MOSS, On this device, Endpoint).
+func CardTranscribedBy(detail string, engine string) string {
+	return In(i18n.Locale()).CardTranscribedBy(detail, engine)
+}
+
+// CardTranscribedBy says "{detail} · {engine}"
+// in the language of msgs.
+//
+// An audio file's card, under the name: its type and size, then the engine
+// that transcribed it (Soniox, MOSS, On this device, Endpoint).
+func (msgs Messages) CardTranscribedBy(detail string, engine string) string {
+	return Catalog.Format(msgs.locale, "cardTranscribedBy", map[string]any{"detail": detail, "engine": engine})
+}
+
 // CardPlayFile says "Play {name}"
 // in the language the app shows.
 //
@@ -10279,18 +10297,182 @@ func (msgs Messages) RecErrNoWords() string {
 	return Catalog.Format(msgs.locale, "recErrNoWords", nil)
 }
 
-// RecErrSonioxSaved says "Soniox transcribes as you record here; saved audio needs a Leaflet server."
+// RecErrSonioxFailed says "Soniox could not transcribe this audio. {details}"
 // in the language the app shows.
 //
-// Error when retranscribing with Soniox while signed out.
-func RecErrSonioxSaved() string { return In(i18n.Locale()).RecErrSonioxSaved() }
+// Error when Soniox fails to transcribe saved audio sent from this device,
+// with Soniox's own message (may be empty).
+func RecErrSonioxFailed(details string) string { return In(i18n.Locale()).RecErrSonioxFailed(details) }
 
-// RecErrSonioxSaved says "Soniox transcribes as you record here; saved audio needs a Leaflet server."
+// RecErrSonioxFailed says "Soniox could not transcribe this audio. {details}"
 // in the language of msgs.
 //
-// Error when retranscribing with Soniox while signed out.
-func (msgs Messages) RecErrSonioxSaved() string {
-	return Catalog.Format(msgs.locale, "recErrSonioxSaved", nil)
+// Error when Soniox fails to transcribe saved audio sent from this device,
+// with Soniox's own message (may be empty).
+func (msgs Messages) RecErrSonioxFailed(details string) string {
+	return Catalog.Format(msgs.locale, "recErrSonioxFailed", map[string]any{"details": details})
+}
+
+// RecErrSetUpMoss says "Add a MOSS API key in Settings › Speech to text."
+// in the language the app shows.
+//
+// Error when transcribing with MOSS before a key is saved on this device.
+func RecErrSetUpMoss() string { return In(i18n.Locale()).RecErrSetUpMoss() }
+
+// RecErrSetUpMoss says "Add a MOSS API key in Settings › Speech to text."
+// in the language of msgs.
+//
+// Error when transcribing with MOSS before a key is saved on this device.
+func (msgs Messages) RecErrSetUpMoss() string {
+	return Catalog.Format(msgs.locale, "recErrSetUpMoss", nil)
+}
+
+// RecErrMossRejected says "MOSS rejected this key"
+// in the language the app shows.
+//
+// Error when MOSS refuses the API key.
+func RecErrMossRejected() string { return In(i18n.Locale()).RecErrMossRejected() }
+
+// RecErrMossRejected says "MOSS rejected this key"
+// in the language of msgs.
+//
+// Error when MOSS refuses the API key.
+func (msgs Messages) RecErrMossRejected() string {
+	return Catalog.Format(msgs.locale, "recErrMossRejected", nil)
+}
+
+// RecErrMossBalance says "Your MOSS account has no balance left."
+// in the language the app shows.
+//
+// Error when MOSS says the account is out of credit.
+func RecErrMossBalance() string { return In(i18n.Locale()).RecErrMossBalance() }
+
+// RecErrMossBalance says "Your MOSS account has no balance left."
+// in the language of msgs.
+//
+// Error when MOSS says the account is out of credit.
+func (msgs Messages) RecErrMossBalance() string {
+	return Catalog.Format(msgs.locale, "recErrMossBalance", nil)
+}
+
+// RecErrMossTooLarge says "MOSS takes files up to 512 MB."
+// in the language the app shows.
+//
+// Error when the audio is too large for MOSS.
+func RecErrMossTooLarge() string { return In(i18n.Locale()).RecErrMossTooLarge() }
+
+// RecErrMossTooLarge says "MOSS takes files up to 512 MB."
+// in the language of msgs.
+//
+// Error when the audio is too large for MOSS.
+func (msgs Messages) RecErrMossTooLarge() string {
+	return Catalog.Format(msgs.locale, "recErrMossTooLarge", nil)
+}
+
+// RecErrMossStatus says "MOSS answered {status} {details}"
+// in the language the app shows.
+//
+// Error of a MOSS call, with the HTTP status and MOSS's message (may be
+// empty).
+func RecErrMossStatus(status string, details string) string {
+	return In(i18n.Locale()).RecErrMossStatus(status, details)
+}
+
+// RecErrMossStatus says "MOSS answered {status} {details}"
+// in the language of msgs.
+//
+// Error of a MOSS call, with the HTTP status and MOSS's message (may be
+// empty).
+func (msgs Messages) RecErrMossStatus(status string, details string) string {
+	return Catalog.Format(msgs.locale, "recErrMossStatus", map[string]any{"status": status, "details": details})
+}
+
+// RecErrMossFailed says "MOSS could not transcribe this audio. {details}"
+// in the language the app shows.
+//
+// Error when MOSS fails to transcribe audio, with MOSS's own message (may
+// be empty).
+func RecErrMossFailed(details string) string { return In(i18n.Locale()).RecErrMossFailed(details) }
+
+// RecErrMossFailed says "MOSS could not transcribe this audio. {details}"
+// in the language of msgs.
+//
+// Error when MOSS fails to transcribe audio, with MOSS's own message (may
+// be empty).
+func (msgs Messages) RecErrMossFailed(details string) string {
+	return Catalog.Format(msgs.locale, "recErrMossFailed", map[string]any{"details": details})
+}
+
+// RecSttMossKey says "MOSS API key"
+// in the language the app shows.
+//
+// Settings › Speech to text: the label of the MOSS key field.
+func RecSttMossKey() string { return In(i18n.Locale()).RecSttMossKey() }
+
+// RecSttMossKey says "MOSS API key"
+// in the language of msgs.
+//
+// Settings › Speech to text: the label of the MOSS key field.
+func (msgs Messages) RecSttMossKey() string {
+	return Catalog.Format(msgs.locale, "recSttMossKey", nil)
+}
+
+// RecSttMossDesc says "Transcribes when a recording stops, with speakers; key kept on this device"
+// in the language the app shows.
+//
+// Settings › Speech to text: what MOSS does, and where its key is kept.
+func RecSttMossDesc() string { return In(i18n.Locale()).RecSttMossDesc() }
+
+// RecSttMossDesc says "Transcribes when a recording stops, with speakers; key kept on this device"
+// in the language of msgs.
+//
+// Settings › Speech to text: what MOSS does, and where its key is kept.
+func (msgs Messages) RecSttMossDesc() string {
+	return Catalog.Format(msgs.locale, "recSttMossDesc", nil)
+}
+
+// RecSttOnDevicePlace says "Private and offline, without a key"
+// in the language the app shows.
+//
+// Settings › Speech to text: the providers list, under the device's own
+// engine.
+func RecSttOnDevicePlace() string { return In(i18n.Locale()).RecSttOnDevicePlace() }
+
+// RecSttOnDevicePlace says "Private and offline, without a key"
+// in the language of msgs.
+//
+// Settings › Speech to text: the providers list, under the device's own
+// engine.
+func (msgs Messages) RecSttOnDevicePlace() string {
+	return Catalog.Format(msgs.locale, "recSttOnDevicePlace", nil)
+}
+
+// RecSttNoProviders says "No speech providers yet"
+// in the language the app shows.
+//
+// Settings › Speech to text: the providers list when none is set up.
+func RecSttNoProviders() string { return In(i18n.Locale()).RecSttNoProviders() }
+
+// RecSttNoProviders says "No speech providers yet"
+// in the language of msgs.
+//
+// Settings › Speech to text: the providers list when none is set up.
+func (msgs Messages) RecSttNoProviders() string {
+	return Catalog.Format(msgs.locale, "recSttNoProviders", nil)
+}
+
+// RecSttNoProvidersDesc says "Add Soniox or MOSS with an API key, or an endpoint such as a transcription server on your network."
+// in the language the app shows.
+//
+// Settings › Speech to text: under the empty providers list.
+func RecSttNoProvidersDesc() string { return In(i18n.Locale()).RecSttNoProvidersDesc() }
+
+// RecSttNoProvidersDesc says "Add Soniox or MOSS with an API key, or an endpoint such as a transcription server on your network."
+// in the language of msgs.
+//
+// Settings › Speech to text: under the empty providers list.
+func (msgs Messages) RecSttNoProvidersDesc() string {
+	return Catalog.Format(msgs.locale, "recSttNoProvidersDesc", nil)
 }
 
 // RecErrTranscribing says "This recording is being transcribed."
@@ -12945,48 +13127,6 @@ func SettingsSignInWith(name string) string { return In(i18n.Locale()).SettingsS
 // to.
 func (msgs Messages) SettingsSignInWith(name string) string {
 	return Catalog.Format(msgs.locale, "settingsSignInWith", map[string]any{"name": name})
-}
-
-// SettingsDefaults says "Defaults"
-// in the language the app shows.
-//
-// Settings › Agent providers: the heading over the default agent.
-func SettingsDefaults() string { return In(i18n.Locale()).SettingsDefaults() }
-
-// SettingsDefaults says "Defaults"
-// in the language of msgs.
-//
-// Settings › Agent providers: the heading over the default agent.
-func (msgs Messages) SettingsDefaults() string {
-	return Catalog.Format(msgs.locale, "settingsDefaults", nil)
-}
-
-// SettingsDefaultAgent says "Default agent"
-// in the language the app shows.
-//
-// Settings › Agent providers › Defaults.
-func SettingsDefaultAgent() string { return In(i18n.Locale()).SettingsDefaultAgent() }
-
-// SettingsDefaultAgent says "Default agent"
-// in the language of msgs.
-//
-// Settings › Agent providers › Defaults.
-func (msgs Messages) SettingsDefaultAgent() string {
-	return Catalog.Format(msgs.locale, "settingsDefaultAgent", nil)
-}
-
-// SettingsDefaultAgentDesc says "Used unless you pick another"
-// in the language the app shows.
-//
-// Settings › Agent providers › Defaults › Default agent.
-func SettingsDefaultAgentDesc() string { return In(i18n.Locale()).SettingsDefaultAgentDesc() }
-
-// SettingsDefaultAgentDesc says "Used unless you pick another"
-// in the language of msgs.
-//
-// Settings › Agent providers › Defaults › Default agent.
-func (msgs Messages) SettingsDefaultAgentDesc() string {
-	return Catalog.Format(msgs.locale, "settingsDefaultAgentDesc", nil)
 }
 
 // SettingsReadOtherPages says "Let agents read your other pages"

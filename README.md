@@ -122,6 +122,8 @@ itself.
   keys drive it.
 - Real-time transcription with Soniox, or any OpenAI-compatible
   `/audio/transcriptions` endpoint, including one on your own network.
+- Transcription with speakers through MOSS, with a MOSI API key kept on the
+  device: recordings once they stop, and audio files.
 - Transcription on the device itself, offline and without a key, with the
   system's own speech recognition: on a Mac with macOS 26 or later, and on
   iPhone and iPad.
@@ -405,7 +407,7 @@ rules.
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
 | `internal/cli` | The `leaflet` command line, on those tools |
-| `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
+| `internal/recording` | Capture, WAV, Soniox streaming, MOSS and endpoint transcription |
 | `internal/macspeech`, `speech` | Transcription with the device's own speech recognition: `speech`, a Swift package the iOS app and `leaflet-speech`, the helper the Mac app ships, are built with |
 | `internal/theme` | Colors, fonts and icons |
 | `locales` | The app's texts in each language, and the Go code generated from them |

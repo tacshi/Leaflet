@@ -65,10 +65,11 @@ func (a *App) saveExport(name string, save func(path string) error) {
 	})
 }
 
-// startRecording records into the open page.
-func (a *App) startRecording(pageID string) {
+// startRecording records into the open page, transcribed by provider, or
+// the one marked for the page when it is "".
+func (a *App) startRecording(pageID, provider string) {
 	ed := a.openEditor(pageID)
-	err := a.rec.Start(pageID, a.settings.Stt, a.online && !a.settings.WorkOffline, func(n *doc.Node) {
+	err := a.rec.Start(pageID, a.sttFor(pageID, provider), a.online && !a.settings.WorkOffline, func(n *doc.Node) {
 		if ed != nil {
 			ed.InsertBlocks(n)
 			a.savePage()
@@ -343,11 +344,11 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 						label = locales.RecTranscribe()
 					}
 					// Not while a transcription runs, which the new one would race.
-					if m.Item(label).Disabled(ro || a.rec.Transcribing[id]).Chosen() {
-						if err := a.rec.Retranscribe(id, a.settings.Stt, a.online && !a.settings.WorkOffline); err != nil {
+					a.transcribeItem(m, a.openPageID(), label, ro || a.rec.Transcribing[id], func(provider string) {
+						if err := a.rec.Retranscribe(id, a.sttFor(a.openPageID(), provider), a.online && !a.settings.WorkOffline); err != nil {
 							a.toast(err.Error())
 						}
-					}
+					})
 					m.Separator()
 					// The block goes as one step to undo; its recording stays,
 					// for the undo to bring back.
@@ -635,10 +636,17 @@ type speechState struct {
 	soniox              string
 	// sonioxSaved is whether this device's keychain has a Soniox key.
 	sonioxSaved bool
-	saving      bool
-	testing     bool
-	testResult  string
-	testOK      bool
+	// moss is the MOSS key typed, and mossSaved whether this device's
+	// keychain has one.
+	moss      string
+	mossSaved bool
+	// open is the speech provider whose settings show under its row, and
+	// adding one being added, listed until it is set up.
+	open, adding string
+	saving       bool
+	testing      bool
+	testResult   string
+	testOK       bool
 	// micTesting is whether Record a test is running; micText is what it
 	// heard, or why it heard nothing.
 	micTesting bool
@@ -649,138 +657,106 @@ type speechState struct {
 // field's input is that less its box's padding.
 const sttControlW = 280
 
+// loadSpeechKeys reads the speech keys kept here, once, off the main
+// thread: the keychain can take a while, or ask first.
+func (a *App) loadSpeechKeys() {
+	s := &a.speech
+	if s.keyLoaded {
+		return
+	}
+	s.keyLoaded = true
+	var key string
+	var soniox, moss bool
+	a.offMain(func() {
+		key, soniox, moss = recording.EndpointKey(), recording.LocalSonioxKey() != "", recording.MossKey() != ""
+	}, func() {
+		if !s.keyTyped {
+			s.key = key
+		}
+		s.sonioxSaved, s.mossSaved = soniox, moss
+	})
+}
+
 func (a *App) speechSettings(c *ui.Context) {
 	s := &a.speech
 	stt := &a.settings.Stt
-	if !s.keyLoaded {
-		s.keyLoaded = true
-		// The keychain can take a while, or ask first.
-		var key string
-		var soniox bool
-		a.offMain(func() { key, soniox = recording.EndpointKey(), recording.LocalSonioxKey() != "" }, func() {
-			if !s.keyTyped {
-				s.key = key
-			}
-			s.sonioxSaved = soniox
-		})
-	}
+	a.loadSpeechKeys()
 	changed := false
-	heading(c, locales.RecSttTitle(), locales.RecSttSubtitle())
-	// The Mac's own engine comes first where it has one.
-	providers := []string{"openai-compatible", "soniox"}
-	labels := []string{locales.CommonEndpoint(), "Soniox"}
-	if a.rec.Engine != nil || stt.Provider == recording.OnDevice {
-		providers = []string{recording.OnDevice, "soniox", "openai-compatible"}
-		labels = []string{locales.RecSttOnDevice(), "Soniox", locales.CommonEndpoint()}
+	keys := recording.KeysOf(*stt, s.sonioxSaved, s.mossSaved, a.session.SignedIn, a.rec.Engine != nil)
+	set, addable := recording.SpeechProviders(*stt, keys)
+	// A provider being added shows with its settings until it is set up.
+	if s.adding != "" {
+		if recording.SetUp(s.adding, *stt, keys) {
+			s.adding = ""
+		} else {
+			set = append(set, recording.SpeechProvider{ID: s.adding, Name: recording.ProviderName(s.adding)})
+			addable = slices.DeleteFunc(addable, func(p recording.SpeechProvider) bool { return p.ID == s.adding })
+		}
 	}
-	prov := max(slices.Index(providers, stt.Provider), 0)
-	// One card for the engine and its settings, their controls one width
-	// so their left edges line up.
+	headingWith(c, locales.RecSttTitle(), locales.RecSttSubtitle(), func() {
+		add := primary(c, "add", "plus", locales.SettingsAddProvider()).Disabled(len(addable) == 0)
+		add.Menu(func(m *ui.Menu) {
+			for _, p := range addable {
+				if m.Item(p.Name).Chosen() {
+					s.adding, s.open, s.testResult = p.ID, p.ID, ""
+				}
+			}
+		})
+	})
+	// One card for the providers, each opening its settings, as Agent
+	// providers has them, the controls one width so their left edges line
+	// up. There is no default: each transcription picks its provider.
+	pal := theme.Of(c)
 	card(c, "engine", func() {
-		settingRow(c, "provider", locales.RecSttTranscription(), recording.EngineStatus(*stt, s.sonioxSaved || a.session.SignedIn, a.rec.Engine != nil), true, func() {
-			if ui.Segmented(c.Key("provider"), &prov, labels...); true {
-				want := providers[prov]
-				if want != stt.Provider {
-					stt.Provider = want
-					changed = true
+		if len(set) == 0 {
+			settingRow(c, "none", locales.RecSttNoProviders(), locales.RecSttNoProvidersDesc(), true, nil)
+		}
+		for i, p := range set {
+			open := s.open == p.ID
+			row := ui.ButtonBase(c.Key("sp:" + p.ID)).Justify(ui.Start).Label(p.Name)
+			if i > 0 {
+				row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider)
+			}
+			if row.Hovered() {
+				row.Background(pal.Hover)
+			}
+			row.Children(func() {
+				icon := "chevron-right"
+				if open {
+					icon = "chevron-down"
+				}
+				settingRow(c, "row", p.Name, p.Place, true, func() {
+					ui.Icon(c, theme.Icon(icon)).FontSize(14).TextColor(pal.TextMuted)
+				})
+			})
+			if row.Clicked() {
+				s.testResult = ""
+				if open {
+					s.open = ""
+				} else {
+					s.open = p.ID
 				}
 			}
-		})
-		if stt.Provider == recording.OnDevice {
-			settingRow(c, "on-device", locales.RecSttOnDevice(), locales.RecSttOnDeviceDesc(), false, nil)
+			if open {
+				ui.Column(c.Key("fields:" + p.ID)).FillWidth().Background(pal.Ground).Children(func() {
+					a.speechFields(c, p, stt, &changed)
+				})
+			}
+		}
+		if len(set) == 0 {
 			return
 		}
-		if stt.Provider == "openai-compatible" {
-			settingRow(c, "url", locales.CommonEndpoint(), locales.RecSttEndpointDesc(), false, func() {
-				if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(sttControlW - 20).Changed() {
+		// Each transcription picks its provider: speakers are labelled by
+		// those that can, Soniox and MOSS.
+		if recording.SetUp("soniox", *stt, keys) || recording.SetUp(recording.Moss, *stt, keys) {
+			sp := stt.SpeakerLabels
+			settingRow(c, "speakers", locales.RecSttSpeakers(), "", false, func() {
+				if ui.Switch(c.Key("speakers"), &sp).Changed() {
+					stt.SpeakerLabels = sp
 					changed = true
 				}
 			})
-			settingRow(c, "model", locales.CommonModel(), "", false, func() {
-				if field(c, "model", &stt.Model, "gpt-transcribe").Width(sttControlW - 20).Changed() {
-					changed = true
-				}
-			})
-			if strings.TrimSpace(stt.BaseURL) == "" {
-				// The key row comes with an address: where it is says
-				// where the key is kept.
-			} else if recording.IsLocalEndpoint(stt.BaseURL) {
-				settingRow(c, "key", locales.RecSttApiKey(), locales.RecSttKeyInKeychain(), false, func() {
-					ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
-						if growPassword(c, "key", &s.key, locales.RecSttOptional()).Changed() {
-							a.keepEndpointKey(s.key)
-						}
-						// The test goes on while the fields change: it has
-						// them as they are now.
-						url, model, key := stt.BaseURL, stt.Model, s.key
-						a.sttTestButton(c, func(ctx context.Context) error {
-							return recording.TestEndpoint(ctx, url, model, key)
-						})
-					})
-				})
-			} else {
-				// The server calls a cloud endpoint with the key of one of
-				// the agent providers.
-				var ids []string
-				names := map[string]string{"": locales.RecSttNoKey()}
-				for _, p := range a.providers {
-					if !p.IsLocal {
-						ids = append(ids, p.ID)
-						names[p.ID] = p.Name
-					}
-				}
-				desc := locales.RecSttKeyFromDesc()
-				if len(ids) == 0 {
-					desc = locales.RecSttAddProvider()
-				}
-				settingRow(c, "key", locales.RecSttKeyFrom(), desc, false, func() {
-					choice := stt.ProviderID
-					if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, sttControlW); choice != stt.ProviderID {
-						stt.ProviderID = choice
-						changed = true
-					}
-				})
-			}
-			return
 		}
-		where, ph := locales.RecSttSonioxOnServer(), locales.RecSttPasteKey()
-		if !a.session.SignedIn {
-			where = locales.RecSttSonioxOnDevice()
-		}
-		if s.sonioxSaved {
-			ph = locales.RecSttKeySaved()
-		}
-		settingRow(c, "key", locales.RecSttSonioxKey(), where, false, func() {
-			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
-				if growPassword(c, "key", &s.soniox, ph).Changed() {
-					s.testResult = ""
-				}
-				// With none typed, the test reads the one kept here, as it
-				// runs: not the keychain each frame.
-				key, saved := strings.TrimSpace(s.soniox), s.sonioxSaved
-				a.sttTestButton(c, func(ctx context.Context) error {
-					if key == "" && saved {
-						key = recording.LocalSonioxKey()
-					}
-					return recording.TestSonioxKey(ctx, key)
-				})
-				if button(c, "save-key", "", locales.CommonSave()).Disabled(s.saving || strings.TrimSpace(s.soniox) == "").Clicked() {
-					a.saveSonioxKey()
-				}
-			})
-		})
-		settingRow(c, "model", locales.CommonModel(), "", false, func() {
-			if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(sttControlW - 20).Changed() {
-				changed = true
-			}
-		})
-		sp := stt.SpeakerLabels
-		settingRow(c, "speakers", locales.RecSttSpeakers(), "", false, func() {
-			if ui.Switch(c.Key("speakers"), &sp).Changed() {
-				stt.SpeakerLabels = sp
-				changed = true
-			}
-		})
 	})
 	// Both engines' Test buttons report here.
 	if s.testResult != "" {
@@ -832,8 +808,132 @@ func (a *App) speechSettings(c *ui.Context) {
 		})
 	})
 	if changed {
+		// An endpoint's address typed sets it up.
+		recording.PreferSetUp(stt, keys)
 		a.saveSettings()
 		a.rec.MirrorSettings(a.settings.Stt)
+	}
+}
+
+// speechFields are provider p's own settings, under its row: its key,
+// address or model, a test of them, and taking it off the list.
+func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store.SttSettings, changed *bool) {
+	s := &a.speech
+	switch p.ID {
+	case recording.OnDevice:
+		settingRow(c, "on-device", locales.RecSttOnDevice(), locales.RecSttOnDeviceDesc(), true, nil)
+	case recording.Endpoint:
+		settingRow(c, "url", locales.CommonEndpoint(), locales.RecSttEndpointDesc(), true, func() {
+			if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(sttControlW - 20).Changed() {
+				*changed = true
+			}
+		})
+		settingRow(c, "model", locales.CommonModel(), "", false, func() {
+			if field(c, "model", &stt.Model, "gpt-transcribe").Width(sttControlW - 20).Changed() {
+				*changed = true
+			}
+		})
+		if strings.TrimSpace(stt.BaseURL) == "" {
+			// The key row comes with an address: where it is says
+			// where the key is kept.
+		} else if recording.IsLocalEndpoint(stt.BaseURL) {
+			settingRow(c, "key", locales.RecSttApiKey(), locales.RecSttKeyInKeychain(), false, func() {
+				ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
+					if growPassword(c, "key", &s.key, locales.RecSttOptional()).Changed() {
+						a.keepEndpointKey(s.key)
+					}
+					// The test goes on while the fields change: it has
+					// them as they are now.
+					url, model, key := stt.BaseURL, stt.Model, s.key
+					a.sttTestButton(c, func(ctx context.Context) error {
+						return recording.TestEndpoint(ctx, url, model, key)
+					})
+				})
+			})
+		} else {
+			// The server calls a cloud endpoint with the key of one of
+			// the agent providers.
+			var ids []string
+			names := map[string]string{"": locales.RecSttNoKey()}
+			for _, p := range a.providers {
+				if !p.IsLocal {
+					ids = append(ids, p.ID)
+					names[p.ID] = p.Name
+				}
+			}
+			desc := locales.RecSttKeyFromDesc()
+			if len(ids) == 0 {
+				desc = locales.RecSttAddProvider()
+			}
+			settingRow(c, "key", locales.RecSttKeyFrom(), desc, false, func() {
+				choice := stt.ProviderID
+				if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, sttControlW); choice != stt.ProviderID {
+					stt.ProviderID = choice
+					*changed = true
+				}
+			})
+		}
+	case recording.Moss:
+		ph := locales.RecSttPasteKey()
+		if s.mossSaved {
+			ph = locales.RecSttKeySaved()
+		}
+		settingRow(c, "moss-key", locales.RecSttMossKey(), locales.RecSttMossDesc(), true, func() {
+			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
+				if growPassword(c, "moss-key", &s.moss, ph).Changed() {
+					s.testResult = ""
+				}
+				key, saved := strings.TrimSpace(s.moss), s.mossSaved
+				a.sttTestButton(c, func(ctx context.Context) error {
+					if key == "" && saved {
+						key = recording.MossKey()
+					}
+					return recording.TestMossKey(ctx, key)
+				})
+				if button(c, "save-moss-key", "", locales.CommonSave()).Disabled(s.saving || strings.TrimSpace(s.moss) == "").Clicked() {
+					a.saveMossKey()
+				}
+			})
+		})
+	case "soniox":
+		where, ph := locales.RecSttSonioxOnServer(), locales.RecSttPasteKey()
+		if !a.session.SignedIn {
+			where = locales.RecSttSonioxOnDevice()
+		}
+		if s.sonioxSaved {
+			ph = locales.RecSttKeySaved()
+		}
+		settingRow(c, "key", locales.RecSttSonioxKey(), where, true, func() {
+			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
+				if growPassword(c, "key", &s.soniox, ph).Changed() {
+					s.testResult = ""
+				}
+				// With none typed, the test reads the one kept here, as it
+				// runs: not the keychain each frame.
+				key, saved := strings.TrimSpace(s.soniox), s.sonioxSaved
+				a.sttTestButton(c, func(ctx context.Context) error {
+					if key == "" && saved {
+						key = recording.LocalSonioxKey()
+					}
+					return recording.TestSonioxKey(ctx, key)
+				})
+				if button(c, "save-key", "", locales.CommonSave()).Disabled(s.saving || strings.TrimSpace(s.soniox) == "").Clicked() {
+					a.saveSonioxKey()
+				}
+			})
+		})
+		settingRow(c, "model", locales.CommonModel(), "", false, func() {
+			if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(sttControlW - 20).Changed() {
+				*changed = true
+			}
+		})
+	}
+	if p.Removable {
+		settingRow(c, "remove", "", "", false, func() {
+			if danger(c, "remove", locales.CommonRemove()).Disabled(s.saving).Clicked() {
+				a.removeSpeechProvider(p.ID)
+			}
+		})
 	}
 }
 
@@ -888,6 +988,117 @@ func (a *App) keepEndpointKey(key string) {
 	})
 }
 
+// speechKeys are the speech keys kept, as last read.
+func (a *App) speechKeys() recording.Keys {
+	s := &a.speech
+	a.loadSpeechKeys()
+	return recording.KeysOf(a.settings.Stt, s.sonioxSaved, s.mossSaved, a.session.SignedIn, a.rec.Engine != nil)
+}
+
+// sttFor is the speech settings a transcription on page pageID takes, with
+// provider picked, or the one marked for the page when it is "": there is
+// no default. One picked is kept as the one last picked anywhere.
+func (a *App) sttFor(pageID, provider string) store.SttSettings {
+	stt, last := a.rec.For(pageID, provider, a.settings.Stt, a.speechKeys())
+	if last {
+		a.settings.Stt.Provider = provider
+		a.saveSettings()
+		a.rec.MirrorSettings(a.settings.Stt)
+	}
+	return stt
+}
+
+// openPageID is the open page's ID, or "" with none open.
+func (a *App) openPageID() string {
+	if a.page == nil {
+		return ""
+	}
+	return a.page.id
+}
+
+// transcribeItems are menu m's items picking the provider a transcription
+// on page pageID takes, the one last picked there checked; do runs with
+// the one picked.
+func (a *App) transcribeItems(m *ui.Menu, pageID string, do func(provider string)) {
+	keys := a.speechKeys()
+	cur := a.rec.Choice(pageID, a.settings.Stt, keys)
+	for _, p := range recording.Choices(a.settings.Stt, keys) {
+		if m.Item(p.Name).Checked(p.ID == cur).Chosen() {
+			do(p.ID)
+		}
+	}
+}
+
+// transcribeItem is menu m's item that transcribes on page pageID, as
+// label says: with more than one provider set up, a submenu picking it,
+// the one last picked there checked; do runs with the provider picked, or
+// "" for the one marked.
+func (a *App) transcribeItem(m *ui.Menu, pageID, label string, disabled bool, do func(provider string)) {
+	choices := recording.Choices(a.settings.Stt, a.speechKeys())
+	if len(choices) < 2 {
+		if m.Item(label).Disabled(disabled).Chosen() {
+			do("")
+		}
+		return
+	}
+	m.Submenu(label, func(m *ui.Menu) { a.transcribeItems(m, pageID, do) }).Disabled(disabled)
+}
+
+// preferSetUp has the speech settings transcribe with a provider set up,
+// when the one they name is not, saving them if so: the first provider
+// set up transcribes.
+func (a *App) preferSetUp() {
+	if recording.PreferSetUp(&a.settings.Stt, a.speechKeys()) {
+		a.saveSettings()
+		a.rec.MirrorSettings(a.settings.Stt)
+	}
+}
+
+// removeSpeechProvider takes a speech provider off Settings' list, its key
+// off this device, off the main thread.
+func (a *App) removeSpeechProvider(id string) {
+	s := &a.speech
+	s.saving = true
+	stt, keys := a.settings.Stt, a.speechKeys()
+	var err error
+	a.offMain(func() { keys, err = recording.RemoveProvider(id, &stt, keys) }, func() {
+		s.saving = false
+		if err != nil {
+			a.toast(err.Error())
+			return
+		}
+		s.sonioxSaved, s.mossSaved, s.open, s.testResult = keys.SonioxHere, keys.MossHere, "", ""
+		if id == recording.Endpoint {
+			s.key = ""
+		}
+		a.settings.Stt = stt
+		a.saveSettings()
+		a.rec.MirrorSettings(a.settings.Stt)
+	})
+}
+
+// saveMossKey keeps the MOSS key typed in this device's keychain, off the
+// main thread.
+func (a *App) saveMossKey() {
+	s := &a.speech
+	key := strings.TrimSpace(s.moss)
+	if key == "" {
+		return
+	}
+	s.saving = true
+	var err error
+	a.offMain(func() { err = recording.SetMossKey(key) }, func() {
+		s.saving = false
+		if err != nil {
+			a.toast(locales.RecSttKeyNotSaved(err.Error()))
+			return
+		}
+		s.moss, s.mossSaved, s.testResult = "", true, ""
+		a.preferSetUp()
+		a.toast(locales.RecSttSavedOnDevice())
+	})
+}
+
 // saveSonioxKey keeps the Soniox key typed on the server, or in this
 // device's keychain when signed out, off the main thread.
 func (a *App) saveSonioxKey() {
@@ -906,12 +1117,16 @@ func (a *App) saveSonioxKey() {
 			a.toast(err.Error())
 			return
 		}
-		s.soniox = ""
+		s.soniox, s.testResult = "", ""
 		if onServer {
+			a.settings.Stt.SonioxOnServer = true
+			a.saveSettings()
+			a.preferSetUp()
 			a.toast(locales.RecSttSavedOnServer())
 			return
 		}
-		s.sonioxSaved, s.testResult = true, ""
+		s.sonioxSaved = true
+		a.preferSetUp()
 		a.toast(locales.RecSttSavedOnDevice())
 	})
 }

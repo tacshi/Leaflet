@@ -17,16 +17,31 @@ import (
 // microphone, and what goes to the server: the Soniox key and the
 // settings.
 
-// EngineStatus says where transcription runs, or that it is not set up:
-// the device's engine on one without it (onDevice), Soniox without a key
-// here or on the server (hasSonioxKey), or an endpoint with no address.
-func EngineStatus(stt store.SttSettings, hasSonioxKey, onDevice bool) string {
-	if stt.Provider == OnDevice && !onDevice ||
-		stt.Provider == "soniox" && !hasSonioxKey ||
-		stt.Provider == "openai-compatible" && strings.TrimSpace(stt.BaseURL) == "" {
+// Summary says which providers are set up, by name, or that none is:
+// there is no default to say, each transcription picking its own.
+func Summary(stt store.SttSettings, k Keys) string {
+	var names []string
+	for _, p := range Choices(stt, k) {
+		names = append(names, ProviderName(p.ID))
+	}
+	if len(names) == 0 {
 		return locales.RecSttNotSetUp()
 	}
-	return EngineLabel(stt)
+	return strings.Join(names, ", ")
+}
+
+// KeysOf are the keys kept for stt: a Soniox key in this device's
+// keychain (sonioxHere) or saved on the server, as one is once this device
+// saved it there, or the server has transcribed with Soniox for it, and a
+// MOSS key in the keychain (mossHere); onDevice says the device has an
+// engine of its own.
+func KeysOf(stt store.SttSettings, sonioxHere, mossHere, signedIn, onDevice bool) Keys {
+	return Keys{
+		SonioxHere:     sonioxHere,
+		SonioxOnServer: signedIn && (stt.SonioxOnServer || stt.Provider == "soniox"),
+		MossHere:       mossHere,
+		OnDevice:       onDevice,
+	}
 }
 
 // PreferOnDevice turns speech settings that name no engine, an endpoint
@@ -92,7 +107,9 @@ const mirrorWait = 500 * time.Millisecond
 // goroutine may call it.
 func (r *Controller) MirrorSettings(stt store.SttSettings) {
 	be := r.be
-	if !be.SignedIn() || stt.Provider == OnDevice {
+	// Nor is MOSS, with its key on this device alone, which the server
+	// could not transcribe with.
+	if !be.SignedIn() || stt.Provider == OnDevice || stt.Provider == Moss {
 		return
 	}
 	n := r.sttLatest.Add(1)

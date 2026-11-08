@@ -147,7 +147,7 @@ final class FilePlayback {
         loading = id
         fetch += 1
         let this = fetch
-        fetching = Task {
+        fetching = Task { [self] in
             defer {
                 if fetch == this {
                     loading = nil

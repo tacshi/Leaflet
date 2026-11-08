@@ -261,6 +261,8 @@ type App struct {
 	// fileToTranscribe is the file block whose notes a transcript is to
 	// replace, while that is asked.
 	fileToTranscribe string
+	// fileTranscribeWith is the speech provider it was picked to take.
+	fileTranscribeWith string
 	// preview is the file shown in the window, or nil.
 	preview   *filePreview
 	videoInfo webAnswers[videoInfo]

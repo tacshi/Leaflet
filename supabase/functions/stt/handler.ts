@@ -67,6 +67,7 @@ export interface SttDeps {
 
 interface Body {
   action: "soniox_key" | "save_key" | "transcribe" | "transcribed";
+  /** The provider of a key saved, or the one a transcription was picked to use. */
   provider?: string;
   api_key?: string;
   recording_id?: string;
@@ -229,6 +230,11 @@ async function transcriberOf(uc: SupabaseClient, sc: SupabaseClient, user: User,
     language: "auto",
     speaker_labels: false,
   };
+  // The provider the app picked for this transcription, which the
+  // settings it mirrors may not have yet: each transcription is picked.
+  if (body.action === "transcribe" && (body.provider === "soniox" || body.provider === "openai-compatible")) {
+    settings.provider = body.provider;
+  }
   const useSoniox = settings.provider === "soniox";
   if (!useSoniox && !settings.provider_id && !settings.base_url) {
     throw new HttpError(

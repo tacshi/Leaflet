@@ -187,6 +187,31 @@ Deno.test("a provider's key goes only to its address", async () => {
   assertEquals(sent, ["https://api.openai.com/v1/audio/transcriptions"]);
 });
 
+// The provider a transcription was picked for is the one it takes, over
+// the settings the app mirrors, which may not have it yet; any other the
+// server can't run leaves the settings' own.
+Deno.test("a transcription takes the provider picked for it", async () => {
+  const p = project({ provider: "soniox", base_url: "https://stt.example/v1", model: "whisper-1" });
+  const sent: string[] = [];
+  const send: SttDeps["send"] = (raw) => (sent.push(String(raw)), Promise.resolve(Response.json({ text: "Hi." })));
+  const s = soniox();
+  const picked = await handle(
+    p.request("ann-token", { action: "transcribe", recording_id: "rec", provider: "openai-compatible" }),
+    deps(p, s.fetch, send),
+  );
+  assertEquals(picked.status, 200);
+  assertEquals([sent, s.calls], [["https://stt.example/v1/audio/transcriptions"], []]);
+
+  const q = project({ provider: "soniox" });
+  const t = soniox();
+  const moss = await handle(
+    q.request("ann-token", { action: "transcribe", recording_id: "rec", provider: "moss" }),
+    deps(q, t.fetch),
+  );
+  assertEquals(moss.status, 200);
+  assert(t.calls.includes("POST /v1/files"));
+});
+
 // A local provider is the device's to call: a transcription that names
 // one is refused before its key is read or anything is sent or claimed,
 // whatever address the provider names.

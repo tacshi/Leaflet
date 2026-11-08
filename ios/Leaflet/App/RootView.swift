@@ -370,6 +370,9 @@ private struct NoPageScreen: View {
     @Environment(SceneModel.self) private var scene
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.palette) private var palette
+    /// pageTrailing is where this view ends on screen, for the panel to
+    /// tell whether it stands beside it or floats over it.
+    @State private var pageTrailing: CGFloat?
 
     var body: some View {
         ContentUnavailableView {
@@ -410,12 +413,18 @@ private struct NoPageScreen: View {
                 .tint(scene.inspectorShown ? nil : Color.primary)
             }
         }
+        .onGeometryChange(for: CGFloat.self) {
+            $0.frame(in: .global).maxX
+        } action: {
+            pageTrailing = $0
+        }
         .inspector(
             isPresented: Binding(get: { scene.inspectorShown }, set: { scene.inspectorShown = $0 })
         ) {
             Inspector(
                 tab: Binding(get: { scene.inspectorTab }, set: { scene.inspectorTab = $0 }),
-                model: nil, isSheet: sizeClass == .compact, noPage: true
+                model: nil, isSheet: sizeClass == .compact, noPage: true,
+                pageTrailing: pageTrailing
             )
             .inspectorColumnWidth(min: 280, ideal: 340, max: 640)
             .presentationDetents([.medium, .large])

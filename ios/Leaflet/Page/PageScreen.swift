@@ -35,6 +35,9 @@ struct PageScreen: View {
     @State private var uploadNext = false
     /// embedding makes an embed to put at the caret.
     @State private var embedding = false
+    /// pageTrailing is where the page ends on screen, for the panel to
+    /// tell whether it stands beside the page or floats over it.
+    @State private var pageTrailing: CGFloat?
     /// sizeClass is the page's: the panel's own column is narrow on iPad.
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -194,13 +197,19 @@ struct PageScreen: View {
                 .tint(scene.inspectorShown ? nil : Color.primary)
             }
         }
+        .onGeometryChange(for: CGFloat.self) {
+            $0.frame(in: .global).maxX
+        } action: {
+            pageTrailing = $0
+        }
         .inspector(
             isPresented: Binding(get: { scene.inspectorShown }, set: { scene.inspectorShown = $0 })
         ) {
             Inspector(
                 tab: Binding(get: { scene.inspectorTab }, set: { scene.inspectorTab = $0 }),
                 model: model,
-                isSheet: sizeClass == .compact
+                isSheet: sizeClass == .compact,
+                pageTrailing: pageTrailing
             )
             // Writing in the page, the keyboard's bar is no reason for the
             // panel's composer to rise; writing in the panel, it is.
@@ -550,10 +559,23 @@ struct Inspector: View {
     /// a column beside it.
     var isSheet = false
     var noPage = false
+    /// pageTrailing is where the page the panel goes with ends on screen,
+    /// as its host measures it, or nil before it has.
+    var pageTrailing: CGFloat?
     @Environment(SceneModel.self) private var scene
     @Environment(AppModel.self) private var app
     /// counted is what the window was told the panel is, as it showed.
     @State private var counted = false
+    /// leading is where the panel begins on screen.
+    @State private var leading: CGFloat = 0
+
+    /// beside says the panel is a column beside the page. Where a column
+    /// won't fit, as on iPhone Duo with its sidebar showing, iOS floats the
+    /// panel over the page, which runs on under it, its bar above.
+    private var beside: Bool {
+        guard let pageTrailing else { return true }
+        return pageTrailing <= leading + 1
+    }
 
     var body: some View {
         @Bindable var scene = scene
@@ -586,7 +608,12 @@ struct Inspector: View {
                 }
             }
         }
-        .modifier(PanelTop(column: !isSheet))
+        .onGeometryChange(for: CGFloat.self) {
+            $0.frame(in: .global).minX
+        } action: {
+            leading = $0
+        }
+        .modifier(PanelTop(column: !isSheet && beside))
         .task { scene.workspace.start(app) }
         // Settings, or a new folder, asked for while the panel is a sheet
         // shows once it goes.
@@ -610,9 +637,12 @@ struct Inspector: View {
 
 /// PanelTop has a panel beside the page take the room its column keeps
 /// over it for the bar, which stands by the window's edge on a display
-/// with a vertical bar and leaves it empty.
+/// with a vertical bar and leaves it empty. A panel floating over the page
+/// keeps clear of that room: the page's bar is there, and would blur the
+/// tabs under it.
 private struct PanelTop: ViewModifier {
-    /// column says the panel is a column, and not a sheet.
+    /// column says the panel is a column beside the page, and not a sheet
+    /// or a panel floating over it.
     let column: Bool
 
     func body(content: Content) -> some View {

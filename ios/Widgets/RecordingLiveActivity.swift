@@ -77,12 +77,12 @@ private struct Status: View {
 }
 
 /// Time is how long the recording has run: counting on by itself while it
-/// records, and still while it is paused.
+/// records, and still while it is paused, or its microphone isn't on yet.
 private struct Time: View {
     let state: RecordingAttributes.ContentState
 
     var body: some View {
-        if state.paused {
+        if state.paused || state.starting {
             Text(
                 Duration.seconds(state.elapsed),
                 format: .time(pattern: state.elapsed >= 3600 ? .hourMinuteSecond : .minuteSecond))

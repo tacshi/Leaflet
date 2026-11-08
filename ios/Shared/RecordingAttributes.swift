@@ -13,5 +13,8 @@ struct RecordingAttributes: ActivityAttributes {
         var paused: Bool
         /// elapsed is how long it had recorded, as it paused.
         var elapsed: TimeInterval
+        /// starting says the microphone isn't on yet: its time stays at
+        /// none until it is.
+        var starting: Bool
     }
 }

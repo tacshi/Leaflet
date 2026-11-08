@@ -17,6 +17,12 @@ final class RecordingActivity {
     private var id: String?
     /// shown is what it was last told.
     private var shown: State?
+    /// last is the recording as it was last told of, and when, to show it
+    /// again in an activity of its own should iOS end the one showing.
+    private var last: (recording: RecordingState, at: Date)?
+    /// declined says the user took the activity away while it recorded:
+    /// none shows again until the next recording.
+    private var declined = false
     /// swept says the activities an earlier launch left have gone.
     private var swept = false
 
@@ -31,12 +37,13 @@ final class RecordingActivity {
         // Once it shows, or iOS refused it: the one just shown stays.
         defer { sweep() }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
-        let state = State(started: Date(), paused: false, elapsed: 0)
+        let state = State(started: Date(), paused: false, elapsed: 0, starting: true)
         do {
             let activity = try Activity.request(
                 attributes: RecordingAttributes(), content: .init(state: state, staleDate: nil))
             id = activity.id
             shown = state
+            watch(activity)
             return true
         } catch {
             Logger.app.error("recording activity: \(error.localizedDescription, privacy: .public)")
@@ -52,13 +59,16 @@ final class RecordingActivity {
             end()
             return
         }
-        guard start(), let id else { return }
+        last = (recording, at)
+        guard !declined, start(), let id else { return }
         let elapsed = TimeInterval(recording.elapsedMs) / 1000
         let state = State(
-            started: at.addingTimeInterval(-elapsed), paused: recording.paused, elapsed: elapsed)
+            started: at.addingTimeInterval(-elapsed), paused: recording.paused, elapsed: elapsed,
+            starting: !recording.active)
         // Its time counts on by itself: told again only as it pauses or
-        // goes on, or as it is found a second out.
-        if let shown, shown.paused == state.paused,
+        // goes on, as its microphone comes on, or as it is found a second
+        // out.
+        if let shown, shown.paused == state.paused, shown.starting == state.starting,
             abs(shown.started.timeIntervalSince(state.started)) < 1
         {
             return
@@ -69,11 +79,41 @@ final class RecordingActivity {
 
     /// end takes the activity away, and those an earlier launch left.
     func end() {
+        last = nil
+        declined = false
         guard id != nil || !swept else { return }
         id = nil
         shown = nil
         swept = true
         endAll(but: nil)
+    }
+
+    /// watch hears activity end without the app ending it, as end does:
+    /// one iOS ended, after the hours it may show, gives way to a new one,
+    /// should iOS allow it now, and one the user took away to none.
+    private func watch(_ activity: Activity<RecordingAttributes>) {
+        let watched = activity.id
+        Task { [weak self] in
+            for await state in activity.activityStateUpdates
+            where state == .ended || state == .dismissed {
+                self?.gone(watched, byUser: state == .dismissed)
+                return
+            }
+        }
+    }
+
+    private func gone(_ watched: String, byUser: Bool) {
+        // One the app ended, or that another replaced, is gone already.
+        guard watched == id else { return }
+        id = nil
+        shown = nil
+        if byUser {
+            declined = true
+            return
+        }
+        // Ended, it would stay on the Lock Screen a while beside the new.
+        Task { await Self.end([watched]) }
+        if let last { sync(last.recording, at: last.at) }
     }
 
     /// sweep takes away the activities an earlier launch left, as one that

@@ -1,6 +1,24 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Open Leaflet to record a voice note.": {
+      "comment": "The Action Button, Control Center or a Live Activity's button, should iOS run it outside the app, which records.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモを録音するには Leaflet を開いてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请打开 Leaflet 录制语音备忘录。"
+          }
+        }
+      }
+    },
     "Pause": {
       "comment": "A recording's Live Activity: VoiceOver's name of the button that pauses the recording.",
       "extractionState": "manual",

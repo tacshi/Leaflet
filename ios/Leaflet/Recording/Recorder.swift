@@ -1,7 +1,6 @@
 import AVFoundation
 import Foundation
 import LeafletCore
-import UIKit
 
 /// Recorder is recording as the app's views see it: the recording in
 /// progress, the recordings the open pages' blocks show, and the one
@@ -58,7 +57,7 @@ final class Recorder {
     @ObservationIgnored private let microphone = Microphone()
     /// finishing is the time iOS gives the app in the background while
     /// recordings transcribe, as one stopped from the Live Activity does.
-    @ObservationIgnored private var finishing = UIBackgroundTaskIdentifier.invalid
+    @ObservationIgnored private let finishing = BackgroundTask()
     /// ended hears the player reach the end, which it holds weakly.
     @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
         self?.changes += 1
@@ -124,20 +123,11 @@ final class Recorder {
     /// running. One cut short goes on as the app comes back.
     private func holdOn(_ s: RecordingState) {
         let busy = !s.transcribing.isEmpty || !s.finishing.isEmpty
-        if busy, finishing == .invalid {
-            finishing = UIApplication.shared.beginBackgroundTask(withName: "Transcribe") {
-                [weak self] in
-                MainActor.assumeIsolated { self?.letGo() }
-            }
+        if busy, !finishing.running {
+            finishing.begin("Transcribe")
         } else if !busy {
-            letGo()
+            finishing.end()
         }
-    }
-
-    private func letGo() {
-        guard finishing != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(finishing)
-        finishing = .invalid
     }
 
     /// update takes the latest levels of the recording in progress.
@@ -186,8 +176,23 @@ final class Recorder {
     }
 
     func stop() {
+        Task { await stopRecording() }
+    }
+
+    /// stopRecording ends the recording, the time to transcribe it in the
+    /// background asked for first: stopped with the app away, as from the
+    /// Live Activity, it lets go of the microphone that kept the app
+    /// running, and iOS could put the app away before the core says the
+    /// recording transcribes.
+    func stopRecording() async {
         guard let client else { return }
-        Task { await client.stopRecording() }
+        if !finishing.running { finishing.begin("Transcribe") }
+        await client.stopRecording()
+        if let s = try? await client.recordingState() {
+            holdOn(s)
+        } else {
+            finishing.end()
+        }
     }
 
     func togglePause() {

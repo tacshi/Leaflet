@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 // The intents the Action Button, Control Center, Siri and Shortcuts run,
 // and the Live Activity's buttons. The widgets have them too, to name them
@@ -12,6 +13,8 @@ struct RecordVoiceNoteIntent: AudioRecordingIntent {
     static let title = LocalizedStringResource(
         "Record Voice Note", table: "Recording",
         comment: "The Action Button, Control Center and Shortcuts: start or stop a voice note.")
+    /// description says what it does, in Shortcuts and in Control Center's
+    /// list of controls.
     static let description = IntentDescription(
         LocalizedStringResource(
             "Records a voice note in a new page, or stops the one recording.",
@@ -22,7 +25,9 @@ struct RecordVoiceNoteIntent: AudioRecordingIntent {
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
 
     func perform() async throws -> some IntentResult {
-        #if !WIDGETS
+        #if WIDGETS
+            try appOnly()
+        #else
             try await VoiceNotes.toggle(self)
         #endif
         return .result()
@@ -37,7 +42,9 @@ struct StopRecordingIntent: LiveActivityIntent {
     static let isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
-        #if !WIDGETS
+        #if WIDGETS
+            try appOnly()
+        #else
             await VoiceNotes.stop()
         #endif
         return .result()
@@ -53,9 +60,28 @@ struct PauseRecordingIntent: LiveActivityIntent {
     static let isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
-        #if !WIDGETS
+        #if WIDGETS
+            try appOnly()
+        #else
             await VoiceNotes.togglePause()
         #endif
         return .result()
     }
 }
+
+#if WIDGETS
+    /// appOnly fails an intent the widgets were given to perform, which
+    /// only the app can: done quietly, a press would seem to have worked.
+    private func appOnly() throws { throw AppOnly() }
+
+    private struct AppOnly: LocalizedError {
+        var errorDescription: String? {
+            String(
+                localized: LocalizedStringResource(
+                    "Open Leaflet to record a voice note.", table: "Recording",
+                    comment:
+                        "The Action Button, Control Center or a Live Activity's button, should iOS run it outside the app, which records."
+                ))
+        }
+    }
+#endif

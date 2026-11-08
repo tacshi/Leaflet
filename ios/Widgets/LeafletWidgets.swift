@@ -30,9 +30,6 @@ struct RecordVoiceNoteControl: ControlWidget {
             }
         }
         .displayName(RecordVoiceNoteIntent.title)
-        .description(
-            LocalizedStringResource(
-                "Records a voice note in a new page, or stops the one recording.",
-                table: "Recording", comment: "Shortcuts: what Record Voice Note does."))
+        .description(RecordVoiceNoteIntent.description.descriptionText)
     }
 }

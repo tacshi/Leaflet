@@ -1,3 +1,4 @@
+import AVFoundation
 import AppIntents
 import Foundation
 import UIKit
@@ -18,40 +19,73 @@ enum VoiceNotes {
     static let folderKey = "voiceNoteFolder"
     static let topLevel = "-"
 
+    /// toggling is the last press's run: each waits for the one before,
+    /// so two presses close together never both start a voice note, nor
+    /// make its folder twice; the second stops the first.
+    private static var toggling: Task<Void, any Error>?
+
     /// toggle stops the recording in progress, or starts a voice note.
     static func toggle(_ intent: RecordVoiceNoteIntent) async throws {
+        let before = toggling
+        let run = Task {
+            _ = await before?.result
+            try await toggleNow(intent)
+        }
+        toggling = run
+        try await withTaskCancellationHandler {
+            try await run.value
+        } onCancel: {
+            run.cancel()
+        }
+    }
+
+    private static func toggleNow(_ intent: RecordVoiceNoteIntent) async throws {
         guard let app, let client = await app.opened() else { throw Failure(LI.coreFailed) }
         await Recorder.shared.ready()
         let now = try await client.recordingState()
         if now.recording, !now.testing {
             app.voiceNote = nil
-            await client.stopRecording()
+            await Recorder.shared.stopRecording()
             return
         }
+        // A test of the microphone, from Settings, gives way to it.
+        if now.testing { await client.stopRecording() }
         // Shown first: iOS stops a recording from the background that has
-        // none. Where it refuses one, Leaflet comes to the front, where a
-        // recording needs none, and shows it from there.
-        if !RecordingActivity.shared.start(), !inFront {
+        // none. Where it refuses one, or the microphone is still to be
+        // allowed, which only the app in front can ask, Leaflet comes to
+        // the front, where a recording needs none, and shows it there.
+        if !inFront,
+            AVAudioApplication.shared.recordPermission == .undetermined
+                || !RecordingActivity.shared.start()
+        {
             try await intent.continueInForeground(nil, alwaysConfirm: false)
-            RecordingActivity.shared.start()
         }
-        let page: PageRow
+        RecordingActivity.shared.start()
+        // What plays stops, as for a recording in a page.
+        Recorder.shared.stopPlaying()
+        let page: String
         do {
             page = try await client.recordNewPage(folderID: await folder(app, client))
-            try await started(client)
+            // Still starting, its page isn't made yet: the Live Activity
+            // shows it meanwhile.
+            guard try await started(page) else { return }
         } catch {
-            RecordingActivity.shared.end()
+            // Unless a recording runs all the same, as one started in the
+            // app meanwhile.
+            if (try? await client.recordingState())?.recording != true {
+                RecordingActivity.shared.end()
+            }
             throw error
         }
         // Once the library has it, as a window drops pages it hasn't.
-        await app.reload()
-        app.voiceNote = page.id
+        await app.reload(.library)
+        app.voiceNote = page
     }
 
     static func stop() async {
-        guard let app, let client = await app.opened() else { return }
+        guard let app, await app.opened() != nil else { return }
         app.voiceNote = nil
-        await client.stopRecording()
+        await Recorder.shared.stopRecording()
     }
 
     static func togglePause() async {
@@ -70,7 +104,10 @@ enum VoiceNotes {
     static func folder(_ app: AppModel, _ client: CoreClient) async -> String {
         let saved = UserDefaults.standard.string(forKey: folderKey) ?? ""
         if saved == topLevel { return "" }
-        if !app.libraryLoaded { await app.reload() }
+        if !app.libraryLoaded { await app.reload(.library) }
+        // Unread, the library can't tell a folder deleted from one it
+        // hasn't read: the one chosen stays, and none is made.
+        guard app.libraryLoaded else { return saved }
         let folders = app.library.folders
         if folders.contains(where: { $0.id == saved }) { return saved }
         let name = LI.voiceNotesFolder
@@ -86,18 +123,32 @@ enum VoiceNotes {
         return id
     }
 
-    /// started waits for the microphone to come on, and throws why it
-    /// didn't: it comes on after the recording starts, once iOS lets it.
-    private static func started(_ client: CoreClient) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
-        while ContinuousClock.now < deadline {
-            let s = try await client.recordingState()
-            if s.active { return }
-            if !s.starting { throw Failure(s.error.isEmpty ? LI.voiceNoteNotStarted : s.error) }
-            try await Task.sleep(for: .milliseconds(100))
+    /// started waits for the microphone of the voice note for page to come
+    /// on, which makes the page, and throws why it didn't: it comes on
+    /// after the recording starts, once iOS lets it. Still starting after
+    /// a while, it returns false.
+    private static func started(_ page: String) async throws -> Bool {
+        // The recorder hears each change of the recording as the core says
+        // it; the page's are the ones for this voice note.
+        let watch = Task { () throws -> Bool in
+            for await s in Observations({ Recorder.shared.state }) where s.pageID == page {
+                if s.active { return true }
+                if !s.starting {
+                    throw Failure(s.error.isEmpty ? LI.voiceNoteNotStarted : s.error)
+                }
+            }
+            return false
         }
-        // Still starting: the Live Activity shows it, and the page says
-        // why, should it never start.
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(10))
+            watch.cancel()
+        }
+        defer { timeout.cancel() }
+        return try await withTaskCancellationHandler {
+            try await watch.value
+        } onCancel: {
+            watch.cancel()
+        }
     }
 
     /// Failure is why a voice note couldn't start, as Shortcuts and Siri

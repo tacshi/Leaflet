@@ -141,6 +141,143 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	}
 }
 
+// quietMic is a microphone that never answers, as one whose permission
+// the user has yet to give, or that refuses, saying refused.
+type quietMic struct{ refused string }
+
+func (m quietMic) Start(_, _ int, sink *AudioSink) error {
+	if m.refused != "" {
+		go sink.Failed(m.refused)
+	}
+	return nil
+}
+func (quietMic) Pause(int)  {}
+func (quietMic) Resume(int) {}
+func (quietMic) Stop(int)   {}
+func (quietMic) Close(int)  {}
+
+// RecordNewPage records into a page of its own, in the folder asked for,
+// with no editor to put its block in: the page is made with the block in
+// it as the microphone comes on. One that never comes on, refused or
+// stopped while it starts, leaves nothing behind: no page, no recording,
+// no audio, nothing waiting to go up.
+func TestRecordNewPage(t *testing.T) {
+	c, _ := open(t)
+	raw, err := c.CreateFolder("Voice notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var folder folderRow
+	_ = json.Unmarshal([]byte(raw), &folder)
+	state := func() recordingState {
+		var st recordingState
+		raw, _ := c.RecordingState()
+		_ = json.Unmarshal([]byte(raw), &st)
+		return st
+	}
+	until := func(what string, done func(recordingState) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !done(state()); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("never %s: %+v", what, state())
+			}
+		}
+	}
+	pages, _ := c.core.Store.Pages()
+	queued := c.core.Store.PendingCount()
+	// nothingLeft says a voice note that never began left nothing.
+	nothingLeft := func(id string) {
+		t.Helper()
+		if _, err := c.core.Store.Page(id); err == nil {
+			t.Errorf("page %s was made", id)
+		}
+		if all, _ := c.core.Store.Pages(); len(all) != len(pages) {
+			t.Errorf("%d pages, had %d", len(all), len(pages))
+		}
+		if recs, _ := c.core.Store.Recordings(); len(recs) != 0 {
+			t.Errorf("recordings left: %+v", recs)
+		}
+		if n := c.core.Store.PendingCount(); n != queued {
+			t.Errorf("%d changes waiting to go up, had %d", n, queued)
+		}
+		if wavs, _ := filepath.Glob(filepath.Join(c.core.Store.Dir, "recordings", "*.wav")); len(wavs) != 0 {
+			t.Errorf("audio left: %v", wavs)
+		}
+	}
+
+	if _, err := c.RecordNewPage(folder.ID); err == nil {
+		t.Fatal("recorded without a microphone")
+	}
+	nothingLeft("")
+
+	// Refused, as the microphone's permission turned down.
+	c.UseMicrophone(quietMic{refused: "denied"})
+	id, err := c.RecordNewPage(folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until("failed", func(st recordingState) bool { return !st.Starting && !st.Active })
+	nothingLeft(id)
+
+	// Stopped while it starts, as the Action Button pressed again.
+	c.UseMicrophone(quietMic{})
+	if id, err = c.RecordNewPage(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.core.Store.Page(id); err == nil {
+		t.Fatal("the page was made before the microphone came on")
+	}
+	c.StopRecording()
+	until("stopped", func(st recordingState) bool { return !st.Starting && !st.Active })
+	nothingLeft(id)
+
+	mic := &fakeMic{closed: make(chan struct{}, 1)}
+	c.UseMicrophone(mic)
+	before := time.Now()
+	if id, err = c.RecordNewPage(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	until("started", func(st recordingState) bool { return st.Active })
+	p, err := c.core.Store.Page(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Named after when it began, which a minute may have turned over.
+	named := p.Title == locales.RecBlockTitle(before) || p.Title == locales.RecBlockTitle(time.Now())
+	if p.FolderID != folder.ID || !named {
+		t.Fatalf("page %+v", p)
+	}
+	var block *doc.Node
+	c.q.do(func() {
+		content := c.core.Store.Content(id)
+		if n := len(content.Children); n > 0 {
+			block = content.Children[n-1]
+		}
+	})
+	if block == nil || block.Type != "recording" || block.Str("recording_id") == "" {
+		t.Fatalf("last block %+v", block)
+	}
+	if st := state(); st.PageID != id || st.BlockID != block.ID {
+		t.Fatalf("state %+v, block %s", st, block.ID)
+	}
+	if _, err := c.RecordNewPage(""); err == nil {
+		t.Fatal("a second recording started over the first")
+	}
+	if all, _ := c.core.Store.Pages(); len(all) != len(pages)+1 {
+		t.Fatalf("%d pages, want the recording's alone beside the %d there were", len(all), len(pages))
+	}
+
+	c.StopRecording()
+	select {
+	case <-mic.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the microphone was never let go")
+	}
+	if _, err := c.core.Store.Page(id); err != nil {
+		t.Fatalf("the recorded page went: %v", err)
+	}
+}
+
 // A recording started before the last one's microphone has stopped gets
 // a session of its own: the last one's Stop and Close, late, are for it
 // alone, and its last audio goes to its own file.

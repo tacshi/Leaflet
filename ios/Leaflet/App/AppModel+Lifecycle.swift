@@ -99,12 +99,15 @@ struct Leavings {
 /// the background, ended once: when the work is done, or as the time runs
 /// out.
 @MainActor
-private final class BackgroundTask {
+final class BackgroundTask {
     private var id = UIBackgroundTaskIdentifier.invalid
+
+    /// running says the time was asked for and the task hasn't ended.
+    var running: Bool { id != .invalid }
 
     /// begin asks for the time; expired runs as it runs out, before the
     /// task ends.
-    func begin(_ name: String, expired: @escaping @MainActor () -> Void) {
+    func begin(_ name: String, expired: @escaping @MainActor () -> Void = {}) {
         id = UIApplication.shared.beginBackgroundTask(withName: name) { [self] in
             MainActor.assumeIsolated {
                 expired()

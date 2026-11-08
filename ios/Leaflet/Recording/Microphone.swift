@@ -312,11 +312,14 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         return Data(bytes: samples[0], count: Int(out.frameLength) * 2)
     }
 
+    /// pause stops handing on what recording session hears (hands). Its
+    /// engine stays on: iOS lets no app start recording again from the
+    /// background, where Resume from the Live Activity would find the
+    /// microphone gone, and the app, its audio stopped, put away.
     func pause(_ session: Int) {
         queue.async {
             guard let rec = self.recordings[session] else { return }
             rec.paused = true
-            rec.engine?.pause()
         }
     }
 

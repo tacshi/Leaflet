@@ -47,6 +47,10 @@ type Core struct {
 	// and levelsSent its levels; touched only on q (tellRecording).
 	recSent    string
 	levelsSent []float64
+	// voiceNote is the page a recording RecordNewPage started is for,
+	// until its microphone comes on and the page is made, or it never
+	// does; touched only on q (settleVoiceNote).
+	voiceNote *voiceNote
 	// cancels are the calls running that the app may give up on, by the
 	// token it gave each, and cancelled the tokens it gave up on before
 	// their calls began (Cancel).

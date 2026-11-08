@@ -41,19 +41,23 @@ targets:
     platform: iOS
     sources:
       - path: Leaflet
+      # What the app and its widgets share: a recording's Live Activity
+      # and the intents that start, pause and stop one.
+      - path: Shared
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
     # The keys Xcode's generated Info.plist can't take, which it merges
     # in: background refresh, for sync passes while the app is away, and
-    # audio, for a recording to go on with the screen locked. The versions
-    # stay Config's, over XcodeGen's own.
+    # audio, for a recording to go on with the screen locked, which a Live
+    # Activity shows. The versions stay Config's, over XcodeGen's own.
     info:
       path: Leaflet/Sync/Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIBackgroundModes: [fetch, audio]
+        NSSupportsLiveActivities: true
         BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).sync"]
     # Signing in with Supabase: the web session takes the Worker's
     # https redirect as its callback, which needs this domain's
@@ -75,6 +79,8 @@ targets:
       - package: SwiftDraw
       - package: DeviceKit
       - package: LeafletSpeech
+      # Embedded in the app, as XcodeGen does an extension.
+      - target: LeafletWidgets
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -105,6 +111,39 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         # Go's net package resolves names through libresolv.
         OTHER_LDFLAGS: -lresolv
+  # A recording's Live Activity, and Record Voice Note for Control Center,
+  # the Lock Screen and the Action Button. The app performs their intents,
+  # which they have too, to name them: WIDGETS leaves out what performs
+  # them.
+  LeafletWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    # Config's team and versions, which the app's must match.
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_NAME: LeafletWidgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGETS
+      # Inside the app's own, each build's.
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: app.capyvibe.leaflet.debug.widgets
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: app.capyvibe.leaflet.widgets
   LeafletTests:
     type: bundle.unit-test
     platform: iOS

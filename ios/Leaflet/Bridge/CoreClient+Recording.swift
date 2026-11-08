@@ -238,6 +238,17 @@ extension CoreClient {
         }
     }
 
+    /// recordNewPage records into a page of its own, named after when it
+    /// began, in folderID, or at the top level when it is "", as for the
+    /// Action Button: the page, its recording's block in it, is made as
+    /// the microphone comes on, and isn't should it never come on. It
+    /// returns the page's ID.
+    nonisolated(nonsending) func recordNewPage(folderID: String) async throws -> String {
+        try await call { core in
+            try Self.answer { e in core.recordNewPage(folderID, error: e) }
+        }
+    }
+
     /// speechChoices returns the speech providers a transcription on page
     /// can be picked from, and the one marked.
     nonisolated(nonsending) func speechChoices(_ pageID: String) async throws -> SpeechChoices {

@@ -2433,15 +2433,14 @@ struct EditorTests {
     /// with no more word from the hinge.
     @Test func aFoldLetGoAfterTheHingeStopsGoes() async throws {
         let view = UIView()
-        var reserved: ClosedRange<CGFloat>? = 465...486
         var said: [ClosedRange<CGFloat>?] = []
         let watch = FoldWatch(view: view, wait: .milliseconds(20)) { said.append($0) }
-        watch.reserved = { _ in reserved }
+        watch.reserved = { _ in 465...486 }
         watch.hingeMoved()
         try await Task.sleep(for: .milliseconds(100))
         #expect(watch.fold == 465...486)
         watch.hingeMoved()
-        reserved = nil
+        watch.reserved = { _ in nil }
         try await Task.sleep(for: .milliseconds(100))
         #expect(watch.fold == nil)
         #expect(said == [465...486, nil])

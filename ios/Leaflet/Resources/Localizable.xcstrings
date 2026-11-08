@@ -487,6 +487,24 @@
         }
       }
     },
+    "Record Voice Note records in a page of its own. Put it on the Action Button in Settings › Action Button, or add it to Control Center or the Lock Screen.": {
+      "comment": "Settings › Speech to text, under Voice Notes Go In: where to find Leaflet's Record Voice Note control.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ボイスメモを録音」は専用のページに録音します。設定 › アクションボタン でアクションボタンに割り当てるか、コントロールセンターやロック画面に追加してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“录制语音备忘录”会在单独的页面中录音。可在“设置 › 操作按钮”中将其设为操作按钮，或添加到控制中心或锁定屏幕。"
+          }
+        }
+      }
+    },
     "Remove %@": {
       "comment": "The tag editor: VoiceOver's name of the button that takes the tag (%@) off the page.",
       "extractionState": "manual",
@@ -649,6 +667,24 @@
         }
       }
     },
+    "The recording didn't start. Try again.": {
+      "comment": "Record Voice Note, from the Action Button or Siri: the microphone never came on.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録音を開始できませんでした。もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音未能开始。请重试。"
+          }
+        }
+      }
+    },
     "Turn Into": {
       "comment": "The editor: change the block to another kind.",
       "extractionState": "manual",
@@ -681,6 +717,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "下划线"
+          }
+        }
+      }
+    },
+    "Voice Notes": {
+      "comment": "The folder voice notes go in, made as the first one is recorded from the Action Button, Control Center or Siri.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语音备忘录"
+          }
+        }
+      }
+    },
+    "Voice Notes Go In": {
+      "comment": "Settings › Speech to text: the folder that voice notes recorded from the Action Button, Control Center or Siri go in.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモの保存先"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语音备忘录存放位置"
           }
         }
       }

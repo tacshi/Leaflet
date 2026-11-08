@@ -1,0 +1,60 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "${applicationName} voice note": {
+      "comment": "Siri and Spotlight: a phrase that records a voice note. ${applicationName} is the app's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "${applicationName}ボイスメモ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "${applicationName}语音备忘录"
+          }
+        }
+      }
+    },
+    "Record a voice note in ${applicationName}": {
+      "comment": "Siri and Spotlight: a phrase that records a voice note. ${applicationName} is the app's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "${applicationName}でボイスメモを録音"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用${applicationName}录制语音备忘录"
+          }
+        }
+      }
+    },
+    "Start a ${applicationName} voice note": {
+      "comment": "Siri and Spotlight: a phrase that records a voice note. ${applicationName} is the app's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "${applicationName}のボイスメモを開始"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始${applicationName}语音备忘录"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

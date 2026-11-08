@@ -344,6 +344,9 @@ func (c *Core) recState() recordingState {
 // the words heard so far, which grow through a long meeting, only as it
 // changes, but for the time recorded, which the app counts on.
 func (c *Core) tellRecording() {
+	// Each change of the recording comes here, a voice note's microphone
+	// coming on or failing too.
+	c.settleVoiceNote()
 	st := c.recState()
 	levels := st.Levels
 	st.Levels = []float64{}
@@ -396,6 +399,87 @@ func (c *Core) StartRecording(pageID, provider string) (_ string, err error) {
 		return "", err
 	}
 	return encode(node)
+}
+
+// voiceNote is a page RecordNewPage records for, made with its recording's
+// block in it once the recording's microphone comes on.
+type voiceNote struct {
+	page  store.NewPageOptions
+	recID string
+	block *doc.Node
+}
+
+// RecordNewPage starts a recording in a page of its own, named after when
+// it began, in folderID, or at the top level when it is "", as the
+// desktop's New Recording does, with a transcript by the provider
+// SpeechChoices marks, for a recording started from outside the app, as
+// the Action Button's. The page, its recording's block in it, is made as
+// the microphone comes on: a recording that never starts, its microphone
+// refused or stopped while it started, leaves no page behind, here or on
+// the server, nor anything of the recording (settleVoiceNote). It
+// returns the page's ID.
+func (c *Core) RecordNewPage(folderID string) (_ string, err error) {
+	defer catch(&err)
+	keys := c.speechKeys()
+	id := doc.NewRowID()
+	c.q.do(func() {
+		var block *doc.Node
+		s := c.core.Store.Settings()
+		err = c.core.Rec.Start(id, c.sttFor(id, "", keys), c.online(s), func(n *doc.Node) { block = n })
+		if err != nil {
+			// One that failed once made goes as one whose microphone
+			// failed does.
+			if c.core.Rec.State.PageID == id {
+				c.dropVoiceNote(id)
+			}
+			return
+		}
+		c.voiceNote = &voiceNote{
+			page:  store.NewPageOptions{ID: id, FolderID: folderID, Title: locales.RecBlockTitle(time.Now())},
+			recID: c.core.Rec.State.ID, block: block,
+		}
+		c.tellRecording()
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// settleVoiceNote makes the page of the voice note whose microphone came
+// on, or drops the recording of one whose microphone never did, which
+// ended still starting; on the queue, as the recording changes. One the
+// recording moved on from unseen is made: its audio is never lost.
+func (c *Core) settleVoiceNote() {
+	v := c.voiceNote
+	st := c.core.Rec.State
+	if v == nil || st.ID == v.recID && st.Starting {
+		return
+	}
+	c.voiceNote = nil
+	if st.ID == v.recID && !st.Active {
+		c.dropVoiceNote(v.page.ID)
+		return
+	}
+	content := doc.Empty()
+	if err := content.Insert(doc.Position{At: "end"}, v.block); err != nil {
+		log.Printf("page %s: recording block: %v", v.page.ID, err)
+	}
+	v.page.Content = content
+	if _, err := c.core.Store.CreatePage(v.page); err != nil {
+		// The recording goes on, as on the desktop, though its block
+		// couldn't be saved: its audio is kept all the same.
+		c.ev.notice(locales.RecCouldNotSave(err.Error()))
+	}
+}
+
+// dropVoiceNote takes away what a voice note that never began kept, for
+// page id, never made: its recording, failed, with its audio and its
+// change waiting to go up. On the queue.
+func (c *Core) dropVoiceNote(id string) {
+	if err := c.core.Store.RemovePages([]string{id}); err != nil {
+		log.Printf("page %s: drop a recording that never began: %v", id, err)
+	}
 }
 
 // StopRecording ends the recording, saves its audio and transcribes it.

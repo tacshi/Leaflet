@@ -1,0 +1,204 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Open Leaflet to record a voice note.": {
+      "comment": "The Action Button, Control Center or a Live Activity's button, should iOS run it outside the app, which records.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモを録音するには Leaflet を開いてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请打开 Leaflet 录制语音备忘录。"
+          }
+        }
+      }
+    },
+    "Pause": {
+      "comment": "A recording's Live Activity: VoiceOver's name of the button that pauses the recording.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂停"
+          }
+        }
+      }
+    },
+    "Pause or Resume Recording": {
+      "comment": "A recording's Live Activity: pause the recording, or go on with it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録音を一時停止または再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂停或继续录音"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "comment": "A recording's Live Activity: the recording is paused.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已暂停"
+          }
+        }
+      }
+    },
+    "Record Voice Note": {
+      "comment": "The Action Button, Control Center and Shortcuts: start or stop a voice note.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモを録音"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录制语音备忘录"
+          }
+        }
+      }
+    },
+    "Recording": {
+      "comment": "A recording's Live Activity: a recording is under way.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録音中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在录音"
+          }
+        }
+      }
+    },
+    "Records a voice note in a new page, or stops the one recording.": {
+      "comment": "Shortcuts: what Record Voice Note does.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいページにボイスメモを録音します。録音中なら停止します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在新页面中录制语音备忘录；正在录音时则停止录音。"
+          }
+        }
+      }
+    },
+    "Resume": {
+      "comment": "A recording's Live Activity: VoiceOver's name of the button that goes on with the paused recording.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "Stop": {
+      "comment": "A recording's Live Activity: VoiceOver's name of the button that stops the recording.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        }
+      }
+    },
+    "Stop Recording": {
+      "comment": "A recording's Live Activity: stop the recording.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録音を停止"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止录音"
+          }
+        }
+      }
+    },
+    "Voice Note": {
+      "comment": "Control Center, the Lock Screen and the Action Button: the control that records a voice note.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボイスメモ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语音备忘录"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

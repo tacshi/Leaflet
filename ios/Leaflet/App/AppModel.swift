@@ -41,6 +41,10 @@ final class AppModel {
     var syncing = false
     var syncFailure: String?
     var toast: Toast?
+    /// voiceNote is the page a voice note records in, started from outside
+    /// the app, for the window in front to open: at once, or as the app
+    /// comes to the front.
+    var voiceNote: String?
 
     // The settings the look comes from, as the core keeps them.
     var theme = ThemeMode.system
@@ -113,6 +117,9 @@ final class AppModel {
             opened: { [weak self] in await self?.opened() })
         let root = folder.root?.path(percentEncoded: false)
         opening = Task { [weak self] in await self?.open(iCloudRoot: root) }
+        // For the intents iOS runs, as the Action Button's, which may
+        // launch the app to run one.
+        VoiceNotes.app = self
         // The zone the device is in changes as it travels, and its offset
         // as the clocks change. The core's dates follow the clocks at once,
         // and a new zone from the next time the core opens.

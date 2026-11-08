@@ -45,14 +45,14 @@ ios-check: ios-project
 	@for tool in swiftlint osv-scanner mobsfscan semgrep; do \
 		command -v $$tool >/dev/null || { echo "ios-check needs $$tool on PATH" >&2; exit 1; }; \
 	done
-	cd ios && find Leaflet LeafletTests ../speech -name '*.swift' -not -path '*/Generated/*' \
+	cd ios && find Leaflet Shared Widgets LeafletTests ../speech -name '*.swift' -not -path '*/Generated/*' \
 		-not -path '../speech/.build/*' -print0 | \
 		xargs -0 xcrun swift-format lint --strict --configuration .swift-format
 	cd ios && swiftlint lint --strict --quiet
 	xcodebuild -resolvePackageDependencies -quiet -onlyUsePackageVersionsFromResolvedFile \
 		-project ios/Leaflet.xcodeproj -scheme Leaflet
 	osv-scanner scan source -L ios/Package.resolved
-	cd ios && mobsfscan -w -c .mobsf Leaflet LeafletTests ../speech
+	cd ios && mobsfscan -w -c .mobsf Leaflet Shared Widgets LeafletTests ../speech
 
 clean:
 	@case "$(strip $(BUILD_DIR))" in \

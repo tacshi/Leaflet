@@ -223,19 +223,21 @@ final class EditorMenus {
                 }
             ]))
         if UIDevice.current.userInterfaceIdiom == .phone {
-            let bar = UIToolbar()
+            let bar = KeyboardBar()
             let undo = UIBarButtonItem(
                 image: UIImage(systemName: "arrow.uturn.backward"),
                 primaryAction: UIAction(title: L.commonUndo) { [weak self] _ in
                     self?.textView.undoManager?.undo()
                 })
-            let done = UIBarButtonItem(
-                image: UIImage(systemName: "keyboard.chevron.compact.down"),
-                primaryAction: UIAction(title: LI.hideKeyboard) { [weak self] _ in
-                    self?.textView.resignFirstResponder()
-                })
-            bar.items = [insert, format, todo, outdent, indent, .flexibleSpace(), undo, done]
-            bar.sizeToFit()
+            // Six buttons are what the bar holds on an iPhone without
+            // folding some into a "…" menu. The keyboard goes as the page
+            // is dragged down, so it has no button of its own; short of
+            // room all the same, iOS folds the indents before Undo.
+            if #available(iOS 27.0, *) {
+                undo.visibilityPriority = .high
+                for item in [outdent, indent] { item.visibilityPriority = .low }
+            }
+            bar.toolbar.items = [insert, format, todo, outdent, indent, .flexibleSpace(), undo]
             textView.inputAccessoryView = bar
         } else {
             let item = textView.inputAssistantItem
@@ -306,4 +308,44 @@ private final class StayingMenuButton: UIButton {
 extension UIViewController {
     /// topmost is the view controller shown on top of this one.
     var topmost: UIViewController { presentedViewController?.topmost ?? self }
+}
+
+/// KeyboardBar is the editor's toolbar over the keyboard on iPhone. With no
+/// keyboard on screen, as with a hardware keyboard, the system stands it at
+/// the screen's foot, where its toolbar keeps above the home indicator. Laid
+/// out by constraints, the toolbar is as wide as the bar from the start: a
+/// toolbar sized before it has a width folds its last items into "…".
+final class KeyboardBar: UIView {
+    let toolbar = UIToolbar()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // The system sizes an accessory by its intrinsic height, and adds
+        // the safe area below it when it stands at the screen's foot.
+        autoresizingMask = .flexibleHeight
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(toolbar)
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            toolbar.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor),
+        ])
+    }
+
+    convenience init() { self.init(frame: CGRect(x: 0, y: 0, width: 390, height: 44)) }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: CGSize {
+        let height = toolbar.sizeThatFits(
+            CGSize(width: max(bounds.width, 320), height: .greatestFiniteMagnitude)
+        ).height
+        return CGSize(width: UIView.noIntrinsicMetric, height: max(height, 44))
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        invalidateIntrinsicContentSize()
+    }
 }

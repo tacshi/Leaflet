@@ -57,6 +57,10 @@ struct RecordControl: View {
                     Text(state.starting ? L.recStarting : Self.time(recorder.elapsed(at: t.date)))
                         .font(.footnote.weight(.semibold).monospacedDigit())
                         .foregroundStyle(palette.dangerText)
+                        // On one line and whole: squeezed by a long title in
+                        // the bar, the time would wrap to "0:" over "…".
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             Button {
@@ -84,6 +88,8 @@ struct RecordControl: View {
         .buttonStyle(.plain)
         .foregroundStyle(palette.danger)
         .padding(.leading, 10).padding(.trailing, 4)
+        // The bar shortens the page's title before the pill.
+        .fixedSize()
     }
 
     /// time is a duration as the desktop shows it: 1:05, or 1:02:05.

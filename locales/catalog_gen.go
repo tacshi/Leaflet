@@ -3583,13 +3583,13 @@ func (msgs Messages) DialogHistoryTime(at time.Time) string {
 	return Catalog.Format(msgs.locale, "dialogHistoryTime", map[string]any{"at": at})
 }
 
-// DialogHistoryWhen says "{at, date, ::MMMdHm}"
+// DialogHistoryWhen says "{at, date, ::MMMdjm}"
 // in the language the app shows.
 //
 // Page history: when a version was kept, its date and time.
 func DialogHistoryWhen(at time.Time) string { return In(i18n.Locale()).DialogHistoryWhen(at) }
 
-// DialogHistoryWhen says "{at, date, ::MMMdHm}"
+// DialogHistoryWhen says "{at, date, ::MMMdjm}"
 // in the language of msgs.
 //
 // Page history: when a version was kept, its date and time.
@@ -3683,7 +3683,7 @@ func (msgs Messages) DialogHistoryNoChanges() string {
 	return Catalog.Format(msgs.locale, "dialogHistoryNoChanges", nil)
 }
 
-// DialogHistoryBeforeRestoring says "Before restoring {at, date, ::MMMdHm}"
+// DialogHistoryBeforeRestoring says "Before restoring {at, date, ::MMMdjm}"
 // in the language the app shows.
 //
 // Page history: the name given to the version kept before a restore, with
@@ -3692,7 +3692,7 @@ func DialogHistoryBeforeRestoring(at time.Time) string {
 	return In(i18n.Locale()).DialogHistoryBeforeRestoring(at)
 }
 
-// DialogHistoryBeforeRestoring says "Before restoring {at, date, ::MMMdHm}"
+// DialogHistoryBeforeRestoring says "Before restoring {at, date, ::MMMdjm}"
 // in the language of msgs.
 //
 // Page history: the name given to the version kept before a restore, with
@@ -8943,14 +8943,14 @@ func (msgs Messages) VideoSummarizePrompt(title string) string {
 	return Catalog.Format(msgs.locale, "videoSummarizePrompt", map[string]any{"title": title})
 }
 
-// RecBlockTitle says "Recording · {when, date, ::MMMdHm}"
+// RecBlockTitle says "Recording · {when, date, ::MMMdjm}"
 // in the language the app shows.
 //
 // The default title of a new recording block (and of a page made for a
 // recording), with the date and time it was made.
 func RecBlockTitle(when time.Time) string { return In(i18n.Locale()).RecBlockTitle(when) }
 
-// RecBlockTitle says "Recording · {when, date, ::MMMdHm}"
+// RecBlockTitle says "Recording · {when, date, ::MMMdjm}"
 // in the language of msgs.
 //
 // The default title of a new recording block (and of a page made for a

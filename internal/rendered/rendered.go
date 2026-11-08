@@ -269,7 +269,16 @@ var diagramScript = PeleModule + "\n" + ZoomScript + `
 {
   const view = document.getElementById("v"), box = document.getElementById("d");
   const {source, full} = JSON.parse(document.getElementById("diagram").textContent);
-  try { box.innerHTML = peleRender(source, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
+  const draw = (src) => { box.innerHTML = peleRender(src, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; };
+  try {
+    draw(source);
+    // A flowchart drawn across a narrow block, as a phone's, shrinks past
+    // reading to fit: there it is drawn down instead.
+    const across = /^(\s*(?:flowchart|graph)\s+)(LR|RL)\b/m, svg = box.querySelector("svg");
+    const natural = svg ? (svg.viewBox.baseVal && svg.viewBox.baseVal.width) || svg.getBBox().width : 0;
+    if (!full && across.test(source) && view.clientWidth > 0 && natural * 0.6 > view.clientWidth)
+      draw(source.replace(across, "$1TD"));
+  }
   catch (e) { box.className = "err"; box.textContent = e.message; }
   const zoom = leafletZoom(view, box, window, full, (z) => parent.postMessage({leafletZoomed: z}, "*"));
   if (full) addEventListener("keydown", e => {

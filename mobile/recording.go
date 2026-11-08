@@ -778,6 +778,14 @@ func (c *Core) SpeechSettings() (_ string, err error) {
 	keys := recording.KeysOf(out.Stt, out.SonioxSaved, out.MossSaved, out.SignedIn, out.OnDevice)
 	out.Status = recording.Summary(out.Stt, keys)
 	out.Providers, out.Addable = recording.SpeechProviders(out.Stt, keys)
+	// Lists, though empty, as the app reads them: with no provider set up
+	// and no engine on the device, there is none.
+	if out.Providers == nil {
+		out.Providers = []recording.SpeechProvider{}
+	}
+	if out.Addable == nil {
+		out.Addable = []recording.SpeechProvider{}
+	}
 	for _, code := range recording.LanguageCodes() {
 		out.Languages = append(out.Languages, speechLanguage{Code: code, Name: recording.LanguageName(code)})
 	}

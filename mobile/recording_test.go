@@ -668,3 +668,23 @@ func TestRecordingTranscriptFile(t *testing.T) {
 		t.Errorf("audio name %q", got)
 	}
 }
+
+func TestSpeechSettingsListsAreNeverNull(t *testing.T) {
+	// A fresh core with no engine on the device has no provider set up:
+	// the app reads its providers as a list all the same.
+	c, _ := open(t)
+	raw, err := c.SpeechSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lists struct {
+		Providers *[]recording.SpeechProvider `json:"providers"`
+		Addable   *[]recording.SpeechProvider `json:"addable"`
+	}
+	if err := json.Unmarshal([]byte(raw), &lists); err != nil {
+		t.Fatal(err)
+	}
+	if lists.Providers == nil || lists.Addable == nil {
+		t.Fatalf("speech settings %s: a list is null", raw)
+	}
+}

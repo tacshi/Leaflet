@@ -568,6 +568,9 @@ struct Inspector: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
+                // A sheet's grabber stands at its top: the tabs keep clear
+                // of it, as a sheet's own content does.
+                .padding(.top, isSheet ? 14 : 0)
                 switch tab {
                 case .outline: OutlineList(rows: model?.outline ?? [], isSheet: isSheet)
                 case .agent:

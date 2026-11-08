@@ -88,6 +88,10 @@ struct Byline: View {
 /// does when it is long.
 struct FlowRow: Layout {
     var spacing: CGFloat = 6
+    /// slack is how far past its width a line may run before it wraps:
+    /// the width it is placed in is rounded to the screen's pixels, and a
+    /// line that just fit when measured would wrap by a fraction of one.
+    private static let slack: CGFloat = 1
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
@@ -97,7 +101,7 @@ struct FlowRow: Layout {
         var widest: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.unspecified)
-            if x > 0, x + s.width > width {
+            if x > 0, x + s.width > width + Self.slack {
                 y += line + spacing
                 x = 0
                 line = 0
@@ -106,7 +110,10 @@ struct FlowRow: Layout {
             line = max(line, s.height)
             widest = max(widest, x - spacing)
         }
-        return CGSize(width: min(widest, width), height: y + line)
+        // The width offered, when there is one: what it holds may grow (a
+        // byline's "just now" becoming "1 minute ago") without its host
+        // measuring it again, and it then wraps in the width it had.
+        return CGSize(width: width.isFinite ? width : widest, height: y + line)
     }
 
     func placeSubviews(
@@ -117,7 +124,7 @@ struct FlowRow: Layout {
         var line: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + s.width > bounds.maxX {
+            if x > bounds.minX, x + s.width > bounds.maxX + Self.slack {
                 y += line + spacing
                 x = bounds.minX
                 line = 0

@@ -1235,7 +1235,7 @@
   "@dialogHistoryTime": {
     "description": "Page history: the time a version was kept, under the heading of its day."
   },
-  "dialogHistoryWhen": "{at, date, ::MMMdHm}",
+  "dialogHistoryWhen": "{at, date, ::MMMdjm}",
   "@dialogHistoryWhen": {
     "description": "Page history: when a version was kept, its date and time.",
     "placeholders": {
@@ -1273,7 +1273,7 @@
   "@dialogHistoryNoChanges": {
     "description": "Page history: the changes tab when nothing changed."
   },
-  "dialogHistoryBeforeRestoring": "Before restoring {at, date, ::MMMdHm}",
+  "dialogHistoryBeforeRestoring": "Before restoring {at, date, ::MMMdjm}",
   "@dialogHistoryBeforeRestoring": {
     "description": "Page history: the name given to the version kept before a restore, with the time.",
     "placeholders": {
@@ -3206,7 +3206,7 @@
       }
     }
   },
-  "recBlockTitle": "Recording · {when, date, ::MMMdHm}",
+  "recBlockTitle": "Recording · {when, date, ::MMMdjm}",
   "@recBlockTitle": {
     "description": "The default title of a new recording block (and of a page made for a recording), with the date and time it was made.",
     "placeholders": {

@@ -5,7 +5,13 @@
 <h1 align="center">Leaflet</h1>
 
 <p align="center">
-  人と AI エージェントが一緒に「生きたドキュメント」を書く、ネイティブのデスクトップアプリ。
+  人と AI エージェントが一緒に「生きたドキュメント」を書く、Mac、Windows、iPhone、iPad のネイティブアプリ。
+</p>
+
+<p align="center">
+  <a href="https://leaflet.capyvibe.app/ja/">ウェブサイト</a> ·
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849">App Store</a> ·
+  <a href="https://github.com/tacshi/Leaflet/releases/latest">Mac と Windows 版</a>
 </p>
 
 <p align="center">
@@ -13,7 +19,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT ライセンス"></a>
   <a href="#動作環境"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 以降"></a>
   <a href="#動作環境"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 と arm64"></a>
-  <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS と iPadOS 26 以降（開発中）"></a>
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849"><img src="https://img.shields.io/badge/App%20Store-iOS%20%7C%20iPadOS%2026%2B-0D96F6?logo=appstore&logoColor=white" alt="App Store で配信中、iOS と iPadOS 26 以降"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#アプリ外のエージェント-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="MCP 対応"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="MyGo で構築"></a>
@@ -31,9 +37,10 @@ Leaflet は、メモや仕様書、議事録をブロックでできたページ
 まずデバイスに保存され、iCloud Drive を通じて、またはサインインすると Leaflet サーバーを通じて同期されるので、Leaflet はオフラインでも、
 ローカルモデルでも使えます。
 
-Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれています。MyGo
-はインターフェイス全体を GPU でネイティブに描画し、アプリ自体には Web
-ビューを使いません。
+Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) で
+書かれています。MyGo はインターフェイス全体を GPU でネイティブに描画し、アプリ
+自体には Web ビューを使いません。iPhone と iPad のアプリは SwiftUI と UIKit
+で書かれ、同じ Go のコアを使います。
 
 ## 目次
 
@@ -147,6 +154,7 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 ## 動作環境
 
 - macOS 13 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
+- iPhone と iPad では iOS または iPadOS 26 以降。
 - ソースからビルドするには Go 1.27.3 以降。Go のコードに cgo や C
   コンパイラは不要です。Mac アプリのオンデバイス音声認識ヘルパー
   （[`speech`](speech)）は Swift で書かれ、`scripts/build-speech.sh`
@@ -162,9 +170,12 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 
 ## インストール
 
-[最新リリース](https://github.com/tacshi/Leaflet/releases/latest)から macOS
+iPhone と iPad 版は
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849) で入手できます。
+
+Mac と Windows 版は、[最新リリース](https://github.com/tacshi/Leaflet/releases/latest)から macOS
 用のディスクイメージ、または Windows 用のインストーラをダウンロードしてください。
-インストールしたアプリは GitHub Releases から自動でアップデートされます。
+これらのアプリは GitHub Releases から自動でアップデートされます。
 Windows インストーラはまだコード署名されていないため、初回の実行時に SmartScreen
 が警告することがあります。
 
@@ -199,7 +210,9 @@ API キーなしでエージェントを試すには、ローカルのモデル�
 
 ### iOS
 
-iPhone と iPad のアプリは [`ios/`](ios) にあり、開発中です。デスクトップ
+iPhone と iPad のアプリは
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849)
+で配信中で、ソースは [`ios/`](ios) にあります。デスクトップ
 アプリと同じ Go のコアをリンクし、gomobile が [`mobile`](mobile) パッケージ
 を通じて Swift にバインドします。Xcode 27 と
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) が必要です：

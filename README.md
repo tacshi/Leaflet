@@ -5,7 +5,13 @@
 <h1 align="center">Leaflet</h1>
 
 <p align="center">
-  A native desktop app where people and AI agents write living documents together.
+  A native app for Mac, Windows, iPhone and iPad where people and AI agents write living documents together.
+</p>
+
+<p align="center">
+  <a href="https://leaflet.capyvibe.app">Website</a> ·
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849">App Store</a> ·
+  <a href="https://github.com/tacshi/Leaflet/releases/latest">Mac and Windows</a>
 </p>
 
 <p align="center">
@@ -13,7 +19,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 or later"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 and arm64"></a>
-  <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS and iPadOS 26 or later, in progress"></a>
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849"><img src="https://img.shields.io/badge/App%20Store-iOS%20%7C%20iPadOS%2026%2B-0D96F6?logo=appstore&logoColor=white" alt="On the App Store, for iOS and iPadOS 26 or later"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#agents-outside-the-app-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="MCP supported"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="Built with MyGo"></a>
@@ -31,9 +37,10 @@ validated tools, as one step you can undo. Pages are saved on your device
 first and sync through iCloud Drive, or a Leaflet server when you sign in,
 so Leaflet works offline, with local models too.
 
-It is written in Go with [MyGo](https://github.com/egoist/mygo), which
-draws the whole interface natively on the GPU, with no web view for the app
-itself.
+The Mac and Windows app is written in Go with
+[MyGo](https://github.com/egoist/mygo), which draws the whole interface
+natively on the GPU, with no web view for the app itself. The iPhone and
+iPad app is SwiftUI and UIKit, on the same Go core.
 
 ## Contents
 
@@ -152,6 +159,7 @@ itself.
 ## Requirements
 
 - macOS 13 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
+- iOS or iPadOS 26 or later, on iPhone and iPad.
 - To build from source: Go 1.27.3 or later; the Go code needs no cgo or C
   compiler. The Mac app's on-device speech helper ([`speech`](speech))
   is Swift, which `scripts/build-speech.sh` builds with Xcode 26 or later
@@ -167,10 +175,13 @@ itself.
 
 ## Install
 
-Download the disk image for macOS or the installer for Windows from the
+Get Leaflet for iPhone and iPad on the
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849).
+
+For the Mac and Windows, download the disk image or the installer from the
 [latest release](https://github.com/tacshi/Leaflet/releases/latest).
-Installed copies update themselves from GitHub Releases. Windows installers
-are not code signed yet, so SmartScreen may warn when one first runs.
+These copies update themselves from GitHub Releases. Windows installers are
+not code signed yet, so SmartScreen may warn when one first runs.
 
 ## Run from source
 
@@ -204,8 +215,9 @@ helper first with `scripts/build-speech.sh`, which needs Xcode 26 or later.
 
 ### iOS
 
-The iPhone and iPad app is in [`ios/`](ios), and is being built. It
-links the same Go core as the desktop app, which gomobile binds to Swift
+The iPhone and iPad app, on the
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849),
+is in [`ios/`](ios). It links the same Go core as the desktop app, which gomobile binds to Swift
 through the [`mobile`](mobile) package. It needs Xcode 27 and
 [XcodeGen](https://github.com/yonaskolb/XcodeGen):
 

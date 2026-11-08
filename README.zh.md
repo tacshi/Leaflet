@@ -5,7 +5,13 @@
 <h1 align="center">Leaflet</h1>
 
 <p align="center">
-  一款原生桌面应用，让人与 AI 智能体一起书写活文档。
+  一款适用于 Mac、Windows、iPhone 和 iPad 的原生应用，让人与 AI 智能体一起书写活文档。
+</p>
+
+<p align="center">
+  <a href="https://leaflet.capyvibe.app/zh/">网站</a> ·
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849">App Store</a> ·
+  <a href="https://github.com/tacshi/Leaflet/releases/latest">Mac 和 Windows 版</a>
 </p>
 
 <p align="center">
@@ -13,7 +19,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证"></a>
   <a href="#系统要求"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 或更高版本"></a>
   <a href="#系统要求"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 和 arm64"></a>
-  <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS 和 iPadOS 26 或更高版本（开发中）"></a>
+  <a href="https://apps.apple.com/app/leaflet-notes-agents/id6829665849"><img src="https://img.shields.io/badge/App%20Store-iOS%20%7C%20iPadOS%2026%2B-0D96F6?logo=appstore&logoColor=white" alt="已在 App Store 上架，适用于 iOS 和 iPadOS 26 或更高版本"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#应用外的智能体-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="支持 MCP"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="基于 MyGo 构建"></a>
@@ -30,8 +36,9 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 可以一键撤销。页面先保存在你的设备上，再通过 iCloud 云盘同步，或在登录后通过 Leaflet 服务器同步，所以 Leaflet 可以离线
 使用，也可以搭配本地模型。
 
-它用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，MyGo 在 GPU
-上原生绘制整个界面，应用本身不使用网页视图。
+Mac 和 Windows 应用用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，
+MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。iPhone 和 iPad 应用
+用 SwiftUI 和 UIKit 编写，使用同一个 Go 核心。
 
 ## 目录
 
@@ -130,6 +137,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 ## 系统要求
 
 - macOS 13 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
+- iPhone 和 iPad 上的 iOS 或 iPadOS 26 或更高版本。
 - 从源码构建：Go 1.27.3 或更高版本；Go 代码不需要 cgo 或 C 编译器。Mac
   应用的设备端语音识别助手（[`speech`](speech)）用 Swift 编写，
   由 `scripts/build-speech.sh` 使用 Xcode 26 或更高版本（macOS 26 SDK）
@@ -142,8 +150,11 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 
 ## 安装
 
-从[最新版本](https://github.com/tacshi/Leaflet/releases/latest)下载
-macOS 磁盘映像或 Windows 安装程序。安装后的应用会从 GitHub Releases
+iPhone 和 iPad 版可以在
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849) 获取。
+
+Mac 和 Windows 版请从[最新版本](https://github.com/tacshi/Leaflet/releases/latest)
+下载 macOS 磁盘映像或 Windows 安装程序。这些应用会从 GitHub Releases
 自动更新。Windows 安装程序目前还没有代码签名，首次运行时 SmartScreen 可能会发出警告。
 
 ## 从源码运行
@@ -175,7 +186,9 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key> g
 
 ### iOS
 
-iPhone 和 iPad 应用位于 [`ios/`](ios)，仍在开发中。它链接与桌面应用相同的
+iPhone 和 iPad 应用已在
+[App Store](https://apps.apple.com/app/leaflet-notes-agents/id6829665849)
+上架，源码位于 [`ios/`](ios)。它链接与桌面应用相同的
 Go 核心，由 gomobile 通过 [`mobile`](mobile) 包绑定到 Swift。它需要
 Xcode 27 和 [XcodeGen](https://github.com/yonaskolb/XcodeGen)：
 

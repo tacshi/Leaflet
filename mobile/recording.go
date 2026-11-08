@@ -659,7 +659,7 @@ type speechSettings struct {
 	SonioxSaved bool `json:"soniox_saved"`
 	// MossSaved says this device's keychain has a MOSS key.
 	MossSaved bool `json:"moss_saved"`
-	SignedIn    bool `json:"signed_in"`
+	SignedIn  bool `json:"signed_in"`
 	// LocalEndpoint says the endpoint is on this device's network: its
 	// key is this device's; a cloud one's comes from an agent provider.
 	LocalEndpoint bool `json:"local_endpoint"`
@@ -671,7 +671,7 @@ type speechSettings struct {
 	// Addable those that can be added.
 	Providers []recording.SpeechProvider `json:"providers"`
 	Addable   []recording.SpeechProvider `json:"addable"`
-	Languages []speechLanguage `json:"languages"`
+	Languages []speechLanguage           `json:"languages"`
 	// KeepAudio is how long recordings' audio stays on this device once
 	// uploaded: until_uploaded, 30_days or always.
 	KeepAudio string `json:"keep_audio"`

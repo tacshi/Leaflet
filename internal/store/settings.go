@@ -11,16 +11,16 @@ import (
 type SttSettings struct {
 	// Provider is soniox | moss | openai-compatible | on-device, the
 	// device's own engine.
-	Provider       string   `json:"provider"`
-	ModelSize      string   `json:"model_size"`
-	RunOn          string   `json:"run_on"`   // auto | gpu | cpu
-	Language       string   `json:"language"` // auto, or an ISO 639-1 code
-	LiveTranscript bool     `json:"live_transcript"`
-	SpeakerLabels  bool     `json:"speaker_labels"`
-	BaseURL        string   `json:"base_url"`
-	Model          string   `json:"model"`
-	ProviderID     string   `json:"provider_id,omitempty"`
-	SonioxModel    string   `json:"soniox_model"`
+	Provider       string `json:"provider"`
+	ModelSize      string `json:"model_size"`
+	RunOn          string `json:"run_on"`   // auto | gpu | cpu
+	Language       string `json:"language"` // auto, or an ISO 639-1 code
+	LiveTranscript bool   `json:"live_transcript"`
+	SpeakerLabels  bool   `json:"speaker_labels"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model"`
+	ProviderID     string `json:"provider_id,omitempty"`
+	SonioxModel    string `json:"soniox_model"`
 	// SonioxOnServer says a Soniox key was saved on the server from this
 	// device, signed in.
 	SonioxOnServer bool     `json:"soniox_on_server,omitempty"`

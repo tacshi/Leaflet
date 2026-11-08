@@ -155,14 +155,16 @@ func (s *Store) notifyPeerMerge(pageID, label string, conflicts []doc.Conflict) 
 }
 
 // ForgetICloud removes what iCloud sync kept of the other devices, so the
-// next sync starts afresh.
+// next sync starts afresh. The public links this device serves stay
+// (icloud.link.<lease>): they are this device's, and the next device.json
+// it writes says them.
 func (s *Store) ForgetICloud() error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, q := range []string{`DELETE FROM peer_contents`, `DELETE FROM row_versions`, `DELETE FROM key_values WHERE key LIKE 'icloud.%'`} {
+	for _, q := range []string{`DELETE FROM peer_contents`, `DELETE FROM row_versions`, `DELETE FROM key_values WHERE key LIKE 'icloud.%' AND key NOT LIKE 'icloud.link.%'`} {
 		if _, err := tx.Exec(q); err != nil {
 			return err
 		}

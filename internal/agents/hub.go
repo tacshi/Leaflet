@@ -116,6 +116,10 @@ type Run struct {
 	// Local is a run of this device's, all of whose changes were made
 	// here: none of them is still to come with a sync (awaited).
 	Local bool `json:"Local,omitempty"`
+	// Skipped are the indexes in Ops of the block ops that did not apply
+	// to the page, passed over as the run's other edits went in: Undo and
+	// Redo leave them out (landed), as the page never had them.
+	Skipped []int `json:"Skipped,omitempty"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -125,6 +129,27 @@ type Run struct {
 	// too, as its account leaves (Forget); epoch is the hub's then.
 	cancel context.CancelFunc
 	epoch  int64
+}
+
+// skip marks the op at at as passed over: it did not apply to the page.
+func (r *Run) skip(at int) {
+	if !slices.Contains(r.Skipped, at) {
+		r.Skipped = append(r.Skipped, at)
+	}
+}
+
+// landed are the run's ops that reached its page: all but those skipped.
+func (r *Run) landed() []doc.Op {
+	if len(r.Skipped) == 0 {
+		return r.Ops
+	}
+	out := make([]doc.Op, 0, len(r.Ops))
+	for i, o := range r.Ops {
+		if !slices.Contains(r.Skipped, i) {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // RemovedPages are the pages deleting one took away, its subpages with it,
@@ -163,10 +188,10 @@ type Hub struct {
 	// devices through, signed out, while iCloud sync is on: ICloudLease
 	// says so of this device's (ServePublicLink) until stopped, and
 	// ICloudLinks are the pages the other devices say so of, with when
-	// each lease ends, by that device's clock (publicElsewhere). Nil is
-	// none.
+	// each lease ends, by that device's clock (publicElsewhere), and an
+	// error where a device's could not all be read. Nil is none.
 	ICloudLease func(pageID string) (stop func())
-	ICloudLinks func() map[string]time.Time
+	ICloudLinks func() (map[string]time.Time, error)
 	// links are when each page's public link, which another device
 	// serves, stops counting, as the server last said (publicElsewhere),
 	// listed the spaces whose pages with a link it has listed
@@ -496,12 +521,12 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 	}
 	switch live := h.host.Live(s.PageID); {
 	case live != nil:
+		// Ops held back stay for the next delivery, at the latest the
+		// run's end, which fails the run if they still cannot go: none
+		// goes in before the snapshot, which the page goes back to.
 		if err := h.keepBefore(s.PageID, run, option, before); err != nil {
 			log.Printf("agent run history: %v", err)
-		}
-		// Ops held back stay for the next delivery, at the latest the
-		// run's end, which fails the run if they still cannot go.
-		if err := d.to(live, run.Ops); err != nil {
+		} else if err := d.to(live, run.Ops); err != nil {
 			log.Printf("agent op on the open page: %v", err)
 		}
 		h.keepRunning(s, run, d, o, chatSaveEvery)
@@ -542,6 +567,7 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 	had := d.sent > at
 	if op == nil {
 		run.Ops, run.Edits = run.Ops[:at], run.Edits[:at]
+		run.Skipped = slices.DeleteFunc(run.Skipped, func(i int) bool { return i >= at })
 		d.sent = min(d.sent, len(run.Ops))
 	} else {
 		run.Ops[at] = *op
@@ -553,17 +579,21 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 	if !had {
 		return
 	}
+	// A change that does not apply leaves the op passed over, as Undo
+	// could not take it back whole.
 	if live := h.host.Live(s.PageID); live != nil {
 		for _, c := range delta {
-			if err := d.apply(live, c); err != nil {
+			if err := d.apply(live, c, at); err != nil {
 				log.Printf("agent op on the open page: %v", err)
 				d.failed = errors.Join(d.failed, err)
 				break
 			}
 		}
-	} else if err := storeOps(h.st, s.PageID, delta, true, false, run.ID, "agent op on a closed page"); err != nil {
+	} else if skipped, err := storeOps(h.st, s.PageID, delta, true, false, run.ID, "agent op on a closed page"); err != nil {
 		log.Printf("agent op on a closed page: %v", err)
 		d.failed = errors.Join(d.failed, err)
+	} else if len(skipped) > 0 {
+		run.skip(at)
 	}
 }
 
@@ -716,13 +746,14 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		// ops it missed, open or stored.
 		var err error
 		if live := h.host.Live(pageID); live != nil {
-			if err := h.keepBefore(pageID, run, option, before); err != nil {
-				log.Printf("agent run history: %v", err)
+			// As on a closed page, edits that could not keep the snapshot
+			// do not go in; an op whose conflict could not be kept in
+			// history is not applied, nor those after it.
+			err = h.keepBefore(pageID, run, option, before)
+			if err == nil {
+				err = d.to(live, run.Ops)
 			}
-			// An op whose conflict could not be kept in history is not
-			// applied, nor those after it.
-			err = d.to(live, run.Ops)
-		} else if len(d.missed(run.Ops)) > 0 {
+		} else if missed, _ := d.missed(run.Ops); len(missed) > 0 {
 			// The snapshot goes first, as an MCP edit's: edits that could
 			// not keep one are not stored, so none is stored that the page
 			// cannot go back from.

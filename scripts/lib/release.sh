@@ -66,27 +66,98 @@ version_after() {
 	return 1
 }
 
-# config_value prints the value in mygo.json at the dotted keys $1, as in
-# "version" or "updates.github".
-config_value() {
+# CONFIG_LOCK names the build of this checkout that has mygo.json changed,
+# by its process, while it does; CONFIG_KEPT keeps the committed file
+# meanwhile, which it puts back as it ends. CONFIG_RECOVER is held while a
+# build puts back what one that is gone left changed.
+CONFIG_LOCK="$ROOT_DIR/build/mygo.json.lock"
+CONFIG_KEPT="$ROOT_DIR/build/mygo.json.committed"
+CONFIG_RECOVER="$ROOT_DIR/build/mygo.json.recover"
+CONFIG_HELD=false
+
+# read_config prints the value in the mygo.json $1 at the dotted keys $2.
+read_config() {
 	python3 -I -c '
 import json, sys
 value = json.load(open(sys.argv[1]))
 for key in sys.argv[2].split("."):
     value = value[key]
-print(value)' "$ROOT_DIR/mygo.json" "$1"
+print(value)' "$1" "$2"
+}
+
+# config_value prints the value in mygo.json at the dotted keys $1, as in
+# "version" or "updates.github": as this build has it changed, or as it is
+# committed while another build has it changed.
+config_value() {
+	if ! $CONFIG_HELD && [[ -f "$CONFIG_KEPT" ]] && read_config "$CONFIG_KEPT" "$1" 2>/dev/null; then
+		return
+	fi
+	read_config "$ROOT_DIR/mygo.json" "$1"
+}
+
+# hold_config waits until no other build of this checkout has mygo.json
+# changed, and then holds it for this one, with the committed file kept in
+# CONFIG_KEPT, until the script exits: builds that overlapped would read
+# each other's changes, and one could put back another's as the committed
+# file. What a build that is gone, killed, left changed is put back first.
+hold_config() {
+	local holder said=false
+	mkdir -p "$ROOT_DIR/build"
+	until (
+		set -o noclobber
+		printf '%s\n' "$$" >"$CONFIG_LOCK"
+	) 2>/dev/null; do
+		holder="$(cat "$CONFIG_LOCK" 2>/dev/null || true)"
+		if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null && recover_config "$holder"; then
+			continue
+		fi
+		if ! $said; then
+			info "waiting for another build of this checkout (process ${holder:-?}), which has mygo.json changed; $CONFIG_LOCK names it"
+			said=true
+		fi
+		sleep 1
+	done
+	CONFIG_HELD=true
+	trap release_config EXIT
+	# Kept whole or not at all: a build killed as it copies has nothing
+	# changed yet to put back.
+	cp -p "$ROOT_DIR/mygo.json" "$CONFIG_KEPT.$$"
+	mv -f "$CONFIG_KEPT.$$" "$CONFIG_KEPT"
+}
+
+# release_config puts the committed mygo.json back, and lets another build
+# change it.
+release_config() {
+	if [[ -f "$CONFIG_KEPT" ]]; then mv -f "$CONFIG_KEPT" "$ROOT_DIR/mygo.json"; fi
+	rm -f "$CONFIG_LOCK"
+	CONFIG_HELD=false
+}
+
+# recover_config puts back the committed mygo.json that the build $1, by
+# its process, which is gone, left changed, and lets go of its hold. One
+# build at a time does, and only while that build still holds it; it fails
+# when another is at it.
+recover_config() {
+	(
+		set -o noclobber
+		: >"$CONFIG_RECOVER"
+	) 2>/dev/null || return 1
+	if [[ "$(cat "$CONFIG_LOCK" 2>/dev/null || true)" == "$1" ]]; then
+		if [[ -f "$CONFIG_KEPT" ]]; then
+			warn "a build that ended early left mygo.json changed; putting the committed one back"
+			mv -f "$CONFIG_KEPT" "$ROOT_DIR/mygo.json"
+		fi
+		rm -f "$CONFIG_LOCK"
+	fi
+	rm -f "$CONFIG_RECOVER"
 }
 
 # patch_config changes mygo.json for this run only: each argument is
 # <dotted key>=<value>, which sets the value, or -<dotted key>, which
-# removes the key. The first call keeps the committed file, which is put
-# back when the script exits.
+# removes the key. The first call holds mygo.json for this build
+# (hold_config), and the committed file is put back when the script exits.
 patch_config() {
-	if [[ -z "${CONFIG_BACKUP:-}" ]]; then
-		CONFIG_BACKUP="$(mktemp)"
-		cp "$ROOT_DIR/mygo.json" "$CONFIG_BACKUP"
-		trap 'cp "$CONFIG_BACKUP" "$ROOT_DIR/mygo.json"; rm -f "$CONFIG_BACKUP"' EXIT
-	fi
+	$CONFIG_HELD || hold_config
 	python3 -I - "$ROOT_DIR/mygo.json" "$@" <<'EOF'
 import json, sys
 path, pairs = sys.argv[1], sys.argv[2:]

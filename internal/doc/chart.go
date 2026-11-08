@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -148,7 +149,9 @@ func ParseChartCSV(text string) (labels []any, series []any, err error) {
 		for s := range values {
 			v := 0.0
 			if s+1 < len(cells) && cells[s+1] != "" {
-				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil {
+				// NaN and the infinities read as floats, but no chart
+				// draws them.
+				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 					return nil, nil, &ChartNumberError{Line: lines[i+1][s+1], Cell: cells[s+1]}
 				}
 			}

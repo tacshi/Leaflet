@@ -517,7 +517,7 @@ func (a *App) nameVersion(name string) {
 		a.toast(locales.DialogHistoryKeepFailed(err.Error()))
 		return
 	}
-	d.history, _ = a.st.History(d.historyPage)
+	reread(&d.history, func() ([]store.HistoryEntry, error) { return a.st.History(d.historyPage) })
 	d.historyPick, d.historyDiffOf, d.versionOf, d.naming, d.versionName = 0, "", "", false, ""
 }
 

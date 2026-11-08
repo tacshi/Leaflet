@@ -104,12 +104,18 @@ func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
 func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	redraw := func() { h.a.update(func() {}) }
+	// A download that failed shows as failed in the frame its end draws.
+	downloaded := func(ok bool) {
+		if ok {
+			redraw()
+		}
+	}
 	url := n.Str("url")
 	// An uploaded picture is found by its file: its url is a path on the
 	// device that uploaded it.
 	path := ""
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
-		if path = h.a.localFile(f, redraw); path == "" {
+		if path = h.a.localFile(f, downloaded); path == "" {
 			return nil, nil, h.a.downloadFailed(f.ID)
 		}
 		url = "file://" + path
@@ -344,7 +350,7 @@ func (a *App) addSubpageBlock() {
 		a.toast(locales.HostErrorCreateSubpage(err.Error()))
 		return
 	}
-	a.pages, _ = a.st.Pages()
+	reread(&a.pages, a.st.Pages)
 	n := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": p.ID}}
 	ps.editor.InsertBlocks(n)
 	a.treeOpen("page", ps.id)
@@ -461,8 +467,8 @@ func (a *App) openFile(f store.File) {
 	// on the device again.
 	delete(a.downloadFails, f.ID)
 	a.lost(f.LocalPath)
-	path := a.localFile(f, func() {
-		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
+	path := a.localFile(f, func(ok bool) {
+		if f, found := a.fileByID(f.ID); ok && found && f.LocalPath != "" {
 			openSafely(f.LocalPath)
 		}
 	})
@@ -564,20 +570,25 @@ func (a *App) onDevice(path string) bool {
 func (a *App) lost(path string) { delete(a.present, path) }
 
 // localFile returns where a file is on this device, or "" while one
-// uploaded from another device downloads; done runs once it has. A
-// download that failed is tried again once imageRetry has passed, or
-// when the file is opened.
-func (a *App) localFile(f store.File, done func()) string {
+// uploaded from another device downloads; done runs once the download
+// ends, ok if it came. A file asked for again while it downloads waits
+// for the same download, and each done runs. A download that failed is
+// tried again once imageRetry has passed, or when the file is opened.
+func (a *App) localFile(f store.File, done func(ok bool)) string {
 	if f.LocalPath != "" && a.onDevice(f.LocalPath) {
 		return f.LocalPath
 	}
-	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloads[f.ID] || a.downloadFailed(f.ID) {
+	if waiting, ok := a.downloads[f.ID]; ok {
+		a.downloads[f.ID] = append(waiting, done)
+		return ""
+	}
+	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloadFailed(f.ID) {
 		return ""
 	}
 	if a.downloads == nil {
-		a.downloads = map[string]bool{}
+		a.downloads = map[string][]func(bool){}
 	}
-	a.downloads[f.ID] = true
+	a.downloads[f.ID] = []func(bool){done}
 	var err error
 	a.offMain(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -590,6 +601,7 @@ func (a *App) localFile(f store.File, done func()) string {
 			_ = r.Close()
 		}
 	}, func() {
+		waiting := a.downloads[f.ID]
 		delete(a.downloads, f.ID)
 		if err != nil {
 			log.Printf("download %s: %v", f.Name, err)
@@ -599,11 +611,13 @@ func (a *App) localFile(f store.File, done func()) string {
 			a.downloadFails[f.ID] = time.Now()
 			// The next frame after the wait tries again.
 			a.later(imageRetry, func() {})
-			return
+		} else {
+			delete(a.downloadFails, f.ID)
+			a.reload(store.Change{Table: "files"})
 		}
-		delete(a.downloadFails, f.ID)
-		a.reload(store.Change{Table: "files"})
-		done()
+		for _, done := range waiting {
+			done(err == nil)
+		}
 	})
 	return ""
 }

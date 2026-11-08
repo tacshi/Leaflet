@@ -38,7 +38,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	}
 	var b strings.Builder
 	if title != "" {
-		b.WriteString("# " + escapeText(title) + "\n\n")
+		b.WriteString("# " + headingMarkdown(escapeCommonMark(title)) + "\n\n")
 	}
 	text := func(indent, lead, pad, md string) { b.WriteString(TextMarkdown(indent, lead, pad, md)) }
 	// block writes Markdown that is already a block at an indent, every
@@ -56,7 +56,9 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 		}
 		b.WriteString("\n")
 	}
-	link := func(text, to string) string { return "[" + escapeText(text) + "](" + LinkDestination(href(to)) + ")" }
+	link := func(text, to string) string {
+		return "[" + escapeCommonMark(text) + "](" + commonMarkDestination(href(to)) + ")"
+	}
 	// indent is the room before a block, nested under list items: as much
 	// as each item's marker takes, as CommonMark nests by ("1. " three).
 	var visit func(nodes []*Node, indent string)
@@ -86,7 +88,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				b.WriteString("\n")
 			case "heading":
 				hashes := strings.Repeat("#", min(max(n.Int("level", 1), 1), 6))
-				block(indent, hashes+" "+OneLine(n.Delta()).ReadableMarkdown())
+				block(indent, hashes+" "+headingMarkdown(OneLine(n.Delta()).ReadableMarkdown()))
 			case "bulleted_list":
 				text(indent, "- ", "  ", md)
 			case "numbered_list":
@@ -129,16 +131,16 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				block(indent, tableMarkdown(ReadableTableRows(n)))
 			case "chart":
 				if t := n.Str("title"); t != "" {
-					block(indent, "**"+escapeText(t)+"**")
+					block(indent, "**"+escapeCommonMark(t)+"**")
 				}
 				chart := ChartOf(n)
 				head := []string{""}
 				for _, l := range chart.Labels {
-					head = append(head, escapeText(l))
+					head = append(head, escapeCommonMark(l))
 				}
 				rows := [][]string{head}
 				for _, s := range chart.Series {
-					row := []string{escapeText(s.Name)}
+					row := []string{escapeCommonMark(s.Name)}
 					for _, v := range s.Values {
 						row = append(row, trimFloat(v))
 					}
@@ -146,15 +148,15 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				}
 				block(indent, tableMarkdown(rows))
 				if cap := n.Str("caption"); cap != "" {
-					block(indent, "*"+escapeText(cap)+"*")
+					block(indent, "*"+escapeCommonMark(cap)+"*")
 				}
 			case "embed":
 				// An embed with no title, or the one a new embed takes, in
 				// any language, is named only for what it is.
 				if title := n.Str("title"); title == "" || defaultEmbedTitle(title) {
-					block(indent, "*"+escapeText(msgs.ExportEmbed())+"*")
+					block(indent, "*"+escapeCommonMark(msgs.ExportEmbed())+"*")
 				} else {
-					block(indent, "*"+escapeText(msgs.ExportEmbedTitled(title))+"*")
+					block(indent, "*"+escapeCommonMark(msgs.ExportEmbedTitled(title))+"*")
 				}
 			case "video":
 				title := n.Str("title")
@@ -187,7 +189,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				if title := n.Str("title"); title != "" {
 					name = msgs.ExportRecordingTitled(title)
 				}
-				block(indent, "*"+escapeText(name)+"*")
+				block(indent, "*"+escapeCommonMark(name)+"*")
 			case "subpage":
 				name := n.Str("page_id")
 				if o.PageTitle != nil {
@@ -224,9 +226,9 @@ func mathMarkdown(formula string) string {
 func notesMarkdown(notes string, to func(at int) string) string {
 	time := func(text string, at int) string {
 		if dest := to(at); dest != "" {
-			return "[" + escapeText(text) + "](" + LinkDestination(dest) + ")"
+			return "[" + escapeCommonMark(text) + "](" + commonMarkDestination(dest) + ")"
 		}
-		return escapeText(text)
+		return escapeCommonMark(text)
 	}
 	var lines []string
 	for _, l := range NoteLines(notes) {
@@ -235,7 +237,7 @@ func notesMarkdown(notes string, to func(at int) string) string {
 			if p.At >= 0 {
 				b.WriteString(time(p.Text, p.At))
 			} else {
-				b.WriteString(escapeText(p.Text))
+				b.WriteString(escapeCommonMark(p.Text))
 			}
 		}
 		text := b.String()

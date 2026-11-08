@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -338,6 +339,43 @@ func TestStalePushTakesItsConflictsBack(t *testing.T) {
 	}
 }
 
+// A save the server answers that it did not apply, as one it refuses or
+// whose statement ran out of time, takes its conflicts back, as a stale
+// one does: the merge tried again meets its own. One met with no answer
+// may have been applied, and keeps them.
+func TestRefusedPushTakesItsConflictsBack(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		kept   bool
+	}{
+		"refused":           {http.StatusForbidden, `{"code":"42501","message":"new row violates row-level security policy"}`, false},
+		"statement timeout": {http.StatusInternalServerError, `{"code":"57014","message":"canceling statement due to statement timeout"}`, false},
+		"no answer":         {http.StatusBadGateway, `bad gateway`, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := openStore(t)
+			p, srv := conflictedPage(t, st)
+			hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPatch {
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+					return
+				}
+				srv.ServeHTTP(w, r)
+			})))
+			defer hs.Close()
+			svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+			if _, err := svc.saveContent(context.Background(), p.ID); err == nil {
+				t.Fatal("save went")
+			}
+			if got := localSides(t, st, "a"); tc.kept != (len(got) == 1) {
+				t.Errorf("conflicts on a %q", got)
+			}
+		})
+	}
+}
+
 // A pulled revision is stored with the conflicts of its merge or not at
 // all: stored without them, the page would no longer be behind, and the
 // merge that meets them would never run again.
@@ -483,8 +521,8 @@ func TestKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
 	if got := texts(); !slices.Equal(got, []string{"there", "there", "there"}) {
 		t.Errorf("with all kept, %v", got)
 	}
-	if len(svc.waiting()) != 0 {
-		t.Errorf("still waiting for %v", svc.waiting())
+	if len(waitingOn(t, svc)) != 0 {
+		t.Errorf("still waiting for %v", waitingOn(t, svc))
 	}
 }
 
@@ -527,8 +565,8 @@ func TestContentWaitsForItsPage(t *testing.T) {
 	if c := st.Content(id); c == nil || textOf(c, "a") != "written first" {
 		t.Errorf("stored %v", c)
 	}
-	if len(svc.waiting()) != 0 {
-		t.Errorf("still waiting for %v", svc.waiting())
+	if len(waitingOn(t, svc)) != 0 {
+		t.Errorf("still waiting for %v", waitingOn(t, svc))
 	}
 }
 
@@ -610,8 +648,8 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	if c := st.Content(other.ID); c == nil || textOf(c, "b") != "two, added there" {
 		t.Errorf("the other page has %v", c)
 	}
-	if !svc.waiting()[p.ID] {
-		t.Errorf("waiting for %v", svc.waiting())
+	if !waitingOn(t, svc)[p.ID] {
+		t.Errorf("waiting for %v", waitingOn(t, svc))
 	}
 }
 
@@ -714,8 +752,8 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	if c := st.Content(other.ID); c == nil || textOf(c, "c") != "from another device" {
 		t.Errorf("the other page has %v", c)
 	}
-	if !svc.waiting()[p.ID] {
-		t.Errorf("waiting for %v", svc.waiting())
+	if !waitingOn(t, svc)[p.ID] {
+		t.Errorf("waiting for %v", waitingOn(t, svc))
 	}
 }
 
@@ -752,6 +790,49 @@ func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 // now, gives way to the server's: else it would go, and fail, on every
 // pass, and the pulls would pass over the page for good.
 func TestRefusedContentTakesTheServers(t *testing.T) {
+	st, shared, svc, patches := refusedContent(t)
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st.HasPending("page_content", shared) {
+		t.Error("the refused change still waits")
+	}
+	if got := textOf(st.Content(shared), "a"); got != "one, edited by the owner" {
+		t.Errorf("content %q", got)
+	}
+	if row, _ := st.ContentRow(shared); row.RemoteRevision != 3 {
+		t.Errorf("revision %d", row.RemoteRevision)
+	}
+	if *patches != 3 {
+		t.Errorf("%d saves tried", *patches)
+	}
+}
+
+// A refused change to a page's content stays queued while the server's
+// content cannot be stored over it: gone from the queue first, it would
+// be neither sent nor replaced.
+func TestRefusedContentStaysQueuedWhenTheServersCannotStore(t *testing.T) {
+	st, shared, svc, _ := refusedContent(t)
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasPending("page_content", shared) {
+		t.Error("the change left the queue, the server's content not stored")
+	}
+	if got := textOf(st.Content(shared), "a"); got != "one, edited here" {
+		t.Errorf("content %q", got)
+	}
+}
+
+// refusedContent is a page shared with the user as an editor, whose
+// content they changed here since, and a server where they are a viewer
+// now, which refuses the change, with the owner's edit since; and the
+// count of saves the server refused.
+func refusedContent(t *testing.T) (*store.Store, string, *Service, *int) {
+	t.Helper()
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
 		t.Fatal(err)
@@ -778,7 +859,7 @@ func TestRefusedContentTakesTheServers(t *testing.T) {
 	theirs.Find("a").SetDelta(doc.Delta{{Text: "one, edited by the owner"}})
 	theirs.Blocks["a"] = 2000
 	var mu gosync.Mutex
-	patches := 0
+	patches := new(int)
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -787,30 +868,14 @@ func TestRefusedContentTakesTheServers(t *testing.T) {
 		case r.URL.Path == "/rest/v1/rpc/page_members":
 			out = []map[string]any{{"user_id": "u2", "role": "owner", "accepted": true}, {"user_id": "u1", "role": "viewer", "accepted": true}}
 		case r.URL.Path == "/rest/v1/page_content" && r.Method == "PATCH":
-			patches++ // row-level security matches no row
+			*patches++ // row-level security matches no row
 		case r.URL.Path == "/rest/v1/page_content":
 			out = []map[string]any{{"content": json.RawMessage(theirs.Encode()), "revision": 3, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}}
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	}))
-	defer hs.Close()
-	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-
-	if err := svc.push(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if st.HasPending("page_content", shared) {
-		t.Error("the refused change still waits")
-	}
-	if got := textOf(st.Content(shared), "a"); got != "one, edited by the owner" {
-		t.Errorf("content %q", got)
-	}
-	if row, _ := st.ContentRow(shared); row.RemoteRevision != 3 {
-		t.Errorf("revision %d", row.RemoteRevision)
-	}
-	if patches != 3 {
-		t.Errorf("%d saves tried", patches)
-	}
+	t.Cleanup(hs.Close)
+	return st, shared, New(st, remote.SignedInForTest(hs.URL, st, "u1")), patches
 }
 
 // Merged content the server took is stored here before its change leaves

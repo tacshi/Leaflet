@@ -59,8 +59,44 @@ enum Reminders {
     /// asking says the app is on the screen, to ask for permission once
     /// there is something to remind of: never before, and never from the
     /// background.
+    ///
+    /// One run at a time: two interleaved across their waits could leave
+    /// a to-do checked off scheduled, or schedule one twice. A call while
+    /// one runs has another run after it, one for all such calls, and
+    /// returns once that is done.
     @MainActor
     static func schedule(_ client: CoreClient, asking: Bool) async {
+        if let running {
+            again = Again(client: client, asking: asking || again?.asking == true)
+            await running.value
+            return
+        }
+        let run = Task { @MainActor in
+            var next: Again? = Again(client: client, asking: asking)
+            while let this = next {
+                await scheduleOnce(this.client, asking: this.asking)
+                next = again
+                again = nil
+            }
+            running = nil
+        }
+        running = run
+        await run.value
+    }
+
+    /// Again is a run asked for while another was under way.
+    private struct Again {
+        let client: CoreClient
+        let asking: Bool
+    }
+
+    /// running is the run under way, and again the one asked for meanwhile.
+    @MainActor private static var running: Task<Void, Never>?
+    @MainActor private static var again: Again?
+
+    /// scheduleOnce is one run of schedule.
+    @MainActor
+    private static func scheduleOnce(_ client: CoreClient, asking: Bool) async {
         let center = UNUserNotificationCenter.current()
         let list: [Reminder]
         do {

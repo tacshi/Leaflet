@@ -273,7 +273,7 @@ func TestPullFetchesContentInBatches(t *testing.T) {
 	if got := rec.asked("/rest/v1/page_content", "content%2C"); len(got) != 2 {
 		t.Errorf("%d requests for the changed pages' content, want 2 batches: %v", len(got), got)
 	}
-	if w := svc.waiting(); !w[late.ID] {
+	if w := waitingOn(t, svc); !w[late.ID] {
 		t.Errorf("waiting for %v", w)
 	}
 }
@@ -296,7 +296,7 @@ func TestWaitingIsWrittenOnlyAsItChanges(t *testing.T) {
 		if err := svc.setWaiting(map[string]bool{"p1": true}); err != nil {
 			t.Fatal(err)
 		}
-		if err := svc.setWaiting(svc.waiting()); err != nil {
+		if err := svc.setWaiting(waitingOn(t, svc)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -306,8 +306,8 @@ func TestWaitingIsWrittenOnlyAsItChanges(t *testing.T) {
 	if err := svc.setWaiting(map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}
-	if told != 1 || len(svc.waiting()) != 0 {
-		t.Errorf("told %d times, waiting %v", told, svc.waiting())
+	if told != 1 || len(waitingOn(t, svc)) != 0 {
+		t.Errorf("told %d times, waiting %v", told, waitingOn(t, svc))
 	}
 }
 
@@ -523,7 +523,7 @@ func TestPagesThatStayWaitingDoNotHoldUpTheOthers(t *testing.T) {
 	if c := st.Content(last); c == nil || textOf(c, "a") != "there" {
 		t.Errorf("the page after those that stay waiting has %v", c)
 	}
-	if w := svc.waiting(); len(w) != 3 || w[last] {
+	if w := waitingOn(t, svc); len(w) != 3 || w[last] {
 		t.Errorf("waiting for %v", w)
 	}
 	if !slices.Equal(kicked, []bool{false, true, false}) {

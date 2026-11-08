@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,8 +53,8 @@ func (s *Service) adopted(ctx context.Context, space, key string) error {
 	return errors.Join(failed, s.st.SetValue(key, space))
 }
 
-// requeueAll queues everything on this device to go up, now in the space
-// spaceID: the pages and their content, folders, comments, files and
+// requeueAll queues everything of the space spaceID on this device to go
+// up: the pages and their content, folders, comments, files and
 // recordings with their audio. A file or audio this device has only in
 // iCloud Drive, as after syncing through it, comes here first, to go up
 // from here; one that does not come yet waits, and retryMoves tries it
@@ -71,25 +72,41 @@ func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	// Each row goes as stored when it is queued, not as read here: a
 	// change made meanwhile, as a deletion, is not undone.
 	var queued error
+	// Only what is of the space goes, with what is on its pages: a page
+	// another account shared with the user, kept here after the user's
+	// session ended on its own, is not the user's to send, and the devices
+	// that took it would file it as one of the user's own.
 	pages, err := s.st.AllPages()
 	queued = errors.Join(queued, err)
+	ofSpace := map[string]bool{}
 	for _, p := range pages {
-		queued = errors.Join(queued, s.st.Requeue("pages", p.ID))
+		if p.SpaceID == spaceID {
+			ofSpace[p.ID] = true
+			queued = errors.Join(queued, s.st.Requeue("pages", p.ID))
+		}
 	}
 	folders, err := s.st.AllFolders()
 	queued = errors.Join(queued, err)
 	for _, f := range folders {
-		queued = errors.Join(queued, s.st.Requeue("folders", f.ID))
+		if f.SpaceID == spaceID {
+			queued = errors.Join(queued, s.st.Requeue("folders", f.ID))
+		}
 	}
 	comments, err := s.st.AllComments()
 	queued = errors.Join(queued, err)
 	for _, c := range comments {
-		queued = errors.Join(queued, s.st.Requeue("comments", c.ID))
+		if ofSpace[c.PageID] {
+			queued = errors.Join(queued, s.st.Requeue("comments", c.ID))
+		}
 	}
 	files, err := s.st.AllFiles()
 	queued = errors.Join(queued, err)
+	files = slices.DeleteFunc(files, func(f store.File) bool {
+		return f.SpaceID != spaceID || f.PageID != "" && !ofSpace[f.PageID]
+	})
 	recordings, err := s.st.Recordings()
 	queued = errors.Join(queued, err)
+	recordings = slices.DeleteFunc(recordings, func(r store.Recording) bool { return !ofSpace[r.PageID] })
 	var failed error
 	moves := map[string]bool{}
 	// Deleted files go too, as deleted pages do, so a deletion sent in a
@@ -137,9 +154,9 @@ func (s *Service) retryMoves(ctx context.Context) error {
 	if space, _ := s.st.Value(requeueKey); space != "" {
 		return s.requeueAll(ctx, space)
 	}
-	moves := s.ids(movesKey)
-	if len(moves) == 0 {
-		return nil
+	moves, err := s.ids(movesKey)
+	if err != nil || len(moves) == 0 {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, moveWait/4)
 	defer cancel()

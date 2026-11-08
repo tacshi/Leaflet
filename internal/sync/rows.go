@@ -109,3 +109,67 @@ func (s *Service) localRow(table, id string) (row map[string]any, ok bool, err e
 	}
 	return out, true, nil
 }
+
+// rowSpace is the space a row of a synced table is of, by the pages this
+// device has: a page's or a folder's own; a file's own, or the space of
+// the page it is on when that is another, as an upload to a page someone
+// shared is; and a comment's or a recording's page's. known is false for
+// a comment or a recording on a page this device does not have.
+func (s *Service) rowSpace(table string, row map[string]any) (space string, known bool, err error) {
+	pageSpace := func() (string, bool, error) {
+		id := store.S(row, "page_id")
+		if id == "" {
+			return "", false, nil
+		}
+		p, err := s.st.Page(id)
+		if store.IsNotFound(err) {
+			return "", false, nil
+		}
+		return p.SpaceID, err == nil, err
+	}
+	switch table {
+	case "pages", "folders":
+		return store.S(row, "space_id"), true, nil
+	case "files":
+		on, known, err := pageSpace()
+		if err != nil || known && on != store.S(row, "space_id") {
+			return on, known, err
+		}
+		return store.S(row, "space_id"), true, nil
+	case "comments", "recordings":
+		return pageSpace()
+	}
+	return "", false, nil
+}
+
+// otherSpace reports whether a row of a synced table is of a space other
+// than the one this device syncs, as a page another account shared with
+// the user, kept here after their session ended, is: as row has it, and
+// as this device has it, when it does. A comment or a recording on a page
+// this device does not have counts as of another space when strict, as
+// what goes from here does, and as of this one otherwise, as what comes
+// before its page may.
+func (s *Service) otherSpace(table, id string, row map[string]any, strict bool) (bool, error) {
+	space := s.st.Session().SpaceID
+	local, here, err := s.localRow(table, id)
+	if err != nil {
+		return true, err
+	}
+	rows := []map[string]any{row}
+	if here {
+		rows = append(rows, local)
+	}
+	for _, r := range rows {
+		if r == nil {
+			continue
+		}
+		of, known, err := s.rowSpace(table, r)
+		if err != nil {
+			return true, err
+		}
+		if known && of != space || !known && strict {
+			return true, nil
+		}
+	}
+	return false, nil
+}

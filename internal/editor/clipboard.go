@@ -2,10 +2,12 @@ package editor
 
 import (
 	"crypto/rand"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/richtext"
 
 	"leaflet/internal/doc"
@@ -85,7 +87,10 @@ func (e *Editor) pasteClipboard(plain bool) {
 }
 
 // richOfData reads the richest format of data it has: MyGo's rich text,
-// HTML or RTF.
+// HTML or RTF. Only MyGo's rich text, as Leaflet copies, keeps its
+// colors: those of HTML or RTF are the theme of the page or the editor of
+// code it came from more than colors anyone gave its text, and would
+// make Markdown copied from an editor of code paste as colored text.
 func richOfData(data transfer.Data) (richtext.Text, bool) {
 	if raw, err := data.Read(richtext.Format); err == nil {
 		var t richtext.Text
@@ -94,12 +99,26 @@ func richOfData(data transfer.Data) (richtext.Text, bool) {
 		}
 	}
 	if raw, err := data.Read(transfer.HTML); err == nil {
-		return richtext.ParseHTML(string(raw)), true
+		return uncolored(richtext.ParseHTML(string(raw))), true
 	}
 	if raw, err := data.Read(richtext.RTF); err == nil {
-		return richtext.ParseRTF(raw), true
+		return uncolored(richtext.ParseRTF(raw)), true
 	}
 	return richtext.Text{}, false
+}
+
+// uncolored is t without its text colors and highlights.
+func uncolored(t richtext.Text) richtext.Text {
+	var paras []richtext.Paragraph
+	for _, p := range t.Paragraphs() {
+		p.Runs = slices.Clone(p.Runs)
+		for i := range p.Runs {
+			a := &p.Runs[i].Attributes
+			a.Color, a.Background = ui.Color{}, ui.Color{}
+		}
+		paras = append(paras, p)
+	}
+	return richtext.TextOf(paras...)
 }
 
 // formatted reports whether rich text has any format Leaflet keeps. Text
@@ -185,7 +204,8 @@ func richAttrs(a doc.Attrs) richtext.Attributes {
 // attrsOf are the formats of a run of rich text that Leaflet keeps: a
 // link only to the web or a mail address.
 func attrsOf(a richtext.Attributes) doc.Attrs {
-	out := doc.Attrs{Bold: a.Bold(), Italic: a.Italic, Under: a.Underline, Strike: a.Strikethrough, Code: a.Code}
+	out := doc.Attrs{Bold: a.Bold(), Italic: a.Italic, Under: a.Underline, Strike: a.Strikethrough, Code: a.Code,
+		Color: colorHex(a.Color), Background: colorHex(a.Background)}
 	if doc.WebURL(a.Link) || strings.HasPrefix(a.Link, "mailto:") {
 		out.Href = strings.TrimSpace(a.Link)
 	}

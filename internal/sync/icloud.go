@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -133,6 +134,16 @@ func (s *Service) cloudPass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// device.json is written however the rest goes, so a lease taken or
+	// ended since (keepLink) reaches the other devices though a step
+	// fails.
+	return errors.Join(s.cloudSteps(ctx, me), s.writeDevice(me, false))
+}
+
+// cloudSteps is what a pass does once this device knows the ID it writes
+// under: it sends what is queued, takes what the other devices sent, and
+// compacts its log.
+func (s *Service) cloudSteps(ctx context.Context, me string) error {
 	if !s.ownLogChecked {
 		checked, err := s.checkOwnLog(ctx, me)
 		if err != nil {
@@ -149,7 +160,7 @@ func (s *Service) cloudPass(ctx context.Context) error {
 	if err := s.compact(me); err != nil {
 		log.Printf("icloud: compact: %v", err)
 	}
-	return s.writeDevice(me, false)
+	return nil
 }
 
 // joinSpace has this device sync the pages of the folder's space.json,
@@ -435,6 +446,10 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			continue // failed lately; it waits a while
 		case synced(e.Entity):
 			entry, err := s.rowEntry(me, &e)
+			if errors.Is(err, errOtherSpace) {
+				done = append(done, sent{e: e})
+				continue
+			}
 			if err != nil {
 				log.Printf("icloud: %s %s: %v", e.Entity, e.EntityID, err)
 				s.failed(e, err)
@@ -530,7 +545,9 @@ func (s *Service) cloudRemove(entry *store.OutboxEntry) {
 // columns changed here when the queue names them (store.ChangedKey), and
 // for a comment its author's name, which no server here looks up. Its
 // version is newer than any this device has seen of the row, so a change
-// made here while another device's waited still wins over it.
+// made here while another device's waited still wins over it. A row of
+// another space than the one the devices sync, or on a page of one, is
+// errOtherSpace: it never goes there.
 func (s *Service) rowEntry(me string, entry *store.OutboxEntry) (icloud.Entry, error) {
 	row, err := s.payload(entry)
 	if err != nil {
@@ -540,6 +557,9 @@ func (s *Service) rowEntry(me string, entry *store.OutboxEntry) (icloud.Entry, e
 		return icloud.Entry{}, errors.New("no longer queued")
 	}
 	e := *entry
+	if other, err := s.otherSpace(e.Entity, e.EntityID, row, true); err != nil || other {
+		return icloud.Entry{}, cmp.Or(err, errOtherSpace)
+	}
 	// A recording settled after a quit (store.IfStatusKey) goes as just
 	// after the version this device had of it, not after every one it has
 	// seen: a transcription another device finished since is newer, and
@@ -592,9 +612,9 @@ func (s *Service) rowEntry(me string, entry *store.OutboxEntry) (icloud.Entry, e
 // version published, nil when it was already. The version counts as
 // published once the batch is written: until then it goes again.
 func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerContent, error) {
-	// A page that is gone has nothing to publish; one that cannot be read
-	// now stays queued.
-	if _, err := s.st.Page(pageID); store.IsNotFound(err) {
+	// A page that is gone has nothing to publish, nor one of another space
+	// than the devices sync; one that cannot be read now stays queued.
+	if p, err := s.st.Page(pageID); store.IsNotFound(err) || err == nil && p.SpaceID != s.st.Session().SpaceID {
 		return icloud.Entry{}, nil, nil
 	} else if err != nil {
 		return icloud.Entry{}, nil, err
@@ -661,6 +681,11 @@ func (s *Service) cloudUpload(ctx context.Context, entry *store.OutboxEntry) (bo
 		return false, err
 	}
 	e := *entry
+	// A file or audio of another space never goes there: its entry leaves
+	// the queue, as its row's does.
+	if other, err := s.uploadOfOtherSpace(e); err != nil || other {
+		return err == nil, err
+	}
 	local, waits, err := s.uploadFrom(ctx, payload)
 	if err != nil || waits || local == "" {
 		return err == nil && !waits, err // gone: nothing to upload
@@ -683,6 +708,26 @@ func (s *Service) cloudUpload(ctx context.Context, entry *store.OutboxEntry) (bo
 	}
 	return err == nil, err
 }
+
+// uploadOfOtherSpace reports whether an upload is of a file or a
+// recording of another space than the one the devices sync, or on a page
+// of one (otherSpace). One whose row is gone is of none.
+func (s *Service) uploadOfOtherSpace(entry store.OutboxEntry) (bool, error) {
+	// The entry is "files/<id>" or "recordings/<id>".
+	table, id, _ := strings.Cut(entry.EntityID, "/")
+	if table != "files" && table != "recordings" {
+		return false, nil
+	}
+	row, here, err := s.localRow(table, id)
+	if err != nil || !here {
+		return false, err
+	}
+	return s.otherSpace(table, id, row, true)
+}
+
+// errOtherSpace is a row of another space than the one the devices sync
+// through iCloud Drive, which never goes there.
+var errOtherSpace = errors.New("of another space")
 
 // blobPath is where the folder keeps a file or a recording's audio, by its
 // storage path in either iCloud Drive or Supabase.

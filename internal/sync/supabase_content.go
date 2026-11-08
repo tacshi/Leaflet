@@ -19,6 +19,19 @@ import (
 // saving over it.
 var errStale = errors.New("the page changed on the server while saving")
 
+// notApplied reports whether err is the server answering that it did not
+// apply a save: one another went before (errStale), one it refused (4xx),
+// or one the database failed, as a statement that ran out of time, which
+// it answers with the database's code, the change undone. A save that met
+// no answer, or a gateway's, may have been applied.
+func notApplied(err error) bool {
+	if errors.Is(err, errStale) {
+		return true
+	}
+	re, ok := errors.AsType[*remote.Error](err)
+	return ok && (re.Status >= 400 && re.Status < 500 || re.Code != "")
+}
+
 // errServerUnreadable is a page whose content on the server cannot be
 // read here, as one a newer version of Leaflet wrote may not be. It is
 // neither merged nor saved over, as an empty page would take its place:
@@ -122,11 +135,12 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 			err = errStale
 		}
 	}
-	if errors.Is(err, errStale) {
-		// The server refused the merge, as another was saved first: the
-		// merge over that one meets its own conflicts. One that failed
-		// otherwise may have reached the server, and keeps them; tried
-		// again, it meets them again, and they are not recorded twice.
+	if notApplied(err) {
+		// The server did not take the merge, as another was saved first or
+		// it refused it: the merge tried again meets its own conflicts.
+		// One that failed otherwise may have reached the server, and keeps
+		// them; tried again, it meets them again, and they are not
+		// recorded twice.
 		return false, errors.Join(err, s.st.DropConflicts(held))
 	}
 	if err != nil {
@@ -232,7 +246,9 @@ func (s *Service) cannotEdit(ctx context.Context, pageID string) (bool, error) {
 // takeServerContent has a page's content the server refused give way to
 // the server's, as pushRow's change does to its row: the pulls pass over
 // a page while its change waits, so the edits of those who may edit it
-// would never come. A change made here since stays queued, and merges.
+// would never come. The change leaves the queue as the server's content
+// is stored, or not at all. A change made here since stays queued, and
+// merges.
 func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, refused error) (bool, error) {
 	pageID := e.EntityID
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}})
@@ -245,21 +261,19 @@ func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, re
 			return false, errServerUnreadable
 		}
 	}
-	// Off the queue first, so the content goes in, as takeServer has it.
-	if err := s.st.Dequeue(e); err != nil {
-		return false, err
-	}
 	log.Printf("outbox %s/%s: %v; taking the server's content", e.Entity, pageID, refused)
 	if theirs == nil {
 		return true, nil
 	}
+	// A change made since, which replaced e, keeps the server's content
+	// out: that change merges on the next push.
 	_, _, err = s.storeMerge(pageID, func(_ store.ContentRow, kept bool) (*doc.Content, error) {
-		if !kept || s.st.HasPending("page_content", pageID) {
-			return nil, nil // gone, or changed since: that change merges on the next push
+		if !kept {
+			return nil, nil // gone
 		}
 		return theirs, nil
 	}, func(over string, c *doc.Content) error {
-		return s.st.PutSyncedContentOver(pageID, over, c, theirs.Encode(), store.Time(remoteRow["updated_at"]), store.Int(remoteRow, "revision"))
+		return s.st.TakeSyncedContentOver(e, pageID, over, c, theirs.Encode(), store.Time(remoteRow["updated_at"]), store.Int(remoteRow, "revision"))
 	})
 	return err == nil, err
 }
@@ -402,7 +416,10 @@ func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	allOffline := s.st.Settings().AllPagesOffline
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return false, err
+	}
 	start := s.cursor("page_content")
 	// handled says, of each row, whether it is done with; fetch are the
 	// pages whose content comes, in the rows' order.
@@ -477,9 +494,9 @@ var waitingBatch = 500
 // this version cannot read, do not keep the others from coming: each pass
 // goes on round them from where the last stopped.
 func (s *Service) pullWaiting(ctx context.Context) error {
-	waiting := s.waiting()
-	if len(waiting) == 0 {
-		return nil
+	waiting, err := s.waiting()
+	if err != nil || len(waiting) == 0 {
+		return err
 	}
 	allOffline := s.st.Settings().AllPagesOffline
 	var open, rest []string

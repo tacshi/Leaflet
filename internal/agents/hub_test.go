@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -370,7 +371,7 @@ func TestOpWhileComposingKeepsItsText(t *testing.T) {
 	rewrite.SetDelta(doc.Delta{{Text: "Ship the editor first.and more"}})
 	h := NewHub(st, nil, stubHost{})
 	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", IsLocal: true}})
-	if err := d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read}); err != nil {
+	if err := d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
@@ -410,7 +411,7 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	_ = open.Doc() // a save
 	d := h.newDelivery(p.ID, &Run{ID: "r1"}, local)
 	d.read = before
-	if err := d.apply(open, op); err != nil {
+	if err := d.apply(open, op, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
@@ -426,7 +427,7 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	op = rewrite("Ship the editor first.and morean, then the rest.")
 	d = h.newDelivery(p.ID, &Run{ID: "r2"}, local)
 	d.read = composing
-	if err := d.apply(open, op); err != nil {
+	if err := d.apply(open, op, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more, then the rest." {
@@ -1782,9 +1783,8 @@ func TestPublicLinkThroughICloud(t *testing.T) {
 		t.Errorf("leases %q", leased)
 	}
 	now := time.Now()
-	h.ICloudLinks = func() map[string]time.Time {
-		return map[string]time.Time{"p1": now.Add(time.Hour), "p2": now.Add(-iCloudLinkDrift / 2), "p3": now.Add(-2 * iCloudLinkDrift)}
-	}
+	leases := map[string]time.Time{"p1": now.Add(time.Hour), "p2": now.Add(-iCloudLinkDrift / 2), "p3": now.Add(-2 * iCloudLinkDrift)}
+	h.ICloudLinks = func() (map[string]time.Time, error) { return leases, nil }
 	ctx := context.Background()
 	for id, want := range map[string]bool{"p1": true, "p2": true, "p3": false, "p4": false} {
 		if got := h.publicElsewhere(ctx, id, true); got != want {
@@ -1793,6 +1793,24 @@ func TestPublicLinkThroughICloud(t *testing.T) {
 	}
 	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); !got("p1") || !got("p2") || got("p3") || got("p4") {
 		t.Errorf("a workspace run's pages with a link: p1 %v, p2 %v, p3 %v, p4 %v", got("p1"), got("p2"), got("p3"), got("p4"))
+	}
+}
+
+// A device whose leases in iCloud Drive could not be read may serve a link
+// of any page: every page counts as linked, for the page alone and for a
+// workspace run's pages.
+func TestPublicLinkThroughICloudUnread(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, stubHost{})
+	h.ICloudLinks = func() (map[string]time.Time, error) {
+		return map[string]time.Time{}, errors.New("a device.json not downloaded")
+	}
+	ctx := context.Background()
+	if !h.publicElsewhere(ctx, "p4", true) {
+		t.Error("a page counts as unlinked while a device's links are unknown")
+	}
+	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); !got("p4") {
+		t.Error("a workspace run's page counts as unlinked while a device's links are unknown")
 	}
 }
 
@@ -1985,5 +2003,84 @@ func TestJobGoesUpClean(t *testing.T) {
 	}
 	if bytes.Contains(sent, []byte(`\u0000`)) || !bytes.Contains(sent, []byte("a�b")) || !bytes.Contains(sent, []byte("c�d")) {
 		t.Errorf("sent %s", sent)
+	}
+}
+
+// An op that could not apply, as one on a block the user deleted during
+// the run, is passed over, and Undo and Redo leave it out: the run's other
+// edits still undo, open page or closed.
+func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
+	for _, open := range []bool{true, false} {
+		st := openStore(t)
+		p, ed := openPage(t, st)
+		read := ed.Content.Copy()
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
+		ops := []doc.Op{insertAfter("h1", "x1", "one"), read.ReplaceOp("p1", n), insertAfter("x1", "x2", "two")}
+		// The user deletes p1 as the run works.
+		ed.Content.Children = slices.DeleteFunc(ed.Content.Children, func(n *doc.Node) bool { return n.ID == "p1" })
+		if _, _, err := st.SaveContent(p.ID, ed.Content); err != nil {
+			t.Fatal(err)
+		}
+		var host Host = stubHost{}
+		if open {
+			host = openHost{ed: ed}
+		}
+		h := NewHub(st, nil, host)
+		s := h.Session(p.ID)
+		run := &Run{ID: "r1", Ops: ops}
+		s.Runs = append(s.Runs, run)
+		local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+		h.finish(s, run, Request{Instruction: "Rewrite"}, local, read, h.newDelivery(p.ID, run, local), Result{Reply: "Done."}, nil, RunOptions{})
+		content := func() *doc.Content {
+			if open {
+				return ed.Content
+			}
+			return st.Content(p.ID)
+		}
+		if got := ids(content()); got != "h1,x1,x2,l1" {
+			t.Fatalf("open %v: blocks after the run %s", open, got)
+		}
+		if err := h.UndoRun(p.ID, run.ID); err != nil {
+			t.Fatalf("open %v: undo: %v", open, err)
+		}
+		if got := ids(content()); got != "h1,l1" {
+			t.Errorf("open %v: blocks after undo %s", open, got)
+		}
+		if err := h.RedoRun(p.ID, run.ID); err != nil {
+			t.Fatalf("open %v: redo: %v", open, err)
+		}
+		if got := ids(content()); got != "h1,x1,x2,l1" {
+			t.Errorf("open %v: blocks after redo %s", open, got)
+		}
+	}
+}
+
+// A run on an open page that could not keep its history snapshot leaves
+// the page as it is, as it arrives and at its end, as one on a closed page
+// does: there would be nothing to go back to.
+func TestOpenPageRunNotAppliedWithoutItsSnapshot(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_history BEFORE INSERT ON page_history WHEN NEW.reason = 'agent_run'
+		BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1"}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	before := ed.Content.Copy()
+	d := h.newDelivery(p.ID, run, local)
+	h.arrived(s, run, local, before, d, RunOptions{}, insertAfter("p1", "x1", "one"), "Added a line")
+	if ed.Content.Find("x1") != nil {
+		t.Error("an op went in without the page's snapshot")
+	}
+	h.finish(s, run, Request{Instruction: "Add a line"}, local, before, d, Result{Reply: "Added a line."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+	if ed.Content.Find("x1") != nil {
+		t.Error("the run's edits went in without the page's snapshot")
 	}
 }

@@ -183,16 +183,42 @@ func TestChatGPTPresetAndSave(t *testing.T) {
 
 func TestClosingTheChatGPTPageKeepsTheSignIn(t *testing.T) {
 	c, _ := open(t)
+	c.chatgpt.attempt = 1
 	c.chatgpt.g = agents.NewChatGPT(agents.ChatGPTAccount{Email: "a@example.com"})
 	// The page closed after OpenAI answered: the sign-in stays to save.
-	c.CancelChatGPTSignIn()
+	c.CancelChatGPTSignIn(1)
 	if c.madeChatGPT() == nil {
 		t.Fatal("closing the page forgot the sign-in made")
 	}
 	// The form closed without saving: it goes.
-	c.ForgetChatGPTSignIn()
+	c.ForgetChatGPTSignIn(1)
 	if c.madeChatGPT() != nil {
 		t.Fatal("the form closed and kept the sign-in")
+	}
+}
+
+func TestALateCancelLeavesTheNextChatGPTSignIn(t *testing.T) {
+	c, _ := open(t)
+	s := &c.chatgpt
+	// The page of the first sign-in closed, and the person signed in
+	// again before its cancel came: the second one is under way.
+	cancelled := false
+	s.attempt = 2
+	s.cancel, s.done = func() { cancelled = true }, make(chan struct{})
+	c.CancelChatGPTSignIn(1)
+	c.ForgetChatGPTSignIn(1)
+	if cancelled || s.done == nil {
+		t.Fatal("a call for the first sign-in gave up the second")
+	}
+	c.CancelChatGPTSignIn(2)
+	if !cancelled || s.done != nil {
+		t.Fatal("the second sign-in's own cancel left it")
+	}
+	// One made is forgotten only by its own attempt, too.
+	s.g = agents.NewChatGPT(agents.ChatGPTAccount{Email: "a@example.com"})
+	c.ForgetChatGPTSignIn(1)
+	if c.madeChatGPT() == nil {
+		t.Fatal("a form closing late forgot the next form's sign-in")
 	}
 }
 

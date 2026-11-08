@@ -20,12 +20,23 @@ import (
 // and the one made, until it is saved.
 type chatgptSignIn struct {
 	mu sync.Mutex
+	// attempt numbers the sign-ins begun. The app gives one up, or
+	// forgets it, by its number: a call that comes late, for one before,
+	// leaves the one after alone.
+	attempt int64
 	// cancel stops the sign-in being made; done closes as it ends, with
 	// err or the sign-in in g.
 	cancel context.CancelFunc
 	done   chan struct{}
 	err    error
 	g      *agents.ChatGPT
+}
+
+// chatgptBegun is a sign-in begun, as BeginChatGPTSignIn returns it: the
+// page for the app to open, and the attempt's number.
+type chatgptBegun struct {
+	URL     string `json:"url"`
+	Attempt int64  `json:"attempt"`
 }
 
 // chatgptAccount is a ChatGPT sign-in, as FinishChatGPTSignIn returns it:
@@ -36,11 +47,12 @@ type chatgptAccount struct {
 }
 
 // BeginChatGPTSignIn begins signing in with ChatGPT, for the provider
-// providerID ("" for a new one), and returns the page for the app to
-// open. A sign-in begun or made before is given up.
+// providerID ("" for a new one), and returns a chatgptBegun as JSON: the
+// page for the app to open, and the number CancelChatGPTSignIn and
+// ForgetChatGPTSignIn take. A sign-in begun or made before is given up.
 func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
 	defer catch(&err)
-	c.ForgetChatGPTSignIn()
+	c.forgetChatGPTSignIn()
 	var had *agents.ChatGPT
 	if providerID != "" {
 		c.q.do(func() { had, _ = c.core.Hub.ChatGPT(providerID) })
@@ -49,6 +61,8 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
 	s := &c.chatgpt
 	s.mu.Lock()
 	done := make(chan struct{})
+	s.attempt++
+	attempt := s.attempt
 	s.cancel, s.done, s.err, s.g = cancel, done, nil, nil
 	s.mu.Unlock()
 	opened := make(chan string, 1)
@@ -71,7 +85,7 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
 	}()
 	select {
 	case u := <-opened:
-		return u, nil
+		return encode(chatgptBegun{URL: u, Attempt: attempt})
 	case <-done:
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -125,15 +139,16 @@ func (c *Core) ChatGPTModels() (_ string, err error) {
 	return encode(agents.ChatModels(models, agents.PresetByID("chatgpt").Suggested))
 }
 
-// CancelChatGPTSignIn gives up the sign-in being made, as its page is
-// closed before OpenAI answered. One already made stays, for the form to
-// save: the page may be closed after it said so.
-func (c *Core) CancelChatGPTSignIn() {
+// CancelChatGPTSignIn gives up the sign-in being made, attempt as
+// BeginChatGPTSignIn numbered it, as its page is closed before OpenAI
+// answered. One already made stays, for the form to save: the page may
+// be closed after it said so. Another sign-in begun since stays too.
+func (c *Core) CancelChatGPTSignIn(attempt int64) {
 	defer catch(nil)
 	s := &c.chatgpt
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.g != nil {
+	if attempt != s.attempt || s.g != nil {
 		return
 	}
 	if s.cancel != nil {
@@ -143,12 +158,30 @@ func (c *Core) CancelChatGPTSignIn() {
 }
 
 // ForgetChatGPTSignIn gives up the sign-in being made, and forgets one
-// made and not saved, as the form closes.
-func (c *Core) ForgetChatGPTSignIn() {
+// made and not saved, as the form that began attempt closes. Another
+// sign-in begun since, in another form, stays.
+func (c *Core) ForgetChatGPTSignIn(attempt int64) {
 	defer catch(nil)
 	s := &c.chatgpt
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if attempt == s.attempt {
+		s.forget()
+	}
+}
+
+// forgetChatGPTSignIn gives up the sign-in being made, and forgets one
+// made, whichever attempt it is.
+func (c *Core) forgetChatGPTSignIn() {
+	s := &c.chatgpt
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forget()
+}
+
+// forget gives up the sign-in being made and forgets one made; s.mu is
+// held.
+func (s *chatgptSignIn) forget() {
 	if s.cancel != nil {
 		s.cancel()
 	}

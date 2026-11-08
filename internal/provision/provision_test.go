@@ -52,6 +52,10 @@ type fakeProject struct {
 	// yet, and heard how often Setup had the policy for them made.
 	realtimeWaits bool
 	heard         int
+	// deployDown fails every deploy; retiredAfter is how many functions
+	// were deployed each time Setup dropped what older ones called.
+	deployDown   bool
+	retiredAfter []int
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -117,6 +121,11 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				w.WriteHeader(http.StatusCreated)
 				return
 			}
+			if body.Query == retired {
+				f.retiredAfter = append(f.retiredAfter, len(f.deployed))
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
 			f.queries = append(f.queries, body.Query)
 			for _, v := range f.meanwhile {
 				if strings.Contains(body.Query, "where version = '"+v+"') then raise exception") {
@@ -157,6 +166,8 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			for _, s := range set {
 				f.secrets = append(f.secrets, supabaseapi.Secret{Name: s.Name, Value: "digest"})
 			}
+		case strings.HasSuffix(path, "/functions/deploy") && f.deployDown:
+			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
 		case strings.HasSuffix(path, "/functions/deploy"):
 			f.deployed = append(f.deployed, r.URL.Query().Get("slug"))
 			w.WriteHeader(http.StatusCreated)
@@ -663,5 +674,35 @@ func TestSetupSaysSignUpsLeftOpen(t *testing.T) {
 	f.mu.Unlock()
 	if err := Setup(context.Background(), api, "p", nil); err != nil || f.signUps != (supabaseapi.SignUps{Disabled: true}) {
 		t.Errorf("again: %v, sign-ups %+v", err, f.signUps)
+	}
+}
+
+// What only older functions call stays while they are the project's: a
+// deploy that fails leaves it, as the migrations before it did, and the
+// next Setup drops it once every function is deployed. With functions as
+// new as these, there is nothing to deploy, and nothing is dropped.
+func TestSetupRetiresOnceDeployed(t *testing.T) {
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, deployDown: true}
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); err == nil || len(f.queries) != len(all) || len(f.retiredAfter) != 0 {
+		t.Errorf("with deploys failing: %v, %d queries, dropped after %v", err, len(f.queries), f.retiredAfter)
+	}
+	f.mu.Lock()
+	f.deployDown = false
+	f.applied["p"] = nil
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	f.mu.Unlock()
+	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.retiredAfter, []int{len(Functions)}) {
+		t.Errorf("deployed: %v, dropped after %v", err, f.retiredAfter)
+	}
+	f.deployed = nil
+	if err := Setup(context.Background(), api, "p", nil); err != nil || len(f.deployed) != 0 || len(f.retiredAfter) != 1 {
+		t.Errorf("up to date: %v, deployed %v, dropped after %v", err, f.deployed, f.retiredAfter)
 	}
 }

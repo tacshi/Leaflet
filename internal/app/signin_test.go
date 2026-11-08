@@ -238,6 +238,37 @@ func TestSignOutAsksAboutAChangeFoundAsItRemoves(t *testing.T) {
 	}
 }
 
+// The open page takes no typing while signing out removes the account's
+// pages, which would remove it unsaved, and takes it again when the
+// sign-out stops to ask about the changes waiting.
+func TestSignOutKeepsThePageReadOnlyUntilItEnds(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	proceed := make(chan struct{})
+	a.leave(func() error { <-proceed; return store.ErrUnsynced }, true)
+	if !a.page.editor.ReadOnly {
+		t.Error("the page takes typing as signing out removes it")
+	}
+	// A change meanwhile, as leaflet mcp stores, leaves it so.
+	a.reload(store.Change{Table: "pages", PageID: p.ID})
+	if !a.page.editor.ReadOnly {
+		t.Error("a change made the page take typing as signing out removes it")
+	}
+	close(proceed)
+	(<-posted)()
+	if a.account.unsynced == 0 || a.page == nil || a.page.editor.ReadOnly {
+		t.Errorf("asked about %d, page %v, read-only after", a.account.unsynced, a.page != nil)
+	}
+}
+
 // Deleting the account wipes the device's settings with it: those the app
 // shows then are a new device's, not the ones gone.
 func TestWipeResetsSettings(t *testing.T) {

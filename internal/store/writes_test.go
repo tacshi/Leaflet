@@ -106,7 +106,7 @@ func TestFailedWritesNotifyNoOne(t *testing.T) {
 	}
 	fail(t, s, "UPDATE", "pages")
 	fail(t, s, "DELETE", "model_providers")
-	fail(t, s, "DELETE", "conflicts")
+	fail(t, s, "UPDATE", "conflicts")
 	fail(t, s, "DELETE", "spaces")
 	var told []string
 	s.Subscribe(func(c Change) { told = append(told, c.Table) })

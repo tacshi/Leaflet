@@ -90,12 +90,15 @@ type delivery struct {
 	// streamed, did not reach the page: delivered, the op is not delivered
 	// again, so the run ends failed with it.
 	failed error
+	// run is the run delivered, whose ops that do not apply are marked
+	// skipped (Run.skip); nil marks none.
+	run *Run
 }
 
 // newDelivery is a run's delivery to its page, which keeps in the page's
 // history what the run's ops take away of the open page, under its job.
 func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
-	return &delivery{conflict: func(c *doc.Content) error {
+	return &delivery{run: run, conflict: func(c *doc.Content) error {
 		return h.st.AddHistory(pageID, c, "conflict", runJobID(run, option), "")
 	}}
 }
@@ -110,7 +113,7 @@ func (d *delivery) to(ed LiveDoc, ops []doc.Op) error {
 		if op.IsPageOp() {
 			continue
 		}
-		if err := d.apply(ed, op); err != nil {
+		if err := d.apply(ed, op, d.sent+i); err != nil {
 			d.sent += i
 			return err
 		}
@@ -131,8 +134,8 @@ func (d *delivery) to(ed LiveDoc, ops []doc.Op) error {
 // conflict could not be kept is not applied, as storeOps saves none, and
 // its error is returned: the change it would take away has nowhere to go
 // back to. An op that does not apply is passed over, as the agent's other
-// edits still go.
-func (d *delivery) apply(ed LiveDoc, op doc.Op) error {
+// edits still go, and marked skipped: at is its index in the run's ops.
+func (d *delivery) apply(ed LiveDoc, op doc.Op, at int) error {
 	if d.conflict != nil {
 		if c := ed.Peek(); overwrites(c, []doc.Op{op}) {
 			if err := d.conflict(c); err != nil {
@@ -142,20 +145,30 @@ func (d *delivery) apply(ed LiveDoc, op doc.Op) error {
 	}
 	if err := ed.ApplyOpFrom(op, ed != d.ed, d.read); err != nil {
 		log.Printf("agent op on the open page: %v", err)
+		d.skip(at)
 	}
 	d.ed = ed
 	return nil
 }
 
-// missed are the block ops the page does not have yet.
-func (d *delivery) missed(ops []doc.Op) []doc.Op {
+// skip marks the run's op at at as passed over.
+func (d *delivery) skip(at int) {
+	if d.run != nil {
+		d.run.skip(at)
+	}
+}
+
+// missed are the block ops the page does not have yet, and their indexes
+// in ops.
+func (d *delivery) missed(ops []doc.Op) ([]doc.Op, []int) {
 	var out []doc.Op
-	for _, op := range ops[d.sent:] {
+	var at []int
+	for i, op := range ops[d.sent:] {
 		if !op.IsPageOp() {
-			out = append(out, op)
+			out, at = append(out, op), append(at, d.sent+i)
 		}
 	}
-	return out
+	return out, at
 }
 
 // save applies the ops the page does not have yet to its stored content,
@@ -163,9 +176,13 @@ func (d *delivery) missed(ops []doc.Op) []doc.Op {
 // what they would take away of it (storeOps), under the run jobID. They
 // count as delivered once stored, so a save that fails can be tried again.
 func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op, jobID string) error {
-	if missed := d.missed(ops); len(missed) > 0 {
-		if err := storeOps(st, pageID, missed, true, false, jobID, "agent op on a closed page"); err != nil {
+	if missed, at := d.missed(ops); len(missed) > 0 {
+		skipped, err := storeOps(st, pageID, missed, true, false, jobID, "agent op on a closed page")
+		if err != nil {
 			return err
+		}
+		for _, i := range skipped {
+			d.skip(at[i])
 		}
 	}
 	d.sent = len(ops)
@@ -198,10 +215,13 @@ func (errPageKeptChanging) Error() string { return locales.AgentPageKeptChanging
 // they find is kept in history first (reason conflict, under jobID), as
 // the agent function does; one that could not be kept is not saved over.
 // An op that does not apply is passed over, as the agent's other edits
-// still go; with strict, it stops them all, and nothing is saved.
-func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty, strict bool, jobID, what string) error {
+// still go, and skipped has its index in ops; with strict, it stops them
+// all, and nothing is saved.
+func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty, strict bool, jobID, what string) (skipped []int, err error) {
 	inHistory := "" // the stored content history has already
-	err := st.UpdateContent(pageID, func(c *doc.Content, kept bool) (bool, error) {
+	err = st.UpdateContent(pageID, func(c *doc.Content, kept bool) (bool, error) {
+		// Each try applies the ops to the content it read afresh.
+		skipped = nil
 		if !kept && !orEmpty {
 			return false, nil
 		}
@@ -216,9 +236,10 @@ func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty, strict bool
 				return false, err
 			}
 		} else {
-			for _, op := range ops {
+			for i, op := range ops {
 				if err := c.Apply(op); err != nil {
 					log.Printf("%s: %v", what, err)
+					skipped = append(skipped, i)
 				}
 			}
 		}
@@ -226,12 +247,14 @@ func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty, strict bool
 		return true, nil
 	})
 	switch {
+	case err == nil:
+		return skipped, nil
 	case errors.Is(err, store.ErrContentChanged):
-		return errKeptChanging
+		return nil, errKeptChanging
 	case errors.Is(err, store.ErrUnreadable):
-		return errUnreadable
+		return nil, errUnreadable
 	}
-	return err
+	return nil, err
 }
 
 // overwrites reports whether applying ops to c takes away a change made

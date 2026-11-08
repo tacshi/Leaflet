@@ -596,10 +596,16 @@ func (a *App) leave(clear func() error, synced bool) {
 	if !a.flush() && synced {
 		return
 	}
+	// The open page, saved, takes no more typing until the pages are
+	// cleared: what was typed meanwhile would go with them unsaved.
+	a.leaving = true
+	a.pageEditable()
 	c := a.core()
 	go func() {
 		unsynced, err := c.Leave(clear, synced)
 		a.update(func() {
+			a.leaving = false
+			a.pageEditable()
 			if unsynced > 0 {
 				a.account.unsynced = unsynced
 				return
@@ -853,9 +859,9 @@ func (a *App) editProvider(p *store.Provider) {
 			return
 		}
 		a.form.reading = false
-		if a.form.apiKey == "" {
-			a.form.apiKey = key
-		}
+		// The key kept fills the field only through keyFollowsAddress:
+		// not over a key typed (or cleared) meanwhile, and only while the
+		// address is still at its origin, so it goes to no other server.
 		a.form.keptKey, a.form.keptURL = key, base
 		a.keyFollowsAddress()
 		if g != nil && a.form.chatgpt == nil {

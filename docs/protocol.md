@@ -869,8 +869,9 @@ Leaflet/
   names that start with a dot, and names that fit no pattern above, such as
   the copies iCloud makes of a batch or a device's folder
   ("0000000000000007 2.json"). The copies of space.json are read, as below.
-- **space.json** names the space the devices sync: every device files its
-  pages, folders and files under that `space_id`, whatever a row says. The
+- **space.json** names the space the devices sync: a device sends only the
+  rows of that `space_id`, and stores none of another: pages shared from
+  other accounts stay on the device that has them. The
   first device makes it from its own space, only where none is yet, as
   the file moves into place. When two made it at once, apart, the
   lowest `space_id` among `space*.json` wins; a device that made a losing
@@ -953,7 +954,11 @@ Leaflet/
   minutes for the devices' clocks, agent runs on the other devices, which
   read the other devices' device.json as they start, read none of the
   user's other pages into the page. A device's own leases are its own to
-  know. A device.json iCloud has not downloaded says none until it has. A
+  know. While a device.json cannot be read (not downloaded yet, cut
+  short, or of a newer format), that device may serve a link of any page,
+  and every page counts as linked; one that has not changed for longer
+  than a lease could count says none. A device writes its device.json
+  even when the rest of its pass fails, so its leases go on. A
   Leaflet from before writes no `public_links`, and reads none.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is

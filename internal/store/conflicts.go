@@ -42,11 +42,13 @@ func addConflicts(q querier, pageID string, conflicts []doc.Conflict) error {
 }
 
 // insertConflicts records conflicts of a page and returns the IDs of those
-// it recorded. One the same as a conflict of the page not yet handled, the
-// same block with the same two sides, is that one met again, as a merge
-// tried again meets it, and is not recorded twice.
+// it recorded. One the same as a conflict of the page not yet handled, or
+// handled lately (resolvedKept), the same block with the same two sides,
+// is that one met again, as a merge tried again meets it, and is not
+// recorded twice, nor shown again once dismissed.
 func insertConflicts(q querier, pageID string, conflicts []doc.Conflict) ([]string, error) {
 	now := time.Now().UnixMilli()
+	since := now - resolvedKept.Milliseconds()
 	var ids []string
 	for _, c := range conflicts {
 		local, err := json.Marshal(c.Local)
@@ -60,9 +62,10 @@ func insertConflicts(q querier, pageID string, conflicts []doc.Conflict) ([]stri
 		id := doc.NewRowID()
 		res, err := q.Exec(`INSERT INTO conflicts (id, page_id, block_id, local_node, remote_node, kept, local_edited_at, remote_edited_at, created_at)
 			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
-			WHERE NOT EXISTS (SELECT 1 FROM conflicts WHERE page_id = ? AND block_id = ? AND local_node = ? AND remote_node = ? AND resolved_at IS NULL)`,
+			WHERE NOT EXISTS (SELECT 1 FROM conflicts WHERE page_id = ? AND block_id = ? AND local_node = ? AND remote_node = ?
+				AND (resolved_at IS NULL OR resolved_at >= ?))`,
 			id, pageID, c.BlockID, string(local), string(remote), c.Kept(), c.LocalEditedAt, c.RemoteEditedAt, now,
-			pageID, c.BlockID, string(local), string(remote))
+			pageID, c.BlockID, string(local), string(remote), since)
 		if err != nil {
 			return nil, err
 		}
@@ -100,14 +103,15 @@ func (s *Store) HoldConflicts(pageID string, conflicts []doc.Conflict) ([]string
 }
 
 // DropConflicts takes back the conflicts HoldConflicts recorded, of a merge
-// the server did not take: the merge tried again meets its own.
+// the server did not take: the merge tried again meets its own. One the
+// user dismissed meanwhile stays dismissed, and is not met again.
 func (s *Store) DropConflicts(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	err := s.inTx(func(tx *sql.Tx) error {
 		for _, id := range ids {
-			if _, err := tx.Exec(`DELETE FROM conflicts WHERE id = ?`, id); err != nil {
+			if _, err := tx.Exec(`DELETE FROM conflicts WHERE id = ? AND resolved_at IS NULL`, id); err != nil {
 				return err
 			}
 		}
@@ -138,12 +142,26 @@ func (s *Store) Conflicts() ([]ConflictRow, error) {
 	})
 }
 
-// ResolveConflict lets a conflict handled go: nothing reads it again, and
-// kept, each conflict ever met would stay with its two blocks.
+// ResolveConflict lets a conflict handled go: it is no longer listed, and
+// a merge tried again that meets it does not record it again
+// (insertConflicts). It is kept for that resolvedKept, and those handled
+// before go: kept, each conflict ever met would stay with its two blocks.
 func (s *Store) ResolveConflict(id string) error {
-	if _, err := s.db.Exec(`DELETE FROM conflicts WHERE id = ?`, id); err != nil {
+	now := time.Now().UnixMilli()
+	err := s.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE conflicts SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL`, now, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM conflicts WHERE resolved_at < ?`, now-resolvedKept.Milliseconds())
+		return err
+	})
+	if err != nil {
 		return err
 	}
 	s.Notify("conflicts", "")
 	return nil
 }
+
+// resolvedKept is how long a conflict handled is kept, for a merge tried
+// again, as a save whose answer did not come is, to know it.
+const resolvedKept = 30 * 24 * time.Hour

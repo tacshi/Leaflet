@@ -60,7 +60,9 @@ func todoSection(header string) string {
 // todoList returns the open to-dos, read again after pages changed.
 func (a *App) todoList() []store.PageTodo {
 	if a.todosStale || a.todos == nil {
-		a.todos, _ = a.st.Todos()
+		// A read that failed leaves the list as it was, until the pages
+		// change again.
+		reread(&a.todos, a.st.Todos)
 		if a.todos == nil {
 			a.todos = []store.PageTodo{}
 		}

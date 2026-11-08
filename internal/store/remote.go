@@ -352,10 +352,16 @@ const PeerKey = "_peer"
 // transaction, so a change made in between, here or by leaflet mcp, is
 // never stored over, and nor is one the check could not tell of. A row
 // from the server keeps its time there as pulled_at, in the same
-// transaction. It reports whether it stored the row.
-func (s *Store) putRemote(entity, id string, r map[string]any, write func(tx *sql.Tx) error) (bool, error) {
+// transaction. over, when not nil, is this device's change to the row,
+// which the row is taken over: it leaves the queue in the transaction,
+// unless a change made since replaced it, which keeps the row out. It
+// reports whether it stored the row.
+func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry, write func(tx *sql.Tx) error) (bool, error) {
 	stored := false
 	err := s.inTx(func(tx *sql.Tx) error {
+		if err := dequeueIn(tx, over); err != nil {
+			return err
+		}
 		waits, err := pending(tx, entity, id)
 		if err != nil || waits {
 			return err
@@ -371,7 +377,44 @@ func (s *Store) putRemote(entity, id string, r map[string]any, write func(tx *sq
 		_, err = tx.Exec(`UPDATE `+entity+` SET pulled_at = ? WHERE id = ?`, at, id) // #nosec G202 -- entity is one of pulledTables.
 		return err
 	})
+	if err == nil && over != nil {
+		s.Notify("outbox", "")
+	}
 	return stored && err == nil, err
+}
+
+// dequeueIn takes an entry off the queue in a transaction, as Dequeue
+// does, unless it was replaced since it was read; nil is none.
+func dequeueIn(tx *sql.Tx, e *OutboxEntry) error {
+	if e == nil {
+		return nil
+	}
+	_, err := tx.Exec(`DELETE FROM outbox WHERE id = ? AND revision = ?`, e.ID, e.Revision)
+	return err
+}
+
+// TakeRemote stores a row from the server over this device's change to
+// it, entry e, as the PutRemote function of e's table does, with e off
+// the queue in the same transaction: stored apart, a failure in between
+// would leave the change neither queued nor replaced. A change made here
+// since, which replaced e, stays queued, and the row stays out, as the
+// pulls leave it. A comment's author is the row's author_name. Of a table
+// whose rows come from elsewhere through no PutRemote function, e only
+// leaves the queue.
+func (s *Store) TakeRemote(e OutboxEntry, r map[string]any) error {
+	switch e.Entity {
+	case "pages":
+		return s.putRemotePage(r, &e)
+	case "folders":
+		return s.putRemoteFolder(r, &e)
+	case "comments":
+		return s.putRemoteComment(r, S(r, "author_name"), &e)
+	case "files":
+		return s.putRemoteFile(r, &e)
+	case "recordings":
+		return s.putRemoteRecording(r, &e)
+	}
+	return s.Dequeue(e)
 }
 
 // unpulled has a row changed here no longer count as the server's copy
@@ -402,9 +445,11 @@ func (s *Store) RowPulledAt(table, id string) (time.Time, bool) {
 
 // PutRemotePage stores a page that came from the server, unless it has a
 // change waiting here (putRemote), keeping whether it is kept offline.
-func (s *Store) PutRemotePage(r map[string]any) error {
+func (s *Store) PutRemotePage(r map[string]any) error { return s.putRemotePage(r, nil) }
+
+func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
 	id := S(r, "id")
-	_, err := s.putRemote("pages", id, r, func(tx *sql.Tx) error {
+	_, err := s.putRemote("pages", id, r, over, func(tx *sql.Tx) error {
 		keep := true
 		if err := tx.QueryRow(`SELECT keep_offline FROM pages WHERE id = ?`, id).Scan(&keep); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -416,26 +461,34 @@ func (s *Store) PutRemotePage(r map[string]any) error {
 
 // PutRemoteFolder stores a folder from the server, unless it has a change
 // waiting here (putRemote).
-func (s *Store) PutRemoteFolder(r map[string]any) error {
+func (s *Store) PutRemoteFolder(r map[string]any) error { return s.putRemoteFolder(r, nil) }
+
+func (s *Store) putRemoteFolder(r map[string]any, over *OutboxEntry) error {
 	f := FolderFromRemote(r)
-	_, err := s.putRemote("folders", f.ID, r, func(tx *sql.Tx) error { return writeFolder(tx, f) })
+	_, err := s.putRemote("folders", f.ID, r, over, func(tx *sql.Tx) error { return writeFolder(tx, f) })
 	return err
 }
 
 // PutRemoteComment stores a comment from the server, unless it has a
 // change waiting here (putRemote).
 func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {
+	return s.putRemoteComment(r, authorName, nil)
+}
+
+func (s *Store) putRemoteComment(r map[string]any, authorName string, over *OutboxEntry) error {
 	c := CommentFromRemote(r, authorName)
-	_, err := s.putRemote("comments", c.ID, r, func(tx *sql.Tx) error { return putComment(tx, c) })
+	_, err := s.putRemote("comments", c.ID, r, over, func(tx *sql.Tx) error { return putComment(tx, c) })
 	return err
 }
 
 // PutRemoteFile stores a file from the server, unless it has a change
 // waiting here (putRemote), keeping its copy here until the file is
 // deleted.
-func (s *Store) PutRemoteFile(r map[string]any) error {
+func (s *Store) PutRemoteFile(r map[string]any) error { return s.putRemoteFile(r, nil) }
+
+func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 	f := FileFromRemote(r)
-	stored, err := s.putRemote("files", f.ID, r, func(tx *sql.Tx) error {
+	stored, err := s.putRemote("files", f.ID, r, over, func(tx *sql.Tx) error {
 		if err := putFile(tx, s.Dir, f); err != nil || !f.DeletedAt.IsZero() {
 			return err
 		}
@@ -471,9 +524,11 @@ func RecordingFromRemote(r map[string]any) Recording {
 
 // PutRemoteRecording stores a recording from the server, unless it has a
 // change waiting here (putRemote), keeping its audio on this device.
-func (s *Store) PutRemoteRecording(r map[string]any) error {
+func (s *Store) PutRemoteRecording(r map[string]any) error { return s.putRemoteRecording(r, nil) }
+
+func (s *Store) putRemoteRecording(r map[string]any, over *OutboxEntry) error {
 	rec := RecordingFromRemote(r)
-	_, err := s.putRemote("recordings", rec.ID, r, func(tx *sql.Tx) error {
+	_, err := s.putRemote("recordings", rec.ID, r, over, func(tx *sql.Tx) error {
 		switch old, err := recordingIn(tx, s.Dir, rec.ID); {
 		case err == nil:
 			rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt

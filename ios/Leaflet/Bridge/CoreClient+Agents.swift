@@ -380,13 +380,14 @@ extension CoreClient {
     }
 
     /// beginChatGPTSignIn begins signing in with ChatGPT for the provider
-    /// providerID ("" for a new one), and returns OpenAI's page to open.
-    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws -> URL {
-        let raw = try await call(waiting: true) { core in
+    /// providerID ("" for a new one), and returns OpenAI's page to open,
+    /// with the attempt's number.
+    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws
+        -> ChatGPTSignIn
+    {
+        try await call(ChatGPTSignIn.self, waiting: true) { core in
             try Self.answer { e in core.beginChatGPTSign(in: providerID, error: e) }
         }
-        guard let url = URL(string: raw) else { throw URLError(.badURL) }
-        return url
     }
 
     /// finishChatGPTSignIn waits for the sign-in begun to come back.
@@ -403,17 +404,25 @@ extension CoreClient {
         }
     }
 
-    /// cancelChatGPTSignIn gives up the sign-in being made, as its page
-    /// closes; one already made stays, to save.
-    func cancelChatGPTSignIn() {
-        Task { try? await call(waiting: true) { $0.cancelChatGPTSignIn() } }
+    /// cancelChatGPTSignIn gives up the sign-in attempt, as its page
+    /// closes; one already made stays, to save, and one begun since goes
+    /// on.
+    func cancelChatGPTSignIn(_ attempt: Int64) {
+        Task { try? await call(waiting: true) { $0.cancelChatGPTSign(in: attempt) } }
     }
 
-    /// forgetChatGPTSignIn gives up the sign-in being made, and forgets one
-    /// made and not saved, as the form closes.
-    func forgetChatGPTSignIn() {
-        Task { try? await call(waiting: true) { $0.forgetChatGPTSignIn() } }
+    /// forgetChatGPTSignIn gives up the sign-in attempt, and forgets it
+    /// made and not saved, as the form closes; one begun since stays.
+    func forgetChatGPTSignIn(_ attempt: Int64) {
+        Task { try? await call(waiting: true) { $0.forgetChatGPTSign(in: attempt) } }
     }
+}
+
+/// ChatGPTSignIn is a sign-in begun: OpenAI's page to open, and the
+/// number by which it is given up or forgotten.
+struct ChatGPTSignIn: Decodable, Sendable {
+    var url: URL
+    var attempt: Int64
 }
 
 /// ChatGPTAccount is who signed in with ChatGPT, and the models their plan

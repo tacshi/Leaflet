@@ -324,6 +324,36 @@ func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base s
 	return nil
 }
 
+// TakeSyncedContentOver stores the server's content of a page over this
+// device's change to it, entry e, which the server refused, as
+// PutSyncedContentOver does, with e off the queue in the same
+// transaction: stored apart, a failure in between would leave the change
+// neither queued nor replaced. A change made here since, which replaced
+// e, stays queued, and the content stays out, to merge with the server's
+// as it goes.
+func (s *Store) TakeSyncedContentOver(e OutboxEntry, pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
+	stored := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		if err := dequeueIn(tx, &e); err != nil {
+			return err
+		}
+		waits, err := pending(tx, "page_content", pageID)
+		if err != nil || waits {
+			return err
+		}
+		stored = true
+		return putSyncedOver(tx, pageID, over, c, base, remoteAt, revision)
+	})
+	if err != nil {
+		return err
+	}
+	s.Notify("outbox", pageID)
+	if stored {
+		s.Notify("page_contents", pageID)
+	}
+	return nil
+}
+
 // PutMergedContentOver is PutSyncedContentOver for content merged from
 // another device's version of a page, from, through iCloud Drive, which
 // has no server base. In the same transaction it records from, the base

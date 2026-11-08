@@ -33,7 +33,10 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 	for table := range changed {
 		s.st.Notify(table, "")
 	}
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -267,7 +270,10 @@ func (s *Service) putCloudPage(r map[string]any) error {
 // another device, if this device keeps them: open, all pages kept
 // offline, or this one kept. Others wait until they are opened.
 func (s *Service) refreshWaiting(ctx context.Context) error {
-	waiting := s.waiting()
+	waiting, err := s.waiting()
+	if err != nil {
+		return err
+	}
 	allOffline := s.st.Settings().AllPagesOffline
 	// A page whose file iCloud has not brought yet waits for it, and is no
 	// failure; another page's error still is.
@@ -313,6 +319,12 @@ func wantKey(peer, pageID string) string { return "icloud.want." + peer + "." + 
 // merged and from what it published, so the devices end up with one
 // version, the same whichever merged first.
 func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content, error) {
+	// A page of another space than the devices sync, as one shared with
+	// the user by another account, takes no other device's version: none
+	// of theirs is of it.
+	if p, err := s.st.Page(pageID); err == nil && p.SpaceID != s.st.Session().SpaceID {
+		return s.st.Content(pageID), nil
+	}
 	me := s.st.DeviceID()
 	peers, err := s.devices(me)
 	if err != nil {

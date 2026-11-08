@@ -1126,9 +1126,11 @@ func (r *Controller) DismissError(id string) error {
 // recorded on another or removed here once it went up, for an engine on
 // this device to transcribe: into a file of its own in the system's
 // temporary folder as it comes, never all in memory, whose path it
-// returns. The caller removes it.
+// returns. The caller removes it. Its size is that of its length in the
+// app's WAV, 2 bytes a sample.
 func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	size := int64(rec.DurationMs) * 2 * SampleRate / 1000
+	ctx, cancel := context.WithTimeout(ctx, downloadWait(size))
 	defer cancel()
 	audio, err := r.openAudioOf(ctx, rec)
 	if err != nil {
@@ -1139,14 +1141,26 @@ func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) (stri
 }
 
 // uploadAudio uploads size bytes of a recording's audio from audio, given
-// as long as it takes over a slow connection (256 kbit/s) and two minutes
-// more: storage transfers have no whole-request timeout of their own, so
-// a stalled one ends here.
+// transferWait: storage transfers have no whole-request timeout of their
+// own, so a stalled one ends here.
 func (r *Controller) uploadAudio(path string, audio io.Reader, size int64) error {
-	wait := 2*time.Minute + time.Duration(size/(32<<10))*time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	ctx, cancel := context.WithTimeout(context.Background(), transferWait(size))
 	defer cancel()
 	return r.be.Upload(ctx, "recordings", path, audio, "audio/wav")
+}
+
+// transferWait is how long moving size bytes to or from storage is given:
+// as long as it takes over a slow connection (256 kbit/s), and two
+// minutes more.
+func transferWait(size int64) time.Duration {
+	return 2*time.Minute + time.Duration(size/(32<<10))*time.Second
+}
+
+// downloadWait is how long fetching size bytes of audio is given:
+// transferWait, and never less than five minutes, for audio whose size is
+// not known (0).
+func downloadWait(size int64) time.Duration {
+	return max(5*time.Minute, transferWait(size))
 }
 
 // openAudio opens a recording's audio file at path to read, with its
@@ -1347,7 +1361,7 @@ func (r *Controller) fileHere(ctx context.Context, f store.File) (string, error)
 	if f.StoragePath == "" {
 		return "", errors.New(locales.RecErrAudioMissing())
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, downloadWait(f.SizeBytes))
 	defer cancel()
 	var from io.ReadCloser
 	var err error

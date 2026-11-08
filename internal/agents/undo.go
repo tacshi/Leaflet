@@ -26,7 +26,7 @@ func (h *Hub) UndoRun(pageID, runID string) error {
 	if run == nil || run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, run, doc.InvertRun(run.Ops), true); err != nil {
+	if err := h.apply(pageID, run, doc.InvertRun(run.landed()), true); err != nil {
 		log.Printf("undo run: %v", err)
 		return err
 	}
@@ -45,7 +45,7 @@ func (h *Hub) RedoRun(pageID, runID string) error {
 	if run == nil || !run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, run, run.Ops, false); err != nil {
+	if err := h.apply(pageID, run, run.landed(), false); err != nil {
 		log.Printf("redo run: %v", err)
 		return err
 	}
@@ -105,7 +105,7 @@ func (h *Hub) apply(pageID string, run *Run, ops []doc.Op, undo bool) error {
 				err = ed.ApplyOps(blockOps)
 			}
 		} else {
-			err = storeOps(h.st, pageID, blockOps, false, true, run.ID, "undo run")
+			_, err = storeOps(h.st, pageID, blockOps, false, true, run.ID, "undo run")
 		}
 		if err != nil {
 			return err

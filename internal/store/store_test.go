@@ -1663,6 +1663,23 @@ func TestADatabaseGainsTheICloudTables(t *testing.T) {
 	}
 }
 
+// Forgetting what iCloud sync kept of the other devices keeps the public
+// links this device serves, which its next device.json says.
+func TestForgetICloudKeepsLinksServedHere(t *testing.T) {
+	s := open(t)
+	for key, v := range map[string]string{"icloud.link.l1": "p1|9", "icloud.seq": "4", "icloud.cursor.d1": "2"} {
+		if err := s.SetValue(key, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ForgetICloud(); err != nil {
+		t.Fatal(err)
+	}
+	if left := s.ValuesWithPrefix("icloud."); len(left) != 1 || left["link.l1"] != "p1|9" {
+		t.Errorf("kept %v", left)
+	}
+}
+
 // A save stores its content and queues it together: content another
 // process finds changed is always waiting to go up, so a pull never takes
 // it for the server's.
@@ -3269,8 +3286,9 @@ func TestCopyPageIsAllOrNothing(t *testing.T) {
 	}
 }
 
-// A conflict resolved goes, and those an earlier version kept resolved go
-// as the database is opened.
+// A conflict resolved is no longer listed, and goes once it has been kept
+// a while; those an earlier version kept resolved go as the database is
+// opened.
 func TestResolvedConflictsGo(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -3307,8 +3325,53 @@ func TestResolvedConflictsGo(t *testing.T) {
 	if err := s.ResolveConflict("c2"); err != nil {
 		t.Fatal(err)
 	}
+	if cs, err := s.Conflicts(); err != nil || len(cs) != 0 {
+		t.Errorf("listed once resolved: %+v, %v", cs, err)
+	}
+	// Resolved long ago, it goes as another is resolved.
+	if _, err := s.db.Exec(`UPDATE conflicts SET resolved_at = ? WHERE id = 'c2'`, time.Now().Add(-resolvedKept-time.Hour).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveConflict("c3"); err != nil {
+		t.Fatal(err)
+	}
 	if n := count(); n != 0 {
-		t.Errorf("%d conflicts kept once resolved", n)
+		t.Errorf("%d conflicts kept, resolved long ago", n)
+	}
+}
+
+// A conflict dismissed stays so when the merge that met it is tried
+// again, as after a save the server may or may not have taken, and when
+// that save's conflicts are taken back.
+func TestDismissedConflictStaysDismissed(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflict := doc.Conflict{BlockID: "b1", Local: &doc.Node{ID: "b1", Type: "paragraph"}}
+	held, err := s.HoldConflicts(p.ID, []doc.Conflict{conflict})
+	if err != nil || len(held) != 1 {
+		t.Fatalf("held %v, %v", held, err)
+	}
+	if err := s.ResolveConflict(held[0]); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.HoldConflicts(p.ID, []doc.Conflict{conflict})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs, err := s.Conflicts(); err != nil || len(cs) != 0 || len(again) != 0 {
+		t.Errorf("met again, the conflict dismissed is back: %+v, %v", cs, err)
+	}
+	if err := s.DropConflicts(held); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldConflicts(p.ID, []doc.Conflict{conflict}); err != nil {
+		t.Fatal(err)
+	}
+	if cs, err := s.Conflicts(); err != nil || len(cs) != 0 {
+		t.Errorf("taken back and met again, the conflict dismissed is back: %+v, %v", cs, err)
 	}
 }
 

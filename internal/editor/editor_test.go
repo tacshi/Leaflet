@@ -13,6 +13,7 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/richtext"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
@@ -1242,6 +1243,38 @@ func TestCopyAndPasteFormats(t *testing.T) {
 	got = paste("<div>## Title</div><div>- item</div>", "## Title\n- item")
 	if len(got) != 2 || got[0].Type != "heading" || got[1].Type != "bulleted_list" {
 		t.Errorf("pasted plain HTML as %v", texts(e))
+	}
+}
+
+// Text colors and highlights paste as they were copied from Leaflet's
+// rich text, from another copy of Leaflet too, but not from HTML: a web
+// page's or a code editor's colors are its theme's, not the writer's.
+func TestPasteKeepsColorsOfLeafletsRichText(t *testing.T) {
+	e, tt, _ := setup(t)
+	n := newText("paragraph", doc.Delta{{Text: "red", Attrs: doc.Attrs{Color: "#ef4444"}}, {Text: " and "},
+		{Text: "marked", Attrs: doc.Attrs{Background: "#eab30840", Bold: true}}})
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{n} })
+	e.Select(Pos{n.ID, 0}, Pos{n.ID, 14})
+	tt.Command("copy")
+	rich, err := tt.ClipboardData().Read(richtext.Format)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paste := func(format transfer.Format, data string) doc.Delta {
+		end := newText("paragraph", nil)
+		e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{end} })
+		e.PlaceCaret(end.ID, 0)
+		tt.SetClipboardData(transfer.New(transfer.NewItem(
+			transfer.Bytes(format, []byte(data)), transfer.Bytes(transfer.Text, []byte("red and marked")))))
+		tt.Command("paste")
+		return e.Content.Children[0].Delta()
+	}
+	if got := paste(richtext.Format, string(rich)); !reflect.DeepEqual(got, n.Delta()) {
+		t.Errorf("pasted %+v, want %+v", got, n.Delta())
+	}
+	got := paste(transfer.HTML, `<p><span style="color:#ef4444">red</span> and <b style="background-color:#eab30840">marked</b></p>`)
+	if want := (doc.Delta{{Text: "red and "}, {Text: "marked", Attrs: doc.Attrs{Bold: true}}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("pasted HTML as %+v, want %+v", got, want)
 	}
 }
 

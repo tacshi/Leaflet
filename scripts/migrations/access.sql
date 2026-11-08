@@ -577,6 +577,34 @@ begin
 end;
 $$;
 
+-- A file stays in its space: the owner of the page it is on, whom the
+-- policy lets write it, can't move it into the editor's, where it would
+-- show in their files and go to their devices.
+do $$
+declare
+  v_file constant uuid := 'e0000000-0000-0000-0000-0000000000b3';
+  v_theirs uuid;
+begin
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  select id into v_theirs from public.spaces where owner_id = auth.uid();
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.files (id, space_id, page_id, name)
+  select v_file, s.id, 'e0000000-0000-0000-0000-0000000000e1', 'mine.txt'
+  from public.spaces s where s.owner_id = auth.uid();
+  begin
+    update public.files set space_id = v_theirs where id = v_file;
+    raise exception 'the page''s owner moved a file into another space';
+  exception when check_violation then
+    if sqlerrm <> 'space_immutable' then
+      raise;
+    end if;
+  end;
+  if (select space_id from public.files where id = v_file) is not distinct from v_theirs then
+    raise exception 'a file is in another space';
+  end if;
+end;
+$$;
+
 -- An editor's recording on the page: its audio is at its own path, which
 -- no one can point elsewhere; its recorder uploads it there and nowhere
 -- else; the page's viewers hear it, and a stranger does not. A viewer
@@ -785,6 +813,11 @@ do $$
 begin
   if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', 'openai') is distinct from 'key-2' then
     raise exception 'the Functions read another key';
+  end if;
+  -- The functions deployed before the address came with the read still
+  -- read the key by the provider's id, until Setup deploys these.
+  if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee') is distinct from 'key-2' then
+    raise exception 'the functions from before read another key';
   end if;
   -- Read for an address or preset the provider no longer has, the key is
   -- not given.

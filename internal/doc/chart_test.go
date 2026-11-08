@@ -46,6 +46,13 @@ func TestParseChartCSVReadsTypedText(t *testing.T) {
 	if number, ok := errors.AsType[*ChartNumberError](err); !ok || number.Line != 4 || number.Cell != "lots" {
 		t.Errorf("error %v", err)
 	}
+	// What reads as a float but no chart can draw is no number either.
+	for _, cell := range []string{"NaN", "Infinity", "-inf", "+Inf"} {
+		_, _, err = ParseChartCSV("Month, Sales\nJan, " + cell)
+		if number, ok := errors.AsType[*ChartNumberError](err); !ok || number.Line != 2 || number.Cell != cell {
+			t.Errorf("%s: error %v", cell, err)
+		}
+	}
 	if _, _, err := ParseChartCSV("Month, Sales"); !errors.Is(err, ErrChartRows) {
 		t.Errorf("no rows: %v", err)
 	}

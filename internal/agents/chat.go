@@ -143,7 +143,7 @@ func (h *Hub) loadChat(s *Session) {
 	if err := json.Unmarshal([]byte(raw), &run); err != nil {
 		log.Printf("agent chat: %v", err)
 	} else if r := s.Run(run.ID); r != nil && len(run.Ops) > len(r.Ops) {
-		r.Ops, r.Edits = run.Ops, run.Edits
+		r.Ops, r.Edits, r.Skipped = run.Ops, run.Edits, run.Skipped
 		h.saveChat(s)
 	}
 	if err := h.st.DeleteValue(runningKey(s.PageID)); err != nil {

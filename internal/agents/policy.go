@@ -168,7 +168,8 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 // out, the other devices say so in iCloud Drive (iCloudLinked).
 func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) bool {
 	if h.be == nil || !h.be.SignedIn() {
-		return h.iCloudLinked()[pageID]
+		linked, known := h.iCloudLinked()
+		return !known || linked[pageID]
 	}
 	// Offline, the server is not asked: the lease it last gave stands.
 	if !online {
@@ -215,18 +216,24 @@ const iCloudLinkDrift = 15 * time.Minute
 
 // iCloudLinked are the pages with a public link another device says in
 // iCloud Drive that it serves (ICloudLinks), as their leases stand now.
-func (h *Hub) iCloudLinked() map[string]bool {
-	out := map[string]bool{}
+// known is false where a device's could not be read: it may serve a link
+// of any page, so every page counts as linked.
+func (h *Hub) iCloudLinked() (linked map[string]bool, known bool) {
+	linked = map[string]bool{}
 	if h.ICloudLinks == nil {
-		return out
+		return linked, true
+	}
+	leases, err := h.ICloudLinks()
+	if err != nil {
+		log.Printf("public links in iCloud Drive: %v", err)
 	}
 	now := time.Now()
-	for id, until := range h.ICloudLinks() {
+	for id, until := range leases {
 		if until.Add(iCloudLinkDrift).After(now) {
-			out[id] = true
+			linked[id] = true
 		}
 	}
-	return out
+	return linked, err == nil
 }
 
 // errOffline is the server not asked, this device being offline.
@@ -241,8 +248,8 @@ var errOffline = errors.New("offline")
 // as linked.
 func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) func(pageID string) bool {
 	if h.be == nil || !h.be.SignedIn() {
-		linked := h.iCloudLinked()
-		return func(id string) bool { return linked[id] }
+		linked, known := h.iCloudLinked()
+		return func(id string) bool { return !known || linked[id] }
 	}
 	out := map[string]bool{}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -354,7 +354,7 @@ func TestRetryMovesKeepsWhatItCannotRead(t *testing.T) {
 	if err := svc.retryMoves(context.Background()); err == nil {
 		t.Error("the retry read no files, and said nothing")
 	}
-	if got := svc.ids(movesKey); !maps.Equal(got, map[string]bool{"files:" + f.ID: true}) {
+	if got := idsOf(t, svc, movesKey); !maps.Equal(got, map[string]bool{"files:" + f.ID: true}) {
 		t.Errorf("waiting for %v", got)
 	}
 
@@ -367,7 +367,7 @@ func TestRetryMovesKeepsWhatItCannotRead(t *testing.T) {
 	if !st.HasPending("files", f.ID) {
 		t.Error("the deleted file is not queued")
 	}
-	if got := svc.ids(movesKey); len(got) != 0 {
+	if got := idsOf(t, svc, movesKey); len(got) != 0 {
 		t.Errorf("still waiting for %v", got)
 	}
 }

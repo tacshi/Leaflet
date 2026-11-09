@@ -26,23 +26,44 @@ function isPunct(text: string): boolean {
 
 const SENTENCE_ENDS = [".", "?", "!", "。", "？", "！"];
 
+/** Whether a token, a word or punctuation, ends a sentence (recording.endsSentence). */
+function endsSentence(text: string): boolean {
+  const t = trimSpace(text);
+  return SENTENCE_ENDS.some((p) => t.endsWith(p));
+}
+
+/**
+ * Whether a token starts a word of its own rather than carrying on the
+ * one before, as the 5 of 3.5 does (recording.startsWord): it starts with
+ * a space, or in a script written without them.
+ */
+function startsWord(text: string): boolean {
+  const [c] = text;
+  return c !== undefined && (isSpace(c) || /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u.test(c));
+}
+
 /**
  * Groups Soniox tokens into transcript segments, as the app groups those
  * it streams (recording.TokensToSegments): a new one on a new speaker,
  * after a pause of more than a second, or at a sentence's end after four
- * seconds. Punctuation that comes late ends the words before it rather
- * than starting a segment of its own.
+ * seconds, whether the word ends the sentence or punctuation of its own
+ * does. Punctuation that comes late ends the words before it rather than
+ * starting a segment of its own.
  */
 export function tokensToSegments(tokens: SonioxToken[]): Segment[] {
   const segments: Segment[] = [];
   let text = "";
   let start = -1, end = 0;
   let speaker = "";
+  // The segment's sentence has ended, four seconds in: the next word
+  // starts a segment, once the quotes and brackets closing it are in.
+  let ended = false;
   const flush = () => {
     const t = trimSpace(text);
     if (t) segments.push({ start_ms: Math.max(start, 0), end_ms: end, text: t, ...(speaker ? { speaker } : {}) });
     text = "";
     start = -1;
+    ended = false;
   };
   for (const token of tokens) {
     const tokenText = typeof token.text === "string" ? token.text : "";
@@ -50,17 +71,18 @@ export function tokensToSegments(tokens: SonioxToken[]): Segment[] {
     const e = Math.max(token.end_ms ?? 0, s);
     const who = jsonText(token.speaker);
     if (isPunct(tokenText)) {
-      if (text) text += tokenText;
-      else if (segments.length) segments[segments.length - 1].text += trimSpace(tokenText);
+      if (text) {
+        text += tokenText;
+        ended ||= endsSentence(tokenText) && end - start > 4000;
+      } else if (segments.length) segments[segments.length - 1].text += trimSpace(tokenText);
       continue;
     }
-    if (text && ((who && who !== speaker) || s - end > 1000)) flush();
+    if (text && ((who && who !== speaker) || s - end > 1000 || (ended && startsWord(tokenText)))) flush();
     if (start < 0) start = s;
     if (who) speaker = who;
     text += tokenText;
     end = e;
-    const word = trimSpace(tokenText);
-    if (SENTENCE_ENDS.some((p) => word.endsWith(p)) && end - start > 4000) flush();
+    ended = endsSentence(tokenText) && end - start > 4000;
   }
   flush();
   return segments;

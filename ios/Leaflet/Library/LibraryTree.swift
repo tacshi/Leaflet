@@ -62,6 +62,23 @@ extension LibrarySnapshot {
         return files.filter { !held.contains($0.folderID ?? "") }
     }
 
+    /// rows are pages as the rows of the sidebar's tree, in order: each
+    /// page, and right under one that is open, its subpages, a level
+    /// deeper. A page comes once, even where parents go round in a loop.
+    func rows(of pages: [PageRow], open: Set<String>) -> [TreeRow] {
+        var out: [TreeRow] = []
+        var seen: Set<String> = []
+        func add(_ pages: [PageRow], depth: Int) {
+            for page in pages where seen.insert(page.id).inserted {
+                let under = children(of: page)
+                out.append(TreeRow(page: page, depth: depth, folds: !under.isEmpty))
+                if open.contains(page.id) { add(under, depth: depth + 1) }
+            }
+        }
+        add(pages, depth: 0)
+        return out
+    }
+
     /// path is the page's ancestors, from the top, for its breadcrumbs.
     func path(to page: PageRow) -> [PageRow] {
         var out: [PageRow] = []
@@ -73,6 +90,15 @@ extension LibrarySnapshot {
         }
         return out
     }
+}
+
+/// TreeRow is a page as a row of the sidebar's tree: how deep it is
+/// nested, and whether subpages fold under it.
+struct TreeRow: Identifiable {
+    let page: PageRow
+    let depth: Int
+    let folds: Bool
+    var id: String { page.id }
 }
 
 extension PageRow {

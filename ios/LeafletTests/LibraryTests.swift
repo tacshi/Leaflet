@@ -48,6 +48,28 @@ struct LibraryTests {
         #expect(lib.topFiles.map(\.id) == ["left", "top"])
     }
 
+    /// The tree's rows are the pages and, under each one open, its
+    /// subpages a level deeper: closing a page takes away all under it,
+    /// and pages nested in a loop come once.
+    @Test func theTreesRowsFollowThePagesOpen() {
+        let lib = LibrarySnapshot(
+            spaceID: "me",
+            pages: [
+                page("a"), page("a1", parent: "a"), page("a2", parent: "a"),
+                page("a1x", parent: "a1"), page("b"),
+            ], folders: [], tags: [], top: ["a", "b"],
+            children: ["a": ["a1", "a2"], "a1": ["a1x", "a"]])
+        func rows(_ open: Set<String>) -> [String] {
+            lib.rows(of: lib.topPages, open: open).map {
+                "\($0.page.id):\($0.depth)\($0.folds ? "+" : "")"
+            }
+        }
+        #expect(rows([]) == ["a:0+", "b:0"])
+        #expect(rows(["a"]) == ["a:0+", "a1:1+", "a2:1", "b:0"])
+        #expect(rows(["a", "a1"]) == ["a:0+", "a1:1+", "a1x:2", "a2:1", "b:0"])
+        #expect(rows(["a1"]) == ["a:0+", "b:0"])
+    }
+
     /// A page whose parents go round in a loop, as two devices' moves can
     /// leave them, still has a path, which ends.
     @Test func aLoopOfParentsEnds() {

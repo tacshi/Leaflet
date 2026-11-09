@@ -513,6 +513,17 @@ Deno.test("tokens make the app's transcript lines (testdata/corpus/segments.json
     });
     return { tokens, segments: tokensToSegments(tokens as never) };
   });
+  // Long lines of words close together, which end at a sentence's end
+  // rather than at a pause.
+  const close = [...words, "5", "com", " And", '"', "ア", "é"];
+  for (let i = 0; i < 200; i++) {
+    let at = r.int(3000);
+    const tokens = r.times(0, 40, () => {
+      at += r.pick([0, 50, 300, 900]);
+      return { text: r.pick(close), start_ms: at, end_ms: at + r.pick([0, 200, 600]) };
+    });
+    made.push({ tokens, segments: tokensToSegments(tokens as never) });
+  }
   await corpus("corpus/segments.json", made, segmentsCorpus);
 });
 

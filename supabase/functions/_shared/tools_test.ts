@@ -527,6 +527,32 @@ Deno.test("soniox tokens group into segments as the app groups them", () => {
   ]);
 });
 
+// Punctuation Soniox sends as tokens of its own ends a sentence as a
+// word's does: the segment ends there four seconds in, and not inside a
+// number.
+Deno.test("punctuation tokens end segments", () => {
+  const segments = tokensToSegments([
+    { text: "It", start_ms: 0, end_ms: 200 },
+    { text: " costs", start_ms: 200, end_ms: 3000 },
+    { text: " 3", start_ms: 3000, end_ms: 4200 },
+    { text: ".", start_ms: 4200, end_ms: 4200 },
+    { text: "5", start_ms: 4200, end_ms: 4500 },
+    { text: ".", start_ms: 4500, end_ms: 4500 },
+    { text: '"', start_ms: 4500, end_ms: 4500 },
+    { text: " So", start_ms: 4600, end_ms: 4800 },
+    { text: " short", start_ms: 4800, end_ms: 5000 },
+    { text: ".", start_ms: 5000, end_ms: 5000 },
+    { text: " And", start_ms: 5100, end_ms: 9500 },
+    { text: "。", start_ms: 9500, end_ms: 9500 },
+    { text: "好", start_ms: 9600, end_ms: 9800 },
+  ]);
+  assertEquals(segments, [
+    { start_ms: 0, end_ms: 4500, text: 'It costs 3.5."' },
+    { start_ms: 4600, end_ms: 9500, text: "So short. And。" },
+    { start_ms: 9600, end_ms: 9800, text: "好" },
+  ]);
+});
+
 // Punctuation that comes late ends the words before it rather than
 // starting a segment of its own, as in the app.
 Deno.test("late punctuation ends the segment before it", () => {

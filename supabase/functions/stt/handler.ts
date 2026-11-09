@@ -486,15 +486,18 @@ async function fileTranscribed(sc: SupabaseClient, user: User, body: Body, deps:
   const id = body.file_id ?? "";
   if (!UUID.test(id)) throw new HttpError(400, "file_id is not a file's");
   const mine = { source_file_id: id, user_id: user.id };
+  // Not one a call has now, as the file transcribed again: its job is
+  // that call's, which would send the audio and spend the key again.
   const { data: left, error } = await sc.from("stt_file_jobs")
     .select("file_id, transcription_id, model")
     .match(mine)
+    .is("claimed_at", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (left?.transcription_id) {
     await sonioxRemove(deps.fetch, await sonioxKey(sc, user), left as SonioxJob);
   }
-  await sc.from("stt_file_jobs").delete().match(mine);
+  await sc.from("stt_file_jobs").delete().match(mine).is("claimed_at", null);
   return { ok: true };
 }
 
@@ -758,9 +761,19 @@ async function sonioxFile(
     await jobs.forget();
   };
 
+  const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
+  const hints = language ? [language] : ["en", "zh"];
+  const speakers = !!settings.speaker_labels;
+  // Whether a job left at Soniox was asked for what this call asks, as
+  // Soniox says of it: one in another language, or without the speakers,
+  // is not this call's transcript.
+  const asked = (info: { model?: unknown; language_hints?: unknown; enable_speaker_diarization?: unknown }) =>
+    (typeof info.model !== "string" || info.model === model) &&
+    (!Array.isArray(info.language_hints) || JSON.stringify(info.language_hints) === JSON.stringify(hints)) &&
+    (typeof info.enable_speaker_diarization !== "boolean" || info.enable_speaker_diarization === speakers);
+
   // Sends the audio and starts transcribing it.
   const start = async (): Promise<SonioxJob> => {
-    const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
     const signal = until(deadline, deps);
     const upload = await postAudio(audio, [], signal, (body, contentType) =>
       fetch(`${SONIOX_API}/files`, {
@@ -778,8 +791,8 @@ async function sonioxFile(
         body: JSON.stringify({
           model,
           file_id: fileId,
-          language_hints: language ? [language] : ["en", "zh"],
-          enable_speaker_diarization: settings.speaker_labels,
+          language_hints: hints,
+          enable_speaker_diarization: speakers,
         }),
         signal: until(deadline, deps),
       });
@@ -795,8 +808,10 @@ async function sonioxFile(
 
   // Waits on a job as long as this call may, or null when Soniox no longer
   // has it. A failure of a call here, Soniox's or the network's, leaves the
-  // job as it is for the next call: only its own end is one.
-  const wait = async (job: SonioxJob): Promise<Transcribed | null> => {
+  // job as it is for the next call: only its own end is one. A job left
+  // by a call before that asked for something else goes, as one Soniox no
+  // longer has.
+  const wait = async (job: SonioxJob, left = false): Promise<Transcribed | null> => {
     try {
       while (true) {
         const status = await fetch(`${SONIOX_API}/transcriptions/${job.transcription_id}`, {
@@ -809,6 +824,10 @@ async function sonioxFile(
         }
         if (!status.ok) throw await sonioxFailure(status, "status");
         const info = await status.json();
+        if (left && !asked(info)) {
+          await sonioxRemove(fetch, key, job);
+          return null;
+        }
         if (info.status === "completed") break;
         if (info.status === "error") {
           console.error("Soniox transcription:", info.error_message);
@@ -837,7 +856,7 @@ async function sonioxFile(
 
   const left = await jobs.load();
   if (left) {
-    const done = await wait(left);
+    const done = await wait(left, true);
     if (done) return done;
     await jobs.forget();
   }

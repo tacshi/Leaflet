@@ -26,10 +26,10 @@ function isPunct(text: string): boolean {
 
 const SENTENCE_ENDS = [".", "?", "!", "。", "？", "！"];
 
-/** Whether a token, a word or punctuation, ends a sentence (recording.endsSentence). */
-function endsSentence(text: string): boolean {
+/** What ends the sentence a token, a word or punctuation, ends, "" for one that ends none (recording.sentenceEnd). */
+function sentenceEnd(text: string): string {
   const t = trimSpace(text);
-  return SENTENCE_ENDS.some((p) => t.endsWith(p));
+  return SENTENCE_ENDS.find((p) => t.endsWith(p)) ?? "";
 }
 
 /**
@@ -55,15 +55,17 @@ export function tokensToSegments(tokens: SonioxToken[]): Segment[] {
   let text = "";
   let start = -1, end = 0;
   let speaker = "";
-  // The segment's sentence has ended, four seconds in: the next word
-  // starts a segment, once the quotes and brackets closing it are in.
-  let ended = false;
+  // What ended the segment's sentence, four seconds in, "" until then:
+  // the next word starts a segment, once the quotes and brackets closing
+  // it are in. After a full stop, which numbers and addresses have inside
+  // them, only a word of its own does.
+  let ended = "";
   const flush = () => {
     const t = trimSpace(text);
     if (t) segments.push({ start_ms: Math.max(start, 0), end_ms: end, text: t, ...(speaker ? { speaker } : {}) });
     text = "";
     start = -1;
-    ended = false;
+    ended = "";
   };
   for (const token of tokens) {
     const tokenText = typeof token.text === "string" ? token.text : "";
@@ -73,16 +75,19 @@ export function tokensToSegments(tokens: SonioxToken[]): Segment[] {
     if (isPunct(tokenText)) {
       if (text) {
         text += tokenText;
-        ended ||= endsSentence(tokenText) && end - start > 4000;
+        const p = sentenceEnd(tokenText);
+        if (p && end - start > 4000) ended = p;
       } else if (segments.length) segments[segments.length - 1].text += trimSpace(tokenText);
       continue;
     }
-    if (text && ((who && who !== speaker) || s - end > 1000 || (ended && startsWord(tokenText)))) flush();
+    if (text && ((who && who !== speaker) || s - end > 1000 || (ended && (ended !== "." || startsWord(tokenText))))) {
+      flush();
+    }
     if (start < 0) start = s;
     if (who) speaker = who;
     text += tokenText;
     end = e;
-    ended = endsSentence(tokenText) && end - start > 4000;
+    ended = end - start > 4000 ? sentenceEnd(tokenText) : "";
   }
   flush();
   return segments;

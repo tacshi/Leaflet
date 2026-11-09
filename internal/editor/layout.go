@@ -657,9 +657,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	if !joins(first) && head.Len() == 0 {
 		// A table, chart, code and the like cannot join a line: the blocks
 		// go before the caret's block, or after its text before the caret.
-		for _, b := range blocks {
-			_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
-		}
+		_ = e.Content.Insert(doc.Position{Before: n.ID}, blocks...)
 		// Before a heading that ends a folded section, they would join
 		// it, out of sight.
 		e.keepShown(first.ID)
@@ -668,7 +666,9 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		return
 	}
 	// The caret's block as it was: what followed the caret, its children
-	// too, goes after what is pasted.
+	// too, goes after what is pasted. Blocks that go in one after another
+	// go in together: a page is walked once for them all, not once for
+	// each line of a long paste.
 	typ, data := n.Type, maps.Clone(n.Data)
 	kids := n.Children
 	n.Children = nil
@@ -676,10 +676,8 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	at := n.ID
 	if !joins(first) {
 		n.SetDelta(head)
-		for _, b := range blocks {
-			_ = e.Content.Insert(doc.Position{After: at}, b)
-			at = b.ID
-		}
+		_ = e.Content.Insert(doc.Position{After: at}, blocks...)
+		at = blocks[len(blocks)-1].ID
 		last = newText("paragraph", nil)
 		_ = e.Content.Insert(doc.Position{After: at}, last)
 	} else {
@@ -705,18 +703,17 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 			if nestable(n) {
 				n.Children = first.Children
 			} else {
-				for _, k := range first.Children {
-					_ = e.Content.Insert(doc.Position{After: at}, k)
-					at = k.ID
-				}
+				_ = e.Content.Insert(doc.Position{After: at}, first.Children...)
+				at = first.Children[len(first.Children)-1].ID
 			}
 			if !collapsed(n) {
 				last = first.Children[len(first.Children)-1]
 			}
 		}
-		for _, b := range blocks[1:] {
-			_ = e.Content.Insert(doc.Position{After: at}, b)
-			at, last = b.ID, b
+		if rest := blocks[1:]; len(rest) > 0 {
+			_ = e.Content.Insert(doc.Position{After: at}, rest...)
+			last = rest[len(rest)-1]
+			at = last.ID
 		}
 		// What followed the caret goes on the last line pasted, but never
 		// on one hidden in a folded toggle: it goes on a line of its own
@@ -754,11 +751,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	if nestable(last) {
 		last.Children = append(last.Children, kids...)
 	} else {
-		at := last.ID
-		for _, k := range kids {
-			_ = e.Content.Insert(doc.Position{After: at}, k)
-			at = k.ID
-		}
+		_ = e.Content.Insert(doc.Position{After: last.ID}, kids...)
 	}
 	// The caret's block turned into a list item no longer ends a folded
 	// section before it, which would take it and what was pasted.

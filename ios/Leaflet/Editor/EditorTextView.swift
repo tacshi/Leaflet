@@ -612,6 +612,9 @@ final class EditorTextView: UITextView {
         // The title, in the header, has these too, up its responder chain:
         // they are the text's alone.
         guard !(header?.holdsFirstResponder ?? false) else { return super.keyCommands }
+        // Text being composed has the keys: Tab, Return, the arrows and
+        // Escape choose among its candidates, or end it.
+        guard markedTextRange == nil else { return super.keyCommands }
         if controller?.menu != nil {
             // The menu at the caret takes the arrows and Escape while it
             // shows; Return and Tab come as text, which it takes too.

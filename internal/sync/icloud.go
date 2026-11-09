@@ -205,10 +205,15 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 			_ = s.folder().Remove(l)
 		}
 	}
-	if joined == space.SpaceID {
+	// Joined, while this device's pages are still in the folder's space:
+	// an account signed in to since moved them into its own, and one whose
+	// session ended without its pages going left them there. Their rows
+	// would go to the folder as another space's, which no device stores,
+	// and the folder's would be passed over here, so they join it again.
+	if joined == space.SpaceID && s.st.Session().SpaceID == joined {
 		return nil
 	}
-	if joined != "" && !lost {
+	if joined != "" && joined != space.SpaceID && !lost {
 		return icloud.ErrOtherLibrary
 	}
 	if err := s.moveInto(space.SpaceID, "My space", store.LocalUserID, !made && space.CreatedByDevice != me); err != nil {

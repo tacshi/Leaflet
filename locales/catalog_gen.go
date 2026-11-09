@@ -12493,6 +12493,68 @@ func (msgs Messages) SettingsOpenSupabase() string {
 	return Catalog.Format(msgs.locale, "settingsOpenSupabase", nil)
 }
 
+// SettingsProjectSignIn says "Sign in to Supabase again"
+// in the language the app shows.
+//
+// Settings › Account: a row shown when the kept Supabase sign-in that
+// updates the user's project has ended; its title.
+func SettingsProjectSignIn() string { return In(i18n.Locale()).SettingsProjectSignIn() }
+
+// SettingsProjectSignIn says "Sign in to Supabase again"
+// in the language of msgs.
+//
+// Settings › Account: a row shown when the kept Supabase sign-in that
+// updates the user's project has ended; its title.
+func (msgs Messages) SettingsProjectSignIn() string {
+	return Catalog.Format(msgs.locale, "settingsProjectSignIn", nil)
+}
+
+// SettingsProjectSignInDesc says "This version of Leaflet has updates for your Supabase project, and the sign-in that applies them has ended. Until the…"
+// in the language the app shows.
+//
+// Settings › Account: under Sign in to Supabase again, why.
+func SettingsProjectSignInDesc() string { return In(i18n.Locale()).SettingsProjectSignInDesc() }
+
+// SettingsProjectSignInDesc says "This version of Leaflet has updates for your Supabase project, and the sign-in that applies them has ended. Until the…"
+// in the language of msgs.
+//
+// Settings › Account: under Sign in to Supabase again, why.
+func (msgs Messages) SettingsProjectSignInDesc() string {
+	return Catalog.Format(msgs.locale, "settingsProjectSignInDesc", nil)
+}
+
+// SettingsProjectSigningIn says "Updating your project…"
+// in the language the app shows.
+//
+// Settings › Account: beside Sign in to Supabase again, while the
+// browser's sign-in and the project's update run.
+func SettingsProjectSigningIn() string { return In(i18n.Locale()).SettingsProjectSigningIn() }
+
+// SettingsProjectSigningIn says "Updating your project…"
+// in the language of msgs.
+//
+// Settings › Account: beside Sign in to Supabase again, while the
+// browser's sign-in and the project's update run.
+func (msgs Messages) SettingsProjectSigningIn() string {
+	return Catalog.Format(msgs.locale, "settingsProjectSigningIn", nil)
+}
+
+// SettingsProjectUpdated says "Your Supabase project is up to date."
+// in the language the app shows.
+//
+// A toast after signing in to Supabase again brought the project up to
+// date.
+func SettingsProjectUpdated() string { return In(i18n.Locale()).SettingsProjectUpdated() }
+
+// SettingsProjectUpdated says "Your Supabase project is up to date."
+// in the language of msgs.
+//
+// A toast after signing in to Supabase again brought the project up to
+// date.
+func (msgs Messages) SettingsProjectUpdated() string {
+	return Catalog.Format(msgs.locale, "settingsProjectUpdated", nil)
+}
+
 // SettingsDevices says "Devices"
 // in the language the app shows.
 //

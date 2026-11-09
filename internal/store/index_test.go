@@ -365,3 +365,46 @@ func TestSaveWithoutItsWriteRow(t *testing.T) {
 		t.Errorf("saved %+v, %v", saved, err)
 	}
 }
+
+// A recording is found by what was said in it, with the quotes and &s its
+// stored JSON writes another way, and not by the names and times that
+// JSON has for every line.
+func TestSearchReadsWhatARecordingSaid(t *testing.T) {
+	st, err := OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := st.CreateRecording(p.ID, "b1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateRecording(r.ID, func(r *Recording) {
+		r.Status = "ready"
+		r.Transcript = []Segment{{EndMs: 1000, Text: `The budget for R&D is "fine"`, Speaker: "1"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for q, want := range map[string]int{"budget": 1, "r&d": 1, `is "fine"`: 1, "start_ms": 0, "speaker": 0, "1000": 0} {
+		hits, err := st.Search(q, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, h := range hits {
+			if h.Kind == "recording" {
+				n++
+			}
+		}
+		if n != want {
+			t.Errorf("%q found %d recordings, want %d", q, n, want)
+		}
+	}
+}

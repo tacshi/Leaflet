@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log"
 	"regexp"
@@ -152,7 +153,7 @@ func (s *Store) search(ctx context.Context, query string, limit int, keep func(P
 		if seen[p.ID] || !found.has(p.ID) {
 			continue
 		}
-		text, ok, err := s.matchText(ctx, `SELECT plain_text FROM page_contents WHERE page_id = ?`, p.ID, q)
+		text, ok, err := s.matchText(ctx, "page", `SELECT plain_text FROM page_contents WHERE page_id = ?`, p.ID, q)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +219,7 @@ func (s *Store) searchRows(ctx context.Context, kind, q string, limit int, list,
 		if !ok || !found.has(r.id) {
 			continue
 		}
-		body, ok, err := s.matchText(ctx, text, r.id, q)
+		body, ok, err := s.matchText(ctx, kind, text, r.id, q)
 		if err != nil {
 			return err
 		}
@@ -230,9 +231,9 @@ func (s *Store) searchRows(ctx context.Context, kind, q string, limit int, list,
 	return nil
 }
 
-// matchText reads a text by id with query, and reports whether it holds q,
-// lowered as Go lowers it. One gone meanwhile holds nothing.
-func (s *Store) matchText(ctx context.Context, query, id, q string) (string, bool, error) {
+// matchText reads a text of kind by id with query, and reports whether it
+// holds q, lowered as Go lowers it. One gone meanwhile holds nothing.
+func (s *Store) matchText(ctx context.Context, kind, query, id, q string) (string, bool, error) {
 	var text string
 	err := s.db.QueryRowContext(ctx, query, id).Scan(&text)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -241,7 +242,27 @@ func (s *Store) matchText(ctx context.Context, query, id, q string) (string, boo
 	if err != nil {
 		return "", false, err
 	}
+	text = searchedText(kind, text)
 	return text, strings.Contains(strings.ToLower(text), q), nil
+}
+
+// searchedText is a text of kind as search reads it. A recording's is its
+// transcript, kept as its lines in JSON: what was said is searched, a line
+// each, not the JSON, whose names and times every recording has, and which
+// writes a quote or an & another way.
+func searchedText(kind, text string) string {
+	if kind != "recording" {
+		return text
+	}
+	var lines []Segment
+	if json.Unmarshal([]byte(text), &lines) != nil {
+		return text
+	}
+	said := make([]string, len(lines))
+	for i, l := range lines {
+		said[i] = l.Text
+	}
+	return strings.Join(said, "\n")
 }
 
 // candidates are the texts of a kind that may hold what is searched for,
@@ -414,7 +435,7 @@ func indexText(tx *sql.Tx, n int64) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO search_index (rowid, text) VALUES (?, ?)`, n, strings.ToLower(text)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO search_index (rowid, text) VALUES (?, ?)`, n, strings.ToLower(searchedText(kind, text))); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`UPDATE text_writes SET indexed = ? WHERE n = ?`, written, n)

@@ -18,7 +18,9 @@ final class BlockCommands {
     /// indent nests the blocks chosen in the block before each, or takes
     /// them out a level, with the blocks nested in them.
     func indent(by step: Int) {
-        guard textView.isEditable else { return }
+        // Text being composed is the keyboard's, which a change to the
+        // text under it would end.
+        guard textView.isEditable, textView.markedTextRange == nil else { return }
         // In code, Tab indents its lines, as on the desktop.
         if text.paragraph(at: textView.selectedRange.location).info.type == "code" {
             indentCode(by: step)
@@ -182,7 +184,7 @@ final class BlockCommands {
     /// it, past the block before or after it at its depth. The first block
     /// in a list item goes before it, and the last after it, at its depth.
     func moveBlock(by step: Int) {
-        guard textView.isEditable else { return }
+        guard textView.isEditable, textView.markedTextRange == nil else { return }
         let caret = text.position(at: textView.selectedRange.location)
         let all = text.paragraphs()
         let i = BlockText.index(all, at: textView.selectedRange.location)
@@ -223,7 +225,11 @@ final class BlockCommands {
     /// softBreak breaks the line within the block, as Shift-Return does on
     /// the desktop: the block stays one.
     func softBreak() {
-        guard textView.isEditable else { return }
+        guard textView.isEditable, textView.markedTextRange == nil else { return }
+        // A block without text has no line to break: the break would go in
+        // its place.
+        let chosen = text.paragraphs(touching: textView.selectedRange)
+        guard chosen.allSatisfy(\.info.isText) else { return }
         edits.insert(String(lineBreak), replacing: textView.selectedRange)
     }
 

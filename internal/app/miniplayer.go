@@ -161,9 +161,12 @@ func (a *App) heardAudio() (heard, bool) {
 		if pl == nil || pl.p == nil {
 			return heard{}, false
 		}
-		rec, err := a.st.Recording(a.now.rec)
+		// As its block reads it, once: this runs each frame the player
+		// shows.
+		v := a.recordingView(a.now.rec)
+		rec := v.rec
 		return heard{
-			title: a.recordingTitle(n, rec, err == nil),
+			title: a.recordingTitle(n, rec, v.err == nil),
 			pos:   pl.p.Position(), length: pl.p.Duration(), playing: pl.p.Playing(),
 			toggle: func() { a.play(rec) },
 			seek: func(t time.Duration) {

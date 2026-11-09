@@ -686,6 +686,8 @@ struct VideoBlock: View {
                 try? JSONDecoder().decode(
                     Player.self, from: Data(MobileVideoPlayerAt(link, start).utf8))
             }.value
+            // A link changed meanwhile has its own player coming.
+            guard !Task.isCancelled else { return }
             made = player.map { Made(player: $0, loads: loads) }
         }
     }
@@ -985,6 +987,7 @@ struct WebPage: UIViewRepresentable {
         view.scrollView.isScrollEnabled = interactive
         view.navigationDelegate = context.coordinator
         context.coordinator.loaded = html
+        context.coordinator.dark = context.environment.colorScheme == .dark
         context.coordinator.ran = script?.id
         if let player { VideoPlayback.shared.register(view, for: player) }
         view.loadHTMLString(

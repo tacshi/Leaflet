@@ -277,8 +277,10 @@ func (p *Page) Save() bool {
 // typed.
 func (p *Page) External() {
 	// The write stored tells, without reading the content, that it is
-	// still the one the page has, as each save finds before it saves.
-	if written, err := p.st.WriteID(p.ID); err == nil && written != 0 && written == p.written && p.row != "" {
+	// still the one the page has, as each save finds before it saves. Not
+	// of a page that was removed: its content back as it was, write and
+	// all, is still the page to open again (below).
+	if written, err := p.st.WriteID(p.ID); err == nil && written != 0 && written == p.written && p.row != "" && !p.removed {
 		return
 	}
 	row, written, err := p.st.StoredContent(p.ID)
@@ -289,7 +291,7 @@ func (p *Page) External() {
 	if err != nil {
 		return
 	}
-	if row == p.row {
+	if row == p.row && !p.removed {
 		p.written = written
 		return
 	}

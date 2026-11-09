@@ -25,12 +25,16 @@ struct AccountInfo: Codable, Sendable {
     var displayName: String
     var project: String
     var projectRef: String
+    /// projectNeedsSignIn says the project waits to be brought up to this
+    /// version of Leaflet for the person to sign in to Supabase again.
+    var projectNeedsSignIn: Bool
 
     enum CodingKeys: String, CodingKey {
         case email, project
         case signedIn = "signed_in"
         case displayName = "display_name"
         case projectRef = "project_ref"
+        case projectNeedsSignIn = "project_needs_sign_in"
     }
 }
 
@@ -94,6 +98,18 @@ extension CoreClient {
                 core.finishSupabaseSign(
                     in: url, state: begun.state, verifier: begun.verifier, error: e)
             }
+        }
+    }
+
+    /// finishProjectSignIn finishes signing in to Supabase again for the
+    /// project in use, with the URL the web session came back to: the
+    /// core brings the project up to date and keeps the sign-in.
+    nonisolated(nonsending) func finishProjectSignIn(_ begun: SupabaseSignIn, callback: URL)
+        async throws
+    {
+        let url = callback.absoluteString
+        try await call(waiting: true) {
+            try $0.finishProjectSign(in: url, state: begun.state, verifier: begun.verifier)
         }
     }
 

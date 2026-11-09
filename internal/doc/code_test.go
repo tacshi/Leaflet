@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,28 @@ func TestCodeLanguages(t *testing.T) {
 	for _, line := range []string{"``", "``` `x`", "text ```"} {
 		if _, ok := CodeFence(line); ok {
 			t.Errorf("%q is not a fence", line)
+		}
+	}
+}
+
+// A language named with backticks, as a spec may name one, keeps none: a
+// fence's line holds none after those it opens with, and the code would
+// read back as text, with all after it as code.
+func TestCodeLanguageKeepsNoBackticks(t *testing.T) {
+	for in, want := range map[string]string{"c`": "c", "`": "", "``` Objective `C` ```": "objective-c", "J`S": "javascript"} {
+		if got := CodeLanguageID(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+		n, err := SpecToNode(map[string]any{"type": "code", "text": "x := 1", "language": in}, "c1", "Agent")
+		if err != nil || n.Str("language") != want {
+			t.Fatalf("%q: got %+v, %v", in, n, err)
+		}
+		// One kept from before reads back the same.
+		n.Set("language", in)
+		md := PageMarkdown("", FromBlocks([]*Node{n, textNode("paragraph", Delta{{Text: "after"}})}), MarkdownOptions{})
+		want := []string{"code language=" + want + ` "x := 1"`, `paragraph "after"`}
+		if got := shape(MarkdownBlocks(md)); !slices.Equal(got, want) {
+			t.Errorf("%q wrote %q, which reads back as %q", in, md, got)
 		}
 	}
 }

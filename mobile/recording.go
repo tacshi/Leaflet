@@ -169,9 +169,11 @@ func (e engine) File(path, language string) ([]store.Segment, error) {
 // onDeviceSlack is how much longer than its audio lasts the device's
 // engine gets to transcribe it, as the Mac's speech helper gets: one
 // stuck, as a speech model that stops answering, is given up on, rather
-// than leave the recording transcribing until the app quits. Tests
-// shorten it.
-var onDeviceSlack = time.Minute
+// than leave the recording transcribing until the app quits. It covers
+// the engine's first use in a language, which downloads its model before
+// it hears any audio, and lasts longer than the three minutes without
+// progress the app's own watch on the engine allows. Tests shorten it.
+var onDeviceSlack = 4 * time.Minute
 
 // anyLength is the longest an audio file not the recorder's is given.
 const anyLength = 6 * time.Hour
@@ -578,7 +580,8 @@ func (c *Core) RecordingAudio(id string, token int64) (_ string, err error) {
 			return rec.LocalPath, nil
 		}
 	}
-	ctx, done := c.cancellable(token, 5*time.Minute)
+	// As long as its size takes: hours of audio are hundreds of megabytes.
+	ctx, done := c.cancellable(token, recording.DownloadWait(recording.AudioSize(rec.DurationMs)))
 	defer done()
 	audio, err := c.core.Rec.OpenAudio(ctx, rec)
 	if err != nil {
@@ -664,7 +667,10 @@ func (c *Core) SpeechChoices(pageID string) (_ string, err error) {
 	var out speechChoices
 	c.q.do(func() {
 		stt := c.core.Store.Settings().Stt
-		out.Choices = recording.Choices(stt, keys)
+		// Never null: the app reads a list.
+		if out.Choices = recording.Choices(stt, keys); out.Choices == nil {
+			out.Choices = []recording.SpeechProvider{}
+		}
 		out.Current = c.core.Rec.Choice(pageID, stt, keys)
 	})
 	return encode(out)

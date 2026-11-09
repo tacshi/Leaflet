@@ -545,11 +545,16 @@ Deno.test("punctuation tokens end segments", () => {
     { text: " And", start_ms: 5100, end_ms: 9500 },
     { text: "。", start_ms: 9500, end_ms: 9500 },
     { text: "好", start_ms: 9600, end_ms: 9800 },
+    { text: "很好", start_ms: 9800, end_ms: 14000 },
+    { text: "。", start_ms: 14000, end_ms: 14000 },
+    { text: "2024", start_ms: 14100, end_ms: 14500 },
+    { text: "年", start_ms: 14500, end_ms: 14700 },
   ]);
   assertEquals(segments, [
     { start_ms: 0, end_ms: 4500, text: 'It costs 3.5."' },
     { start_ms: 4600, end_ms: 9500, text: "So short. And。" },
-    { start_ms: 9600, end_ms: 9800, text: "好" },
+    { start_ms: 9600, end_ms: 14000, text: "好很好。" },
+    { start_ms: 14100, end_ms: 14700, text: "2024年" },
   ]);
 });
 

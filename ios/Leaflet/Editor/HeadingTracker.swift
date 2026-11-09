@@ -43,7 +43,12 @@ final class HeadingTracker {
         textView.replaceBlocks()
     }
 
-    func willBeginDragging() {
+    func willBeginDragging() { endJump() }
+
+    /// endJump forgets a jump the page is taken from before it lands, by a
+    /// finger or by another scroll: the text it went to is no longer where
+    /// the page is going.
+    private func endJump() {
         jumping = false
         jumpTo = nil
         jumpLandings = 0
@@ -104,6 +109,9 @@ final class HeadingTracker {
             }
             return
         }
+        // A jump on its way gives way to this scroll, which ends where the
+        // block shows, not at the jump's heading.
+        endJump()
         textView.scrollRangeToVisible(p.range)
     }
 

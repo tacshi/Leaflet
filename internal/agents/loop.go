@@ -226,8 +226,13 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		exec.saw()
 	}
 	exec.begin()
+	// A run that read those turns holds what their runs read beyond the
+	// page, and may say it again: it kept to its page no more than they
+	// did, so the turns after it stay closed to the web though the run
+	// that read is undone, as the server counts its own (keptToPage).
+	held := pagesBefore && crossPage
 	result := func(reply string) Result {
-		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
+		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages && !held, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
 	}
 	if ev.Status != nil {
 		ev.Status("running")

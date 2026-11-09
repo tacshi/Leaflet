@@ -37,9 +37,10 @@ var languageAliases = map[string]string{
 // CodeLanguageID reads a language's name, as a fence or an agent gives it,
 // as the ID a code block keeps: "JS" is "javascript", and a language not
 // listed keeps its name in lower case, its spaces dashes, as a fence,
-// which ends a language at a space, can write it.
+// which ends a language at a space, can write it, and without its
+// backticks, which a fence's line can't hold after the ones it opens with.
 func CodeLanguageID(name string) string {
-	id := strings.ToLower(strings.Join(strings.Fields(name), "-"))
+	id := strings.ToLower(strings.Join(strings.Fields(strings.ReplaceAll(name, "`", "")), "-"))
 	if a, ok := languageAliases[id]; ok {
 		return a
 	}

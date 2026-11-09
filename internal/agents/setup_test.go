@@ -20,8 +20,8 @@ import (
 	"leaflet/locales"
 )
 
-// memKeys is a keychain in memory; while locked, nothing is removed from
-// it.
+// memKeys is a keychain in memory; while locked, nothing is kept in it or
+// removed from it.
 type memKeys struct {
 	mu     sync.Mutex
 	keys   map[string][]byte
@@ -46,6 +46,9 @@ func (k *memKeys) Get(name string) ([]byte, error) {
 func (k *memKeys) Set(name string, value []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.locked {
+		return errors.New("the keychain is locked")
+	}
 	k.keys[name] = value
 	return nil
 }
@@ -209,6 +212,43 @@ func TestSaveProviderKeptHere(t *testing.T) {
 	kept, err := h.st.Provider(p.ID)
 	if err != nil || !kept.IsLocal || kept.AuthKind != "api_key" || kept.Name != "DeepSeek" || kept.SupportsTools == nil || !*kept.SupportsTools {
 		t.Errorf("kept %+v, %v", kept, err)
+	}
+	if got := LocalKey(p.ID); got != "sk-1" {
+		t.Errorf("key %q", got)
+	}
+}
+
+// A provider whose key the keychain does not take is not kept without
+// it: a new one is not saved, and one changed stays as it was, with the
+// key it had.
+func TestSaveProviderWhoseKeyIsNotKept(t *testing.T) {
+	keys := useMemKeys(t)
+	h := setupHub(t, nil)
+	form := Form{Preset: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", APIKey: "sk-1", KeyTyped: true}
+	keys.locked = true
+	if _, err := h.SaveProvider(form); err == nil || !strings.Contains(err.Error(), "the keychain is locked") {
+		t.Fatalf("saved with no key kept: %v", err)
+	}
+	if all, err := h.st.Providers(); err != nil || len(all) != 0 {
+		t.Errorf("kept %+v, %v", all, err)
+	}
+	keys.locked = false
+	p, err := h.SaveProvider(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.st.Provider(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.locked = true
+	form.ID, form.Name, form.Model, form.APIKey = p.ID, "Renamed", "deepseek-v5", "sk-2"
+	if _, err := h.SaveProvider(form); err == nil {
+		t.Fatal("changed with no key kept")
+	}
+	after, err := h.st.Provider(p.ID)
+	if err != nil || after.Name != before.Name || after.DefaultModel != before.DefaultModel || after.AuthKind != "api_key" || !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("after %+v, before %+v, %v", after, before, err)
 	}
 	if got := LocalKey(p.ID); got != "sk-1" {
 		t.Errorf("key %q", got)

@@ -35,6 +35,11 @@ var markdownSeeds = []string{
 	// summary's code over a line break, and bold in an italic that keeps a
 	// space between.
 	"*[ 0](leaflet://page/0)*", "<details>\n<summary>a `x\n 000`</summary>\n</details>", "**0**_**0** **0**_",
+	// Web addresses written out, a ~ and a _ in their paths, before a hard
+	// break and the space that keeps it out of them, and lines that would
+	// go under a table's header.
+	"see https://x.edu/~user/a_-b_(c) \\\nwww.x.dev/~~a~~_b_  \\\n__https://x.dev/a_-b__ *https://x.dev/~a*\\\nend",
+	"Name | Size\\\n:-- | --:\\\n--- |\n\n- a\\\n  :-:",
 }
 
 // After one reading, a page's Markdown reads back as the blocks it was

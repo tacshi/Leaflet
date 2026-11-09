@@ -153,6 +153,7 @@ func (c *Core) ForgetProject() {
 	c.mgmtMu.Lock()
 	c.mgmt = nil
 	c.mgmtMu.Unlock()
+	c.projectSignIn(c.Remote.Project().Ref, false)
 	_ = c.Remote.Use(remote.Settings{})
 }
 
@@ -244,6 +245,8 @@ func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*
 	c.mgmtMu.Lock()
 	c.mgmt = api
 	c.mgmtMu.Unlock()
+	// Another project's, perhaps: read again.
+	c.signInEnded.Store(0)
 	return user, nil
 }
 
@@ -280,6 +283,86 @@ func (c *Core) projectUpdated(ref string) {
 	if err != nil {
 		log.Printf("update project %s: %v", ref, err)
 	}
+	c.projectSignIn(ref, false)
+}
+
+// projectSignInKey keeps, by a project's ref, that the Supabase account's
+// sign-in kept for it ended while the project still waited to be brought
+// up to date: nothing brings it up to date until the person signs in to
+// Supabase again (RenewProject), which the app then asks for.
+func projectSignInKey(ref string) string { return "project.signin_ended." + ref }
+
+// projectSignIn keeps whether the project of ref waits for the person to
+// sign in to Supabase again.
+func (c *Core) projectSignIn(ref string, ended bool) {
+	if ref == "" {
+		return
+	}
+	var err error
+	if ended {
+		err = c.Store.SetValue(projectSignInKey(ref), "1")
+	} else if _, was := c.Store.Value(projectSignInKey(ref)); was {
+		err = c.Store.DeleteValue(projectSignInKey(ref))
+	}
+	if err != nil {
+		log.Printf("update project %s: %v", ref, err)
+	}
+	c.signInEnded.Store(0)
+}
+
+// ProjectNeedsSignIn reports whether the project in use waits to be
+// brought up to this version of Leaflet for the person to sign in to
+// Supabase again, as the sign-in kept for that ended: revoked, or left
+// unused too long. The app draws it each frame, so it is read from the
+// store once, until it changes.
+func (c *Core) ProjectNeedsSignIn() bool {
+	ref := c.Remote.Project().Ref
+	if ref == "" || !c.Remote.SignedIn() {
+		return false
+	}
+	switch c.signInEnded.Load() {
+	case 1:
+		return false
+	case 2:
+		return true
+	}
+	_, ended := c.Store.Value(projectSignInKey(ref))
+	if ended {
+		c.signInEnded.Store(2)
+	} else {
+		c.signInEnded.Store(1)
+	}
+	return ended
+}
+
+// RenewProject brings the project in use up to this version of Leaflet
+// with api, the Supabase account signed in to again, and keeps that
+// sign-in for UpdateProject, in place of the one that ended. An account
+// that can't manage the project fails, and nothing is kept of it.
+func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error {
+	ref := c.Remote.Project().Ref
+	if ref == "" || !c.Remote.SignedIn() {
+		return remote.ErrSignedOut
+	}
+	updating.Lock()
+	defer updating.Unlock()
+	// Sign-ups it could not close yet, or a Realtime not ready, leave the
+	// project set up but for them, as when signing in: the sign-in is
+	// kept, and the next start does the rest with it.
+	switch err := provision.Setup(ctx, api, ref, nil); {
+	case err == nil:
+		c.projectUpdated(ref)
+	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits):
+		log.Printf("update project %s: %v", ref, err)
+	default:
+		return err
+	}
+	keepManagementOf(api)
+	c.mgmtMu.Lock()
+	c.mgmt = api
+	c.mgmtMu.Unlock()
+	c.projectSignIn(ref, false)
+	return nil
 }
 
 // projectOutOfDate reports whether the project in use may lack what this
@@ -352,6 +435,9 @@ func (c *Core) updateProject() (again bool) {
 			if err := keychain.Delete(managementKey); err != nil {
 				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
 			}
+			// Nothing brings the project up to date now until the person
+			// signs in to Supabase again: the app asks them to.
+			c.projectSignIn(ref, true)
 			return false
 		}
 		return true

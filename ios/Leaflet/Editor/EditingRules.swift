@@ -118,12 +118,17 @@ final class EditingRules {
         }
         if dividerShortcut(s, range, para, info) { return false }
         let clipboard = editor.clipboard
-        if info.type != "code", (s as NSString).length > 1,
-            clipboard.pastedCopy(s, replacing: range, para, info)
-        {
+        // A paste goes in at the caret or over the selection. Text put in
+        // place of other text is the keyboard's own, a word corrected, a
+        // text replacement's phrase or a composition's end, and goes in as
+        // typed: a link among it is not one for the word it replaces.
+        let pasting =
+            info.type != "code" && (s as NSString).length > 1
+            && (range.length == 0 || range == textView.selectedRange)
+        if pasting, clipboard.pastedCopy(s, replacing: range, para, info) {
             return false
         }
-        if info.type != "code", (s as NSString).length > 1, !s.contains("\u{FFFC}"),
+        if pasting, !s.contains("\u{FFFC}"),
             clipboard.pasted(s, replacing: range, para, info)
         {
             return false

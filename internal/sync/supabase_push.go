@@ -226,6 +226,11 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 		}
 		return s.takeServer(ctx, e, row)
 	}
+	// Under a page or folder the server keeps refusing, it would be
+	// refused too, twice each pass for as long as that one waits.
+	if s.parentStuck(payload) {
+		return false, nil
+	}
 	done, err := s.pushChanged(ctx, e.Entity, payload)
 	switch {
 	case err == nil || remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil:
@@ -238,6 +243,10 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 	return false, err
 }
 
+// parentCols are the columns that name the page or folder a row is in,
+// and the table of each.
+var parentCols = map[string]string{"parent_id": "pages", "folder_id": "folders", "parent_folder_id": "folders"}
+
 // waitsForParent reports whether a row names, as the page or folder it is
 // in, one still waiting to go up: the server refuses a move under a page
 // it does not have yet, but this one goes once its parent has, later in the
@@ -245,8 +254,20 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 // its place in the queue, so a page renamed, then moved under a page made
 // after, comes before that page.
 func (s *Service) waitsForParent(payload map[string]any) bool {
-	for col, table := range map[string]string{"parent_id": "pages", "folder_id": "folders", "parent_folder_id": "folders"} {
+	for col, table := range parentCols {
 		if id, _ := payload[col].(string); id != "" && s.st.HasPending(table, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// parentStuck reports whether a row names, as the page or folder it is in,
+// one whose own change the server has refused and that waits to be tried
+// again: the row waits with it, unsent, and goes once it has.
+func (s *Service) parentStuck(payload map[string]any) bool {
+	for col, table := range parentCols {
+		if id, _ := payload[col].(string); id != "" && s.st.PendingFailed(table, id) {
 			return true
 		}
 	}

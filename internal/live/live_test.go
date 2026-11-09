@@ -343,6 +343,43 @@ func TestARemovedPageWaitsNoMore(t *testing.T) {
 	}
 }
 
+// A removed page whose content comes back just as it was, as a share
+// withdrawn and given again with nothing written between, opens again
+// too: it is typed in and saved as before.
+func TestARemovedPageOpensAgainOnTheSameContent(t *testing.T) {
+	st, pg := openStore(t, para("p1", "one"))
+	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
+	ed := &textEditor{c: content}
+	p.Attach(ed)
+	for _, q := range []string{
+		`CREATE TEMP TABLE kept AS SELECT * FROM page_contents WHERE page_id = ?`,
+		`DELETE FROM page_contents WHERE page_id = ?`,
+	} {
+		if _, err := st.DB().Exec(q, pg.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.External()
+	if !p.ReadOnly() || p.Stored() {
+		t.Fatalf("removed: read-only %v, stored %v", p.ReadOnly(), p.Stored())
+	}
+	if _, err := st.DB().Exec(`INSERT INTO page_contents SELECT * FROM kept`); err != nil {
+		t.Fatal(err)
+	}
+	p.External()
+	if p.ReadOnly() || ed.readOnly || !p.Stored() {
+		t.Fatalf("back: read-only %v, the editor's %v, stored %v", p.ReadOnly(), ed.readOnly, p.Stored())
+	}
+	ed.typeIn("one, typed")
+	p.Changed()
+	if !p.Save() {
+		t.Error("the edits wait to be saved")
+	}
+	if row, _ := st.ContentRow(pg.ID); !strings.Contains(row.Content, "one, typed") {
+		t.Errorf("stored %s", row.Content)
+	}
+}
+
 // racingEditor stores the page from outside each time its content is
 // asked for, while race is set, so every save finds it stored over.
 type racingEditor struct {

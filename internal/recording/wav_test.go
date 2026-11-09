@@ -67,8 +67,12 @@ func TestPunctuationTokensEndLines(t *testing.T) {
 		{Text: " And", StartMs: 5100, EndMs: 9500},
 		{Text: "。", StartMs: 9500, EndMs: 9500},
 		{Text: "好", StartMs: 9600, EndMs: 9800},
+		{Text: "很好", StartMs: 9800, EndMs: 14000},
+		{Text: "。", StartMs: 14000, EndMs: 14000},
+		{Text: "2024", StartMs: 14100, EndMs: 14500},
+		{Text: "年", StartMs: 14500, EndMs: 14700},
 	})
-	want := []string{"It costs 3.5.\"", "So short. And。", "好"}
+	want := []string{"It costs 3.5.\"", "So short. And。", "好很好。", "2024年"}
 	if len(segs) != len(want) {
 		t.Fatalf("segments %+v", segs)
 	}

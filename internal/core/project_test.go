@@ -132,3 +132,37 @@ func (l *lockedLog) count(s string) int {
 	defer l.mu.Unlock()
 	return strings.Count(l.buf.String(), s)
 }
+
+// A project whose kept sign-in ended waits for the person to sign in to
+// Supabase again, which the app asks for until the project is brought up
+// to date, or let go of.
+func TestAProjectWhoseSignInEndedAsksForItAgain(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	const ref = "abcdefghijklmnopqrst"
+	be := remote.SignedInToProjectForTest("http://127.0.0.1:1", ref, st, "u1")
+	c := &Core{Store: st, Remote: be, Sync: syncsvc.New(st, be)}
+	t.Cleanup(c.Sync.Stop)
+	if c.ProjectNeedsSignIn() {
+		t.Fatal("a project asks for a sign-in that never ended")
+	}
+	c.projectSignIn(ref, true)
+	if !c.ProjectNeedsSignIn() {
+		t.Error("the project whose sign-in ended asks for none")
+	}
+	// Kept for the next run of the app.
+	again := &Core{Store: st, Remote: be}
+	if !again.ProjectNeedsSignIn() {
+		t.Error("the next run asks for none")
+	}
+	c.projectUpdated(ref)
+	if c.ProjectNeedsSignIn() {
+		t.Error("the project brought up to date still asks")
+	}
+}

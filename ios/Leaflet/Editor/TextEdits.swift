@@ -107,7 +107,9 @@ final class TextEdits {
     /// undo, and now on redo. It finds now itself, wherever the text has
     /// moved it since: the text view's own steps undone before it move it.
     private func registerBlockUndo(_ undo: UndoManager?, now: BlockInfo, was: BlockInfo) {
-        undo?.registerUndo(withTarget: self) { e in
+        // The step is kept by the manager it goes back to: held by the
+        // step too, neither would go as the page closes.
+        undo?.registerUndo(withTarget: self) { [weak undo] e in
             guard let at = e.text.location(of: now) else { return }
             e.setBlock(was, at: at, undoable: false)
             e.registerBlockUndo(undo, now: was, was: now)
@@ -173,7 +175,7 @@ final class TextEdits {
     func registerUndo(
         _ undo: UndoManager?, range: NSRange, before: NSAttributedString, trailing was: BlockInfo?
     ) {
-        undo?.registerUndo(withTarget: self) { e in
+        undo?.registerUndo(withTarget: self) { [weak undo] e in
             guard NSMaxRange(range) <= e.storage.length else { return }
             let now = e.storage.attributedSubstring(from: range)
             let trailingNow = e.text.trailing
@@ -227,19 +229,25 @@ final class TextEdits {
     }
 
     /// keepingScroll changes a block away from the caret without the text
-    /// view scrolling back to the caret, as it does after a change.
+    /// view scrolling back to the caret, as it does after a change. A page
+    /// the user is scrolling, or on its way to a block, goes where it was
+    /// going.
     func keepingScroll(_ change: () -> Void) {
         let offset = textView.contentOffset
         let width = textView.widthChanges
         change()
         textView.layoutIfNeeded()
-        // At another width the same scroll is other text, and the text
-        // view keeps the page where it was itself.
-        guard textView.widthChanges == width else { return }
+        scrollBack(to: offset, atWidth: width)
+        DispatchQueue.main.async { [weak self] in self?.scrollBack(to: offset, atWidth: width) }
+    }
+
+    /// scrollBack puts the page back at offset, where it was at width. At
+    /// another width the same scroll is other text, and the text view
+    /// keeps the page where it was itself.
+    private func scrollBack(to offset: CGPoint, atWidth width: Int) {
+        guard textView.widthChanges == width, !textView.isDragging, !textView.isDecelerating,
+            !editor.headings.isJumping
+        else { return }
         textView.setContentOffset(offset, animated: false)
-        DispatchQueue.main.async { [weak textView] in
-            guard let textView, textView.widthChanges == width else { return }
-            textView.setContentOffset(offset, animated: false)
-        }
     }
 }

@@ -1401,7 +1401,18 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, error) {
 	id := prev.ID
 	if spec["type"] == "file" && prev.Type == "file" {
-		return doc.FileWithNotes(prev, spec)
+		// A file's notes are text the run writes as any other: a URL in
+		// them would be on the page for the next run to take for the
+		// user's, so they keep to the URLs the run may write, as on the
+		// server.
+		n, err := doc.FileWithNotes(prev, spec)
+		if err != nil {
+			return nil, err
+		}
+		if err := x.checkURLs([]*doc.Node{n}); err != nil {
+			return nil, err
+		}
+		return n, nil
 	}
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {

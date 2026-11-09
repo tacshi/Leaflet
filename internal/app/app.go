@@ -1215,6 +1215,8 @@ func (a *App) discardPage() {
 	d.newComment, d.inline = nil, nil
 	d.chartOpen, d.chartEditor = false, nil
 	d.embedOpen, d.linkOpen, d.sourceOpen = false, false, false
+	d.recOpen, d.notesOpen, d.speakerOpen = false, false, false
+	a.fileToTranscribe = ""
 	a.dropEmbeds()
 	a.dropVideos()
 	a.dropPlayers()

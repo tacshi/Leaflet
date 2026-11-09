@@ -201,6 +201,14 @@ func (h *Hub) SaveProvider(f Form) (store.Provider, error) {
 	}
 	if !account && !unread {
 		if err := SetLocalKey(p.ID, key); err != nil {
+			// A provider whose key could not be kept is not left to be
+			// picked without it: it goes back to what it was, or away if
+			// it is new.
+			if oldErr == nil {
+				_ = h.st.PutProvider(old)
+			} else {
+				_ = h.st.DeleteProvider(p.ID)
+			}
 			return store.Provider{}, errors.New(locales.SettingsSaveKeyFailed(err.Error()))
 		}
 	}

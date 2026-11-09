@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 /// AccountSection is Settings › Account, as the desktop's: the name shown
@@ -9,6 +10,10 @@ struct AccountSection: View {
     @State private var account: AccountInfo?
     @Environment(SettingsPrompt.self) private var prompt
     @State private var signingOut = false
+    /// renewing is set while the person signs in to Supabase again and
+    /// the project is brought up to date.
+    @State private var renewing = false
+    @Environment(\.webAuthenticationSession) private var webSession
     @State private var failure: String?
     /// name is the name as typed, saved as Return or leaving the field
     /// does on the desktop.
@@ -42,6 +47,20 @@ struct AccountSection: View {
                             Task { await signOut(anyway: false) }
                         }
                         .buttonStyle(.borderless)
+                    }
+                }
+                // The sign-in that brings the project up to a new version
+                // of Leaflet ended: only signing in to Supabase again does
+                // it now.
+                if account.projectNeedsSignIn || renewing {
+                    ActionRow(
+                        label: L.settingsProjectSignIn, desc: L.settingsProjectSignInDesc
+                    ) {
+                        if renewing {
+                            ProgressView()
+                        } else {
+                            Button(L.commonSignIn) { Task { await renewProject() } }
+                        }
                     }
                 }
             } else {
@@ -86,6 +105,27 @@ struct AccountSection: View {
             await app.refreshStatus()
             if !naming { name = app.status?.displayName ?? "" }
         }
+    }
+
+    /// renewProject signs in to Supabase again in a web session, as
+    /// SignInView does, for the core to bring the project up to date.
+    private func renewProject() async {
+        guard let client = app.client else { return }
+        renewing = true
+        failure = nil
+        defer { renewing = false }
+        do {
+            let begun = try client.beginSupabaseSignIn()
+            let answer = try await webSession.authenticate(
+                using: begun.url, callback: SignInView.callback, additionalHeaderFields: [:])
+            try await client.finishProjectSignIn(begun, callback: answer)
+            app.show(Toast(message: L.settingsProjectUpdated))
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            // Closing Supabase's page is no failure.
+        } catch {
+            failure = error.localizedDescription
+        }
+        account = try? await client.account()
     }
 
     private func signOut(anyway: Bool) async {

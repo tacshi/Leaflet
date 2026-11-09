@@ -15,6 +15,7 @@ import (
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/web"
 	"leaflet/internal/webpage"
@@ -396,7 +397,7 @@ func (c *Core) LocalFile(id string, token int64) (_ string, err error) {
 	// The network's part runs off the core's queue, and so does the
 	// writing of what came, as AddFile's copy does: to the disk as it
 	// comes, as a video of hundreds of megabytes is never all in memory.
-	ctx, done := c.cancellable(token, 5*time.Minute)
+	ctx, done := c.cancellable(token, recording.DownloadWait(f.SizeBytes))
 	defer done()
 	data, err := c.core.Sync.FetchReader(ctx, "files", f.StoragePath)
 	if err != nil {

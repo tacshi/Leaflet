@@ -62,7 +62,7 @@ enum VoiceNotes {
         }
         RecordingActivity.shared.start()
         // What plays stops, as for a recording in a page.
-        Recorder.shared.stopPlaying()
+        Recorder.shared.quiet()
         let page: String
         do {
             page = try await client.recordNewPage(folderID: await folder(app, client))

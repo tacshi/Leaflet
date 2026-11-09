@@ -556,6 +556,37 @@ Deno.test("a file Soniox is still working on is picked up, not paid for again", 
   assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 1);
 });
 
+// A job a call before left at Soniox was asked for what the settings said
+// then: with the speakers turned on since, it is not this call's transcript.
+Deno.test("a file's job left at Soniox for other settings is not picked up", async () => {
+  const p = withFile();
+  const s = soniox({ status: "completed", language_hints: ["en"], enable_speaker_diarization: false });
+  const d = deps(p, s.fetch);
+  assertEquals((await transcribeFile(p, d)).status, 200);
+  assertEquals((await transcribeFile(p, d)).status, 200);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 1);
+  for (const row of p.tables.stt_settings) row.speaker_labels = true;
+  assertEquals((await transcribeFile(p, d)).status, 200);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/files").length, 2);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), [
+    "DELETE /v1/transcriptions/job",
+    "DELETE /v1/files/file",
+  ]);
+});
+
+// The app's word that it has a transcript comes late, as the file is
+// transcribed again: the job is that call's, and stays.
+Deno.test("a file's job a call has now stays as the app says it has a transcript", async () => {
+  const p = withFile();
+  const s = soniox();
+  const d = deps(p, s.fetch);
+  await transcribeFile(p, d);
+  p.tables.stt_file_jobs[0].claimed_at = new Date().toISOString();
+  assertEquals((await transcribed(p, d)).status, 200);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), []);
+  assertEquals(p.tables.stt_file_jobs.length, 1);
+});
+
 Deno.test("an endpoint's transcription leaves nothing behind", async () => {
   const p = withFile({ provider: "openai-compatible", provider_id: "openai" });
   const send: SttDeps["send"] = async (url, init) => {

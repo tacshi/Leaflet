@@ -98,12 +98,28 @@ Deno.test("rich text writes as the app writes it (testdata/corpus/deltas.json)",
   await corpus("corpus/deltas.json", made, deltasCorpus);
 });
 
+/**
+ * Lines that end in a hard break after a web address, as the app writes
+ * them, a space before the backslash that is no part of the text, and
+ * after other text, where the space is.
+ */
+const ADDRESS_BREAKS = [
+  "see https://x.dev/a \\\nnext",
+  "https://x.dev/a  \\\nnext",
+  "https://x.dev/a\\\nnext",
+  "- www.x.dev \\\n  HTTPS://X.DEV \\\n  end",
+  "> **https://x.dev** \\\n> next",
+  "a \\\nb",
+  "https://x.dev b \\\nc",
+  "https://x.dev\t \\\nc",
+  "http\u017f://x.dev \\\nwww \\\nc",
+];
+
 // Markdown of many lines makes the blocks here that the app makes of it
 // (doc.MarkdownBlocks).
 Deno.test("Markdown makes the blocks the app makes (testdata/corpus/markdown.json)", async () => {
   const r = new Random(3);
-  const made = Array.from({ length: 400 }, () => {
-    const md = markdown(r);
+  const made = [...Array.from({ length: 400 }, () => markdown(r)), ...ADDRESS_BREAKS].map((md) => {
     const nodes = markdownSpecs(md).map((s) => specToNode(s, { newId: () => "x", markdown: true }));
     return { markdown: md, nodes: nodes.map(withoutIds) };
   });
@@ -114,8 +130,13 @@ Deno.test("Markdown makes the blocks the app makes (testdata/corpus/markdown.jso
 // both (doc.SpecToNode).
 Deno.test("specs make the blocks the app makes (testdata/corpus/specs.json)", async () => {
   const r = new Random(4);
-  const made = Array.from({ length: 500 }, () => {
-    const s = spec(r);
+  // After the random ones, code in languages named with backticks, which
+  // a fence can't write.
+  const specs = [
+    ...Array.from({ length: 500 }, () => spec(r)),
+    ...["c`", "`", "``` Objective `C` ```", "J`S"].map((language) => ({ type: "code", text: "x", language })),
+  ];
+  const made = specs.map((s) => {
     try {
       return {
         spec: s,

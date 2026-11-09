@@ -382,6 +382,18 @@ function bySortKey(a: { id: string; sort_key: string }, b: { id: string; sort_ke
   return a.sort_key < b.sort_key ? -1 : a.sort_key > b.sort_key ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+/**
+ * The pages inside a page now, not deleted, all of them and in the order
+ * the app's store has them (store.Children): by their keys' bytes, which
+ * the database's own order is not.
+ */
+async function subpagesOf(uc: SupabaseClient, id: string): Promise<{ id: string; title: string }[]> {
+  return (await allRows<{ id: string; title: string; sort_key: string }>(
+    () => uc.from("pages").select("id, title, sort_key").eq("parent_id", id).is("deleted_at", null),
+    "id",
+  )).sort(bySortKey).map((r) => ({ id: r.id, title: displayTitle(r.title) }));
+}
+
 /** The folders of a space, not deleted, in their order, as list_folders lists them (Go's spaceFolders). */
 async function foldersOf(uc: SupabaseClient, space: string): Promise<{ id: string; name: string }[]> {
   return (await allRows<{ id: string; name: string; sort_key: string }>(
@@ -412,7 +424,9 @@ async function recordingsOf(uc: SupabaseClient, pageId: string): Promise<Map<str
       uc.from("recordings").select("id, duration_ms, status, transcript").eq("page_id", pageId),
     )
   ) {
-    recordings.set(r.id, { id: r.id, duration_ms: r.duration_ms, status: r.status, transcript: r.transcript ?? [] });
+    // Whatever an editor of the page wrote there, a transcript is its lines.
+    const transcript = Array.isArray(r.transcript) ? r.transcript : [];
+    recordings.set(r.id, { id: r.id, duration_ms: r.duration_ms, status: r.status, transcript });
   }
   return recordings;
 }
@@ -908,11 +922,7 @@ async function runWorkspaceJob(
         const page = await rowOf(id);
         const { data } = await uc.from("page_content").select("content").eq("page_id", id).maybeSingle();
         if (data && !isPageContent(data.content)) throw new ToolError(UNREADABLE);
-        // Those inside it now, not deleted, as the app's store has them (store.Children).
-        const subpages = (await allRows<{ id: string; title: string; sort_key: string }>(
-          () => uc.from("pages").select("id, title, sort_key").eq("parent_id", id).is("deleted_at", null),
-          "id",
-        )).sort(bySortKey).map((r) => ({ id: r.id, title: displayTitle(r.title) }));
+        const subpages = await subpagesOf(uc, id);
         const tags = page.tags ?? [];
         return {
           page: { id, title: displayTitle(page.title), ...(tags.length ? { tags } : {}) },
@@ -1045,7 +1055,16 @@ async function runWorkspaceJob(
             : {}),
         }
         : {}),
-    }, { canEdit: true, crossPage: false, request: instruction, author: agentName, workspace: hooks });
+    }, {
+      canEdit: true,
+      crossPage: false,
+      request: instruction,
+      author: agentName,
+      workspace: hooks,
+      // Those turns are among what the model reads where it may read the
+      // person's pages itself (below).
+      heldPages: pagesBefore && reading,
+    });
     if (pagesBefore) session.keepToGivenUrls();
     if (webBefore) session.keepToFoundUrls();
 
@@ -1165,9 +1184,7 @@ async function runJob(
 
     const recordings = await recordingsOf(uc, page.id);
 
-    const subpages = (await rows<{ id: string; title: string }>(
-      uc.from("pages").select("id, title").eq("parent_id", page.id).is("deleted_at", null).order("sort_key"),
-    )).map((p) => ({ id: p.id, title: displayTitle(p.title) }));
+    const subpages = await subpagesOf(uc, page.id);
 
     // All of them, past max_rows, in the order they were made.
     const comments = (await allRows<CommentRow>(
@@ -1341,13 +1358,11 @@ async function runJob(
         if (!other || !otherContent || !isPageContent(otherContent.content)) {
           throw new ToolError(`No page with id "${otherId}" that you can read`);
         }
-        const otherSubpages = await rows<{ id: string; title: string }>(
-          uc.from("pages").select("id, title").eq("parent_id", otherId).is("deleted_at", null).order("sort_key"),
-        );
+        const otherSubpages = await subpagesOf(uc, otherId);
         return {
           page: { id: other.id, title: displayTitle(other.title) },
           blocks: agentViews(normalizeContent(otherContent.content), await recordingsOf(uc, otherId)),
-          subpages: otherSubpages.map((p) => ({ id: p.id, title: displayTitle(p.title) })),
+          subpages: otherSubpages,
           comments: [],
         };
       },

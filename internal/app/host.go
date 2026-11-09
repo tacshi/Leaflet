@@ -26,6 +26,7 @@ import (
 	"leaflet/internal/editor"
 	"leaflet/internal/export"
 	"leaflet/internal/menu"
+	"leaflet/internal/recording"
 	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/templates"
@@ -115,7 +116,13 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	// device that uploaded it.
 	path := ""
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
-		if path = h.a.localFile(f, downloaded); path == "" {
+		// Drawn each frame, it waits for a download once: the frames
+		// after would each add a redraw to run as it ends.
+		done := downloaded
+		if _, busy := h.a.downloads[f.ID]; busy {
+			done = nil
+		}
+		if path = h.a.localFile(f, done); path == "" {
 			return nil, nil, h.a.downloadFailed(f.ID)
 		}
 		url = "file://" + path
@@ -572,14 +579,17 @@ func (a *App) lost(path string) { delete(a.present, path) }
 // localFile returns where a file is on this device, or "" while one
 // uploaded from another device downloads; done runs once the download
 // ends, ok if it came. A file asked for again while it downloads waits
-// for the same download, and each done runs. A download that failed is
-// tried again once imageRetry has passed, or when the file is opened.
+// for the same download, and each done runs; done may be nil. A download
+// that failed is tried again once imageRetry has passed, or when the file
+// is opened.
 func (a *App) localFile(f store.File, done func(ok bool)) string {
 	if f.LocalPath != "" && a.onDevice(f.LocalPath) {
 		return f.LocalPath
 	}
 	if waiting, ok := a.downloads[f.ID]; ok {
-		a.downloads[f.ID] = append(waiting, done)
+		if done != nil {
+			a.downloads[f.ID] = append(waiting, done)
+		}
 		return ""
 	}
 	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloadFailed(f.ID) {
@@ -591,7 +601,7 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 	a.downloads[f.ID] = []func(bool){done}
 	var err error
 	a.offMain(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), recording.DownloadWait(f.SizeBytes))
 		defer cancel()
 		// Written to the disk as it comes, never all in memory.
 		var r io.ReadCloser
@@ -616,7 +626,9 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 			a.reload(store.Change{Table: "files"})
 		}
 		for _, done := range waiting {
-			done(err == nil)
+			if done != nil {
+				done(err == nil)
+			}
 		}
 	})
 	return ""

@@ -891,3 +891,118 @@ func TestEditWhileBuildingIsLinear(t *testing.T) {
 		t.Errorf("a key in a cell over 1000 blocks takes %v, over 8000 %v", small, large)
 	}
 }
+
+// Blocks pasted together go in the order they came, wherever the caret
+// is: before its block at its start, after its text, or joined to it,
+// with the text after the caret, its children and the caret itself after
+// the last of them, and all in one step of undo.
+func TestPasteOfSeveralBlocksKeepsTheirOrder(t *testing.T) {
+	code := func(text string) *doc.Node { return doc.CodeNode(text, "go") }
+	item := func(text string, kids ...*doc.Node) *doc.Node {
+		n := newText("bulleted_list", doc.Delta{{Text: text}})
+		n.Children = kids
+		return n
+	}
+	for _, tc := range []struct {
+		name   string
+		page   *doc.Node
+		at     int
+		blocks []*doc.Node
+		want   []string
+		caret  string
+	}{
+		{
+			"before the block", item("abcd", item("kid")), 0,
+			[]*doc.Node{code("1"), para("", "2"), code("3"), para("", "4")},
+			[]string{"code:1", "paragraph:2", "code:3", "paragraph:4", "bulleted_list:abcd", "  bulleted_list:kid"},
+			"abcd",
+		},
+		{
+			"after its text", item("abcd", item("kid")), 2,
+			[]*doc.Node{code("1"), para("", "2"), code("3"), para("", "4")},
+			[]string{"bulleted_list:ab", "code:1", "paragraph:2", "code:3", "paragraph:4", "bulleted_list:cd", "  bulleted_list:kid"},
+			"cd",
+		},
+		{
+			"joined to it", item("abcd", item("kid")), 2,
+			[]*doc.Node{para("", "1"), para("", "2"), code("3"), para("", "4"), para("", "5")},
+			[]string{"bulleted_list:ab1", "paragraph:2", "code:3", "paragraph:4", "bulleted_list:5cd", "  bulleted_list:kid"},
+			"5cd",
+		},
+		{
+			"joined, with children of its own", para("", "abcd"), 2,
+			[]*doc.Node{item("1", item("x"), item("y"), item("z")), para("", "2"), para("", "3")},
+			[]string{"paragraph:ab1", "bulleted_list:x", "bulleted_list:y", "bulleted_list:z", "paragraph:2", "paragraph:3cd"},
+			"3cd",
+		},
+		{
+			"children after a heading", func() *doc.Node {
+				h := newText("heading", doc.Delta{{Text: "abcd"}})
+				h.Children = []*doc.Node{para("", "k1"), para("", "k2"), para("", "k3")}
+				return h
+			}(), 2,
+			[]*doc.Node{para("", "1"), para("", "2")},
+			[]string{"heading:ab1", "heading:2cd", "paragraph:k1", "paragraph:k2", "paragraph:k3"},
+			"2cd",
+		},
+	} {
+		e := New(doc.FromBlocks(freshBlocks([]*doc.Node{para("", "first"), tc.page, para("", "last")})), &fakeHost{})
+		outline := func() []string {
+			var out []string
+			for _, n := range e.units() {
+				out = append(out, strings.Repeat("  ", e.depth(n.ID))+n.Type+":"+n.Delta().Plain())
+			}
+			return out
+		}
+		before := outline()
+		e.PlaceCaret(e.Content.Children[1].ID, tc.at)
+		e.pasteBlocks(freshBlocks(tc.blocks))
+		want := slices.Concat([]string{"paragraph:first"}, tc.want, []string{"paragraph:last"})
+		if got := outline(); !slices.Equal(got, want) {
+			t.Errorf("%s: pasted %q, want %q", tc.name, got, want)
+		}
+		c := e.Caret()
+		if text := e.node(c.ID).Delta().Plain(); text != tc.caret || c.Off != len(tc.caret)-len(strings.TrimLeft(tc.caret, "12345")) || e.anchor != e.focus {
+			t.Errorf("%s: caret at %d of %q, want in %q", tc.name, c.Off, text, tc.caret)
+		}
+		e.Undo()
+		if got := outline(); !slices.Equal(got, before) || len(e.undo) > 0 {
+			t.Errorf("%s: after undo %q, %d steps", tc.name, got, len(e.undo))
+		}
+	}
+}
+
+// A long paste goes in at once, in one walk of the page, not one for each
+// of its lines.
+func TestPasteOfManyBlocksIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times pastes")
+	}
+	paste := func(n int) time.Duration {
+		blocks := make([]*doc.Node, n)
+		for i := range blocks {
+			blocks[i] = newText("paragraph", doc.Delta{{Text: fmt.Sprintf("line %d", i)}})
+		}
+		best := time.Duration(math.MaxInt64)
+		for range 3 {
+			runtime.GC()
+			start := time.Now()
+			// Until the clock has moved far enough to read, as Tab's is
+			// timed: a new page each run, which takes its blocks as they are.
+			for runs := 1; ; runs++ {
+				e := New(doc.FromBlocks([]*doc.Node{newText("paragraph", doc.Delta{{Text: "abcd"}})}), &fakeHost{})
+				e.PlaceCaret(e.Content.Children[0].ID, 2)
+				e.pasteBlocks(blocks)
+				if took := time.Since(start); took >= 32*time.Millisecond {
+					best = min(best, took/time.Duration(runs))
+					break
+				}
+			}
+		}
+		return best
+	}
+	small, large := paste(2000), paste(32000)
+	if large > 64*small {
+		t.Errorf("pasting 2000 blocks takes %v, 32000 %v", small, large)
+	}
+}

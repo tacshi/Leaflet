@@ -57,7 +57,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 		b.WriteString("\n")
 	}
 	link := func(text, to string) string {
-		return "[" + escapeCommonMark(text) + "](" + commonMarkDestination(href(to)) + ")"
+		return "[" + escapeLinkText(text) + "](" + commonMarkDestination(href(to)) + ")"
 	}
 	// indent is the room before a block, nested under list items: as much
 	// as each item's marker takes, as CommonMark nests by ("1. " three).
@@ -226,7 +226,7 @@ func mathMarkdown(formula string) string {
 func notesMarkdown(notes string, to func(at int) string) string {
 	time := func(text string, at int) string {
 		if dest := to(at); dest != "" {
-			return "[" + escapeCommonMark(text) + "](" + commonMarkDestination(dest) + ")"
+			return "[" + escapeLinkText(text) + "](" + commonMarkDestination(dest) + ")"
 		}
 		return escapeCommonMark(text)
 	}
@@ -302,8 +302,10 @@ func OneLine(d Delta) Delta {
 // time, the first line after lead, a list item's marker, and the others
 // after pad, the room it takes, so they stay in the block. A line break
 // is a hard break, a backslash ending the line, as ParseLines reads one,
-// and a line that would start another block, as a line break then "- x"
-// would a list, is escaped. Markdown keeps no spaces at a line's start:
+// after a space where the line ends in a web address, which GitHub's
+// Markdown would take the backslash into, and a line that would start
+// another block, as a line break then "- x" would a list, is escaped.
+// Markdown keeps no spaces at a line's start:
 // they would indent it, under a list item before it, so they go, as do
 // line breaks at the text's end, which a hard break can't be, and a line
 // only of spaces, which would be blank.
@@ -326,6 +328,9 @@ func TextMarkdown(indent, lead, pad, md string) string {
 			l = `\` + l
 		}
 		if i < len(lines)-1 {
+			if endsInAddress(strings.TrimRight(l, " ")) {
+				l += " "
+			}
 			b.WriteString(indent + lead + l + "\\\n")
 		} else {
 			b.WriteString(strings.TrimRight(indent+lead+l, " ") + "\n")

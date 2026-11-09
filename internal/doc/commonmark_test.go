@@ -41,7 +41,8 @@ func commonMarkText(md string) (blocks []string, links []string) {
 }
 
 // Text that only a CommonMark reader would take for markup, as a line of
-// ='s under another, which makes it a heading, an HTML block or tag, an
+// ='s under another, which makes it a heading, the line under a table's
+// header, which makes the line before it a table, an HTML block or tag, an
 // entity, an autolink, or a heading's closing #s, is escaped in a page's
 // Markdown: GitHub shows each block as the page does, and Leaflet reads
 // it back as it was.
@@ -62,6 +63,13 @@ func TestPageMarkdownReadsAsWrittenInCommonMark(t *testing.T) {
 		"AT&amp;T, &copy; 2024, &#65; and &#x42;",
 		"<https://a.b> and <a@b.co> and <1x@y.io>",
 		"1 < 2, a <3 and a & b",
+		"Head\n--- | ---",
+		"Head\n--- |",
+		"Head\n:--",
+		"Name | Size\n:-- | --:",
+		"a|b\n-|-",
+		"a\n:-:",
+		"--- |",
 	}
 	for _, typ := range []string{"paragraph", "bulleted_list", "quote", "callout"} {
 		for _, text := range texts {
@@ -112,5 +120,63 @@ func TestPageMarkdownLinksReadAsWrittenInCommonMark(t *testing.T) {
 	md := PageMarkdown("", FromBlocks([]*Node{textNode("paragraph", Delta{{Text: "x", Attrs: Attrs{Href: "https://x.dev/?a=1&b=2"}}})}), MarkdownOptions{})
 	if !strings.Contains(md, "(https://x.dev/?a=1&b=2)") {
 		t.Errorf("a query's & is escaped: %q", md)
+	}
+}
+
+// A web address written out in a page's text is the link GitHub makes of
+// it, whole: no backslash goes into it, for a ~ or a _ of its path or for
+// the hard break after it, which is still one. Leaflet reads the text
+// back as it was, the spaces before a line break too.
+func TestPageMarkdownKeepsAddressesWhole(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		links []string
+	}{
+		{"see https://x.edu/~user/ now", []string{"https://x.edu/~user/"}},
+		{"https://youtu.be/abc_-def", []string{"https://youtu.be/abc_-def"}},
+		{"(https://en.wikipedia.org/wiki/Foo_(bar))", []string{"https://en.wikipedia.org/wiki/Foo_(bar)"}},
+		{"www.x.dev/~a/b_-c and http://x.dev:80/?q=a_-b#~c", []string{"http://www.x.dev/~a/b_-c", "http://x.dev:80/?q=a_-b#~c"}},
+		{"go to https://x.dev\nnext", []string{"https://x.dev"}},
+		{"https://x.dev/~a \nwww.x.dev  \n\nHTTPS://X.DEV/A_-B\nend", []string{"https://x.dev/~a", "http://www.x.dev", "HTTPS://X.DEV/A_-B"}},
+		// What stays escaped: a ~ beside another, which is a strike's
+		// marker, a _ that could open italics, and either outside a path.
+		{"~a~ https://x.dev/a~~b~~ https://x.dev/_a_-b_ x_-y", nil},
+	} {
+		for _, typ := range []string{"paragraph", "bulleted_list", "quote", "todo_list"} {
+			n := textNode(typ, Delta{{Text: tc.text}})
+			md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{})
+			var links []string
+			breaks := 0
+			d := parser.New(parser.GFM | parser.ExtAlerts)
+			d.Set(md)
+			for i := 1; i < d.Len(); i++ {
+				if d.Block(i).Kind != parser.Paragraph {
+					continue
+				}
+				for _, x := range d.Inlines(i) {
+					switch x.Kind {
+					case parser.Link:
+						links = append(links, x.Dest)
+					case parser.LineBreak:
+						breaks++
+					}
+				}
+			}
+			if tc.links != nil && !reflect.DeepEqual(links, tc.links) {
+				t.Errorf("%s %q wrote %q, which links to %q, want %q", typ, tc.text, md, links, tc.links)
+			}
+			if want := strings.Count(tc.text, "\n"); breaks != want {
+				t.Errorf("%s %q wrote %q, which has %d line breaks, want %d", typ, tc.text, md, breaks, want)
+			}
+			if back := MarkdownBlocks(md); len(back) != 1 || back[0].Type != typ || back[0].Delta().Plain() != tc.text {
+				t.Errorf("%s %q wrote %q, which Leaflet reads back as %v", typ, tc.text, md, shape(back))
+			}
+		}
+	}
+	// A link's text is no link of its own: an address there is escaped as
+	// any text is, where a ~ of it could strike text through.
+	n := textNode("paragraph", Delta{{Text: "https://x.dev/~a/b~c", Attrs: Attrs{Href: "https://x.dev"}}})
+	if md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{}); md != "[https://x.dev/\\~a/b\\~c](https://x.dev)\n" {
+		t.Errorf("a link's text wrote %q", md)
 	}
 }

@@ -88,13 +88,25 @@ func Decode(b []byte, lang string, cut bool) (Text, error) {
 		return Text{Text: string(s)}, nil
 	}
 	for _, e := range legacy(lang) {
-		out, err := e.enc.NewDecoder().Bytes(b)
-		if err == nil && !bytes.ContainsRune(out, utf8.RuneError) {
-			return Text{Text: string(out), Encoding: e.name}, nil
+		// A character cut in two at the end reads as none in its own
+		// encoding, and the file would go to one that reads any bytes:
+		// the bytes of the longest character, less one, may go.
+		for drop := 0; drop <= partialMax && drop <= len(b); drop++ {
+			out, err := e.enc.NewDecoder().Bytes(b[:len(b)-drop])
+			if err == nil && !bytes.ContainsRune(out, utf8.RuneError) {
+				return Text{Text: string(out), Encoding: e.name}, nil
+			}
+			if !cut {
+				break
+			}
 		}
 	}
 	return Text{}, ErrBinary
 }
+
+// partialMax is the most bytes of a character cut in two that a legacy
+// encoding leaves at the end: GB18030's characters take up to four.
+const partialMax = 3
 
 // trimPartial leaves out a character cut in two at the end of b, where cut
 // says it may be.

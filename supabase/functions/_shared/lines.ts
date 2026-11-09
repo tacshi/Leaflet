@@ -253,6 +253,14 @@ function startsBlock(s: string): boolean {
 /** Whether a line of Markdown ends in a hard break, a backslash not itself escaped. */
 const hardBreak = (s: string) => (s.length - s.replace(/\\+$/, "").length) % 2 === 1;
 
+/**
+ * Whether a line of Markdown ends in a web address written out
+ * (doc.endsInAddress): one starts in its last word, which a backslash
+ * right after would be part of.
+ */
+const endsInAddress = (s: string) =>
+  /[Hh][Tt][Tt][Pp][Ss]?:\/\/|[Ww][Ww][Ww]\./.test(s.slice(Math.max(s.lastIndexOf(" "), s.lastIndexOf("\t")) + 1));
+
 /** A list item or a toggle that holds the blocks after it. */
 interface Open {
   spec: BlockSpec;
@@ -319,9 +327,14 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
     return t;
   };
   // Puts a line in a block: a hard break that ended the line before is the
-  // line break between them.
+  // line break between them, with the space the app puts before one to
+  // keep it out of a web address.
   const addLine = (t: Text, s: string) => {
-    if (t.hard) t.lines[t.lines.length - 1] = t.lines[t.lines.length - 1].slice(0, -1);
+    if (t.hard) {
+      let line = t.lines[t.lines.length - 1].slice(0, -1);
+      if (line.endsWith(" ") && endsInAddress(line.replace(/ +$/, ""))) line = line.slice(0, -1);
+      t.lines[t.lines.length - 1] = line;
+    }
     t.lines.push(s);
     t.hard = hardBreak(s);
   };

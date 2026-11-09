@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -441,6 +442,11 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	}
 	if hasBase && file.Version <= known.Version {
 		return nil
+	}
+	// A file without its content, as one damaged, is no empty page: read
+	// as one, it would take every block this device has of the page.
+	if len(bytes.TrimSpace(file.Content)) == 0 {
+		return fmt.Errorf("%w: no content", errPeerUnreadable)
 	}
 	theirs, err := doc.Decode(string(file.Content))
 	if err != nil {

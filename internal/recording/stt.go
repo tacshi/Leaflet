@@ -683,16 +683,16 @@ func carriesOn(prev, next string) bool {
 // sentenceEnds end a sentence.
 var sentenceEnds = []string{".", "?", "!", "。", "？", "！"}
 
-// endsSentence tells whether a token, a word or punctuation, ends a
-// sentence.
-func endsSentence(text string) bool {
+// sentenceEnd is what ends the sentence a token, a word or punctuation,
+// ends, "" for a token that ends none.
+func sentenceEnd(text string) string {
 	text = strings.TrimSpace(text)
 	for _, p := range sentenceEnds {
 		if strings.HasSuffix(text, p) {
-			return true
+			return p
 		}
 	}
-	return false
+	return ""
 }
 
 // startsWord tells whether a token starts a word of its own rather than
@@ -712,16 +712,19 @@ func TokensToSegments(tokens []Token) []store.Segment {
 	var text strings.Builder
 	start, end := -1, 0
 	speaker := ""
-	// ended says the line's sentence has ended, four seconds in: the next
-	// word starts a line, once the quotes and brackets closing it are in.
-	ended := false
+	// ended is what ended the line's sentence, four seconds in, "" until
+	// then: the next word starts a line, once the quotes and brackets
+	// closing it are in. After a full stop, which numbers and addresses
+	// have inside them, only a word of its own does: 2024年 after 。 starts
+	// a line, and the 5 of 3.5 none.
+	ended := ""
 	flush := func() {
 		if t := strings.TrimSpace(text.String()); t != "" {
 			segs = append(segs, store.Segment{StartMs: max(start, 0), EndMs: end, Text: t, Speaker: speaker})
 		}
 		text.Reset()
 		start = -1
-		ended = false
+		ended = ""
 	}
 	for _, t := range tokens {
 		s, e := t.StartMs, t.EndMs
@@ -735,16 +738,18 @@ func TokensToSegments(tokens []Token) []store.Segment {
 		if isPunct(t.Text) {
 			if text.Len() > 0 {
 				text.WriteString(t.Text)
-				ended = ended || (endsSentence(t.Text) && end-start > 4000)
+				if p := sentenceEnd(t.Text); p != "" && end-start > 4000 {
+					ended = p
+				}
 			} else if len(segs) > 0 {
 				segs[len(segs)-1].Text += strings.TrimSpace(t.Text)
 			}
 			continue
 		}
-		if text.Len() > 0 && ((who != "" && who != speaker) || s-end > 1000 || (ended && startsWord(t.Text))) {
+		if text.Len() > 0 && ((who != "" && who != speaker) || s-end > 1000 || (ended != "" && (ended != "." || startsWord(t.Text)))) {
 			flush()
 		}
-		ended = false
+		ended = ""
 		if start < 0 {
 			start = s
 		}
@@ -753,7 +758,9 @@ func TokensToSegments(tokens []Token) []store.Segment {
 		}
 		text.WriteString(t.Text)
 		end = e
-		ended = endsSentence(t.Text) && end-start > 4000
+		if end-start > 4000 {
+			ended = sentenceEnd(t.Text)
+		}
 	}
 	flush()
 	return segs

@@ -334,10 +334,11 @@ final class DocumentSession {
     }
 
     /// scroll puts the page at offset, as far as it goes, unless the user
-    /// is scrolling it.
+    /// is scrolling it, or it is on its way to a block: put back, it would
+    /// never land there.
     private func scroll(to offset: CGPoint) {
         let tv = textView
-        guard !tv.isDragging, !tv.isDecelerating else { return }
+        guard !tv.isDragging, !tv.isDecelerating, !editor.headings.isJumping else { return }
         let bottom = max(
             -tv.adjustedContentInset.top,
             tv.contentSize.height - tv.bounds.height + tv.adjustedContentInset.bottom)

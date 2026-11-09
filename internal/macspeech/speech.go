@@ -237,8 +237,9 @@ func (s *stream) write(in io.WriteCloser) {
 }
 
 // finishSlack is how much longer than the audio sent Finish waits for the
-// helper; tests shorten it.
-var finishSlack = time.Minute
+// helper, which on its first use in a language downloads the model before
+// it hears any audio; tests shorten it.
+var finishSlack = 4 * time.Minute
 
 // Finish waits for the words of the audio sent: as long as the helper
 // takes to catch up, which is about as long as the recording at worst. A

@@ -786,6 +786,7 @@ func (r *Controller) Stop() {
 				rec.Status, rec.DurationMs, rec.SttProvider, rec.SttModel = "ready", int(duration.Milliseconds()), "", ""
 			}); err != nil {
 				log.Printf("recording: %v", err)
+				gone(path, err)
 			}
 			return
 		}
@@ -797,6 +798,7 @@ func (r *Controller) Stop() {
 		})
 		if err != nil {
 			log.Printf("recording: %v", err)
+			gone(path, err)
 			if stream != nil {
 				stream.Close()
 			}
@@ -808,6 +810,14 @@ func (r *Controller) Stop() {
 		}
 		r.finish(rec, path, stream, stt)
 	})
+}
+
+// gone removes the audio of a recording whose row went while it was
+// recorded, with its page or its account: nothing would find it again.
+func gone(path string, err error) {
+	if path != "" && store.IsNotFound(err) {
+		_ = os.Remove(path)
+	}
 }
 
 // keep stores what a recording has when it stops, so that it is not lost

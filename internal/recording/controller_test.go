@@ -1158,6 +1158,9 @@ func TestStreamClosesWhenTheRecordingIsGone(t *testing.T) {
 	if !r.Settle(5 * time.Second) {
 		t.Error("still saving")
 	}
+	if left, _ := filepath.Glob(filepath.Join(st.Dir, "recordings", "*")); len(left) > 0 {
+		t.Errorf("the audio of a recording whose account went is left: %v", left)
+	}
 }
 
 func TestStopKeepsTheLiveTextAtOnce(t *testing.T) {

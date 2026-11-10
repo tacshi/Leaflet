@@ -36,7 +36,8 @@ func (s *Store) Wipe() error {
 		return err
 	}
 	s.Notify("*", "")
-	return s.removeCopies()
+	s.removeCopies()
+	return nil
 }
 
 func (s *Store) ForgetAccount() error { return s.forgetAccount(false) }
@@ -74,7 +75,8 @@ func (s *Store) forgetAccount(synced bool) error {
 		return err
 	}
 	s.Notify("*", "")
-	return s.removeCopies()
+	s.removeCopies()
+	return nil
 }
 
 func forgetSearch(tx *sql.Tx) error {

@@ -264,7 +264,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | `create_page`、`rename_page` | ページの作成と名前の変更 |
 | `set_page_tags` | ページのタグを設定する |
 | `move_page` | ページをフォルダや別のページの中、またはトップレベルへ移動する |
-| `create_folder`、`rename_folder` | フォルダの作成と名前の変更 |
+| `create_folder`、`rename_folder` | フォルダの作成（トップレベルまたは別のフォルダの中）と名前の変更 |
+| `move_folder` | フォルダを別のフォルダの中、またはトップレベルへ移動する |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて
@@ -301,7 +302,8 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet rename PAGE TITLE` | ページのタイトルを変更する |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | ページを別のページの中、フォルダ、またはトップレベルへ移動する |
 | `leaflet tag PAGE [TAG...]` | ページのタグを設定する、または出力する。`--clear` ですべて外す |
-| `leaflet folder new NAME`、`leaflet folder rename FOLDER NAME` | フォルダの作成と名前の変更 |
+| `leaflet folder new NAME [--in FOLDER]`、`leaflet folder rename FOLDER NAME` | フォルダの作成（トップレベルまたは別のフォルダの中）と名前の変更 |
+| `leaflet folder mv FOLDER --in FOLDER \| --top` | フォルダを別のフォルダの中、またはトップレベルへ移動する |
 
 ページはタイトル、ID、または `ls` が表示する ID の先頭部分で指定できます。
 `--json` は MCP ツールが返す内容を出力し、`leaflet completion zsh`（または bash、

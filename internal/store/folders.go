@@ -1,8 +1,10 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 
 	"leaflet/internal/doc"
@@ -61,18 +63,23 @@ func writeFolder(q querier, f Folder) error {
 	return err
 }
 
-func (s *Store) CreateFolder(name string) (Folder, error) {
+func (s *Store) CreateFolder(name string) (Folder, error) { return s.CreateFolderIn(name, "") }
+
+func (s *Store) CreateFolderIn(name, parentID string) (Folder, error) {
 	now := time.Now()
-	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: name, CreatedAt: now, UpdatedAt: now}
+	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, ParentFolderID: parentID, Name: name, CreatedAt: now, UpdatedAt: now}
 	err := s.inTx(func(tx *sql.Tx) error {
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
 			return ErrNoSpace
 		}
-		var last sql.NullString
-		if err := tx.QueryRow(`SELECT MAX(sort_key) FROM folders WHERE deleted_at IS NULL`).Scan(&last); err != nil {
+		if err := folderParentOK(tx, f.SpaceID, parentID); err != nil {
 			return err
 		}
-		f.SortKey = NewKey(last.String, "")
+		var err error
+		f.SortKey, err = folderKeyAfter(tx, f.SpaceID, parentID, "", f.ID)
+		if err != nil {
+			return err
+		}
 		return saveFolder(tx, f, "new folder")
 	})
 	if err != nil {
@@ -148,12 +155,22 @@ func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
 func (s *Store) DeleteFolder(f Folder) error {
 	now := time.Now()
 	err := s.inTx(func(tx *sql.Tx) error {
+		f, err := folderIn(tx, f.ID)
+		if err != nil {
+			return err
+		}
+		up := f.ParentFolderID
+		if up != "" {
+			if parent, err := folderIn(tx, up); err != nil || !parent.DeletedAt.IsZero() || parent.SpaceID != f.SpaceID {
+				up = ""
+			}
+		}
 		pages, err := pagesIn(tx, `folder_id = ?`, f.ID)
 		if err != nil {
 			return err
 		}
 		for _, p := range pages {
-			p.FolderID, p.UpdatedAt = "", now
+			p.FolderID, p.UpdatedAt = up, now
 			if err := savePage(tx, p, "moved"); err != nil {
 				return err
 			}
@@ -164,7 +181,7 @@ func (s *Store) DeleteFolder(f Folder) error {
 		}
 		for _, file := range files {
 			old := FileToRemote(file)
-			file.FolderID, file.UpdatedAt = "", now
+			file.FolderID, file.UpdatedAt = up, now
 			if err := putFile(tx, s.Dir, file); err != nil {
 				return err
 			}
@@ -172,9 +189,29 @@ func (s *Store) DeleteFolder(f Folder) error {
 				return err
 			}
 		}
-		f, err := folderIn(tx, f.ID)
+		children, err := foldersIn(tx, `deleted_at IS NULL AND parent_folder_id = ? ORDER BY sort_key, id`, f.ID)
 		if err != nil {
 			return err
+		}
+		if len(children) > 0 {
+			siblings, err := folderSiblings(tx, f.SpaceID, up, f.ID)
+			if err != nil {
+				return err
+			}
+			before, after := f.SortKey, ""
+			for _, x := range siblings {
+				if x.SortKey > f.SortKey {
+					after = x.SortKey
+					break
+				}
+			}
+			for _, child := range children {
+				before = NewKey(before, after)
+				child.ParentFolderID, child.SortKey, child.UpdatedAt = up, before, now
+				if err := saveFolder(tx, child, "moved folder"); err != nil {
+					return err
+				}
+			}
 		}
 		f.DeletedAt, f.UpdatedAt = now, now
 		return saveFolder(tx, f, "deleted folder")
@@ -187,4 +224,189 @@ func (s *Store) DeleteFolder(f Folder) error {
 	s.Notify("pages", "")
 	s.Notify("files", "")
 	return nil
+}
+
+var ErrFolderIntoSelf = errors.New("a folder cannot move inside itself")
+
+var ErrFolderAcrossSpaces = errors.New("a folder cannot move into another space")
+
+var ErrFolderIntoDeleted = errors.New("a folder cannot move inside a deleted folder")
+
+func (s *Store) MoveFolder(id, parentID, afterID string) error {
+	return s.moveFolder(id, parentID, func(q querier, f Folder) (string, error) {
+		before, after, err := folderGapAfter(q, f.SpaceID, parentID, afterID, id)
+		return keyIn(f, parentID, before, after), err
+	})
+}
+
+func (s *Store) MoveFolderBefore(id, parentID, beforeID string) error {
+	return s.moveFolder(id, parentID, func(q querier, f Folder) (string, error) {
+		before, after, err := folderGapBefore(q, f.SpaceID, parentID, beforeID, id)
+		return keyIn(f, parentID, before, after), err
+	})
+}
+
+// keyIn is the sort key that puts f in parentID between the keys before and after: the one it has, when it is there already.
+func keyIn(f Folder, parentID, before, after string) string {
+	if f.ParentFolderID == parentID && f.SortKey > before && (after == "" || f.SortKey < after) {
+		return f.SortKey
+	}
+	return NewKey(before, after)
+}
+
+func (s *Store) moveFolder(id, parentID string, key func(q querier, f Folder) (string, error)) error {
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		f, err := folderIn(tx, id)
+		if err != nil {
+			return err
+		}
+		if parentID != "" {
+			if under, err := folderUnder(tx, parentID, id); err != nil || under {
+				return cmp.Or(err, ErrFolderIntoSelf)
+			}
+		}
+		if err := folderParentOK(tx, f.SpaceID, parentID); err != nil {
+			return err
+		}
+		k, err := key(tx, f)
+		if err != nil {
+			return err
+		}
+		if f.ParentFolderID == parentID && f.SortKey == k {
+			return nil
+		}
+		changed = true
+		f.ParentFolderID, f.SortKey, f.UpdatedAt = parentID, k, time.Now()
+		return saveFolder(tx, f, "moved folder")
+	})
+	if err != nil || !changed {
+		return err
+	}
+	s.Notify("outbox", "")
+	s.Notify("folders", "")
+	return nil
+}
+
+func (s *Store) PlaceFolder(id, parentID, sortKey string) error {
+	return s.moveFolder(id, parentID, func(q querier, f Folder) (string, error) {
+		if sortKey != "" {
+			return sortKey, nil
+		}
+		return folderKeyAfter(q, f.SpaceID, parentID, "", id)
+	})
+}
+
+func folderParentOK(q querier, spaceID, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	switch parent, err := folderIn(q, parentID); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrFolderIntoDeleted
+	case err != nil:
+		return err
+	case parent.SpaceID != spaceID:
+		return ErrFolderAcrossSpaces
+	case !parent.DeletedAt.IsZero():
+		return ErrFolderIntoDeleted
+	}
+	return nil
+}
+
+func (s *Store) FolderUnder(candidate, of string) bool {
+	under, err := folderUnder(s.db, candidate, of)
+	return under || err != nil
+}
+
+func folderUnder(q querier, candidate, of string) (bool, error) {
+	seen := map[string]bool{}
+	for cursor := candidate; cursor != "" && !seen[cursor]; {
+		if cursor == of {
+			return true, nil
+		}
+		seen[cursor] = true
+		f, err := folderIn(q, cursor)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		cursor = f.ParentFolderID
+	}
+	return false, nil
+}
+
+func foldersIn(q querier, where string, args ...any) ([]Folder, error) {
+	rows, err := q.Query(`SELECT `+folderCols+` FROM folders WHERE `+where, args...) // #nosec G202
+	return collect(rows, err, scanFolder)
+}
+
+func folderSiblings(q querier, spaceID, parentID, skip string) ([]Folder, error) {
+	all, err := foldersIn(q, `deleted_at IS NULL AND space_id = ? ORDER BY sort_key, id`, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]bool, len(all))
+	for _, f := range all {
+		live[f.ID] = true
+	}
+	shown := func(parent string) string {
+		if live[parent] {
+			return parent
+		}
+		return ""
+	}
+	parentID = shown(parentID)
+	return slices.DeleteFunc(all, func(f Folder) bool { return f.ID == skip || shown(f.ParentFolderID) != parentID }), nil
+}
+
+func folderKeyAfter(q querier, spaceID, parentID, afterID, skip string) (string, error) {
+	before, after, err := folderGapAfter(q, spaceID, parentID, afterID, skip)
+	return NewKey(before, after), err
+}
+
+// folderGapAfter is the sort keys a folder goes between to come after the folder afterID in parentID, or last.
+func folderGapAfter(q querier, spaceID, parentID, afterID, skip string) (before, after string, err error) {
+	siblings, err := folderSiblings(q, spaceID, parentID, skip)
+	if err != nil {
+		return "", "", err
+	}
+	i := slices.IndexFunc(siblings, func(f Folder) bool { return f.ID == afterID })
+	if afterID == "" || i < 0 {
+		i = len(siblings) - 1
+	}
+	if i >= 0 {
+		before = siblings[i].SortKey
+		if i+1 < len(siblings) {
+			after = siblings[i+1].SortKey
+		}
+	}
+	if before != "" && after != "" && before >= after {
+		after = ""
+	}
+	return before, after, nil
+}
+
+// folderGapBefore is the sort keys a folder goes between to come before the folder beforeID in parentID, or first.
+func folderGapBefore(q querier, spaceID, parentID, beforeID, skip string) (before, after string, err error) {
+	siblings, err := folderSiblings(q, spaceID, parentID, skip)
+	if err != nil {
+		return "", "", err
+	}
+	for i, f := range siblings {
+		if f.ID == beforeID {
+			after = f.SortKey
+			if i > 0 {
+				before = siblings[i-1].SortKey
+			}
+		}
+	}
+	if after == "" && len(siblings) > 0 {
+		after = siblings[0].SortKey
+	}
+	if before != "" && after != "" && before >= after {
+		before = ""
+	}
+	return before, after, nil
 }

@@ -156,7 +156,7 @@ func WorkspacePrompt(agentName string, reading, supportsTools, web, search bool)
 		b.WriteString("This model cannot call tools, so you cannot read or change the user's pages. Answer in the reply, and say what you would do.\n")
 	} else {
 		b.WriteString(`How to work:
-- Make every change you are asked for with the tools (create_page, move_page, rename_page, set_page_tags, create_folder); never paste content meant for a page into your reply instead. An answer to a question is not a change: it goes in your reply.
+- Make every change you are asked for with the tools (create_page, move_page, rename_page, set_page_tags, create_folder, move_folder); never paste content meant for a page into your reply instead. An answer to a question is not a change: it goes in your reply.
 - Asked to save something in a new page, make it with create_page, its content in the call: at the top level, in a folder (its folder_id from list_folders) or inside a page (its parent_id). Asked to write, copy or save an article, a web page or other text into a page, write all of it as it is, its headings, lists and links kept: not a summary, unless the user asks for one.
 - Give a page's content in markdown, a block a line, as write_markdown takes it; keep blocks for charts, embeds, videos, callouts, formulas, diagrams and link cards.
 - A page shared ("shared" in list_pages) you leave as it is: you change nothing of it, nor put a page in it. One shared with other people ("shared_with_people"), who write in it too, you cannot read either: for it, the user asks the agent on that page.

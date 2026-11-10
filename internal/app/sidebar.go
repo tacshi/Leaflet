@@ -90,12 +90,18 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 	a.defaultTemplateMenu(m, locales.TemplateDefaultForFolder(), f.Name, f.DefaultTemplateID, false, func(id string) error {
 		return a.st.SetFolderDefaultTemplate(f, id)
 	})
+	if m.Item(locales.SidebarNewFolderInFolder()).Chosen() {
+		a.dialogs.openNewFolder(f.ID)
+	}
 	if m.Item(locales.SidebarUploadFile()).Chosen() {
 		a.uploadFile(f.ID)
 	}
 	if m.Item(locales.SidebarRenameEllipsis()).Chosen() {
 		ff := f
 		a.dialogs.openRenameFolder(&ff)
+	}
+	if m.Item(locales.SidebarMoveTo()).Chosen() {
+		a.dialogs.openMoveFolder(f.ID)
 	}
 	m.Separator()
 	if m.Item(locales.SidebarDeleteFolder()).Danger().Chosen() {
@@ -110,14 +116,26 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 func (a *App) treeOpen(kind, id string) { a.treeState.Open.Add(kind + ":" + id) }
 
 func (a *App) showInTree(kind, id string) {
-	a.treeOpen(kind, id)
+	if kind == "folder" {
+		a.openFolders(id)
+	} else {
+		a.treeOpen(kind, id)
+	}
 	a.showSidebar(tabPages)
+}
+
+// openFolders opens the folder and every folder it is in.
+func (a *App) openFolders(id string) {
+	a.treeOpen("folder", id)
+	for _, f := range a.library().FolderPath(id) {
+		a.treeOpen("folder", f.ID)
+	}
 }
 
 func (a *App) tree(c *ui.Context) {
 	var roots []string
 	lib := a.library()
-	for _, f := range lib.Folders {
+	for _, f := range lib.RootFolders {
 		roots = append(roots, "folder:"+f.ID)
 	}
 	for _, p := range lib.Top {
@@ -139,6 +157,9 @@ func (a *App) tree(c *ui.Context) {
 		switch kind {
 		case "folder":
 			out := []string{}
+			for _, f := range lib.SubFolders[id] {
+				out = append(out, "folder:"+f.ID)
+			}
 			for _, p := range lib.InFolder[id] {
 				out = append(out, "page:"+p.ID)
 			}
@@ -175,7 +196,20 @@ func (a *App) tree(c *ui.Context) {
 	a.treeRows = a.treeRows[:0]
 	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.treeItem(c, key) }).Grow(1).Padding(0, 8, 12)
-	a.treeDrop(c, list)
+	over, _ := ui.DragOver[treeDrag](list)
+	dropped, _ := ui.Drop[treeDrag](list)
+	switch d := over.(type) {
+	case pageDrag:
+		a.treeDrop(c, list, &d, nil)
+	case folderDrag:
+		a.treeFolderDrop(c, list, &d, nil)
+	}
+	switch d := dropped.(type) {
+	case pageDrag:
+		a.treeDrop(c, list, nil, &d)
+	case folderDrag:
+		a.treeFolderDrop(c, list, nil, &d)
+	}
 	pressed, submitted := a.treeIn.after(list), list.Submitted()
 	if (list.Changed() || submitted) && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
@@ -307,6 +341,18 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			})
 		})
 		row.PopoverMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
+		row.Drag(folderDrag{id})
+		if row.Dragging() {
+			row.Opacity(0.4)
+		}
+		if row.Clicked() {
+			if a.treeState.Open.Has(key) {
+				a.treeState.Open.Remove(key)
+			} else {
+				a.treeState.Open.Add(key)
+			}
+			a.treeIn.pressedAt = time.Time{}
+		}
 		a.pageDrop(c, row, key)
 	case "page":
 		p := a.pageByID(id)
@@ -382,10 +428,20 @@ func (a *App) deleteFileAlert(c *ui.Context) {
 
 type pageDrag struct{ id string }
 
+type folderDrag struct{ id string }
+
+// treeDrag is what the tree takes dropped below its rows: an element takes one type of value.
+type treeDrag interface{ inTree() }
+
+func (pageDrag) inTree()   {}
+func (folderDrag) inTree() {}
+
 const (
 	dropBefore = iota
 	dropAfter
 	dropInside
+	dropFirst
+	dropLevel
 )
 
 type treeRow struct {
@@ -478,7 +534,7 @@ func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
 	}
 }
 
-func (a *App) treeDrop(c *ui.Context, list ui.Element) {
+func (a *App) treeDrop(c *ui.Context, list ui.Element, over, dropped *pageDrag) {
 	pal := theme.Of(c)
 	spot := func(d pageDrag) (at int, target string, out int, row ui.Rect, ok bool) {
 		lb := list.Bounds()
@@ -497,8 +553,8 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 		}
 		return 0, "", 0, ui.Rect{}, false
 	}
-	if d, ok := ui.DragOver[pageDrag](list); ok {
-		if at, target, out, row, ok := spot(d); ok {
+	if over != nil {
+		if at, target, out, row, ok := spot(*over); ok {
 			lb := list.Bounds()
 			list.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				x, y := r.X+row.X-lb.X, r.Y+row.Y-lb.Y
@@ -516,8 +572,8 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 			})
 		}
 	}
-	if d, ok := ui.Drop[pageDrag](list); ok {
-		if at, target, out, _, ok := spot(d); ok {
+	if d := dropped; d != nil {
+		if at, target, out, _, ok := spot(*d); ok {
 			if target == "" {
 				if err := a.pageCore().MovePage(d.id, "", func() error { return a.st.MovePage(d.id, "", "", "") }); err != nil {
 					a.toast(locales.SidebarCouldNotMove(err.Error()))
@@ -525,6 +581,131 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 				return
 			}
 			a.dropPage(d.id, target, at, out > 0)
+		}
+	}
+}
+
+// folderSpot is where a folder dragged over the row of key, at y in its height h, would go:
+// before or after that folder, inside it, or first in it when it is open with folders in it.
+// Over a page it goes where that page is, last among the folders of the page's folder or of
+// the top level: mark is then the first page there, which it lands above.
+func (a *App) folderSpot(d folderDrag, key string, y, h float32) (at int, target, mark string, ok bool) {
+	kind, id, _ := strings.Cut(key, ":")
+	lib := a.library()
+	if !lib.HasFolder(d.id) {
+		return 0, "", "", false
+	}
+	if kind == "page" {
+		p := a.pageByID(id)
+		if p == nil {
+			return 0, "", "", false
+		}
+		top := *p
+		if anc := a.ancestors(id); len(anc) > 0 {
+			top = anc[0]
+		}
+		if a.isShared(top) || top.Template {
+			return 0, "", "", false
+		}
+		first := lib.Top
+		if lib.HasFolder(top.FolderID) {
+			target, first = top.FolderID, lib.InFolder[top.FolderID]
+		}
+		if len(first) == 0 || lib.FolderUnder(target, d.id) {
+			return 0, "", "", false
+		}
+		return dropLevel, target, "page:" + first[0].ID, true
+	}
+	if kind != "folder" || lib.FolderUnder(id, d.id) {
+		return 0, "", "", false
+	}
+	switch {
+	case y < h/4:
+		return dropBefore, id, "", true
+	case y > h*3/4:
+		if a.treeState.Open.Has(key) && len(lib.SubFolders[id]) > 0 {
+			return dropFirst, id, "", true
+		}
+		return dropAfter, id, "", true
+	}
+	return dropInside, id, "", true
+}
+
+func (a *App) dropFolder(id, target string, at int) {
+	lib := a.library()
+	var err error
+	switch at {
+	case dropBefore:
+		err = a.st.MoveFolderBefore(id, lib.FolderParent(target), target)
+	case dropAfter:
+		err = a.st.MoveFolder(id, lib.FolderParent(target), target)
+	case dropFirst:
+		err = a.st.MoveFolderBefore(id, target, lib.SubFolders[target][0].ID)
+	case dropInside, dropLevel:
+		err = a.st.MoveFolder(id, target, "")
+	}
+	if err != nil {
+		a.toast(locales.SidebarCouldNotMove(err.Error()))
+		return
+	}
+	if at == dropInside || at == dropFirst {
+		a.openFolders(target)
+	}
+}
+
+func (a *App) treeFolderDrop(c *ui.Context, list ui.Element, over, dropped *folderDrag) {
+	pal := theme.Of(c)
+	spot := func(d folderDrag) (at int, target string, row ui.Rect, ok bool) {
+		lb := list.Bounds()
+		_, ly, _ := list.PointerPosition()
+		y := lb.Y + ly
+		end, left := float32(0), lb.X+lb.W
+		for _, r := range a.treeRows {
+			end, left = max(end, r.box.Y+r.box.H), min(left, r.box.X)
+			if y >= r.box.Y && y < r.box.Y+r.box.H {
+				var mark string
+				at, target, mark, ok = a.folderSpot(d, r.key, y-r.box.Y, r.box.H)
+				box := r.box
+				for _, m := range a.treeRows {
+					if mark != "" && m.key == mark {
+						box = m.box
+					}
+				}
+				return at, target, box, ok
+			}
+		}
+		if y >= end && end > 0 && a.library().HasFolder(d.id) {
+			return dropAfter, "", ui.Rect{X: left, Y: end, W: lb.X + lb.W - 8 - left}, true
+		}
+		return 0, "", ui.Rect{}, false
+	}
+	if over != nil {
+		if at, target, row, ok := spot(*over); ok {
+			lb := list.Bounds()
+			list.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				x, y := r.X+row.X-lb.X, r.Y+row.Y-lb.Y
+				switch {
+				case target == "" || at == dropBefore || at == dropLevel:
+					dropLine(p, x, y, x+row.W, pal)
+				case at == dropInside:
+					p.Fill(ui.Rect{X: x, Y: y, W: row.W, H: row.H}, a.dropTint("folder:"+target, pal), 6)
+				case at == dropFirst:
+					dropLine(p, x+a.treeIndent(c), y+row.H, x+row.W, pal)
+				default:
+					dropLine(p, x, y+row.H, x+row.W, pal)
+				}
+			})
+		}
+	}
+	if d := dropped; d != nil {
+		if at, target, _, ok := spot(*d); ok {
+			if target == "" {
+				if err := a.st.MoveFolder(d.id, "", ""); err != nil {
+					a.toast(locales.SidebarCouldNotMove(err.Error()))
+				}
+				return
+			}
+			a.dropFolder(d.id, target, at)
 		}
 	}
 }

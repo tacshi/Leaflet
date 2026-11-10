@@ -3386,13 +3386,13 @@ func (msgs Messages) DialogFolderCreate() string {
 // DialogMoveTitle says "Move “{title}”"
 // in the language the app shows.
 //
-// Move dialog: the title, naming the page moved.
+// Move dialog: the title, naming the page or folder moved.
 func DialogMoveTitle(title string) string { return In(i18n.Locale()).DialogMoveTitle(title) }
 
 // DialogMoveTitle says "Move “{title}”"
 // in the language of msgs.
 //
-// Move dialog: the title, naming the page moved.
+// Move dialog: the title, naming the page or folder moved.
 func (msgs Messages) DialogMoveTitle(title string) string {
 	return Catalog.Format(msgs.locale, "dialogMoveTitle", map[string]any{"title": title})
 }
@@ -3423,6 +3423,20 @@ func DialogMoveSearch() string { return In(i18n.Locale()).DialogMoveSearch() }
 // Move dialog: the search field's placeholder.
 func (msgs Messages) DialogMoveSearch() string {
 	return Catalog.Format(msgs.locale, "dialogMoveSearch", nil)
+}
+
+// DialogMoveSearchFolders says "Search folders"
+// in the language the app shows.
+//
+// Move dialog, when moving a folder: the search field's placeholder.
+func DialogMoveSearchFolders() string { return In(i18n.Locale()).DialogMoveSearchFolders() }
+
+// DialogMoveSearchFolders says "Search folders"
+// in the language of msgs.
+//
+// Move dialog, when moving a folder: the search field's placeholder.
+func (msgs Messages) DialogMoveSearchFolders() string {
+	return Catalog.Format(msgs.locale, "dialogMoveSearchFolders", nil)
 }
 
 // DialogMoveTopLevel says "Top level"
@@ -6477,6 +6491,22 @@ func (msgs Messages) AgentEditCreatedFolder(name string) string {
 	return Catalog.Format(msgs.locale, "agentEditCreatedFolder", map[string]any{"name": name})
 }
 
+// AgentEditMovedFolder says "Moved folder “{name}”"
+// in the language the app shows.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it moved the folder named name into another folder or to the top level.
+func AgentEditMovedFolder(name string) string { return In(i18n.Locale()).AgentEditMovedFolder(name) }
+
+// AgentEditMovedFolder says "Moved folder “{name}”"
+// in the language of msgs.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it moved the folder named name into another folder or to the top level.
+func (msgs Messages) AgentEditMovedFolder(name string) string {
+	return Catalog.Format(msgs.locale, "agentEditMovedFolder", map[string]any{"name": name})
+}
+
 // AgentEditCreatedPage says "Created page “{title}”"
 // in the language the app shows.
 //
@@ -7671,6 +7701,20 @@ func (msgs Messages) SidebarNewPageInFolder() string {
 	return Catalog.Format(msgs.locale, "sidebarNewPageInFolder", nil)
 }
 
+// SidebarNewFolderInFolder says "New folder inside"
+// in the language the app shows.
+//
+// Folder menu item: make a folder inside this folder.
+func SidebarNewFolderInFolder() string { return In(i18n.Locale()).SidebarNewFolderInFolder() }
+
+// SidebarNewFolderInFolder says "New folder inside"
+// in the language of msgs.
+//
+// Folder menu item: make a folder inside this folder.
+func (msgs Messages) SidebarNewFolderInFolder() string {
+	return Catalog.Format(msgs.locale, "sidebarNewFolderInFolder", nil)
+}
+
 // SidebarUploadFile says "Upload file…"
 // in the language the app shows.
 //
@@ -8030,13 +8074,13 @@ func (msgs Messages) SidebarDeleteFileMessage() string {
 // SidebarCouldNotMove says "Could not move: {error}"
 // in the language the app shows.
 //
-// Toast after moving a page failed.
+// Toast after moving a page or folder failed.
 func SidebarCouldNotMove(error string) string { return In(i18n.Locale()).SidebarCouldNotMove(error) }
 
 // SidebarCouldNotMove says "Could not move: {error}"
 // in the language of msgs.
 //
-// Toast after moving a page failed.
+// Toast after moving a page or folder failed.
 func (msgs Messages) SidebarCouldNotMove(error string) string {
 	return Catalog.Format(msgs.locale, "sidebarCouldNotMove", map[string]any{"error": error})
 }
@@ -8058,13 +8102,13 @@ func (msgs Messages) SidebarAddSubpage() string {
 // SidebarMoveTo says "Move to…"
 // in the language the app shows.
 //
-// Page menu item.
+// Page and folder menu item.
 func SidebarMoveTo() string { return In(i18n.Locale()).SidebarMoveTo() }
 
 // SidebarMoveTo says "Move to…"
 // in the language of msgs.
 //
-// Page menu item.
+// Page and folder menu item.
 func (msgs Messages) SidebarMoveTo() string {
 	return Catalog.Format(msgs.locale, "sidebarMoveTo", nil)
 }

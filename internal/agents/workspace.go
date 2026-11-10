@@ -43,7 +43,8 @@ type Workspace struct {
 	MovePage     func(id, parentID, folderID string) (from, to doc.PagePlace, err error)
 	RenamePage   func(id, title string) error
 	SetTags      func(id string, tags []string) ([]string, error)
-	CreateFolder func(name string) (doc.NewFolder, error)
+	CreateFolder func(name, parentID string) (doc.NewFolder, error)
+	MoveFolder   func(id, parentID string) (name string, from, to doc.FolderPlace, err error)
 }
 
 func WorkspaceToolDefinitions(reading bool) []map[string]any {
@@ -57,7 +58,7 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 			tool("read_page", "Read one of the user's pages: every block with its ID, its tags and its subpages. Read-only.", map[string]any{"page_id": pageID}, "page_id"))
 	}
 	return append(out,
-		tool("list_folders", "List the user's folders (names and IDs).", map[string]any{}),
+		tool("list_folders", "List the user's folders: their names and IDs, and the folder each is in.", map[string]any{}),
 		tool("create_page", "Create a page, optionally with content: at the top level of the user's pages, in one of their folders, or inside one of their pages, at whose end a link to it goes.",
 			pageSchema(prop{"parent_id", map[string]any{"type": "string", "description": "The page to put it inside; none for the top level."}},
 				prop{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."}}), "title"),
@@ -67,8 +68,13 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 		tool("rename_page", "Change a page's title.", ordered{{"page_id", pageID}, {"title", map[string]any{"type": "string"}}}, "page_id", "title"),
 		tool("set_page_tags", "Set a page's tags, replacing the ones it has: an empty list takes them all off. Tags are short words or phrases, without #; reuse the user's where they fit.",
 			ordered{{"page_id", pageID}, {"tags", map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}}, "page_id", "tags"),
-		tool("create_folder", "Create a folder for top-level pages, last among the user's folders.", map[string]any{"name": map[string]any{"type": "string"}}, "name"))
+		tool("create_folder", "Create a folder for top-level pages, last among the folders where it goes: at the top level, or in another folder.",
+			ordered{{"name", map[string]any{"type": "string"}}, {"parent_folder_id", parentFolder}}, "name"),
+		tool("move_folder", "Move a folder, with what is in it, last into another folder, or with no parent_folder_id to the top level.",
+			ordered{{"folder_id", map[string]any{"type": "string", "description": "The folder to move, from list_folders."}}, {"parent_folder_id", parentFolder}}, "folder_id"))
 }
+
+var parentFolder = map[string]any{"type": "string", "description": "The folder to put it in, from list_folders; none for the top level."}
 
 func (x *Executor) workspace(name string, args map[string]any) (map[string]any, error) {
 	w := x.Ctx.Workspace
@@ -140,6 +146,8 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		return x.workspaceTags(args)
 	case "create_folder":
 		return x.workspaceFolder(args)
+	case "move_folder":
+		return x.workspaceMoveFolder(args)
 	case "web_search":
 		return x.searchWeb(args)
 	case "read_web_page":
@@ -343,12 +351,39 @@ func (x *Executor) workspaceFolder(args map[string]any) (map[string]any, error) 
 	if err := x.checkURLs(nil, name); err != nil {
 		return nil, err
 	}
-	f, err := x.Ctx.Workspace.CreateFolder(name)
+	parent, err := optionalString(args, "parent_folder_id")
+	if err != nil {
+		return nil, err
+	}
+	f, err := x.Ctx.Workspace.CreateFolder(name, strings.TrimSpace(parent))
 	if err != nil {
 		return nil, err
 	}
 	x.record(doc.Op{Op: "create_folder", Folder: &f}, locales.AgentEditCreatedFolder(name))
 	return map[string]any{"folder_id": f.ID}, nil
+}
+
+func (x *Executor) workspaceMoveFolder(args map[string]any) (map[string]any, error) {
+	id, err := str(args, "folder_id")
+	if err != nil {
+		return nil, err
+	}
+	id = strings.TrimSpace(id)
+	parent, err := optionalString(args, "parent_folder_id")
+	if err != nil {
+		return nil, err
+	}
+	name, from, to, err := x.Ctx.Workspace.MoveFolder(id, strings.TrimSpace(parent))
+	if errors.Is(err, store.ErrFolderIntoSelf) {
+		return nil, terr("A folder cannot move into itself or a folder inside it.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if from != to {
+		x.record(doc.Op{Op: "move_folder", FolderID: id, Title: name, FolderPlace: &to, PrevFolderPlace: &from}, locales.AgentEditMovedFolder(name))
+	}
+	return map[string]any{"folder_id": id}, nil
 }
 
 func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.Settings, online bool) ToolContext {
@@ -520,9 +555,35 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			p, err := st.Page(id)
 			return p.Tags, err
 		},
-		CreateFolder: func(name string) (doc.NewFolder, error) {
-			f, err := st.CreateFolder(name)
-			return doc.NewFolder{ID: f.ID, SpaceID: f.SpaceID, Name: f.Name, SortKey: f.SortKey}, err
+		CreateFolder: func(name, parentID string) (doc.NewFolder, error) {
+			if parentID != "" && !spaceFolder(st, parentID) {
+				return doc.NewFolder{}, noFolder(parentID)
+			}
+			f, err := st.CreateFolderIn(name, parentID)
+			return doc.NewFolder{ID: f.ID, SpaceID: f.SpaceID, ParentFolderID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey}, err
+		},
+		MoveFolder: func(id, parentID string) (name string, from, to doc.FolderPlace, err error) {
+			if !spaceFolder(st, id) {
+				return "", from, to, noFolder(id)
+			}
+			if parentID != "" && !spaceFolder(st, parentID) {
+				return "", from, to, noFolder(parentID)
+			}
+			f, err := st.Folder(id)
+			if err != nil {
+				return "", from, to, err
+			}
+			from = doc.FolderPlace{ParentFolderID: f.ParentFolderID, SortKey: f.SortKey}
+			if f.ParentFolderID == parentID {
+				return f.Name, from, from, nil
+			}
+			if err := st.MoveFolder(id, parentID, ""); err != nil {
+				return f.Name, from, from, err
+			}
+			if f, err = st.Folder(id); err == nil {
+				to = doc.FolderPlace{ParentFolderID: f.ParentFolderID, SortKey: f.SortKey}
+			}
+			return f.Name, from, to, err
 		},
 	}
 	return ToolContext{Content: doc.Empty(), PageID: WorkspaceID, AgentName: agent, Workspace: w}

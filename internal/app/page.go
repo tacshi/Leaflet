@@ -126,13 +126,9 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	if len(ancestors) > 0 {
 		top = ancestors[0]
 	}
-	if top.FolderID != "" {
-		for _, f := range a.folders {
-			if f.ID == top.FolderID {
-				path = append(path, f.Name)
-				open = append(open, func() { a.showInTree("folder", f.ID) })
-			}
-		}
+	for _, f := range a.library().FolderPath(top.FolderID) {
+		path = append(path, f.Name)
+		open = append(open, func() { a.showInTree("folder", f.ID) })
 	}
 	for _, anc := range ancestors {
 		path = append(path, anc.DisplayTitle())

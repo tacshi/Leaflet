@@ -176,6 +176,13 @@ func TestDefault(t *testing.T) {
 	if d, ok := Default(st, all, "", f.ID); !ok || d.Key() != got.Key() {
 		t.Errorf("the folder's default %+v", d)
 	}
+	inner, err := st.CreateFolderIn("Weekly", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := Default(st, all, "", inner.ID); !ok || d.Key() != got.Key() {
+		t.Errorf("a folder inside takes its folder's default, got %+v", d)
+	}
 
 	msg, err = SetDefault(st, nil, "Diary", func(id string) error { return st.SetPageDefaultTemplate(parent.ID, id) })
 	if err != nil || msg != locales.TemplateDefaultCleared("Diary") {

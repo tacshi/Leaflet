@@ -51,9 +51,7 @@ func TestSidebarTree(t *testing.T) {
 	if tt.HasText("My space") {
 		t.Errorf("the tree has a My space header: %v", tt.Texts())
 	}
-	if err := tt.Click("Product"); err != nil {
-		t.Fatal(err)
-	}
+	clickOn(t, tt, "Product")
 	tt.Frame()
 	if !tt.HasText("PRD") || tt.HasText("FAQ") {
 		t.Fatalf("open folder shows %v", tt.Texts())

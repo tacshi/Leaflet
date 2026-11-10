@@ -42,6 +42,34 @@ struct LibraryTests {
         #expect(lib.topFiles.map(\.id) == ["left", "top"])
     }
 
+    @Test func foldersNestAsTheCoreArrangesThem() throws {
+        let json = """
+            {"space_id":"me","pages":[],"tags":[],"files":[],"top":[],"in_folder":{},"children":{},"shared":[],
+            "folders":[{"id":"w","name":"Work","sort_key":"a"},{"id":"h","name":"Home","sort_key":"b"},
+            {"id":"p","name":"Plans","sort_key":"a","parent_id":"w"},{"id":"q","name":"Old","sort_key":"b","parent_id":"p"}],
+            "root_folders":["w","h"],"sub_folders":{"w":["p"],"p":["q"]}}
+            """
+        let lib = try JSONDecoder().decode(LibrarySnapshot.self, from: Data(json.utf8))
+        #expect(lib.rootFolders.map(\.id) == ["w", "h"])
+        #expect(lib.subfolders(of: lib.folder("w")!).map(\.id) == ["p"])
+        #expect(
+            lib.folderOrder.map { "\($0.folder.id):\($0.depth)" } == ["w:0", "p:1", "q:2", "h:0"])
+        #expect(lib.folder("q", isIn: "w"))
+        #expect(lib.folder("w", isIn: "w"))
+        #expect(!lib.folder("w", isIn: "q"))
+        #expect(!lib.folder("h", isIn: "w"))
+    }
+
+    @Test func foldersWithoutTheirArrangementStayFlat() throws {
+        let lib = LibrarySnapshot(
+            spaceID: "me", pages: [],
+            folders: [
+                FolderRow(id: "a", name: "A", sortKey: "a"),
+                FolderRow(id: "b", name: "B", sortKey: "b"),
+            ], tags: [])
+        #expect(lib.rootFolders.map(\.id) == ["a", "b"])
+    }
+
     @Test func theTreesRowsFollowThePagesOpen() {
         let lib = LibrarySnapshot(
             spaceID: "me",

@@ -214,16 +214,38 @@ given. --clear takes them all off.`,
 	tag.Flags().BoolVar(&clearTags, "clear", false, "take all the page's tags off")
 	folders := &cobra.Command{
 		Use:   "folder",
-		Short: "Make and rename folders",
+		Short: "Make, rename and move folders",
 		Args:  cobra.NoArgs,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	folders.AddCommand(&cobra.Command{
-		Use:   "new NAME",
-		Short: "Make a folder, last in the sidebar, and print its ID",
+	var folderIn string
+	var folderTop bool
+	newFolder := &cobra.Command{
+		Use:   "new NAME [--in FOLDER]",
+		Short: "Make a folder, last at the top level or in a folder, and print its ID",
 		Args:  cobra.ExactArgs(1),
-		RunE:  r.with(r.newFolder),
-	}, &cobra.Command{
+		RunE:  r.with(func(args []string) error { return r.newFolder(args, folderIn) }),
+	}
+	newFolder.Flags().StringVar(&folderIn, "in", "", "make it in this folder")
+	_ = newFolder.RegisterFlagCompletionFunc("in", r.completeFolder)
+	mvFolder := &cobra.Command{
+		Use:   "mv FOLDER (--in FOLDER | --top)",
+		Short: "Move a folder, with what is in it, into another folder or to the top level",
+		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return r.completeFolder(cmd, args, toComplete)
+		},
+		RunE: r.with(func(args []string) error { return r.mvFolder(args, folderIn) }),
+	}
+	mvFolder.Flags().StringVar(&folderIn, "in", "", "put it in this folder, last")
+	mvFolder.Flags().BoolVar(&folderTop, "top", false, "put it at the top level")
+	_ = mvFolder.RegisterFlagCompletionFunc("in", r.completeFolder)
+	mvFolder.MarkFlagsOneRequired("in", "top")
+	mvFolder.MarkFlagsMutuallyExclusive("in", "top")
+	folders.AddCommand(newFolder, mvFolder, &cobra.Command{
 		Use:   "rename FOLDER NAME",
 		Short: "Change a folder's name",
 		Args:  cobra.ExactArgs(2),
@@ -435,11 +457,39 @@ func (r *runner) ls(_ []string) error {
 			tree(c, depth+1)
 		}
 	}
+	folderListed := map[string]bool{}
 	for _, f := range l.Folders {
-		b.WriteString(shortID(f.ID) + "  " + shown(f.Name) + "/\n")
-		for _, p := range inFolder[f.ID] {
-			tree(p, 1)
+		folderListed[f.ID] = true
+	}
+	subFolders := map[string][]listedFolder{}
+	var rootFolders []listedFolder
+	for _, f := range l.Folders {
+		if folderListed[f.ParentID] {
+			subFolders[f.ParentID] = append(subFolders[f.ParentID], f)
+		} else {
+			rootFolders = append(rootFolders, f)
 		}
+	}
+	done := map[string]bool{}
+	var folderTree func(f listedFolder, depth int)
+	folderTree = func(f listedFolder, depth int) {
+		if done[f.ID] {
+			return
+		}
+		done[f.ID] = true
+		b.WriteString(shortID(f.ID) + "  " + strings.Repeat("  ", depth) + shown(f.Name) + "/\n")
+		for _, sub := range subFolders[f.ID] {
+			folderTree(sub, depth+1)
+		}
+		for _, p := range inFolder[f.ID] {
+			tree(p, depth+1)
+		}
+	}
+	for _, f := range rootFolders {
+		folderTree(f, 0)
+	}
+	for _, f := range l.Folders {
+		folderTree(f, 0)
 	}
 	for _, p := range slices.Concat(top, shared) {
 		tree(p, 0)
@@ -890,8 +940,16 @@ func orEmpty(tags []string) []string {
 	return tags
 }
 
-func (r *runner) newFolder(args []string) error {
-	out, err := r.call("create_folder", map[string]any{"name": args[0]})
+func (r *runner) newFolder(args []string, in string) error {
+	a := map[string]any{"name": args[0]}
+	if strings.TrimSpace(in) != "" {
+		f, err := r.folder(in)
+		if err != nil {
+			return err
+		}
+		a["parent_folder_id"] = f.ID
+	}
+	out, err := r.call("create_folder", a)
 	if err != nil {
 		return err
 	}
@@ -899,6 +957,23 @@ func (r *runner) newFolder(args []string) error {
 		return r.printJSON(out)
 	}
 	return r.print(fmt.Sprintln(out["folder_id"]))
+}
+
+func (r *runner) mvFolder(args []string, in string) error {
+	f, err := r.folder(args[0])
+	if err != nil {
+		return err
+	}
+	a := map[string]any{"folder_id": f.ID}
+	if strings.TrimSpace(in) != "" {
+		into, err := r.folder(in)
+		if err != nil {
+			return err
+		}
+		a["parent_folder_id"] = into.ID
+	}
+	out, err := r.call("move_folder", a)
+	return r.changed(out, err)
 }
 
 func (r *runner) renameFolder(args []string) error {

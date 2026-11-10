@@ -885,3 +885,68 @@ func TestLongTitlesAreCutAsTheStoreKeepsThem(t *testing.T) {
 		t.Errorf("after Undo the page is titled %d characters", utf8.RuneCountInString(p.Title))
 	}
 }
+
+func TestUndoAndRedoAFolderMove(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	x := w.executor(true)
+	inner, _ := x.Call("create_folder", map[string]any{"name": "Papers", "parent_folder_id": w.folder.ID})["folder_id"].(string)
+	if f, _ := w.st.Folder(inner); f.ParentFolderID != w.folder.ID {
+		t.Fatalf("Papers in %q, want Clippings", f.ParentFolderID)
+	}
+	home, err := w.st.CreateFolder("Home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := x.Call("move_folder", map[string]any{"folder_id": w.folder.ID, "parent_folder_id": inner}); out["error"] == nil {
+		t.Errorf("a folder moved into its own folder: %v", out)
+	}
+	if out := x.Call("move_folder", map[string]any{"folder_id": w.folder.ID, "parent_folder_id": home.ID}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if len(x.Ops) != 2 || x.Ops[1].Op != "move_folder" || x.Edits[1].Summary != "Moved folder “Clippings”" {
+		t.Fatalf("ops %+v, edits %+v", x.Ops, x.Edits)
+	}
+	if folders := spaceFolders(w.st); !slices.ContainsFunc(folders, func(f map[string]any) bool {
+		return f["id"] == w.folder.ID && f["parent_folder_id"] == home.ID
+	}) {
+		t.Errorf("list_folders %v", folders)
+	}
+	w.h.Session(WorkspaceID).Runs = []*Run{{ID: "r1", Status: "done", Ops: x.Ops, Edits: x.Edits}}
+	if err := w.h.UndoRun(WorkspaceID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := w.st.Folder(w.folder.ID); f.ParentFolderID != "" {
+		t.Errorf("after Undo Clippings is in %q", f.ParentFolderID)
+	}
+	if f, _ := w.st.Folder(inner); f.DeletedAt.IsZero() {
+		t.Error("Undo left Papers")
+	}
+	if err := w.h.RedoRun(WorkspaceID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := w.st.Folder(w.folder.ID); f.ParentFolderID != home.ID {
+		t.Errorf("after Redo Clippings is in %q", f.ParentFolderID)
+	}
+}
+
+func TestUndoTakesBackAFolderMadeAndFilled(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	x := w.executor(true)
+	made, _ := x.Call("create_folder", map[string]any{"name": "Archive"})["folder_id"].(string)
+	if out := x.Call("move_folder", map[string]any{"folder_id": w.folder.ID + " ", "parent_folder_id": made}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if len(x.Ops) != 2 || x.Ops[1].FolderID != w.folder.ID {
+		t.Fatalf("ops %+v", x.Ops)
+	}
+	w.h.Session(WorkspaceID).Runs = []*Run{{ID: "r1", Status: "done", Ops: x.Ops, Edits: x.Edits}}
+	if err := w.h.UndoRun(WorkspaceID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := w.st.Folder(w.folder.ID); f.ParentFolderID != "" {
+		t.Errorf("after Undo Clippings is in %q", f.ParentFolderID)
+	}
+	if f, _ := w.st.Folder(made); f.DeletedAt.IsZero() {
+		t.Error("Undo left the folder the run made")
+	}
+}

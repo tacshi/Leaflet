@@ -278,8 +278,11 @@ func goldenWorkspace(reading bool, made *[][]*doc.Node) *Workspace {
 		},
 		RenamePage: func(string, string) error { return nil },
 		SetTags:    func(_ string, tags []string) ([]string, error) { return store.NormalizeTags(tags), nil },
-		CreateFolder: func(name string) (doc.NewFolder, error) {
-			return doc.NewFolder{ID: "f-new", SpaceID: "space-0", Name: name, SortKey: "a1"}, nil
+		CreateFolder: func(name, parentID string) (doc.NewFolder, error) {
+			return doc.NewFolder{ID: "f-new", SpaceID: "space-0", ParentFolderID: parentID, Name: name, SortKey: "a1"}, nil
+		},
+		MoveFolder: func(id, parentID string) (string, doc.FolderPlace, doc.FolderPlace, error) {
+			return "Folder", doc.FolderPlace{SortKey: "a"}, doc.FolderPlace{ParentFolderID: parentID, SortKey: "b"}, nil
 		},
 	}
 }

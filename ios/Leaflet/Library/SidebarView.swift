@@ -39,6 +39,7 @@ struct SidebarView: View {
     @State private var renamingTag: String?
     @State private var id = UUID()
     @State private var open: Set<String> = []
+    @State private var drops = SidebarDrops()
 
     private var showsTodos: Bool { tab == .todos && query.isEmpty }
 
@@ -84,6 +85,9 @@ struct SidebarView: View {
                 }
             }
         }
+        .environment(drops)
+        .background { SidebarDropHost(drops: drops) }
+        .overlay { SidebarDropMark(drops: drops) }
         .modifier(LibraryListStyle(stacked: stacked))
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("")
@@ -96,6 +100,7 @@ struct SidebarView: View {
         .onChange(of: scene.searchRequested) { searchFocused = true }
         .task(id: query) { await search() }
         .task { scene.workspace.start(app) }
+        .task { drops.app = app }
         .onAppear { app.showsTodos(id, showsTodos) }
         .onDisappear { app.showsTodos(id, false) }
         .onChange(of: showsTodos) { app.showsTodos(id, showsTodos) }
@@ -179,7 +184,7 @@ struct SidebarView: View {
     @ViewBuilder private var pagesTab: some View {
         let lib = app.library
         Section {
-            ForEach(lib.folders) { folder in
+            ForEach(lib.rootFolders) { folder in
                 FolderRowView(folder: folder, actions: actions, open: $open)
             }
             PageRows(pages: lib.topPages, actions: actions, open: $open)
@@ -547,15 +552,20 @@ struct FolderRowView: View {
     let actions: RowActions
     @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
     @State private var expanded = true
     @State private var uploading = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
+            ForEach(app.library.subfolders(of: folder)) {
+                FolderRowView(folder: $0, actions: actions, open: $open)
+            }
             PageRows(pages: app.library.pages(in: folder), actions: actions, open: $open)
             ForEach(app.library.files(in: folder)) { FileRowView(file: $0) }
         } label: {
             Label(folder.name, systemImage: "folder")
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .selectionDisabled()
                 .contentShape(.rect)
                 .onTapGesture { withAnimation { expanded.toggle() } }
@@ -568,24 +578,27 @@ struct FolderRowView: View {
                     ) {
                         await app.setDefaultTemplate($0, folder: folder)
                     }
+                    Button(L.sidebarNewFolderInFolder, systemImage: "folder.badge.plus") {
+                        scene.newFolder(in: folder.id)
+                    }
                     Button(L.sidebarUploadFile, systemImage: "square.and.arrow.up") {
                         uploading = true
                     }
                     Button(L.sidebarRenameEllipsis, systemImage: "pencil") {
                         actions.renameFolder(folder)
                     }
+                    Button(L.sidebarMoveTo, systemImage: "folder") {
+                        scene.movingFolder = folder
+                    }
                     Divider()
                     Button(L.sidebarDeleteFolder, systemImage: "trash", role: .destructive) {
                         Task { await app.deleteFolder(folder) }
                     }
                 }
-                .dropDestination(for: String.self) { ids, _ in
-                    guard let id = ids.first, let page = app.library.page(id), page.canEdit,
-                        !page.template, app.library.own(page)
-                    else { return false }
-                    Task { await app.move(page, parentID: "", folderID: folder.id) }
-                    return true
+                .draggable(FolderRow.dragPrefix + folder.id) {
+                    Label(folder.name, systemImage: "folder").padding(8)
                 }
+                .modifier(SidebarDropRow(key: SidebarDrops.folderKey(folder.id)))
                 .fileImporter(
                     isPresented: $uploading, allowedContentTypes: [.item],
                     allowsMultipleSelection: true

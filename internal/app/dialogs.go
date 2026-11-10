@@ -57,6 +57,7 @@ type dialogs struct {
 
 	folderOpen   bool
 	folder       *store.Folder
+	folderParent string
 	folderName   string
 	folderSelect bool
 
@@ -81,9 +82,10 @@ type dialogs struct {
 	speakerLine  int
 	speakerName  string
 
-	moveOpen  bool
-	movePage  string
-	moveQuery string
+	moveOpen   bool
+	movePage   string
+	moveFolder string
+	moveQuery  string
 
 	historyOpen   bool
 	historyPage   string
@@ -327,11 +329,16 @@ func (a *App) openHit(h store.SearchHit) {
 }
 
 func (d *dialogs) openRenameFolder(f *store.Folder) {
-	d.folderOpen, d.folder = true, f
+	d.folderOpen, d.folder, d.folderParent = true, f, ""
 	d.folderName = ""
 	if f != nil {
 		d.folderName, d.folderSelect = f.Name, true
 	}
+}
+
+func (d *dialogs) openNewFolder(parentID string) {
+	d.openRenameFolder(nil)
+	d.folderParent = parentID
 }
 
 func (a *App) folderDialog(c *ui.Context) {
@@ -354,9 +361,12 @@ func (a *App) folderDialog(c *ui.Context) {
 					return
 				}
 				if d.folder == nil {
-					if f, err := a.st.CreateFolder(name); err != nil {
+					if f, err := a.st.CreateFolderIn(name, d.folderParent); err != nil {
 						a.toast(locales.DialogFolderCreateFailed(err.Error()))
 					} else {
+						if d.folderParent != "" {
+							a.openFolders(d.folderParent)
+						}
 						a.showInTree("folder", f.ID)
 					}
 				} else {
@@ -386,19 +396,34 @@ func (a *App) folderDialog(c *ui.Context) {
 }
 
 func (d *dialogs) openMove(id string) {
-	d.moveOpen, d.movePage, d.moveQuery = true, id, ""
+	d.moveOpen, d.movePage, d.moveFolder, d.moveQuery = true, id, "", ""
+}
+
+func (d *dialogs) openMoveFolder(id string) {
+	d.moveOpen, d.movePage, d.moveFolder, d.moveQuery = true, "", id, ""
 }
 
 func (a *App) moveDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
+	lib := a.library()
+	title, search := a.pageTitleOf(d.movePage), locales.DialogMoveSearch()
+	if d.moveFolder != "" {
+		f, ok := lib.Folder(d.moveFolder)
+		if !ok {
+			d.moveOpen = false
+			return
+		}
+		title, search = f.Name, locales.DialogMoveSearchFolders()
+	}
 	dialog(c, &d.moveOpen, 440, func() {
-		dialogHeader(c, locales.DialogMoveTitle(a.pageTitleOf(d.movePage)), locales.DialogMoveSubtitle(), &d.moveOpen)
+		dialogHeader(c, locales.DialogMoveTitle(title), locales.DialogMoveSubtitle(), &d.moveOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(10).Children(func() {
-			field(c, "q", &d.moveQuery, locales.DialogMoveSearch()).AutoFocus()
+			field(c, "q", &d.moveQuery, search).AutoFocus()
 			ui.Scroll(c).MaxHeight(320).Children(func() {
-				target := func(key, icon, title, parent, folder string) {
-					row := ui.ButtonBase(c.Key(key)).Padding(7, 10).Gap(10).Radius(7).AlignItems(ui.Center).Justify(ui.Start).FillWidth()
+				target := func(key, icon, title string, depth int, move func() error) {
+					row := ui.ButtonBase(c.Key(key)).Padding(7, 10).PaddingStart(10 + float32(depth)*16).Gap(10).Radius(7).
+						AlignItems(ui.Center).Justify(ui.Start).FillWidth()
 					if row.Hovered() {
 						row.Background(pal.Hover)
 					}
@@ -407,23 +432,56 @@ func (a *App) moveDialog(c *ui.Context) {
 						ui.Text(c, title).FontSize(13.5).TextColor(pal.Text).SingleLine()
 					})
 					if row.Clicked() {
-						if err := a.pageCore().MovePage(d.movePage, parent, func() error {
-							return a.st.MovePage(d.movePage, parent, folder, "")
-						}); err != nil {
+						if err := move(); err != nil {
 							a.toast(locales.SidebarCouldNotMove(err.Error()))
 						} else {
 							d.moveOpen = false
-							if parent != "" {
-								a.treeOpen("page", parent)
-							}
 						}
 					}
 				}
 				q := strings.ToLower(d.moveQuery)
+				folders, depths := lib.FolderOrder()
+				if id := d.moveFolder; id != "" {
+					if q == "" {
+						target("top", "file-text", locales.DialogMoveTopLevel(), 0, func() error { return a.st.MoveFolder(id, "", "") })
+					}
+					for i, f := range folders {
+						if lib.FolderUnder(f.ID, id) || q != "" && !strings.Contains(strings.ToLower(f.Name), q) {
+							continue
+						}
+						depth := depths[i]
+						if q != "" {
+							depth = 0
+						}
+						target("folder:"+f.ID, "folder", f.Name, depth, func() error {
+							if err := a.st.MoveFolder(id, f.ID, ""); err != nil {
+								return err
+							}
+							a.openFolders(f.ID)
+							return nil
+						})
+					}
+					return
+				}
+				movePage := func(parent, folder string) func() error {
+					return func() error {
+						err := a.pageCore().MovePage(d.movePage, parent, func() error {
+							return a.st.MovePage(d.movePage, parent, folder, "")
+						})
+						switch {
+						case err != nil:
+						case parent != "":
+							a.treeOpen("page", parent)
+						case folder != "":
+							a.openFolders(folder)
+						}
+						return err
+					}
+				}
 				if q == "" && a.canMoveInside(d.movePage, "") {
-					target("top", "file-text", locales.DialogMoveTopLevel(), "", "")
-					for _, f := range a.library().Folders {
-						target("folder:"+f.ID, "folder", f.Name, "", f.ID)
+					target("top", "file-text", locales.DialogMoveTopLevel(), 0, movePage("", ""))
+					for i, f := range folders {
+						target("folder:"+f.ID, "folder", f.Name, depths[i], movePage("", f.ID))
 					}
 				}
 				for _, p := range a.pages {
@@ -433,7 +491,7 @@ func (a *App) moveDialog(c *ui.Context) {
 					if q != "" && !strings.Contains(strings.ToLower(p.DisplayTitle()), q) {
 						continue
 					}
-					target("page:"+p.ID, "file-text", p.DisplayTitle(), p.ID, "")
+					target("page:"+p.ID, "file-text", p.DisplayTitle(), 0, movePage(p.ID, ""))
 				}
 			})
 		})

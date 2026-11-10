@@ -51,23 +51,9 @@ struct FileRowView: View {
 
 struct PageDrops: ViewModifier {
     let page: PageRow
-    @Environment(AppModel.self) private var app
-    @State private var height: CGFloat = 0
-    @State private var targeted = false
 
     func body(content: Content) -> some View {
-        let row =
-            content
-            .onGeometryChange(for: CGFloat.self, of: \.size.height) { height = $0 }
-            .dropDestination(for: String.self) { ids, at in
-                guard let id = ids.first else { return false }
-                let before = at.y < height / 2
-                Task { await app.place(id, beside: page, before: before) }
-                return true
-            } isTargeted: {
-                targeted = $0
-            }
-            .listRowBackground(targeted ? Color.accentColor.opacity(0.15) : nil)
+        let row = content.modifier(SidebarDropRow(key: SidebarDrops.pageKey(page.id)))
         if page.canEdit && !page.template {
             row.draggable(page.id) {
                 Label(page.displayTitle, systemImage: "doc.text")

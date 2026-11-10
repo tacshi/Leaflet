@@ -57,15 +57,18 @@ type fileRow struct {
 }
 
 type library struct {
-	SpaceID  string              `json:"space_id"`
-	Pages    []pageRow           `json:"pages"`
-	Folders  []folderRow         `json:"folders"`
-	Files    []fileRow           `json:"files"`
-	Tags     []tagRow            `json:"tags"`
-	Top      []string            `json:"top"`
-	InFolder map[string][]string `json:"in_folder"`
-	Children map[string][]string `json:"children"`
-	Shared   []string            `json:"shared"`
+	SpaceID string      `json:"space_id"`
+	Pages   []pageRow   `json:"pages"`
+	Folders []folderRow `json:"folders"`
+	// RootFolders and SubFolders arrange the folders as the sidebar shows them.
+	RootFolders []string            `json:"root_folders"`
+	SubFolders  map[string][]string `json:"sub_folders"`
+	Files       []fileRow           `json:"files"`
+	Tags        []tagRow            `json:"tags"`
+	Top         []string            `json:"top"`
+	InFolder    map[string][]string `json:"in_folder"`
+	Children    map[string][]string `json:"children"`
+	Shared      []string            `json:"shared"`
 }
 
 func (c *Core) Library() (_ string, err error) {
@@ -101,6 +104,11 @@ func (c *Core) Library() (_ string, err error) {
 				ID: f.ID, ParentID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey, DefaultTemplateID: f.DefaultTemplateID,
 			})
 		}
+		lib.RootFolders = folderIDs(tree.RootFolders)
+		lib.SubFolders = make(map[string][]string, len(tree.SubFolders))
+		for id, in := range tree.SubFolders {
+			lib.SubFolders[id] = folderIDs(in)
+		}
 		lib.Tags = make([]tagRow, 0, len(tree.Tags))
 		for _, t := range tree.Tags {
 			lib.Tags = append(lib.Tags, tagRow{Tag: t.Name, Count: t.Count, Pages: pageIDs(tree.Tagged(t.Name))})
@@ -122,6 +130,14 @@ func (c *Core) Library() (_ string, err error) {
 		return "", err
 	}
 	return encode(lib)
+}
+
+func folderIDs(folders []store.Folder) []string {
+	out := make([]string, 0, len(folders))
+	for _, f := range folders {
+		out = append(out, f.ID)
+	}
+	return out
 }
 
 func pageIDs(pages []store.Page) []string {
@@ -373,13 +389,33 @@ func (c *Core) SetKeepOffline(id string, keep bool) (err error) {
 
 func (c *Core) CreateFolder(name string) (_ string, err error) {
 	defer catch(&err)
+	return c.CreateFolderIn(name, "")
+}
+
+// CreateFolderIn makes a folder last in the folder parentID, or at the top level when it is "".
+func (c *Core) CreateFolderIn(name, parentID string) (_ string, err error) {
+	defer catch(&err)
 	name = strings.TrimSpace(name)
 	var f store.Folder
-	c.q.do(func() { f, err = c.core.Store.CreateFolder(name) })
+	c.q.do(func() { f, err = c.core.Store.CreateFolderIn(name, parentID) })
 	if err != nil {
 		return "", err
 	}
 	return encode(folderRow{ID: f.ID, ParentID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey})
+}
+
+// MoveFolder puts the folder in the folder parentID, or at the top level when it is "", after the folder afterID or last.
+func (c *Core) MoveFolder(id, parentID, afterID string) (err error) {
+	defer catch(&err)
+	c.q.do(func() { err = c.core.Store.MoveFolder(id, parentID, afterID) })
+	return err
+}
+
+// MoveFolderBefore puts the folder in the folder parentID before the folder beforeID, or first.
+func (c *Core) MoveFolderBefore(id, parentID, beforeID string) (err error) {
+	defer catch(&err)
+	c.q.do(func() { err = c.core.Store.MoveFolderBefore(id, parentID, beforeID) })
+	return err
 }
 
 func (c *Core) RenameFolder(id, name string) (err error) {

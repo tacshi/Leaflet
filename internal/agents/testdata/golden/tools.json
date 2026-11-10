@@ -1349,10 +1349,27 @@
       "properties": {
         "name": {
           "type": "string"
+        },
+        "parent_folder_id": {
+          "type": "string"
         }
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "move_folder": {
+      "properties": {
+        "folder_id": {
+          "type": "string"
+        },
+        "parent_folder_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "folder_id"
       ],
       "type": "object"
     }

@@ -32,10 +32,17 @@ func (p PagePlace) Same(q PagePlace) bool {
 }
 
 type NewFolder struct {
-	ID      string `json:"id"`
-	SpaceID string `json:"space_id,omitempty"`
-	Name    string `json:"name"`
-	SortKey string `json:"sort_key,omitempty"`
+	ID             string `json:"id"`
+	SpaceID        string `json:"space_id,omitempty"`
+	ParentFolderID string `json:"parent_folder_id,omitempty"`
+	Name           string `json:"name"`
+	SortKey        string `json:"sort_key,omitempty"`
+}
+
+// FolderPlace is where a folder is: in which folder, or at the top level, and where among the folders there.
+type FolderPlace struct {
+	ParentFolderID string `json:"parent_folder_id,omitempty"`
+	SortKey        string `json:"sort_key,omitempty"`
 }
 
 type Op struct {
@@ -59,11 +66,14 @@ type Op struct {
 	PrevTags  []string
 	Folder    *NewFolder
 	FolderID  string
+	// FolderPlace and PrevFolderPlace are where move_folder put the folder FolderID, and where it was.
+	FolderPlace     *FolderPlace
+	PrevFolderPlace *FolderPlace
 }
 
 func (o Op) IsPageOp() bool {
 	switch o.Op {
-	case "create_page", "delete_page", "move_page", "rename_page", "set_page_tags", "create_folder", "delete_folder":
+	case "create_page", "delete_page", "move_page", "rename_page", "set_page_tags", "create_folder", "delete_folder", "move_folder":
 		return true
 	}
 	return false
@@ -86,14 +96,15 @@ type opJSON struct {
 	Tags     []string        `json:"tags,omitempty"`
 	Folder   *NewFolder      `json:"folder,omitempty"`
 	FolderID string          `json:"folder_id,omitempty"`
+	FPlace   *FolderPlace    `json:"folder_place,omitempty"`
 }
 
 func (o Op) MarshalJSON() ([]byte, error) {
 	j := opJSON{Op: o.Op, Position: o.Position, Nodes: o.Nodes, ID: o.ID, Node: o.Node,
 		From: o.From, IDs: o.IDs, Page: o.Page, Content: o.Content, PageID: o.PageID,
-		Place: o.Place, Tags: o.Tags, Folder: o.Folder, FolderID: o.FolderID}
+		Place: o.Place, Tags: o.Tags, Folder: o.Folder, FolderID: o.FolderID, FPlace: o.FolderPlace}
 	switch o.Op {
-	case "move_page", "rename_page", "set_page_tags":
+	case "move_page", "rename_page", "set_page_tags", "move_folder":
 		j.Title = &o.Title
 	}
 	var err error
@@ -111,6 +122,10 @@ func (o Op) MarshalJSON() ([]byte, error) {
 	case "move_page":
 		if o.PrevPlace != nil {
 			j.Previous, err = json.Marshal(o.PrevPlace)
+		}
+	case "move_folder":
+		if o.PrevFolderPlace != nil {
+			j.Previous, err = json.Marshal(o.PrevFolderPlace)
 		}
 	case "rename_page":
 		j.Previous, err = json.Marshal(o.PrevTitle)
@@ -134,7 +149,7 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 	}
 	*o = Op{Op: j.Op, Position: j.Position, Nodes: j.Nodes, ID: j.ID, Node: j.Node,
 		From: j.From, IDs: j.IDs, Page: j.Page, Content: j.Content, PageID: j.PageID,
-		Place: j.Place, Tags: j.Tags, Folder: j.Folder, FolderID: j.FolderID}
+		Place: j.Place, Tags: j.Tags, Folder: j.Folder, FolderID: j.FolderID, FolderPlace: j.FPlace}
 	if j.Title != nil {
 		o.Title = *j.Title
 	}
@@ -149,6 +164,9 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 		case "move_page":
 			o.PrevPlace = &PagePlace{}
 			err = json.Unmarshal(j.Previous, o.PrevPlace)
+		case "move_folder":
+			o.PrevFolderPlace = &FolderPlace{}
+			err = json.Unmarshal(j.Previous, o.PrevFolderPlace)
 		case "rename_page":
 			err = json.Unmarshal(j.Previous, &o.PrevTitle)
 		case "set_page_tags":
@@ -311,6 +329,8 @@ func (o Op) Invert() []Op {
 		if o.Folder != nil {
 			return []Op{{Op: "delete_folder", FolderID: o.Folder.ID}}
 		}
+	case "move_folder":
+		return []Op{{Op: "move_folder", FolderID: o.FolderID, Title: o.Title, FolderPlace: o.PrevFolderPlace, PrevFolderPlace: o.FolderPlace}}
 	}
 	return nil
 }

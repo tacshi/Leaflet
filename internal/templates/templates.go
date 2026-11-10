@@ -165,8 +165,14 @@ func Default(st *store.Store, choices []Choice, parent, folder string) (Choice, 
 			id = p.DefaultTemplateID
 		}
 	case folder != "":
-		if f, err := st.Folder(folder); err == nil {
-			id = f.DefaultTemplateID
+		seen := map[string]bool{}
+		for cursor := folder; cursor != "" && id == "" && !seen[cursor]; {
+			seen[cursor] = true
+			f, err := st.Folder(cursor)
+			if err != nil || !f.DeletedAt.IsZero() {
+				break
+			}
+			id, cursor = f.DefaultTemplateID, f.ParentFolderID
 		}
 	}
 	if id == "" {

@@ -1,27 +1,16 @@
 import Foundation
 
-/// ICloudSync is iCloud sync as Settings shows it: the folder picked, and
-/// turning sync through it on and off, one turn at a time.
 @MainActor
 @Observable
 final class ICloudSync {
-    /// folderName names the folder picked, while the app can open it.
     private(set) var folderName: String?
-    /// lost says the folder picked before can't be opened again.
     private(set) var lost: Bool
-    /// turning is the state the switch turns to, until it has.
     private(set) var turning: Bool?
-    /// failure says why iCloud sync couldn't turn on, or the folder
-    /// couldn't be used.
     private(set) var failure: String?
-    /// picking shows the folder picker.
     var picking = false
 
-    /// client is the core, once it is open.
     @ObservationIgnored private var client: CoreClient?
     @ObservationIgnored private let folder: ICloudFolder
-    /// onAfterPicking turns sync on once the folder is picked, when
-    /// turning it on asked for one.
     @ObservationIgnored private var onAfterPicking = false
 
     init(folder: ICloudFolder) {
@@ -30,14 +19,11 @@ final class ICloudSync {
         lost = folder.lost
     }
 
-    /// attach gives sync the core, as it opens, and the core the folder.
     func attach(_ client: CoreClient) {
         self.client = client
         client.useICloudFolder(folder.root)
     }
 
-    /// set turns iCloud sync on or off. On with no folder to sync
-    /// through, the user picks it first.
     func set(_ on: Bool) async {
         guard turning == nil else { return }
         if on && folder.root == nil {
@@ -48,8 +34,6 @@ final class ICloudSync {
         await turn(on, root: on ? folder.root : nil)
     }
 
-    /// picked uses the folder the user picked, with sync on through it
-    /// when it was on, or turning on asked for it.
     func picked(_ url: URL, syncing: Bool) async {
         let on = syncing || onAfterPicking
         onAfterPicking = false
@@ -60,8 +44,6 @@ final class ICloudSync {
             failure = error.localizedDescription
             return
         }
-        // The core moves to the new folder between passes, so a pass under
-        // way still reads and writes the one before until turn returns.
         defer { before?.stopAccessingSecurityScopedResource() }
         folderName = url.lastPathComponent
         lost = false
@@ -69,8 +51,6 @@ final class ICloudSync {
         await turn(on, root: folder.root)
     }
 
-    /// choose has the user pick another folder, with sync left on or
-    /// off as it is.
     func choose() {
         onAfterPicking = false
         picking = true

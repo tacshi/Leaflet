@@ -15,28 +15,19 @@ import (
 	"leaflet/locales"
 )
 
-// Signing in with Supabase: the person's own Supabase account holds the
-// project Leaflet syncs through, which this finds, or creates, and sets up.
-
 //go:embed supabase.svg
 var supabaseLogoSVG []byte
 
-// supabaseLogo is Supabase's mark, over the sign-in page.
 var supabaseLogo = sync.OnceValue(func() *ui.SVG { return ui.MustParseSVG(supabaseLogoSVG) })
 
 func init() {
-	// A development build's project is apart from the real one.
 	if mygo.IsDev() {
 		provision.ProjectName = provision.DevProjectName
 	}
 }
 
-// hasServer reports whether Leaflet can sync through a server here: the
-// project chosen, or one to choose by signing in with Supabase, unless the
-// environment fixes a server it gives no key for.
 func (a *App) hasServer() bool { return a.backend.Configured() || !a.backend.Fixed() }
 
-// Steps of signing in with Supabase, shown on the sign-in page.
 const (
 	stepBrowser  = "browser"
 	stepFinding  = "finding"
@@ -47,10 +38,7 @@ const (
 	stepSigning  = core.StepSigning
 )
 
-// supabaseState is a sign-in with Supabase under way.
 type supabaseState struct {
-	// run tells this sign-in from one cancelled or started again, whose
-	// steps still to come are ignored.
 	run       int
 	step      string
 	api       *supabaseapi.Client
@@ -58,19 +46,14 @@ type supabaseState struct {
 	org       string
 	done, all int
 	cancel    context.CancelFunc
-	// link is Supabase's sign-in page, to open again: a new account makes
-	// its first organization there, and Supabase leaves the sign-in for
-	// that organization's dashboard.
-	link string
+	link      string
 }
 
-// nextRun starts a sign-in's run, on the main thread.
 func (a *App) nextRun() int {
 	a.supaRuns++
 	return a.supaRuns
 }
 
-// supaStep runs fn on the main thread while run is the sign-in under way.
 func (a *App) supaStep(run int, fn func()) {
 	a.update(func() {
 		if a.supa.run == run {
@@ -79,9 +62,6 @@ func (a *App) supaStep(run int, fn func()) {
 	})
 }
 
-// signInWithSupabase opens Supabase's sign-in in the browser, then finds
-// the account's Leaflet project: one is used at once; otherwise the person
-// chooses on the page.
 func (a *App) signInWithSupabase() {
 	ctx, cancel := context.WithCancel(context.Background())
 	run := a.nextRun()
@@ -104,8 +84,6 @@ func (a *App) signInWithSupabase() {
 			a.supabaseFailed(run, err)
 			return
 		}
-		// One Leaflet project is used at once. A project that is not one
-		// yet, though named so, may be the person's own: they choose.
 		if len(found.Projects) == 1 {
 			a.connectProject(ctx, cr, run, api, found.Projects[0])
 			return
@@ -119,11 +97,7 @@ func (a *App) signInWithSupabase() {
 	}()
 }
 
-// chooseProject uses p, or creates a project in the organization chosen
-// when p is nil.
 func (a *App) chooseProject(p *supabaseapi.Project) {
-	// One setup at a time: a second click before the projects' list goes
-	// does nothing.
 	if a.supa.step != stepChoose {
 		return
 	}
@@ -136,7 +110,6 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 	a.supa.run, a.supa.cancel = run, cancel
 	a.signIn.err = ""
 	if p != nil {
-		// The list goes at once; the setup says its steps as they come.
 		a.supa.step = stepSetup
 		go a.connectProject(ctx, cr, run, api, *p)
 		return
@@ -152,9 +125,6 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 	}()
 }
 
-// connectProject sets p up for this version of Leaflet, once it is up,
-// makes it the project, and signs in to it as its owner, through the
-// app's core cr.
 func (a *App) connectProject(ctx context.Context, cr *core.Core, run int, api *supabaseapi.Client, p supabaseapi.Project) {
 	pending, err := cr.ConnectProject(ctx, api, p, func(step string, done, all int) {
 		a.supaStep(run, func() {
@@ -168,9 +138,6 @@ func (a *App) connectProject(ctx context.Context, cr *core.Core, run int, api *s
 		a.supabaseFailed(run, err)
 		return
 	}
-	// The project and session become the device's only for the run still
-	// under way: one cancelled, or started again since, leaves them as
-	// they are.
 	a.update(func() {
 		if a.supa.run != run {
 			go a.backend.Discard(pending)
@@ -187,8 +154,6 @@ func (a *App) connectProject(ctx context.Context, cr *core.Core, run int, api *s
 	})
 }
 
-// supabaseFailed shows err on the sign-in page, unless the sign-in run was
-// cancelled.
 func (a *App) supabaseFailed(run int, err error) {
 	a.supaStep(run, func() {
 		step := a.supa.step
@@ -201,7 +166,6 @@ func (a *App) supabaseFailed(run int, err error) {
 	})
 }
 
-// cancelSupabase stops the sign-in under way.
 func (a *App) cancelSupabase() {
 	if a.supa.cancel != nil {
 		a.supa.cancel()
@@ -209,5 +173,4 @@ func (a *App) cancelSupabase() {
 	a.supa = supabaseState{}
 }
 
-// dashboardURL is the project's page in the Supabase dashboard.
 func dashboardURL(ref string) string { return "https://supabase.com/dashboard/project/" + ref }

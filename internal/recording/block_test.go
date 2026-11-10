@@ -11,8 +11,6 @@ import (
 	"leaflet/locales"
 )
 
-// A recording's length shows as minutes and seconds, with hours once it
-// has them.
 func TestFormatDuration(t *testing.T) {
 	for d, want := range map[time.Duration]string{
 		0: "0:00", 65 * time.Second: "1:05", time.Hour + 2*time.Minute + 5*time.Second: "1:02:05",
@@ -23,8 +21,6 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-// A block's title is its own, an older block's English one in the app's
-// words with its time, and Recording when it has none or is the page's.
 func TestBlockTitle(t *testing.T) {
 	made := time.Date(2026, 1, 2, 9, 30, 0, 0, time.Local)
 	cases := []struct {
@@ -37,7 +33,6 @@ func TestBlockTitle(t *testing.T) {
 		{"", true, "Notes", locales.CommonRecording()},
 		{"Standup", true, " Standup ", locales.CommonRecording()},
 		{"Recording · Jan 2", true, "Notes", locales.RecBlockTitle(made)},
-		// Not on this device, its time is not known.
 		{"Recording · Jan 2", false, "Notes", "Recording · Jan 2"},
 	}
 	for _, c := range cases {
@@ -47,8 +42,6 @@ func TestBlockTitle(t *testing.T) {
 	}
 }
 
-// The status says a transcription running or failed, or the length and
-// what transcribed it.
 func TestStatus(t *testing.T) {
 	minute := 65_000
 	cases := []struct {
@@ -70,8 +63,6 @@ func TestStatus(t *testing.T) {
 	}
 }
 
-// A transcript copies as a line each, tidied, after its speaker's name
-// when it has one.
 func TestTranscriptText(t *testing.T) {
 	rec := store.Recording{Transcript: []store.Segment{
 		{Text: "Hello", Speaker: "1"},
@@ -84,9 +75,6 @@ func TestTranscriptText(t *testing.T) {
 	}
 }
 
-// A transcript saves with its times and speakers, in each kind of file: a
-// line that doesn't say when it ends lasts until the next, and the last a
-// moment, and subtitles' cues are a line each, in their own markup.
 func TestTranscriptFile(t *testing.T) {
 	segs := []store.Segment{
 		{StartMs: 1500, EndMs: 3250, Text: "Hello\nthere.", Speaker: "1"},
@@ -109,8 +97,6 @@ func TestTranscriptFile(t *testing.T) {
 	}
 }
 
-// The last line of a transcript, with no end and none after it, stays up
-// a moment.
 func TestTranscriptFileLastLine(t *testing.T) {
 	got := TranscriptFile([]store.Segment{{StartMs: 1000, Text: "Only."}}, TranscriptSrt)
 	if want := "1\n00:00:01,000 --> 00:00:04,000\nOnly.\n\n"; got != want {
@@ -118,7 +104,6 @@ func TestTranscriptFileLastLine(t *testing.T) {
 	}
 }
 
-// Lines put in a page keep who said them.
 func TestTranscriptBlocksKeepSpeakers(t *testing.T) {
 	nodes := TranscriptBlocks(store.Recording{Transcript: []store.Segment{{StartMs: 65000, Text: "Hi.", Speaker: "2"}}})
 	if len(nodes) != 1 {
@@ -130,8 +115,6 @@ func TestTranscriptBlocksKeepSpeakers(t *testing.T) {
 	}
 }
 
-// A transcript reads as notes: a line each, tidied, after its time and
-// speaker, which is what plays it from there.
 func TestTranscriptNotes(t *testing.T) {
 	notes, cut := TranscriptNotes([]store.Segment{
 		{StartMs: 5000, Text: "Hello\nthere.", Speaker: "1"},
@@ -147,7 +130,6 @@ func TestTranscriptNotes(t *testing.T) {
 	}
 }
 
-// What doesn't fit goes, a whole line at a time, and says so.
 func TestTranscriptNotesCut(t *testing.T) {
 	long := strings.Repeat("字", 60_000)
 	segs := []store.Segment{{StartMs: 0, Text: long + "."}, {StartMs: 1000, Text: long + "."}, {StartMs: 2000, Text: long + "."}, {StartMs: 3000, Text: long + "."}}
@@ -157,8 +139,6 @@ func TestTranscriptNotesCut(t *testing.T) {
 	}
 }
 
-// A transcript fits in the room given by whole lines, the last ones going,
-// and says when any went; with room for none, none is left.
 func TestFitNotes(t *testing.T) {
 	notes := "0:05 Hello\n0:06 Bye"
 	for _, c := range []struct {
@@ -178,8 +158,6 @@ func TestFitNotes(t *testing.T) {
 	}
 }
 
-// Each provider names its engine as a transcript's line says what made
-// it; none names none.
 func TestEngineName(t *testing.T) {
 	for provider, want := range map[string]string{
 		"": "", "soniox": "Soniox", Moss: "MOSS", OnDevice: locales.RecEngineOnDevice(),

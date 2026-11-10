@@ -6,7 +6,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// Keeping a page on this device, or letting it go, is kept in the store.
 func TestSetKeepOffline(t *testing.T) {
 	c, _ := iCloudCore(t, t.TempDir())
 	p, err := c.Store.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -23,8 +22,6 @@ func TestSetKeepOffline(t *testing.T) {
 	}
 }
 
-// Keeping all pages is kept in the settings as the app has them, or in
-// the store's when the app keeps none of its own.
 func TestSetAllPagesOffline(t *testing.T) {
 	c, _ := iCloudCore(t, t.TempDir())
 	c.SetAllPagesOffline(false)

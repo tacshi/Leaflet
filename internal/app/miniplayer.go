@@ -15,44 +15,28 @@ import (
 	"leaflet/locales"
 )
 
-// A small player under the page, for audio whose own has scrolled away: a
-// transcript is read below it, and the block may still be on screen when
-// its player no longer is. It takes a row of its own, not a place over the
-// page, as a web view in the page would show over it.
-
-// nowPlaying is the audio of the open page that started last: file block
-// block, or the recording rec, in block.
 type nowPlaying struct {
 	block, rec string
 }
 
-// lineKey is a line of a block's transcript.
 type lineKey struct {
 	block string
 	line  int
 }
 
-// fileStatus is where a file's player is, as it last said.
 type fileStatus struct {
 	at, length, rate float64
 	paused           bool
 }
 
-// playerHead is how far down a block its player ends: past that, it has
-// left the page's view, whatever of the block still shows.
 const playerHead = 110
 
-// headGone reports whether the head of a block that starts at top is out
-// of the page's view, from viewTop to viewBottom.
 func headGone(top, viewTop, viewBottom float32) bool {
 	return top+playerHead <= viewTop || top >= viewBottom
 }
 
-// setNowPlaying notes the audio that starts: a file's audio or a recording,
-// or nothing for a video, which has picture in picture.
 func (a *App) setNowPlaying(video, rec string) {
 	a.watchSystemAudio()
-	// Going on, it stays where it says it is.
 	if video != "" && a.now == (nowPlaying{block: video}) {
 		return
 	}
@@ -75,8 +59,6 @@ func (a *App) setNowPlaying(video, rec string) {
 	}
 }
 
-// miniPlayer draws the player under the page, while the audio's own is out
-// of view.
 func (a *App) miniPlayer(c *ui.Context) {
 	ps := a.page
 	if ps == nil || a.now.block == "" {
@@ -136,8 +118,6 @@ func (a *App) miniPlayer(c *ui.Context) {
 	})
 }
 
-// heard is the audio that started last, as what shows it and what controls
-// it need it.
 type heard struct {
 	title        string
 	pos, length  time.Duration
@@ -146,7 +126,6 @@ type heard struct {
 	seek         func(time.Duration)
 }
 
-// heardAudio is the audio that started last, if it is still there.
 func (a *App) heardAudio() (heard, bool) {
 	id := a.now.block
 	if a.page == nil || id == "" {
@@ -161,8 +140,6 @@ func (a *App) heardAudio() (heard, bool) {
 		if pl == nil || pl.p == nil {
 			return heard{}, false
 		}
-		// As its block reads it, once: this runs each frame the player
-		// shows.
 		v := a.recordingView(a.now.rec)
 		rec := v.rec
 		return heard{
@@ -191,14 +168,8 @@ func (a *App) heardAudio() (heard, bool) {
 	}, true
 }
 
-// lineTick is how often lines redraw as audio plays, for the line being
-// said to keep up.
 const lineTick = 250 * time.Millisecond
 
-// playhead is where block id's audio is, and how long it lasts, in seconds;
-// false for a block not playing. A file's player says where it is twice a
-// second, and goes on from there in between. It asks for the next frame
-// while it plays: only a block on screen asks.
 func (a *App) playhead(c *ui.Context, id string) (sec, length float64, ok bool) {
 	if a.now.block != id {
 		return 0, 0, false
@@ -219,8 +190,6 @@ func (a *App) playhead(c *ui.Context, id string) (sec, length float64, ok bool) 
 	return a.fileAt(), a.fileNow.length, true
 }
 
-// fileAt is where the file playing is: where its player last said, and on
-// from there as it plays.
 func (a *App) fileAt() float64 {
 	st := a.fileNow
 	if st.paused || st.length <= 0 {
@@ -229,8 +198,6 @@ func (a *App) fileAt() float64 {
 	return min(st.at+time.Since(a.fileNowAt).Seconds()*a.speed(), st.length)
 }
 
-// toggleFile plays audio file block n, or pauses it: its player comes first,
-// and one left paused as another started goes on.
 func (a *App) toggleFile(n *doc.Node) {
 	wv := a.videos[n.ID]
 	if wv == nil {
@@ -246,11 +213,9 @@ func (a *App) toggleFile(n *doc.Node) {
 		a.playAlone(n.ID, "")
 	}
 	page := wv.Page()
-	// Eval waits for the page, so not on the UI thread.
 	go func() { _, _ = page.Eval(rendered.FilePlaying(on)) }()
 }
 
-// seekFile takes block id's file to t, playing or not as it was.
 func (a *App) seekFile(id string, t time.Duration) {
 	wv := a.videos[id]
 	if wv == nil {
@@ -261,11 +226,8 @@ func (a *App) seekFile(id string, t time.Duration) {
 	go func() { _, _ = page.Eval(rendered.FileSeekTo(t.Seconds())) }()
 }
 
-// skipBy is how far a skip goes.
 const skipBy = 15 * time.Second
 
-// skipped is where audio of length dur at pos goes on a skip of by: nowhere
-// until its length is known.
 func skipped(pos, by, dur time.Duration) time.Duration {
 	if dur <= 0 {
 		return pos
@@ -273,8 +235,6 @@ func skipped(pos, by, dur time.Duration) time.Duration {
 	return min(max(pos+by, 0), dur)
 }
 
-// playerBar is the controls of audio of length dur, at pos, that seek moves:
-// a skip each way, where it is, and its speed.
 func (a *App) playerBar(c *ui.Context, pos, dur time.Duration, seek func(time.Duration)) {
 	ui.Row(c.Key("player-bar")).Gap(8).AlignItems(ui.Center).Children(func() {
 		tools(c, func() {
@@ -301,7 +261,6 @@ func (a *App) playerBar(c *ui.Context, pos, dur time.Duration, seek func(time.Du
 	})
 }
 
-// skipButton is a skip's button: its arrow around the seconds it goes.
 func skipButton(c *ui.Context, key, icon, label string) ui.Element {
 	b := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Padding(6)
 	b.Children(func() {
@@ -315,16 +274,12 @@ func skipButton(c *ui.Context, key, icon, label string) ui.Element {
 	return b
 }
 
-// playSpeeds are the speeds audio plays at.
 var playSpeeds = []float64{0.75, 1, 1.25, 1.5, 1.75, 2}
 
-// speedKey keeps how fast audio plays.
 const speedKey = "player.speed"
 
-// speedLabel is a speed as its button says it: 1.5×.
 func speedLabel(s float64) string { return strconv.FormatFloat(s, 'f', -1, 64) + "×" }
 
-// speed is how fast audio plays, files' and recordings' alike.
 func (a *App) speed() float64 {
 	if a.playSpeed == 0 {
 		v, _ := a.st.Value(speedKey)
@@ -337,7 +292,6 @@ func (a *App) speed() float64 {
 	return a.playSpeed
 }
 
-// setSpeed has audio play at s, what plays now and what plays next.
 func (a *App) setSpeed(s float64) {
 	a.fileNow.at, a.fileNowAt = a.fileAt(), time.Now()
 	a.playSpeed = s
@@ -360,17 +314,13 @@ func (a *App) setSpeed(s float64) {
 	}
 }
 
-// tellSpeed tells a file's player how fast to play.
 func (a *App) tellSpeed(wv *mygo.WebView) {
 	page, script := wv.Page(), rendered.FileSpeed(a.speed())
-	// Eval waits for the page, so not on the UI thread.
 	go func() { _, _ = page.Eval(script) }()
 }
 
-// followKey keeps whether transcripts follow the audio.
 const followKey = "player.follow"
 
-// followOn reports whether transcripts follow the audio.
 func (a *App) followOn() bool {
 	if !a.followRead {
 		v, _ := a.st.Value(followKey)
@@ -379,7 +329,6 @@ func (a *App) followOn() bool {
 	return a.followLines
 }
 
-// setFollow says whether transcripts follow the audio.
 func (a *App) setFollow(on bool) {
 	a.followLines, a.followRead, a.followAt = on, true, -1
 	v := ""
@@ -391,8 +340,6 @@ func (a *App) setFollow(on bool) {
 	}
 }
 
-// markLine lights row, the line of block being said, and, once it is laid
-// out where it now is, brings it into view for those who follow along.
 func (a *App) markLine(c *ui.Context, row ui.Element, block string, line int) {
 	lightLine(c, row).Bind(&a.lineRow)
 	switch key := (lineKey{block, line}); {
@@ -405,22 +352,15 @@ func (a *App) markLine(c *ui.Context, row ui.Element, block string, line int) {
 	}
 }
 
-// lineInset and lineLift are how far the light on the line being said
-// reaches past its text, to its sides and above and below it, into the gap
-// between lines: the text stays where it was.
 const (
 	lineInset = 6
 	lineLift  = 3
 )
 
-// lightLine lights row, the line being said.
 func lightLine(c *ui.Context, row ui.Element) ui.Element {
 	return row.Background(theme.Of(c).AccentSoft).Radius(6).Padding(lineLift, lineInset).Margin(-lineLift, -lineInset)
 }
 
-// followLine scrolls the page to keep the line being said a third of the
-// way down. Someone who scrolled since is left to read: it goes on from
-// the line after next, once they have stopped.
 func (a *App) followLine(c *ui.Context) {
 	ps := a.page
 	if ps == nil || !a.followOn() {
@@ -439,5 +379,4 @@ func (a *App) followLine(c *ui.Context) {
 	a.followAt = y
 }
 
-// seconds is a time a web page's player says as a duration.
 func seconds(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }

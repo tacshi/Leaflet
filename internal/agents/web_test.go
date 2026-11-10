@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -19,113 +17,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// Searches read here as the agent function reads them (supabase/functions/
-// _shared/testdata/search.json, which its tests write).
-func TestSearchesAsTheServerReadsThem(t *testing.T) {
-	raw, err := os.ReadFile("../../supabase/functions/_shared/testdata/search.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f struct {
-		Responses struct {
-			Output []any  `json:"output"`
-			Search Search `json:"search"`
-		} `json:"responses"`
-		Anthropic struct {
-			Content []any  `json:"content"`
-			Search  Search `json:"search"`
-		} `json:"anthropic"`
-		Chat struct {
-			Data   chatSearchAnswer `json:"data"`
-			Search Search           `json:"search"`
-		} `json:"chat"`
-	}
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatal(err)
-	}
-	for name, c := range map[string][2]Search{
-		"responses": {responsesSearch(f.Responses.Output), f.Responses.Search},
-		"anthropic": {anthropicSearch(f.Anthropic.Content), f.Anthropic.Search},
-		"chat":      {f.Chat.Data.search(), f.Chat.Search},
-	} {
-		if len(c[1].Sources) == 0 || !reflect.DeepEqual(c[0], c[1]) {
-			t.Errorf("%s found\n%+v\nthe server's\n%+v", name, c[0], c[1])
-		}
-	}
-}
-
-// The web's tools are offered as the server offers them, and take and
-// refuse the calls of supabase/functions/_shared/testdata/web_calls.json as
-// its do: the URLs a run may read and write after reading the web.
-func TestWebToolsAsTheServerHasThem(t *testing.T) {
-	raw, err := os.ReadFile("../../supabase/functions/_shared/testdata/tools.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schemas struct {
-		Web map[string]any `json:"web"`
-	}
-	if err := json.Unmarshal(raw, &schemas); err != nil {
-		t.Fatal(err)
-	}
-	defs := WebToolDefinitions(true)
-	if len(defs) != len(schemas.Web) || len(defs) != 2 {
-		t.Fatalf("%d web tools here, %d on the server", len(defs), len(schemas.Web))
-	}
-	for _, d := range defs {
-		fn := d["function"].(map[string]any)
-		got, _ := json.Marshal(contract(jsonOf(t, fn["parameters"])))
-		want, _ := json.Marshal(schemas.Web[fn["name"].(string)])
-		if string(got) != string(want) {
-			t.Errorf("%s takes\n%s\nthe server's\n%s", fn["name"], got, want)
-		}
-	}
-	if defs := WebToolDefinitions(false); len(defs) != 1 || defs[0]["function"].(map[string]any)["name"] != "read_web_page" {
-		t.Errorf("without a search %v", defs)
-	}
-
-	raw, err = os.ReadFile("../../supabase/functions/_shared/testdata/web_calls.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f struct {
-		Request string `json:"request"`
-		Search  Search `json:"search"`
-		Seqs    []struct {
-			Armed bool `json:"armed"`
-			Calls []struct {
-				Tool string `json:"tool"`
-				Args string `json:"args"`
-				OK   bool   `json:"ok"`
-			} `json:"calls"`
-			KeptToPage bool `json:"kept_to_page"`
-		} `json:"sequences"`
-	}
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.Seqs) == 0 {
-		t.Fatal("the fixture has no cases")
-	}
-	for i, seq := range f.Seqs {
-		x := webExecutor(f.Request, f.Search)
-		x.armed = seq.Armed
-		for _, c := range seq.Calls {
-			out := x.CallRaw(c.Tool, c.Args)
-			if _, refused := out["error"]; refused == c.OK {
-				t.Errorf("sequence %d: %s %s: refused %v (%v), the server's ok %v", i, c.Tool, c.Args, refused, out["error"], c.OK)
-			}
-		}
-		if !x.readPages != seq.KeptToPage {
-			t.Errorf("sequence %d kept to its page %v, the server's %v", i, !x.readPages, seq.KeptToPage)
-		}
-	}
-}
-
-// A run follows so many links of the pages it read and no more, which
-// could spell out what it read by the links it picks: one that fails
-// counts, as its site heard it; the pages the user gave it or a search
-// found are not counted, and go on.
 func TestFollowedLinksEnd(t *testing.T) {
 	x := webExecutor("Read https://given.example/r", Search{Sources: []Source{{URL: "https://found.example/a"}}})
 	read := x.Ctx.ReadWeb
@@ -155,8 +46,6 @@ func TestFollowedLinksEnd(t *testing.T) {
 	must("https://found.example/a", false)
 }
 
-// webExecutor is an executor on page() with the web: its searches find
-// found, and its pages each link https://found.example/b.
 func webExecutor(request string, found Search) *Executor {
 	x := executor(page())
 	x.Ctx.Request = request
@@ -169,21 +58,6 @@ func webExecutor(request string, found Search) *Executor {
 	return x
 }
 
-func jsonOf(t *testing.T, v any) any {
-	t.Helper()
-	raw, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-// toServer sends a client's requests to srv, whatever host they name, so
-// a test can be each provider.
 type toServer struct{ srv *httptest.Server }
 
 func (t toServer) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -194,9 +68,6 @@ func (t toServer) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// Each provider is asked in its own way, as the agent function asks it:
-// the Responses API's web_search, Claude's server tool with its key in
-// x-api-key alone, OpenRouter's and GLM's tools; another is not asked.
 func TestClientSearchesAsItsProviderDoes(t *testing.T) {
 	type asked struct {
 		host, path, auth, key string
@@ -253,8 +124,6 @@ func TestClientSearchesAsItsProviderDoes(t *testing.T) {
 	}
 }
 
-// A ChatGPT plan searches with the Responses API's web_search, its answer
-// streamed; an error it streams fails the search.
 func TestChatGPTSearches(t *testing.T) {
 	var body map[string]any
 	fail := false
@@ -284,9 +153,6 @@ func TestChatGPTSearches(t *testing.T) {
 	}
 }
 
-// A run that may use the web is offered its tools and told of them, says
-// what it does while a call reads the web, and keeps to its page; one that
-// follows turns that read other pages, or may not, is offered none.
 func TestRunOffersTheWeb(t *testing.T) {
 	tools := func(f *fakeModel, i int) []string {
 		var names []string
@@ -345,8 +211,6 @@ func TestRunOffersTheWeb(t *testing.T) {
 	}
 }
 
-// A conversation's turns kept to the page while each reply came from a
-// run that read nothing beyond it.
 func TestConversationKeptToPage(t *testing.T) {
 	s := &Session{Runs: []*Run{{ID: "r1", Status: "done", KeptToPage: true}, {ID: "r2", Status: "done"}, {ID: "r3", Status: "failed"}}}
 	s.Messages = []*Message{{Mine: true, Text: "a"}, {Text: "A", RunID: "r1"}}
@@ -367,45 +231,6 @@ func TestConversationKeptToPage(t *testing.T) {
 	}
 }
 
-// A cloud run says what it does as the server calls the web, and ends
-// with whether it kept to its page.
-func TestCloudRunSaysWhatItDoes(t *testing.T) {
-	var did []string
-	res, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{
-		{"type": "call", "tool": "web_search", "args": map[string]any{"query": "AI videos"}},
-		{"type": "call", "tool": "read_web_page", "args": map[string]any{"url": "https://news.ycombinator.com/"}},
-		{"type": "done", "reply": "Found them.", "kept_to_page": true},
-	}}, "j1", Events{Activity: func(s string) { did = append(did, s) }})
-	if err != nil || !res.KeptToPage || len(did) != 2 || !strings.Contains(did[0], "AI videos") || !strings.Contains(did[1], "news.ycombinator.com") {
-		t.Errorf("run %+v %v, said %q", res, err, did)
-	}
-}
-
-// A cloud run whose URL guard was on says so, as its server does, or as
-// what it did tells: it called the web, or read beyond its page. One that
-// did none of those did not.
-func TestCloudRunSaysItsGuardWasOn(t *testing.T) {
-	for name, c := range map[string]struct {
-		events  []map[string]any
-		guarded bool
-	}{
-		"kept":   {[]map[string]any{{"type": "done", "reply": "Hi.", "kept_to_page": true}}, false},
-		"said":   {[]map[string]any{{"type": "done", "reply": "Hi.", "kept_to_page": true, "guarded": true}}, true},
-		"beyond": {[]map[string]any{{"type": "done", "reply": "Hi."}}, true},
-		"called": {[]map[string]any{{"type": "call", "tool": "read_video_transcript", "args": map[string]any{}}, {"type": "done", "reply": "Hi.", "kept_to_page": true}}, true},
-	} {
-		res, err := RunCloud(context.Background(), fakeStream{events: c.events}, "j1", Events{})
-		if err != nil || res.Guarded != c.guarded {
-			t.Errorf("%s: guarded %v, %v", name, res.Guarded, err)
-		}
-	}
-}
-
-// A page the run read is a source of its own, which a picture, a video or
-// a link card may hold, only when it did not pick it from a page it read:
-// its first page of the web, one the user gave, or a search's result. One
-// a page linked to, read, stays a link: its writer could have listed many
-// for the run to choose from, and reading one makes it no better.
 func TestPagesPickedFromPagesAreNoSources(t *testing.T) {
 	x := webExecutor("Read https://given.example/r", Search{Sources: []Source{{URL: "https://found.example/a"}}})
 	card := func(u string) map[string]any {

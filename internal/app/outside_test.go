@@ -17,8 +17,6 @@ import (
 	"leaflet/locales"
 )
 
-// An agent outside the app (leaflet mcp) edits the open page while the
-// user types: the app's next save keeps both.
 func TestSaveKeepsOutsideEdits(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -45,10 +43,8 @@ func TestSaveKeepsOutsideEdits(t *testing.T) {
 		t.Fatal("the page did not open")
 	}
 
-	// The user types in p1, not yet saved.
 	a.page.editor.Content.Find("p1").SetDelta(doc.FromMarkdown("one, typed"))
 	a.page.live.Changed()
-	// Meanwhile the agent rewrites p2 in the store.
 	outside := st.Content(p.ID)
 	outside.Find("p2").SetDelta(doc.FromMarkdown("two, by the agent"))
 	if _, _, err := st.SaveContent(p.ID, outside); err != nil {
@@ -62,8 +58,6 @@ func TestSaveKeepsOutsideEdits(t *testing.T) {
 	}
 }
 
-// A block deleted here and edited elsewhere comes back as a conflict,
-// stored with no node for this device; Delete it removes it again.
 func TestDeletedAndEditedConflict(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -120,8 +114,6 @@ func TestDeletedAndEditedConflict(t *testing.T) {
 	}
 }
 
-// A save that fails keeps the edits waiting, for the page closing to try
-// again.
 func TestFailedSaveKeepsTheEdits(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -153,8 +145,6 @@ func TestFailedSaveKeepsTheEdits(t *testing.T) {
 	}
 }
 
-// Leaving a page whose edits fail to save keeps it open with them, rather
-// than dropping them; once saving works, it closes with them stored.
 func TestLeavingAPageThatCannotSave(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -212,8 +202,6 @@ func TestLeavingAPageThatCannotSave(t *testing.T) {
 	}
 }
 
-// Stored content that can't be read opens read-only with a notice, and
-// is never saved over; once a readable version comes, it opens as usual.
 func TestUnreadablePageOpensReadOnly(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -258,10 +246,6 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 	}
 }
 
-// Content brought into the open page that can't be read is not shown as
-// an empty page and saved over: the editor keeps what it shows, read-only
-// as an unreadable page opens, with what was typed kept in its history,
-// and the page still closes.
 func TestUnreadableContentBroughtInIsNotSavedOver(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("mine")})})
@@ -295,8 +279,6 @@ func TestUnreadableContentBroughtInIsNotSavedOver(t *testing.T) {
 	}
 }
 
-// A title that cannot be saved keeps the page open with it, as its text
-// would.
 func TestLeavingAPageWhoseTitleCannotSave(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
@@ -314,9 +296,6 @@ func TestLeavingAPageWhoseTitleCannotSave(t *testing.T) {
 	}
 }
 
-// A title typed and not yet saved, its field left before the rename's
-// wait is over, stays as other changes reload the pages; one renamed
-// elsewhere, with nothing typed, shows the new title.
 func TestReloadKeepsATitleNotYetSaved(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
@@ -346,8 +325,6 @@ func TestReloadKeepsATitleNotYetSaved(t *testing.T) {
 	}
 }
 
-// A page renamed elsewhere shows its new title while the user is in the
-// title with nothing typed, and the next save keeps it, not the old one.
 func TestRenameElsewhereShowsInAFocusedTitle(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -386,8 +363,6 @@ func TestRenameElsewhereShowsInAFocusedTitle(t *testing.T) {
 	}
 }
 
-// The open page deleted on another device closes, with what was typed and
-// not yet saved stored first, for restoring it to bring back.
 func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -423,8 +398,6 @@ func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
 	}
 }
 
-// The open page deleted on another device as its edits cannot be saved
-// keeps them in its history, for restoring it to bring back.
 func TestPageDeletedElsewhereKeepsWhatCouldNotSave(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -478,8 +451,6 @@ func TestPageDeletedElsewhereKeepsWhatCouldNotSave(t *testing.T) {
 	}
 }
 
-// A title typed into the open page as it is deleted elsewhere is saved
-// with what was typed, for restoring the page to bring back.
 func TestPageDeletedElsewhereKeepsTheTypedTitle(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Old"})
@@ -512,9 +483,6 @@ func TestPageDeletedElsewhereKeepsTheTypedTitle(t *testing.T) {
 	}
 }
 
-// What was started on a page, a comment not posted yet and the dialogs
-// changing its blocks, closes with it: posted later, it went on the page
-// opened next.
 func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	a := templatesApp(t)
 	first, err := a.st.CreatePage(store.NewPageOptions{Title: "First"})
@@ -544,8 +512,6 @@ func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	}
 }
 
-// Settings closes for a page opened from it that is open already, as a
-// conflict's page is.
 func TestOpeningTheOpenPageClosesSettings(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -561,8 +527,6 @@ func TestOpeningTheOpenPageClosesSettings(t *testing.T) {
 	}
 }
 
-// The open page removed from this device, its share withdrawn, closes
-// without being saved back.
 func TestRemovedSharedPageCloses(t *testing.T) {
 	a := templatesApp(t)
 	old := "2026-01-01T00:00:00Z"
@@ -588,9 +552,6 @@ func TestRemovedSharedPageCloses(t *testing.T) {
 	}
 }
 
-// A title typed is saved shortly after the typing stops: with no window,
-// as in tests, at once, on the goroutine typing it, so no timer's runs it
-// later beside the test's.
 func TestTitleSavesWithoutATimer(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -618,7 +579,6 @@ func TestTitleSavesWithoutATimer(t *testing.T) {
 	if got := stored(); got != "After" || a.page.titleTimer != nil {
 		t.Errorf("stored %q, a timer to come %v", got, a.page.titleTimer != nil)
 	}
-	// Longer than the wait a timer would take, the test goes on.
 	time.Sleep(700 * time.Millisecond)
 	tt.Type(" all")
 	tt.Frame()
@@ -627,8 +587,6 @@ func TestTitleSavesWithoutATimer(t *testing.T) {
 	}
 }
 
-// With a window, or a post standing in for one, later runs its function
-// on the main thread once the wait is over, and not once stopped.
 func TestLaterWaitsWithAWindow(t *testing.T) {
 	a := templatesApp(t)
 	posted := make(chan func(), 2)
@@ -636,8 +594,6 @@ func TestLaterWaitsWithAWindow(t *testing.T) {
 	ran := 0
 	stopped := a.later(time.Millisecond, func() { ran += 10 })
 	if !stopped.Stop() {
-		// It fired before it could be stopped, on a busy machine: what it
-		// posted is no stopped timer's.
 		<-posted
 	}
 	if a.later(20*time.Millisecond, func() { ran++ }) == nil || ran != 0 {
@@ -654,8 +610,6 @@ func TestLaterWaitsWithAWindow(t *testing.T) {
 	}
 }
 
-// The app publishes the open page and its selection, and takes them away
-// as the page closes.
 func TestViewIsPublished(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {

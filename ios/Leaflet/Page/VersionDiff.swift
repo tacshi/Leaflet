@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// VersionDiff compares a version's text with the page's, line by line, as
-/// the desktop's History does, for what restoring it would change.
 enum VersionDiff {
-    /// Row is a line of the comparison, or a gap for those left out.
     struct Row: Hashable, Identifiable, Sendable {
         enum Kind: Sendable { case same, added, removed, gap }
 
@@ -12,8 +9,6 @@ enum VersionDiff {
         let text: String
     }
 
-    /// rows are the lines that changed from old to new, with context lines
-    /// around each, in order; none when nothing did.
     static func rows(from old: String, to new: String, context: Int = 2) -> [Row] {
         let before = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let after = new.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -42,8 +37,6 @@ enum VersionDiff {
                 j += 1
             }
         }
-        // A line stays within context of one that changed; the others
-        // between two such stretches are one gap.
         var kept = Set<Int>()
         for (n, line) in lines.enumerated() where line.kind != .same {
             kept.formUnion(max(0, n - context)...min(lines.count - 1, n + context))
@@ -66,7 +59,6 @@ enum VersionDiff {
     }
 }
 
-/// VersionChanges shows what changed in the page since a version.
 struct VersionChanges: View {
     let rows: [VersionDiff.Row]
 

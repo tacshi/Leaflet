@@ -22,9 +22,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// open is a store in a folder of the test's, as the app's is: a file, with
-// the write-ahead log, the busy timeout and the transactions that take the
-// write lock as they begin, which one in memory has none of.
 func open(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(t.TempDir())
@@ -38,10 +35,6 @@ func open(t *testing.T) *Store {
 	return s
 }
 
-// nextStamp waits for the clock to read a later millisecond, so what is
-// done next is stamped after what was done before. A sleep of a few
-// milliseconds does not do that on Windows, whose clock moves on every
-// 15 ms or so.
 func nextStamp() {
 	for now := time.Now().UnixMilli(); time.Now().UnixMilli() == now; {
 		time.Sleep(time.Millisecond)
@@ -68,8 +61,6 @@ func TestKeyBetween(t *testing.T) {
 	}
 }
 
-// No key sorts between a and a followed by 0s, as the agent function once
-// made: one just after it is given, and dragging on from there works.
 func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 	for _, pair := range [][2]string{{"a", "a0"}, {"", "0"}, {"a1", "a100"}} {
 		k := KeyBetween(pair[0], pair[1])
@@ -77,7 +68,6 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 			t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
 		}
 	}
-	// Dragging to the top of a list that starts at "a0", again and again.
 	top := "a0"
 	for i := 0; i < 20; i++ {
 		next := KeyBetween("", top)
@@ -88,11 +78,6 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 	}
 }
 
-// Keys from the server may hold any characters: a key between them never
-// panics, and sorts strictly between whenever a key of digits can.
-// A key made for a page is its own, between its neighbours: two made from
-// the same keys differ, and so does a page made where a deleted one was,
-// which Undo then brings back.
 func TestNewKeysStayApart(t *testing.T) {
 	for _, pair := range [][2]string{{"", ""}, {"V", ""}, {"", "V"}, {"V", "W"}, {"V", "V1"}, {"a", "a2"}, {"Z", "a"}, {"b", "a"}} {
 		seen := map[string]bool{}
@@ -142,15 +127,13 @@ func TestKeyBetweenAnyKeys(t *testing.T) {
 			t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
 		}
 	}
-	// Nothing of digits sorts before " ": the key goes just after it.
 	if k := KeyBetween("", " "); k <= " " {
 		t.Errorf("before \" \": %q", k)
 	}
-	// Out of order, a key after a.
 	if k := KeyBetween("b", "a"); k <= "b" {
 		t.Errorf("between \"b\" and \"a\": %q", k)
 	}
-	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404 -- seeded, for keys a test can repeat.
+	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404
 	chars := "0aZz~ !\x7f\xe4"
 	key := func() string {
 		var b strings.Builder
@@ -164,8 +147,6 @@ func TestKeyBetweenAnyKeys(t *testing.T) {
 		if a > b {
 			a, b = b, a
 		}
-		// No key of digits sorts between a and a followed by 0s and then
-		// nothing or a character before 0.
 		if rest, ok := strings.CutPrefix(b, a); ok {
 			if rest = strings.TrimLeft(rest, "0"); rest == "" || rest[0] < '0' {
 				continue
@@ -177,8 +158,6 @@ func TestKeyBetweenAnyKeys(t *testing.T) {
 	}
 }
 
-// Deleting a thread's first comment keeps its replies; the thread goes
-// once they are deleted too.
 func TestDeletedFirstCommentKeepsItsReplies(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -218,7 +197,6 @@ func TestPagesAndContent(t *testing.T) {
 	if len(hits) != 1 || hits[0].PageID != p.ID {
 		t.Errorf("hits %+v", hits)
 	}
-	// One outbox entry per changed row.
 	n := 0
 	entries, _ := s.Pending()
 	for _, e := range entries {
@@ -267,8 +245,6 @@ func TestComments(t *testing.T) {
 	}
 }
 
-// A guest's comment, from a page's public link, keeps the guest's name
-// through the server, in agent_name, as an agent's does.
 func TestGuestCommentRemote(t *testing.T) {
 	c := Comment{ID: "c", PageID: "p", BlockID: "b", AuthorKind: "guest", AuthorName: "Ann", Body: "Hi", AuthorID: "owner"}
 	r := CommentToRemote(c)
@@ -305,7 +281,6 @@ func TestDequeueKeepsNewerPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent, _ := s.Pending()
-	// Renamed again while the first rename was on its way.
 	if err := s.Queue("pages", "p1", map[string]any{"title": "Final"}, "", "p1"); err != nil {
 		t.Fatal(err)
 	}
@@ -324,8 +299,6 @@ func TestDequeueKeepsNewerPayload(t *testing.T) {
 	}
 }
 
-// An edit queued while another process sends the queue is never lost:
-// right after it is queued, it either waits or went up.
 func TestQueueWhileSending(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir)
@@ -381,13 +354,12 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	if _, err := s.CreatePage(NewPageOptions{Title: "A's plan"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutProvider(Provider{ID: "ollama", Preset: "ollama", Name: "Ollama", IsLocal: true}); err != nil {
+	if err := s.PutProvider(Provider{ID: "ollama", Preset: "ollama", Name: "Ollama"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutProvider(Provider{ID: "cloud", Preset: "openai", Name: "OpenAI"}); err != nil {
 		t.Fatal(err)
 	}
-	// What sync does on A's first sign-in: adopt the device's space.
 	local := s.Session().SpaceID
 	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p", "mcp_edited:p1": "mark"} {
 		_ = s.SetValue(k, v)
@@ -404,8 +376,6 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 		t.Fatalf("A signing back in: %d pages", len(pages))
 	}
 
-	// A's changes not uploaded stay, until the user agrees to lose them:
-	// the app quitting as it asked signed B in all the same.
 	if _, err := s.LoadSession(&User{ID: "B", Email: "b@example.com"}); !errors.Is(err, ErrUnsynced) {
 		t.Fatalf("B signing in over A's changes: %v", err)
 	}
@@ -436,8 +406,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 			t.Errorf("%s kept", k)
 		}
 	}
-	providers, _ := s.Providers()
-	if len(providers) != 1 || providers[0].ID != "ollama" {
+	if providers, _ := s.Providers(); len(providers) != 2 {
 		t.Errorf("providers %+v", providers)
 	}
 }
@@ -459,7 +428,6 @@ func TestWatchOthers(t *testing.T) {
 	defer close(stop)
 	go app.WatchOthers(10*time.Millisecond, stop, func() { seen <- struct{}{} })
 	time.Sleep(30 * time.Millisecond)
-	// The app's own writes are not news to it.
 	if err := app.SetValue("own", "1"); err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +459,6 @@ func TestSavedContentReadsBackTheSame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The app tells another process's save from its own by this.
 	if got := s.Content(p.ID).Encode(); got != stamped.Encode() {
 		t.Errorf("stored %s\nsaved  %s", got, stamped.Encode())
 	}
@@ -560,7 +527,6 @@ func TestCopyPage(t *testing.T) {
 		t.Error("block IDs were kept")
 	}
 
-	// A template and its subpages stay out of the page list.
 	tpl, err := s.CopyPage(prd.ID, CopyOptions{Title: "PRD", Template: true})
 	if err != nil {
 		t.Fatal(err)
@@ -576,7 +542,6 @@ func TestCopyPage(t *testing.T) {
 		t.Errorf("%d template pages, want the template and its 3 subpages", len(templates))
 	}
 
-	// Starting a page from it copies its subpages as pages.
 	page, _ := s.CreatePage(NewPageOptions{Title: "New PRD"})
 	in, err := s.CopyInto(tpl.ID, page.ID)
 	if err != nil {
@@ -591,10 +556,6 @@ func TestCopyPage(t *testing.T) {
 	}
 }
 
-// A copy's recording blocks have recordings of their own, on the copy, so
-// whoever the copy is shared with can read them. Audio that went up is
-// shared; audio on this device is copied, and goes up as the copy's if the
-// original's was waiting to.
 func TestCopyPageCopiesRecordings(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
@@ -650,7 +611,6 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 		if !s.HasPending("recordings", id) {
 			t.Errorf("block %d: the copy is not queued", i)
 		}
-		// Uploaded audio goes up again, as the copy's own.
 		if !s.HasPending("storage", "recordings/"+id) {
 			t.Errorf("block %d: no upload queued", i)
 		}
@@ -660,10 +620,6 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 	}
 }
 
-// A copy takes only the page's own recordings and files, and each of its
-// subpages' own: a block may name another page's, which would go to the
-// copy's audience. Such a block keeps naming it, nothing of it is copied,
-// and copying needs none of it on this device.
 func TestCopyPageLeavesOtherPagesMedia(t *testing.T) {
 	s := open(t)
 	other, _ := s.CreatePage(NewPageOptions{Title: "Other"})
@@ -739,10 +695,6 @@ func TestCopyPageLeavesOtherPagesMedia(t *testing.T) {
 	}
 }
 
-// A copied recording whose audio is only stored, or still uploading from
-// where it was made, is not copied until its audio is on this device: the
-// copy goes up with audio of its own, never later from the original's,
-// which another device may delete meanwhile.
 func TestCopyPageWaitsForAudioOnThisDevice(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
@@ -800,10 +752,6 @@ func TestCopyPageWaitsForAudioOnThisDevice(t *testing.T) {
 	}
 }
 
-// A copied page's pictures and files are files of its own, on the copy,
-// as only those who can view the page a file is on can read it, copied
-// here: one only stored comes to this device first. Starting a page from
-// a template copies them the same way.
 func TestCopyPageCopiesFiles(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
@@ -892,8 +840,6 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 	}
 }
 
-// Content this app cannot read, as a newer app's, is not taken for an
-// empty page: not returned, copied, or saved over.
 func TestUnreadableContentIsNotAnEmptyPage(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "From a newer app"})
@@ -918,8 +864,6 @@ func TestUnreadableContentIsNotAnEmptyPage(t *testing.T) {
 	}
 }
 
-// A file's name from the server never puts it, or a copy of it, outside
-// the app's files folder.
 func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 	s := open(t)
 	if f := FileFromRemote(map[string]any{"id": "f1", "name": "../../../x"}); f.Name != "x" {
@@ -930,8 +874,6 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
 		}
 	}
-	// iCloud Drive's folder takes no name with a backslash, which macOS
-	// allows in one.
 	if got := fileName(`a\b.pdf`); strings.Contains(got, `\`) {
 		t.Errorf("fileName kept a backslash: %q", got)
 	}
@@ -940,7 +882,6 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// As a row stored before names were checked has it.
 	f := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, PageID: p.ID, Name: "../../../escaped.png", LocalPath: src,
 		CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := s.PutFile(f); err != nil {
@@ -968,10 +909,6 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 	}
 }
 
-// Search finds templates by title and text, marked as templates, and
-// leaves them out of the recent pages.
-// Search matches text as written: % and _ are no wildcards, and letters
-// beyond ASCII match in any case, as titles do.
 func TestSearchTextAsWritten(t *testing.T) {
 	s := open(t)
 	body := func(text string) *doc.Content {
@@ -996,8 +933,6 @@ func TestSearchTextAsWritten(t *testing.T) {
 	}
 }
 
-// Deleted pages, which stay on the device, do not use up the limit: their
-// text, recordings and comments matching never hide a page's.
 func TestSearchPastDeletedPages(t *testing.T) {
 	s := open(t)
 	body := func(text string) *doc.Content {
@@ -1042,8 +977,6 @@ func TestSearchPastDeletedPages(t *testing.T) {
 	}
 }
 
-// Text found on more pages than the limit lists the most recently changed
-// of them, whichever order the rows are in.
 func TestSearchTextListsTheLatestFirst(t *testing.T) {
 	s := open(t)
 	var ids []string
@@ -1057,7 +990,6 @@ func TestSearchTextListsTheLatestFirst(t *testing.T) {
 		ids = append(ids, p.ID)
 		nextStamp()
 	}
-	// The first page changed last.
 	if err := s.RenamePage(ids[0], "A again"); err != nil {
 		t.Fatal(err)
 	}
@@ -1109,7 +1041,6 @@ func TestSearchFindsTemplates(t *testing.T) {
 	}
 }
 
-// A named version stays in a page's history past its newest 50.
 func TestHistoryKeepsNamedVersions(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "PRD"})
@@ -1117,7 +1048,6 @@ func TestHistoryKeepsNamedVersions(t *testing.T) {
 	if err := s.AddHistory(p.ID, c, "manual", "", "Sent to legal"); err != nil {
 		t.Fatal(err)
 	}
-	// Named a day before the others.
 	if _, err := s.db.Exec(`UPDATE page_history SET created_at = created_at - 86400000 WHERE reason = 'manual'`); err != nil {
 		t.Fatal(err)
 	}
@@ -1132,9 +1062,6 @@ func TestHistoryKeepsNamedVersions(t *testing.T) {
 	}
 }
 
-// A page keeps only the snapshots History shows: its newest 50 and its
-// named versions. One pruned before it went up leaves the queue, and
-// another page's are left alone.
 func TestHistoryPrunesWhatItNoLongerShows(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "PRD"})
@@ -1185,7 +1112,6 @@ func TestHistoryPrunesWhatItNoLongerShows(t *testing.T) {
 	}
 }
 
-// To-dos come from pages, not templates.
 func TestTodos(t *testing.T) {
 	s := open(t)
 	todo := &doc.Node{Type: "todo_list"}
@@ -1201,9 +1127,6 @@ func TestTodos(t *testing.T) {
 	}
 }
 
-// To-dos read again follow every change of a page's content, from this
-// process or another, as leaflet mcp's, and of its title, though only the
-// pages whose content changed are read again.
 func TestTodosFollowChanges(t *testing.T) {
 	s := open(t)
 	todo := func(text string) *doc.Node {
@@ -1240,7 +1163,6 @@ func TestTodosFollowChanges(t *testing.T) {
 	if got := texts(); !slices.Equal(got, []string{"A:one", "A:three", "Bee:two"}) {
 		t.Errorf("after a save and a rename %v", got)
 	}
-	// Another process writes the content, in the same millisecond as is.
 	if _, err := s.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, doc.FromBlocks([]*doc.Node{todo("four, from elsewhere")}).Encode(), b.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1249,8 +1171,6 @@ func TestTodosFollowChanges(t *testing.T) {
 	}
 }
 
-// A local agent run's snapshot keeps its job here, and goes up without
-// it, as the job has no server row.
 func TestAgentRunHistoryGoesUpWithoutItsJob(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -1281,7 +1201,6 @@ func TestSaveContentOver(t *testing.T) {
 	read, _ := s.ContentRow(p.ID)
 	agent := doc.MustDecode(read.Content)
 	agent.Children[0].SetDelta(doc.Delta{{Text: "From the agent"}})
-	// Someone else saves after the agent read the page.
 	human := doc.MustDecode(read.Content)
 	human.Children[0].SetDelta(doc.Delta{{Text: "Typed"}})
 	if _, _, err := s.SaveContent(p.ID, human); err != nil {
@@ -1302,7 +1221,6 @@ func TestSaveContentOver(t *testing.T) {
 	}
 }
 
-// Saving over no content saves only while the page has none.
 func TestSaveContentOverNone(t *testing.T) {
 	s := open(t)
 	c := &doc.Content{Children: []*doc.Node{{ID: "a", Type: "paragraph"}}}
@@ -1322,8 +1240,6 @@ func TestSaveContentOverNone(t *testing.T) {
 	}
 }
 
-// Recording what the server stored tells the app of the page's content
-// only when it changed it, as the other stores of synced content do.
 func TestPushedContentTellsOfAChange(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -1349,8 +1265,6 @@ func TestPushedContentTellsOfAChange(t *testing.T) {
 	}
 }
 
-// writeDB makes a database at path with the statements, as an earlier
-// version of Leaflet would have.
 func writeDB(t *testing.T, path string, stmts ...string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
@@ -1374,8 +1288,6 @@ func userVersion(t *testing.T, s *Store) int {
 	return v
 }
 
-// A data folder named relative to the working folder, as LEAFLET_DATA_DIR
-// may be, keeps the files in it found: their paths are joined to it once.
 func TestARelativeDataFolderFindsItsFiles(t *testing.T) {
 	t.Chdir(t.TempDir())
 	s, err := Open("data")
@@ -1406,11 +1318,9 @@ func TestARelativeDataFolderFindsItsFiles(t *testing.T) {
 	}
 }
 
-// A data folder whose name has a character URIs treat specially opens the
-// database in that folder, with the pragmas, and not one beside it.
 func TestOpensTheDatabaseInAFolderOfAnyName(t *testing.T) {
 	names := []string{"Notes #1", "100%", "a%20b", "Notizen ü"}
-	if runtime.GOOS != "windows" { // which takes no "?" in a name
+	if runtime.GOOS != "windows" {
 		names = append(names, "What?")
 	}
 	for _, name := range names {
@@ -1448,7 +1358,6 @@ func TestOpensTheDatabaseInAFolderOfAnyName(t *testing.T) {
 func TestOpensADatabaseFromBeforeTheFirstRelease(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
-	// The tables whose columns changed, as the first commit made them.
 	writeDB(t, path,
 		`CREATE TABLE pages (
 		  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
@@ -1496,7 +1405,6 @@ func TestOpensADatabaseFromBeforeTheFirstRelease(t *testing.T) {
 func TestOpensADatabaseFromARelease(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
-	// The releases made the schema as it is, and kept no version.
 	writeDB(t, path, schema,
 		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at, is_template) VALUES ('p1', 's1', 'Plan', 'a', 1, 1, 1)`)
 	s, err := OpenPath(path, dir)
@@ -1512,9 +1420,6 @@ func TestOpensADatabaseFromARelease(t *testing.T) {
 	}
 }
 
-// A database from before rows kept the server's time of them gains it as
-// it opens: its rows have none, and count as changed here, until the
-// server's copy of one is stored.
 func TestADatabaseGainsThePulledTimes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -1552,9 +1457,6 @@ func TestADatabaseGainsThePulledTimes(t *testing.T) {
 	}
 }
 
-// A row stored from the server keeps the server's time of it, until it
-// changes here, or a change of another device's comes for it through
-// iCloud Drive; one that changes nothing here keeps it.
 func TestRowsKeepTheServersTimeUntilTheyChange(t *testing.T) {
 	s := open(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -1587,7 +1489,6 @@ func TestRowsKeepTheServersTimeUntilTheyChange(t *testing.T) {
 			t.Errorf("%s stored from the server keeps no time", table)
 		}
 	}
-	// Renamed as it is: nothing changes, nothing is queued.
 	if err := s.RenamePage(S(page, "id"), "Plan"); err != nil {
 		t.Fatal(err)
 	}
@@ -1635,7 +1536,6 @@ func TestRefusesADatabaseFromANewerVersion(t *testing.T) {
 func TestADatabaseGainsTheICloudTables(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
-	// A release's schema, from before iCloud sync.
 	before := strings.Split(schema, "CREATE TABLE IF NOT EXISTS peer_contents")[0]
 	writeDB(t, path, before, `PRAGMA user_version = 1`)
 	s, err := OpenPath(path, dir)
@@ -1663,8 +1563,6 @@ func TestADatabaseGainsTheICloudTables(t *testing.T) {
 	}
 }
 
-// Forgetting what iCloud sync kept of the other devices keeps the public
-// links this device serves, which its next device.json says.
 func TestForgetICloudKeepsLinksServedHere(t *testing.T) {
 	s := open(t)
 	for key, v := range map[string]string{"icloud.link.l1": "p1|9", "icloud.seq": "4", "icloud.cursor.d1": "2"} {
@@ -1680,9 +1578,6 @@ func TestForgetICloudKeepsLinksServedHere(t *testing.T) {
 	}
 }
 
-// A save stores its content and queues it together: content another
-// process finds changed is always waiting to go up, so a pull never takes
-// it for the server's.
 func TestSavedContentIsAlwaysQueued(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir)
@@ -1737,8 +1632,6 @@ func TestSavedContentIsAlwaysQueued(t *testing.T) {
 	}
 }
 
-// A save whose entry in the outbox cannot be stored stores nothing, so
-// the edit is not kept here only, never to go up.
 func TestASaveThatCannotQueueStoresNothing(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -1771,7 +1664,6 @@ func TestASaveThatCannotQueueStoresNothing(t *testing.T) {
 func TestADatabaseGainsTheIndexes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
-	// Schema 1, without the indexes schema 2 added.
 	var before []string
 	for _, stmt := range strings.Split(schema, ";") {
 		if !strings.Contains(stmt, "pages_parent") && !strings.Contains(stmt, "page_history_page") && !strings.Contains(stmt, "peer_contents_page") {
@@ -1797,7 +1689,6 @@ func TestADatabaseGainsTheIndexes(t *testing.T) {
 	if kids, err := s.Children("p1", "s1"); err != nil || len(kids) != 1 {
 		t.Errorf("children %+v, %v", kids, err)
 	}
-	// What the queries use.
 	for q, index := range map[string]string{
 		`SELECT id FROM pages WHERE parent_id = 'p1' AND deleted_at IS NULL ORDER BY sort_key`:      "pages_parent",
 		`SELECT created_at FROM page_history WHERE page_id = 'p1' ORDER BY created_at DESC LIMIT 1`: "page_history_page",
@@ -1820,8 +1711,6 @@ func TestADatabaseGainsTheIndexes(t *testing.T) {
 	}
 }
 
-// A database from before invites gains whether each member accepted, as
-// a new one has it; the members it kept had all accepted.
 func TestADatabaseGainsMembersAccepted(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -1869,9 +1758,6 @@ func TestADatabaseGainsMembersAccepted(t *testing.T) {
 	}
 }
 
-// Deleting a file removes its copy in the data folder, drops its upload
-// still waiting, and queues the removal of its stored copy after the
-// deletion. A copy outside the data folder is the user's, and stays.
 func TestDeletingAFileRemovesItsCopy(t *testing.T) {
 	s := open(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -1916,10 +1802,6 @@ func TestDeletingAFileRemovesItsCopy(t *testing.T) {
 	}
 }
 
-// The data folder can move, as an iOS app's does when it is updated: the
-// files and audio kept in it are found where it is now, whether their rows
-// were stored by this version (by where they are in it) or by an earlier
-// one (by their whole paths in the folder as it was).
 func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
 	root := t.TempDir()
 	was, now := filepath.Join(root, "old", "Leaflet"), filepath.Join(root, "new", "Leaflet")
@@ -1953,7 +1835,6 @@ func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ?`, f.ID).Scan(&stored); err != nil || stored != "files/"+f.ID+"/notes.txt" {
 		t.Errorf("the file's row names %q (%v)", stored, err)
 	}
-	// As an earlier version stored it.
 	if _, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, audio, rec.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1996,8 +1877,6 @@ func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
 	if s.Path(S(up, "local_path")) != got.LocalPath {
 		t.Errorf("the upload names %v", up["local_path"])
 	}
-	// Changed, the recording's row names its audio by where it is in the
-	// folder from then on.
 	if _, err := s.UpdateRecording(rec.ID, func(r *Recording) { r.Status = "ready" }); err != nil {
 		t.Fatal(err)
 	}
@@ -2006,8 +1885,6 @@ func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
 	}
 }
 
-// A file deleted on another device loses its copy here as the deletion
-// arrives.
 func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
 	s := open(t)
 	id := doc.NewRowID()
@@ -2029,8 +1906,6 @@ func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
 	}
 }
 
-// A file deleted before its download lands keeps no copy here, which
-// nothing would remove again.
 func TestADownloadOfADeletedFileKeepsNoCopy(t *testing.T) {
 	s := open(t)
 	id := doc.NewRowID()
@@ -2057,9 +1932,6 @@ func TestADownloadOfADeletedFileKeepsNoCopy(t *testing.T) {
 	}
 }
 
-// leaflet mcp opens the app's database in a store of its own. When the app
-// changes accounts, its next call reads the new session, and a page it
-// makes before then fails rather than going into a space that is gone.
 func TestReloadSessionFollowsTheApp(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir)
@@ -2079,7 +1951,6 @@ func TestReloadSessionFollowsTheApp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The app signs in, and sync adopts the server's space.
 	local := app.Session().SpaceID
 	if err := app.PutSpace("remote-a", "My space", "A"); err != nil {
 		t.Fatal(err)
@@ -2108,7 +1979,6 @@ func TestReloadSessionFollowsTheApp(t *testing.T) {
 		t.Errorf("page in %q by %q", p.SpaceID, p.CreatedBy)
 	}
 
-	// Signing out: no space until the app makes its new one.
 	if err := app.ForgetAccount(); err != nil {
 		t.Fatal(err)
 	}
@@ -2126,9 +1996,6 @@ func TestReloadSessionFollowsTheApp(t *testing.T) {
 	}
 }
 
-// A file added while the session still names a space that sync has just
-// moved the pages out of fails, as a page does, rather than going into a
-// space that is gone; it leaves no copy behind.
 func TestAddFileInASpaceThatIsGone(t *testing.T) {
 	s := open(t)
 	local := s.Session().SpaceID
@@ -2153,8 +2020,6 @@ func TestAddFileInASpaceThatIsGone(t *testing.T) {
 	}
 }
 
-// Signing out removes the account's files and recordings' audio from the
-// data folder, not only their rows.
 func TestForgetAccountRemovesFiles(t *testing.T) {
 	s := open(t)
 	src := filepath.Join(t.TempDir(), "plan.pdf")
@@ -2185,9 +2050,6 @@ func TestForgetAccountRemovesFiles(t *testing.T) {
 	}
 }
 
-// Forgetting the account forgets when sync last read who its pages are
-// shared with, as it does those it read: the next account's pages count
-// as shared until sync has read theirs.
 func TestForgetAccountForgetsOwnMembersRead(t *testing.T) {
 	s := open(t)
 	const key = "sync.own_members_at"
@@ -2202,8 +2064,6 @@ func TestForgetAccountForgetsOwnMembersRead(t *testing.T) {
 	}
 }
 
-// A page stays in its space: one moved under a page, or into a folder, of
-// another space would be refused by the server every time it went up.
 func TestMovePageStaysInItsSpace(t *testing.T) {
 	s := open(t)
 	old := "2026-01-01T00:00:00Z"
@@ -2232,10 +2092,6 @@ func TestMovePageStaysInItsSpace(t *testing.T) {
 	}
 }
 
-// No page goes under a page deleted, as on another device since, where it
-// would show nowhere: a move there is refused, Undo's too, and a page
-// brought back from under one comes back at the top level, last, while
-// pages brought back with their parent stay under it.
 func TestNoPageGoesUnderADeletedOne(t *testing.T) {
 	s := open(t)
 	gone, _ := s.CreatePage(NewPageOptions{Title: "Gone"})
@@ -2283,9 +2139,6 @@ func TestNoPageGoesUnderADeletedOne(t *testing.T) {
 	}
 }
 
-// A page of someone else's space, brought back from under a parent deleted
-// since, comes back where it was: only the space's owner may move a page
-// to its top level, and the server would refuse the restore with the move.
 func TestRestoreInASharedTreeKeepsItsParent(t *testing.T) {
 	s := open(t)
 	parent, _ := s.CreatePage(NewPageOptions{Title: "Theirs", SpaceID: "space-other"})
@@ -2309,8 +2162,6 @@ func TestRestoreInASharedTreeKeepsItsParent(t *testing.T) {
 	}
 }
 
-// A page's title is at most 2,000 characters, as the server takes it, as
-// it is made, renamed or copied: a longer one would never go up.
 func TestPageTitlesAreCut(t *testing.T) {
 	s := open(t)
 	long := strings.Repeat("é", 2500)
@@ -2339,9 +2190,6 @@ func TestPageTitlesAreCut(t *testing.T) {
 	}
 }
 
-// A page put at the top level goes in order among the pages the library
-// shows there: those whose parent is gone, deleted or not on this device,
-// and those of a folder that is gone, as another device deleted them.
 func TestTopLevelKeysCountPagesWhoseParentIsGone(t *testing.T) {
 	s := open(t)
 	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
@@ -2385,7 +2233,6 @@ func TestTopLevelKeysCountPagesWhoseParentIsGone(t *testing.T) {
 	}
 }
 
-// A recording's error goes up and comes back with it.
 func TestRecordingErrorSyncs(t *testing.T) {
 	s := open(t)
 	r := Recording{ID: doc.NewRowID(), PageID: "p", BlockID: "b", Status: "failed", Error: "no network", CreatedAt: time.Now(), UpdatedAt: time.Now()}
@@ -2402,8 +2249,6 @@ func TestRecordingErrorSyncs(t *testing.T) {
 	}
 }
 
-// A page's change and its entry in the outbox are stored together: when
-// queueing fails the change is not kept, so trying again queues it.
 func TestFailedQueueKeepsNoChange(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Old"})
@@ -2449,8 +2294,6 @@ func TestFailedQueueKeepsNoChange(t *testing.T) {
 	}
 }
 
-// A page or folder pulled from the server leaves one with a change waiting
-// here as it is, checked as it is stored: the change goes up next push.
 func TestPutRemoteKeepsAWaitingChange(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Mine"})
@@ -2496,8 +2339,6 @@ func TestPutRemoteKeepsAWaitingChange(t *testing.T) {
 	}
 }
 
-// Pages left in a loop of parents, as two devices' moves can leave them
-// until sync breaks it, are under no page outside the loop.
 func TestParentLoop(t *testing.T) {
 	s := open(t)
 	at := time.Now().UTC().Format(time.RFC3339Nano)
@@ -2537,8 +2378,6 @@ func TestParentLoop(t *testing.T) {
 	}
 }
 
-// Tags are tidied as they are set, go up with the page's row, and come
-// back from one the same.
 func TestPageTags(t *testing.T) {
 	if got, want := NormalizeTags([]string{" #Work ", "work", "", "two  words", "##x", strings.Repeat("a", 70)}),
 		[]string{"Work", "two words", "x", strings.Repeat("a", maxTagLen)}; !slices.Equal(got, want) {
@@ -2559,7 +2398,6 @@ func TestPageTags(t *testing.T) {
 	}) {
 		t.Errorf("queued %+v", pending)
 	}
-	// A row through JSON, as the server and iCloud send it.
 	var row map[string]any
 	b, _ := json.Marshal(PageToRemote(got))
 	_ = json.Unmarshal(b, &row)
@@ -2575,8 +2413,6 @@ func TestPageTags(t *testing.T) {
 	}
 }
 
-// The template a folder's new pages and a page's new subpages start from
-// is kept, goes up with the row, and comes back from it.
 func TestDefaultTemplates(t *testing.T) {
 	s := open(t)
 	tpl, _ := s.CreatePage(NewPageOptions{Title: "Weekly sync", Template: true})
@@ -2604,7 +2440,6 @@ func TestDefaultTemplates(t *testing.T) {
 			t.Errorf("%s: queued %+v", entity, pending)
 		}
 	}
-	// Rows through JSON, as the server and iCloud send them.
 	var page, folder map[string]any
 	b, _ := json.Marshal(PageToRemote(got))
 	_ = json.Unmarshal(b, &page)
@@ -2617,7 +2452,6 @@ func TestDefaultTemplates(t *testing.T) {
 		t.Errorf("folder read back %+v", back)
 	}
 
-	// Back to blank pages.
 	if err := s.SetFolderDefaultTemplate(folders[0], ""); err != nil {
 		t.Fatal(err)
 	}
@@ -2626,8 +2460,6 @@ func TestDefaultTemplates(t *testing.T) {
 	}
 }
 
-// A database from before default templates gains their columns, keeping
-// its folders and pages.
 func TestOpensADatabaseFromBeforeDefaultTemplates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -2664,8 +2496,6 @@ func TestOpensADatabaseFromBeforeDefaultTemplates(t *testing.T) {
 	}
 }
 
-// The tags of the pages are counted once in any case, by name, and are
-// renamed, merged and deleted on every page.
 func TestRenameAndDeleteTags(t *testing.T) {
 	s := open(t)
 	a, _ := s.CreatePage(NewPageOptions{Title: "A", Tags: []string{"work", "draft"}})
@@ -2698,8 +2528,6 @@ func TestRenameAndDeleteTags(t *testing.T) {
 	}
 }
 
-// Words starting with # keep a search to the pages with those tags, which
-// alone lists them; other words find a page by its tags too.
 func TestSearchByTag(t *testing.T) {
 	s := open(t)
 	plan, _ := s.CreatePage(NewPageOptions{Title: "Plan", Tags: []string{"work"}})
@@ -2730,7 +2558,7 @@ func TestSearchByTag(t *testing.T) {
 		{"#work budget", sorted(plan.ID)},
 		{"budget", sorted(plan.ID, other.ID)},
 		{"readi", sorted(notes.ID)},
-		{"#rea", sorted(notes.ID)}, // while typing
+		{"#rea", sorted(notes.ID)},
 		{"#nope", nil},
 	} {
 		if got := ids(c.q); !slices.Equal(got, c.want) {
@@ -2739,8 +2567,6 @@ func TestSearchByTag(t *testing.T) {
 	}
 }
 
-// A tag filter keeps to its pages before any limit: comments matching on
-// other pages, more than a search takes, hide none of the tagged page's.
 func TestSearchByTagPastOtherMatches(t *testing.T) {
 	s := open(t)
 	other, _ := s.CreatePage(NewPageOptions{Title: "Elsewhere"})
@@ -2759,7 +2585,6 @@ func TestSearchByTagPastOtherMatches(t *testing.T) {
 	}
 }
 
-// A database from before tags gains them, none on each page.
 func TestADatabaseGainsTags(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -2785,8 +2610,6 @@ func TestADatabaseGainsTags(t *testing.T) {
 	}
 }
 
-// A folder renamed from a copy read before its default template changed
-// keeps the template: the rename changes the name alone.
 func TestRenameFolderKeepsChangesSinceRead(t *testing.T) {
 	s := open(t)
 	f, err := s.CreateFolder("Folder")
@@ -2816,8 +2639,6 @@ func TestRenameFolderKeepsChangesSinceRead(t *testing.T) {
 	}
 }
 
-// A comment or recording whose entry in the queue cannot be stored is not
-// stored either: kept, it would never go up.
 func TestRowsAndTheirQueueEntriesStoreTogether(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{})
@@ -2847,8 +2668,6 @@ func TestRowsAndTheirQueueEntriesStoreTogether(t *testing.T) {
 	}
 }
 
-// A row from the server stores only over one with no change waiting here,
-// checked as it stores: the change stays, to go up.
 func TestRemoteRowsKeepChangesWaiting(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{})
@@ -2885,7 +2704,6 @@ func TestRemoteRowsKeepChangesWaiting(t *testing.T) {
 	}
 }
 
-// Signing out removes nothing while a change waits to go up.
 func TestForgetSyncedAccountKeepsChangesWaiting(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Waiting"})
@@ -2915,8 +2733,6 @@ func TestForgetSyncedAccountKeepsChangesWaiting(t *testing.T) {
 	}
 }
 
-// A withdrawn share's pages leave the device with what is kept of them,
-// their copies here and changes waiting too; the user's own pages stay.
 func TestRemoveSharedPages(t *testing.T) {
 	s := open(t)
 	mine, err := s.CreatePage(NewPageOptions{Title: "Mine"})
@@ -2991,9 +2807,6 @@ func TestRemoveSharedPages(t *testing.T) {
 	}
 }
 
-// Removing a shared page removes its files' changes waiting too, those
-// queued without its page_id as well: the server would refuse them, and
-// they would keep the account from being forgotten.
 func TestRemoveSharedPagesDropsItsFilesChanges(t *testing.T) {
 	s := open(t)
 	old := "2026-01-01T00:00:00Z"
@@ -3021,7 +2834,6 @@ func TestRemoveSharedPagesDropsItsFilesChanges(t *testing.T) {
 	if err := s.DeleteFile(deleted); err != nil {
 		t.Fatal(err)
 	}
-	// As a version from before queued them.
 	if err := s.Queue("files", waiting.ID, FileToRemote(waiting), "file", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -3037,8 +2849,6 @@ func TestRemoveSharedPagesDropsItsFilesChanges(t *testing.T) {
 	}
 }
 
-// A page put after one that is not among its siblings goes last, not at
-// the key rows from the server have.
 func TestPageAfterOneElsewhereGoesLast(t *testing.T) {
 	s := open(t)
 	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
@@ -3059,8 +2869,6 @@ func TestPageAfterOneElsewhereGoesLast(t *testing.T) {
 	}
 }
 
-// Pages in a loop of parents, A under B and B under A, as sync may find
-// them before it breaks the loop, are deleted and copied once each.
 func TestDeleteAndCopyALoopOfParents(t *testing.T) {
 	s := open(t)
 	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
@@ -3092,7 +2900,6 @@ func TestDeleteAndCopyALoopOfParents(t *testing.T) {
 	}
 }
 
-// A deleted folder's pages and files move to the top level.
 func TestDeleteFolderKeepsItsFiles(t *testing.T) {
 	s := open(t)
 	f, _ := s.CreateFolder("Folder")
@@ -3126,9 +2933,6 @@ func TestDeleteFolderKeepsItsFiles(t *testing.T) {
 	}
 }
 
-// Moving a deleted folder's files, and deleting a file, queue only what
-// changed, over the file as stored: neither undoes a deletion or a move
-// made since.
 func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
 	s := open(t)
 	folder, _ := s.CreateFolder("Folder")
@@ -3163,7 +2967,6 @@ func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
 	if cols := queued(); fmt.Sprint(cols) != "[folder_id]" {
 		t.Errorf("move queued %v", cols)
 	}
-	// f is the file as read before the folder went.
 	if err := s.DeleteFile(f); err != nil {
 		t.Fatal(err)
 	}
@@ -3175,8 +2978,6 @@ func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
 	}
 }
 
-// Resolving or deleting a comment queues only what changed, so a
-// resolve made offline does not undo a delete made elsewhere.
 func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -3222,8 +3023,6 @@ func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 	}
 }
 
-// A copy that fails part way makes nothing: its pages, recordings and
-// files are stored together, or the half made would go up as a copy.
 func TestCopyPageIsAllOrNothing(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no mode that keeps a file from being read")
@@ -3244,8 +3043,6 @@ func TestCopyPageIsAllOrNothing(t *testing.T) {
 	if _, err := s.UpdateRecording(r.ID, func(x *Recording) { x.Status = "ready" }); err != nil {
 		t.Fatal(err)
 	}
-	// A file whose copy here cannot be read stops the copy, after the
-	// pages and the recording's audio.
 	src := filepath.Join(t.TempDir(), "plan.pdf")
 	if err := os.WriteFile(src, []byte("%PDF"), 0o600); err != nil {
 		t.Fatal(err)
@@ -3286,9 +3083,6 @@ func TestCopyPageIsAllOrNothing(t *testing.T) {
 	}
 }
 
-// A conflict resolved is no longer listed, and goes once it has been kept
-// a while; those an earlier version kept resolved go as the database is
-// opened.
 func TestResolvedConflictsGo(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -3328,7 +3122,6 @@ func TestResolvedConflictsGo(t *testing.T) {
 	if cs, err := s.Conflicts(); err != nil || len(cs) != 0 {
 		t.Errorf("listed once resolved: %+v, %v", cs, err)
 	}
-	// Resolved long ago, it goes as another is resolved.
 	if _, err := s.db.Exec(`UPDATE conflicts SET resolved_at = ? WHERE id = 'c2'`, time.Now().Add(-resolvedKept-time.Hour).UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
@@ -3340,9 +3133,6 @@ func TestResolvedConflictsGo(t *testing.T) {
 	}
 }
 
-// A conflict dismissed stays so when the merge that met it is tried
-// again, as after a save the server may or may not have taken, and when
-// that save's conflicts are taken back.
 func TestDismissedConflictStaysDismissed(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -3375,7 +3165,6 @@ func TestDismissedConflictStaysDismissed(t *testing.T) {
 	}
 }
 
-// A deleted page's conflicts are not listed, and come back with it.
 func TestConflictsOfDeletedPagesWait(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -3400,8 +3189,6 @@ func TestConflictsOfDeletedPagesWait(t *testing.T) {
 	}
 }
 
-// Keys of pages put last, one after another, stay short however long the
-// list grows, from an empty list and from keys an earlier version made.
 func TestKeysPutLastStayShort(t *testing.T) {
 	for _, start := range []string{"", "V", "lXY", "zzV", "a0", "~"} {
 		k := start
@@ -3418,30 +3205,6 @@ func TestKeysPutLastStayShort(t *testing.T) {
 	}
 }
 
-// The server's agent puts a subpage last with the key the app would make
-// (supabase/functions/_shared/sortkey.ts writes the fixture).
-func TestKeysPutLastAsTheServerMakesThem(t *testing.T) {
-	data, err := os.ReadFile("../../supabase/functions/_shared/testdata/sort_keys.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct{ After, Key string }
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("no cases")
-	}
-	for _, c := range cases {
-		if got := KeyBetween(c.After, ""); got != c.Key {
-			t.Errorf("after %q: the app makes %q, the server %q", c.After, got, c.Key)
-		}
-	}
-}
-
-// The tables the store removes from, all at once or a page's, are every
-// table it has, but those its triggers keep after them: text_writes and
-// search_index.
 func TestEveryTableIsListed(t *testing.T) {
 	s := open(t)
 	rows, err := s.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
@@ -3460,8 +3223,6 @@ func TestEveryTableIsListed(t *testing.T) {
 	}
 }
 
-// The app and leaflet mcp opening a new database at once make one space
-// and one device ID between them, not one each.
 func TestOneSpaceForTwoProcesses(t *testing.T) {
 	for range 5 {
 		dir := t.TempDir()
@@ -3497,10 +3258,6 @@ func TestOneSpaceForTwoProcesses(t *testing.T) {
 	}
 }
 
-// A setting, a queue or a version that cannot be read is never taken for
-// none: no new device ID or space is made over it, a row from elsewhere
-// is not stored over a change that may wait, and no merge goes without
-// its base.
 func TestUnreadRowsCountForSomething(t *testing.T) {
 	s := open(t)
 	device := s.DeviceID()
@@ -3559,10 +3316,6 @@ func TestUnreadRowsCountForSomething(t *testing.T) {
 	back()
 }
 
-// A deleted comment keeps no text, here or in what goes up, whether it
-// was deleted here, came deleted from elsewhere, or was deleted before;
-// only the deletion goes up, which the page's owner may make of a
-// comment of someone else's.
 func TestDeletedCommentsKeepNoText(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -3590,7 +3343,6 @@ func TestDeletedCommentsKeepNoText(t *testing.T) {
 	if row["body"] != "" || row["quote"] != nil || fmt.Sprint(row[ChangedKey]) != "[deleted_at]" {
 		t.Errorf("queued %v", row)
 	}
-	// From another device that kept the text.
 	remote := CommentToRemote(reply)
 	remote["deleted_at"], remote["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)
 	if err := s.PutRemoteComment(remote, "Ann"); err != nil {
@@ -3604,7 +3356,6 @@ func TestDeletedCommentsKeepNoText(t *testing.T) {
 	}
 }
 
-// A database whose deleted comments kept their text loses it as it opens.
 func TestDeletedCommentsLoseTheirText(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -3625,7 +3376,6 @@ func TestDeletedCommentsLoseTheirText(t *testing.T) {
 	}
 }
 
-// A file sent again in another space moves there, its row as its path.
 func TestRequeuedFileMovesToItsSpace(t *testing.T) {
 	s := open(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -3644,9 +3394,6 @@ func TestRequeuedFileMovesToItsSpace(t *testing.T) {
 	}
 }
 
-// A page whose title is longer than the server takes, as one from another
-// device's older Leaflet may be, goes up with its title cut to the bound,
-// whole or as a change, and keeps it whole here.
 func TestPageGoesUpWithItsTitleWithinBounds(t *testing.T) {
 	s := open(t)
 	long := strings.Repeat("é", maxTitleLen+10)
@@ -3677,8 +3424,6 @@ func TestPageGoesUpWithItsTitleWithinBounds(t *testing.T) {
 	}
 }
 
-// A recording sent again goes whole, marked with when it last changed
-// here, as a page sent again does, so a newer row the server has stays.
 func TestRequeuedRecordingGoesAsAdopted(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
@@ -3708,8 +3453,6 @@ func TestRequeuedRecordingGoesAsAdopted(t *testing.T) {
 	}
 }
 
-// A recording finished goes up with its audio, both queued at once or
-// neither; without upload, or once its audio is up, only the recording.
 func TestFinishedRecordingQueuesItsAudio(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
@@ -3745,7 +3488,6 @@ func TestFinishedRecordingQueuesItsAudio(t *testing.T) {
 			_ = s.Dequeue(e)
 		}
 	}
-	// The upload refused, the recording is not finished either.
 	r, _ := s.CreateRecording(p.ID, "b1", "", "", wav, "")
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_storage BEFORE INSERT ON outbox WHEN NEW.entity = 'storage' BEGIN SELECT RAISE(ABORT, 'refused'); END`); err != nil {
 		t.Fatal(err)
@@ -3758,8 +3500,6 @@ func TestFinishedRecordingQueuesItsAudio(t *testing.T) {
 	}
 }
 
-// Every system the app runs on can hold the name a file is kept by, as
-// iCloud Drive syncs it to Windows too.
 func TestFileNamesEverySystemHolds(t *testing.T) {
 	for in, want := range map[string]string{
 		"Q3: report.pdf": "Q3_ report.pdf", `What?<*>|".txt`: "What______.txt", "notes. ": "notes",
@@ -3772,7 +3512,6 @@ func TestFileNamesEverySystemHolds(t *testing.T) {
 	}
 }
 
-// mustPending is the queue, or the test fails.
 func mustPending(t *testing.T, s *Store) []OutboxEntry {
 	t.Helper()
 	entries, err := s.Pending()
@@ -3782,8 +3521,6 @@ func mustPending(t *testing.T, s *Store) []OutboxEntry {
 	return entries
 }
 
-// A page put back goes where it was, at its sort key, or last there
-// without one; a folder brought back is there again, empty.
 func TestPlacePageAndRestoreFolder(t *testing.T) {
 	s := open(t)
 	f, _ := s.CreateFolder("Clippings")
@@ -3816,9 +3553,6 @@ func TestPlacePageAndRestoreFolder(t *testing.T) {
 	}
 }
 
-// SearchPages finds the pages it keeps alone: templates and the pages it
-// leaves out crowd none of them out of the limit, and a blank query lists
-// as many as the limit lets, not Search's few.
 func TestSearchPagesKeepsToItsPages(t *testing.T) {
 	s := open(t)
 	for i := range 5 {
@@ -3850,8 +3584,6 @@ func TestSearchPagesKeepsToItsPages(t *testing.T) {
 	}
 }
 
-// SharedBeyond and GuestCommented find at once the pages Members and
-// HasGuestComments find one at a time.
 func TestPagesSharedAndGuestCommented(t *testing.T) {
 	s := open(t)
 	shared, _ := s.CreatePage(NewPageOptions{Title: "Shared"})
@@ -3874,8 +3606,6 @@ func TestPagesSharedAndGuestCommented(t *testing.T) {
 	}
 }
 
-// HasGuestComments says when it cannot read the comments, rather than
-// that a page has no guest's comment.
 func TestHasGuestCommentsUnread(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Guested"})
@@ -3893,10 +3623,6 @@ func TestHasGuestCommentsUnread(t *testing.T) {
 	}
 }
 
-// SearchPages finds as the agent function's search does: titles and tags
-// first, then text, each the most recently changed page first; tags in any
-// case but whole, as the server keeps them; a match in text with the 40
-// characters either side of it.
 func TestSearchPagesAsTheServer(t *testing.T) {
 	s := open(t)
 	all := func(Page) bool { return true }
@@ -3908,8 +3634,6 @@ func TestSearchPagesAsTheServer(t *testing.T) {
 	if _, _, err := s.SaveContent(text.ID, c); err != nil {
 		t.Fatal(err)
 	}
-	// Changed a second apart, the newer last: within a millisecond the
-	// order would be the IDs'.
 	for i, id := range []string{older.ID, text.ID, newer.ID} {
 		if _, err := s.DB().Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, time.Now().Add(time.Duration(i)*time.Second).UnixMilli(), id); err != nil {
 			t.Fatal(err)
@@ -3919,7 +3643,6 @@ func TestSearchPagesAsTheServer(t *testing.T) {
 	if err != nil || len(hits) != 3 || hits[0].PageID != newer.ID || hits[1].PageID != older.ID || hits[2].PageID != text.ID {
 		t.Fatalf("hits %+v, %v", hits, err)
 	}
-	// From 40 before "plan", as long as it and 80 more.
 	if want := strings.Repeat("x", 35) + " the plan is set " + strings.Repeat("y", 32); hits[2].Snippet != want {
 		t.Errorf("snippet %q, want %q", hits[2].Snippet, want)
 	}

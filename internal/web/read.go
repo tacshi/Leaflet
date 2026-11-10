@@ -17,41 +17,22 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-// Reading a page for an agent: its text, with Markdown's headings, list
-// items and links, the links made whole. The agent function reads pages
-// the same way (supabase/functions/_shared/page.ts); both read the pages
-// of its testdata/pages.json alike.
-
-// Page is a web page as an agent reads it.
 type Page struct {
-	// URL is where the page was read, after the redirects on the way.
-	URL   string
-	Title string
-	Text  string
-	// Links are the web links in Text, in the order they come.
-	Links []string
-	// Truncated is a page whose text went on past MaxPageText.
+	URL       string
+	Title     string
+	Text      string
+	Links     []string
 	Truncated bool
 }
 
-// MaxPageText is the most of a page's text an agent reads, in characters:
-// a long article whole, and no more than a model takes in at once.
 const MaxPageText = 30_000
 
-// maxPageBytes is the most of a page read from the web: a long article
-// whole, and no more than reading it takes a moment for, on the device
-// and on the server alike (page.ts MAX_PAGE_BYTES).
 const maxPageBytes = 2 << 20
 
-// pageAccept is what Read asks for: a page, else other text.
 const pageAccept = "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
 
-// ErrNotText is Read's for what is not a page of text, as a picture.
 var ErrNotText = errors.New("not a page of text")
 
-// Read reads a page for an agent from the public web only, as Fetch does:
-// its text, when it is HTML or other text. It takes as long as Fetch may,
-// however long the agent's run has left.
 func Read(ctx context.Context, link string) (Page, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchWait)
 	defer cancel()
@@ -64,8 +45,6 @@ func Read(ctx context.Context, link string) (Page, error) {
 	if res.Request != nil && res.Request.URL != nil {
 		final = res.Request.URL.String()
 	}
-	// What is not text is not read, as its Content-Type says, or else its
-	// first bytes, as a browser tells.
 	body := io.LimitReader(res.Body, maxPageBytes)
 	ctype := res.Header.Get("Content-Type")
 	var head []byte
@@ -94,9 +73,6 @@ func Read(ctx context.Context, link string) (Page, error) {
 	return Page{URL: final, Text: t, Truncated: cut, Links: urlsOf(t)}, nil
 }
 
-// pageText is a page read from the web as text. Text in another encoding
-// than UTF-8 is read in it, as a browser reads it: by its byte order mark,
-// its Content-Type, its own <meta>, or else as UTF-8 if it is that.
 func pageText(data []byte, ctype string) string {
 	enc, _, _ := charset.DetermineEncoding(data, ctype)
 	if decoded, err := enc.NewDecoder().Bytes(data); err == nil {
@@ -105,21 +81,17 @@ func pageText(data []byte, ctype string) string {
 	return strings.ToValidUTF8(string(data), "�")
 }
 
-// readable reports whether a media type is text an agent reads.
 func readable(mt string) bool {
 	return strings.HasPrefix(mt, "text/") || mt == "application/json" || strings.HasSuffix(mt, "+json") ||
 		mt == "application/xml" || strings.HasSuffix(mt, "+xml")
 }
 
-// skipped are the elements whose content is no text to read: code, styles,
-// media, controls, and what a browser shows in place of those.
 var skipped = map[string]bool{
 	"head": true, "script": true, "style": true, "noscript": true, "template": true, "iframe": true,
 	"object": true, "embed": true, "canvas": true, "video": true, "audio": true, "picture": true, "map": true,
 	"select": true, "button": true, "textarea": true, "input": true, "dialog": true,
 }
 
-// blocks are the elements that start a line of their own.
 var blocks = map[string]bool{
 	"address": true, "article": true, "aside": true, "blockquote": true, "caption": true, "center": true,
 	"dd": true, "details": true, "div": true, "dl": true, "dt": true, "fieldset": true, "figcaption": true,
@@ -129,61 +101,34 @@ var blocks = map[string]bool{
 	"tr": true, "ul": true,
 }
 
-// spaces are what a page's text runs together into one space: HTML's
-// spaces, and the no-break space pages put between words.
 var spaces = regexp.MustCompile("[\t\n\f\r  ]+")
 
-// pageReader writes a page's text: its finished lines in out, the line
-// being written in parts, to go after prefix (a heading's #s, a list
-// item's -) once it has text. Each piece of the page is read once, so a
-// page takes as long as it is long, and the reading stops once the text
-// has gone on past MaxPageText for good, as no more of it is read, or
-// once ctx ends.
 type pageReader struct {
-	ctx  context.Context
-	base *url.URL
-	self string
-	out  strings.Builder
-	// outRunes are the characters in out, and outText those up to its
-	// last that is not a line break.
+	ctx               context.Context
+	base              *url.URL
+	self              string
+	out               strings.Builder
 	outRunes, outText int
-	// parts are the line, piece by piece: a link holds a piece of its own
-	// before its text, for its [ once it ends in the line.
-	parts []string
-	// links are the links being read, outermost first; in the first
-	// decided of them a line has ended, so each ends in a line of its own.
-	links   []openLink
-	decided int
-	// marks counts the line's characters that are not spaces; space is a
-	// line that ends in one, and empty one with nothing in it.
-	marks        int
-	space, empty bool
-	prefix       string
-	pre          int
-	// read are hasText's answers, each element asked once.
-	read map[*html.Node]bool
-	// nodes counts the nodes walked, for how often ctx is asked; done
-	// stops the walk, with err when ctx ended it.
-	nodes int
-	done  bool
-	err   error
+	parts             []string
+	links             []openLink
+	decided           int
+	marks             int
+	space, empty      bool
+	prefix            string
+	pre               int
+	read              map[*html.Node]bool
+	nodes             int
+	done              bool
+	err               error
 }
 
-// openLink is a link being read: its piece in the line, and the line's
-// marks before it.
 type openLink struct{ at, marks int }
 
-// ReadHTML reads a page's HTML, page being where it was read, which its
-// links are made whole against.
 func ReadHTML(page, src string) Page {
 	p, _ := readHTML(context.Background(), page, src)
 	return p
 }
 
-// readHTML is ReadHTML until ctx ends, its parsing too, which takes a
-// page whose elements are nested deep a while for each of its tags. HTML
-// the parser refuses, as a page of elements nested more than 512 deep,
-// has no text, as the server reads it (page.ts parseHtml).
 func readHTML(ctx context.Context, page, src string) (Page, error) {
 	p := Page{URL: page}
 	base, err := url.Parse(page)
@@ -226,7 +171,6 @@ func readHTML(ctx context.Context, page, src string) (Page, error) {
 	return p, nil
 }
 
-// ctxReader reads from r until ctx ends.
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader
@@ -239,7 +183,6 @@ func (c ctxReader) Read(b []byte) (int, error) {
 	return c.r.Read(b)
 }
 
-// find is the first element named name in n, n itself or one inside it.
 func find(n *html.Node, name string) *html.Node {
 	if n.Type == html.ElementNode && n.Namespace == "" && n.Data == name {
 		return n
@@ -273,7 +216,6 @@ func (r *pageReader) walk(n *html.Node) {
 	default:
 		return
 	}
-	// An SVG or MathML element is a picture or a formula.
 	name := n.Data
 	if n.Namespace != "" || skipped[name] {
 		return
@@ -289,8 +231,6 @@ func (r *pageReader) walk(n *html.Node) {
 	case "img":
 		return
 	}
-	// An element with no text, as a link around a picture or an empty
-	// box, breaks no line and says nothing.
 	if !r.hasText(n) {
 		return
 	}
@@ -326,8 +266,6 @@ func (r *pageReader) walk(n *html.Node) {
 	}
 }
 
-// hasText reports whether n has text to read: a text node of more than
-// spaces, or an element with one in it that is read.
 func (r *pageReader) hasText(n *html.Node) bool {
 	switch n.Type {
 	case html.TextNode:
@@ -359,8 +297,6 @@ func (r *pageReader) children(n *html.Node) {
 	}
 }
 
-// anchor writes a link's text as Markdown's [text](link). One whose text
-// runs over lines, as a card's, is followed by a line of its link alone.
 func (r *pageReader) anchor(n *html.Node, link string) {
 	lines := r.out.Len()
 	r.links = append(r.links, openLink{at: len(r.parts), marks: r.marks})
@@ -374,8 +310,6 @@ func (r *pageReader) anchor(n *html.Node, link string) {
 		r.writeOut("<" + link + ">\n")
 		return
 	}
-	// The text goes in the brackets without the spaces it starts and ends
-	// with, a space of which stays outside them.
 	lead, trail := "", ""
 	for _, p := range r.parts[l.at+1:] {
 		if p != "" {
@@ -410,8 +344,6 @@ func (r *pageReader) anchor(n *html.Node, link string) {
 	r.check()
 }
 
-// link is where an <a> goes, whole and without its fragment, or "" when
-// it goes nowhere to show: not to the web, or to this page itself.
 func (r *pageReader) link(n *html.Node) string {
 	if n.Data != "a" {
 		return ""
@@ -430,9 +362,6 @@ func (r *pageReader) link(n *html.Node) string {
 	return ""
 }
 
-// linkString is u as a page's text gives it, as a browser writes it out
-// (its host in lower case, a path of / at least) but for its fragment,
-// left out, and its parentheses, escaped, which would end a Markdown link.
 func linkString(u *url.URL) string {
 	c := *u
 	c.Fragment, c.RawFragment = "", ""
@@ -443,8 +372,6 @@ func linkString(u *url.URL) string {
 	return strings.NewReplacer("(", "%28", ")", "%29").Replace(c.String())
 }
 
-// write adds text to the line: its spaces run together as a browser shows
-// them, but in a <pre>, which keeps them and its line breaks.
 func (r *pageReader) write(s string) {
 	if r.pre > 0 {
 		for !r.done {
@@ -468,7 +395,6 @@ func (r *pageReader) write(s string) {
 	r.add(s)
 }
 
-// add puts s at the end of the line.
 func (r *pageReader) add(s string) {
 	if s == "" {
 		return
@@ -483,7 +409,6 @@ func (r *pageReader) add(s string) {
 	r.check()
 }
 
-// flush ends the line, when it has text, after its prefix.
 func (r *pageReader) flush() {
 	if r.marks == 0 {
 		r.newLine(false)
@@ -501,9 +426,6 @@ func (r *pageReader) flush() {
 	r.writeOut(line)
 }
 
-// newLine starts the next line, after one written, which decides the
-// links open in it, or after one with no text, from which each link open
-// in it keeps its piece, the text it has being all the line's.
 func (r *pageReader) newLine(wrote bool) {
 	r.parts = r.parts[:0]
 	if wrote {
@@ -516,7 +438,6 @@ func (r *pageReader) newLine(wrote bool) {
 	r.marks, r.space, r.empty = 0, false, true
 }
 
-// writeOut adds s to the finished lines, the line it ends begun anew.
 func (r *pageReader) writeOut(s string) {
 	r.out.WriteString(s)
 	if t := strings.TrimRight(s, "\n"); t != "" {
@@ -526,10 +447,6 @@ func (r *pageReader) writeOut(s string) {
 	r.check()
 }
 
-// check stops the reading once the text has gone on past MaxPageText
-// whatever comes next: once out has, or out and the line, after its
-// prefix, with the characters other than spaces it has before any link
-// still open, which nothing that comes moves or takes away.
 func (r *pageReader) check() {
 	kept := r.marks
 	if r.decided < len(r.links) {
@@ -549,8 +466,6 @@ func attr(n *html.Node, key string) (string, bool) {
 	return "", false
 }
 
-// truncate cuts text to MaxPageText characters, at the end of a line when
-// one ends in the last quarter, and reports whether it cut it.
 func truncate(text string) (string, bool) {
 	if utf8.RuneCountInString(text) <= MaxPageText {
 		return text, false
@@ -570,14 +485,10 @@ func truncate(text string) (string, bool) {
 }
 
 var (
-	// markdownURL is a Markdown link's or a <link>'s address.
 	markdownURL = regexp.MustCompile(`\]\((https?://[^()\t\n\f\r ]+)\)|<(https?://[^<>\t\n\f\r ]+)>`)
-	// bareURL is an address written out, to the first space or bracket.
-	bareURL = regexp.MustCompile(`https?://[^\t\n\f\r <>"'()\[\]]+`)
+	bareURL     = regexp.MustCompile(`https?://[^\t\n\f\r <>"'()\[\]]+`)
 )
 
-// urlsOf are the web links in text, once each: those it links, in order,
-// then those written out.
 func urlsOf(text string) []string {
 	var out []string
 	seen := map[string]bool{}

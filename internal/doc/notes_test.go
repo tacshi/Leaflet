@@ -72,7 +72,6 @@ func TestMomentLink(t *testing.T) {
 			t.Errorf("LinkMoment(%q) = %d, but it names no moment", href, got)
 		}
 	}
-	// It stays a link in an agent's Markdown, not a mention of the page.
 	d := FromMarkdown("See [1:23](" + link + ")")
 	if d[1].Attrs.Href != link || d[1].Attrs.Mention != nil || !strings.Contains(d.ToMarkdown(), "("+link+")") {
 		t.Errorf("read as %+v", d)
@@ -104,8 +103,6 @@ func TestVideoNotes(t *testing.T) {
 		"- [1:23](https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=83s) Caches\n") {
 		t.Errorf("markdown %q", md)
 	}
-	// A line that reads as another kind of block is a note in its item all
-	// the same, read back as the list's item it was written as.
 	lines := []string{"---", "# Chapter one", "1. numbered", "> quoted", "<details>", "- dashed", "** *"}
 	md = notesMarkdown(strings.Join(lines, "\n"), func(int) string { return "" })
 	back := ParseLines(md)
@@ -143,7 +140,6 @@ func TestVideoNotesHTML(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
 	}
-	// On paper every line shows, each time a link to the site there.
 	paper := PageHTML("T", c, HTMLOptions{Print: true})
 	if strings.Contains(paper, "<details>") || strings.Contains(paper, "data-t=") || strings.Contains(paper, "video.js") ||
 		!strings.Contains(paper, `<a class="ts" href="https://vimeo.com/76979871#t=540s" rel="noopener noreferrer">9:00</a>`) ||
@@ -152,8 +148,6 @@ func TestVideoNotesHTML(t *testing.T) {
 	}
 }
 
-// On a shared page a link to a moment of a recording plays it there; on
-// paper it is its words alone, with nowhere to go.
 func TestRecordingMomentHTML(t *testing.T) {
 	para := &Node{ID: "p1", Type: "paragraph"}
 	para.SetDelta(Delta{{Text: "1:23", Attrs: Attrs{Href: MomentLink("pg", "r1", 83)}}})
@@ -167,10 +161,6 @@ func TestRecordingMomentHTML(t *testing.T) {
 	}
 }
 
-// A file's notes show under it on a shared page: a time plays what the
-// page plays, and without a player, or on paper, is its words alone. Its
-// card and player are a part of its block, and what serves its file is
-// asked once.
 func TestFileNotesHTML(t *testing.T) {
 	audio := &Node{ID: "a1", Type: "file", Data: map[string]any{"name": "call.m4a", "notes": "0:05 Hello\nsee 1:02"}}
 	pdf := &Node{ID: "d1", Type: "file", Data: map[string]any{"name": "report.pdf", "notes": "0:05 Page one"}}
@@ -203,8 +193,6 @@ func TestFileNotesHTML(t *testing.T) {
 	}
 }
 
-// A file's notes export under it, its times links into the file where it
-// has an address.
 func TestFileNotesMarkdown(t *testing.T) {
 	c := &Content{Children: []*Node{{ID: "a1", Type: "file", Data: map[string]any{"name": "call.m4a", "url": "file:///x/call.m4a", "notes": "0:05 Hello"}}}}
 	if got := PageMarkdown("", c, MarkdownOptions{}); !strings.Contains(got, "- 0:05 Hello") {
@@ -216,7 +204,6 @@ func TestFileNotesMarkdown(t *testing.T) {
 	}
 }
 
-// An agent writes a file's notes and nothing else of the block.
 func TestFileWithNotes(t *testing.T) {
 	prev := &Node{ID: "a1", Type: "file", Data: map[string]any{"file_id": "f1", "url": "file:///x", "name": "call.m4a", "size": 3, "notes": "old"}}
 	n, err := FileWithNotes(prev, map[string]any{"type": "file", "name": "evil.exe", "file": map[string]any{"notes": " 0:05 New\r\n", "file_id": "other"}})
@@ -234,9 +221,6 @@ func TestFileWithNotes(t *testing.T) {
 	}
 }
 
-// A speaker's name goes from a line in any of the app's languages, as the
-// notes keep the language they were made in; the line's time and words
-// stay, and so does a line that only reads like one.
 func TestWithoutSpeakers(t *testing.T) {
 	notes := "0:00 Speaker 1: Hello there.\n0:05 说话人 2：你好\n[0:10] 話者 A：こんにちは\nSpeaker 3: No time.\n0:20 Speakers agree: yes.\nPlain line"
 	want := "0:00 Hello there.\n0:05 你好\n[0:10] こんにちは\nNo time.\n0:20 Speakers agree: yes.\nPlain line"
@@ -246,14 +230,11 @@ func TestWithoutSpeakers(t *testing.T) {
 	if !HasSpeakers(notes, nil) || HasSpeakers(want, nil) || HasSpeakers("", nil) {
 		t.Error("HasSpeakers is wrong")
 	}
-	// What a line says after its name stays as it is.
 	if got := WithoutSpeakers("0:01 Speaker 1: Speaker 2: said so", nil); got != "0:01 Speaker 2: said so" {
 		t.Errorf("got %q", got)
 	}
 }
 
-// Hidden, speakers leave a block's lines and its exports, and stay in its
-// notes.
 func TestShownNotes(t *testing.T) {
 	n := &Node{ID: "a1", Type: "file", Data: map[string]any{"name": "call.m4a", "notes": "0:05 Speaker 1: Hello"}}
 	if got := ShownNotes(n); got != n.Str("notes") {
@@ -275,8 +256,6 @@ func TestShownNotes(t *testing.T) {
 	}
 }
 
-// Renaming a speaker changes each of their lines and no one else's, in
-// the separator each has, and the notes then answer to the new name.
 func TestRenameSpeaker(t *testing.T) {
 	notes := "0:00 说话人 1：你好\n0:05 说话人 2：再见\n0:09 说话人 1：好的"
 	got, names := RenameSpeaker(notes, nil, "说话人 1", " 小 明: \n")
@@ -292,7 +271,6 @@ func TestRenameSpeaker(t *testing.T) {
 	if got := WithoutSpeakers(got, names); got != "0:00 你好\n0:05 再见\n0:09 好的" {
 		t.Errorf("hidden %q", got)
 	}
-	// Renamed again, the old name goes from the list.
 	again, names := RenameSpeaker(got, names, "小 明", "Lin")
 	if want := "0:00 Lin：你好\n0:05 说话人 2：再见\n0:09 Lin：好的"; again != want || !slices.Equal(names, []string{"Lin"}) {
 		t.Errorf("got %q %q", again, names)
@@ -301,7 +279,6 @@ func TestRenameSpeaker(t *testing.T) {
 	if full != "0:00 Lin: Hi" || len(names) != 1 || names[0] != "Lin" {
 		t.Errorf("got %q %q", full, names)
 	}
-	// Named as another, the two are one; an empty name changes nothing.
 	merged, _ := RenameSpeaker("0:00 Speaker 1: A\n0:01 Speaker 2: B", nil, "Speaker 1", "Speaker 2")
 	if merged != "0:00 Speaker 2: A\n0:01 Speaker 2: B" {
 		t.Errorf("merged %q", merged)
@@ -311,8 +288,6 @@ func TestRenameSpeaker(t *testing.T) {
 	}
 }
 
-// One line goes to another speaker, or a new one, or gets one it lacked;
-// the lines SpokenLines numbers are the lines it changes, blank ones too.
 func TestSetLineSpeaker(t *testing.T) {
 	notes := "0:00 Speaker 1: A\n\n0:05 Speaker 2: B\n0:09 No speaker"
 	lines := SpokenLines(notes, nil, false)
@@ -338,7 +313,6 @@ func TestSetLineSpeaker(t *testing.T) {
 	}
 }
 
-// A name keeps in a block as its data does.
 func TestSpeakerNamesOf(t *testing.T) {
 	n := &Node{ID: "a", Type: "file", Data: map[string]any{}}
 	SetSpeakerNames(n, []string{"Ann", "Lin"})
@@ -351,9 +325,6 @@ func TestSpeakerNamesOf(t *testing.T) {
 	}
 }
 
-// A file's transcript copies and goes in a page as a recording's does:
-// without times to copy, each line after its time in bold in the page, and
-// speakers as they show.
 func TestNotesTextAndBlocks(t *testing.T) {
 	notes := "0:05 Speaker 1: Hello\nA plain line"
 	if got := NotesText(notes, nil, false); got != "Speaker 1: Hello\nA plain line" {

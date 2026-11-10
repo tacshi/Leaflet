@@ -1,38 +1,20 @@
 import LeafletCore
 import SwiftUI
 
-/// AgentPanel is an agent chat, as the desktop's Agent tab: the page's,
-/// or the workspace agent's, of all the user's pages. It shows the
-/// conversation, each run's edits with Undo, Stop while one works, the
-/// agent to ask, and suggestions for an empty chat.
 struct AgentPanel<Chat: AgentChat>: View {
     let model: Chat
-    /// allPages, given, is the choice beside a page of what the chat asks
-    /// about, the page or all the user's pages, as a menu by the composer,
-    /// as on the desktop.
     var allPages: Binding<Bool>?
-    /// isSheet says the panel is a sheet over the page, as on iPhone,
-    /// rather than a column beside it: a page opened from it shows once it
-    /// goes. (A column's own size class is compact on iPad too.)
     var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
     @FocusState private var composing: Bool
-    /// line is the composer's height with one line: its buttons take it, so
-    /// they sit level with a line's text, and at the foot of a longer draft.
     @ScaledMetric(relativeTo: .body) private var line: CGFloat = 38
-    /// following keeps a reply in view as it streams in, until the chat is
-    /// scrolled up from its foot.
     @State private var following = true
     @State private var atFoot = true
 
     private var state: AgentState { model.agents }
 
-    /// loneRun is the latest run with edits that no message of the chat
-    /// holds, as one Ask or an @agent comment started: its Undo is here,
-    /// as the desktop's run bar has it, until a version restored settles
-    /// it.
     private var loneRun: AgentState.Run? {
         let held = Set(state.messages.compactMap(\.runID))
         let run = state.runs.last {
@@ -43,7 +25,6 @@ struct AgentPanel<Chat: AgentChat>: View {
 
     var body: some View {
         if !model.agentsLoaded {
-            // Not read yet: no agent to ask is not known yet.
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !state.available && state.options.isEmpty {
             ContentUnavailableView {
@@ -54,7 +35,6 @@ struct AgentPanel<Chat: AgentChat>: View {
                 Button(L.panelOpenProviders) { openProviders() }
                     .buttonStyle(.borderedProminent)
             }
-            // No composer to give the keyboard to: no later one takes it.
             .onAppear { scene.focusChat = false }
         } else {
             VStack(spacing: 0) {
@@ -97,7 +77,6 @@ struct AgentPanel<Chat: AgentChat>: View {
                 }
                 .padding(14)
             }
-            // At its latest as it shows, as a chat opens.
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onChange(of: state.messages.count) {
                 withAnimation { proxy.scrollTo(state.messages.count - 1, anchor: .bottom) }
@@ -116,8 +95,6 @@ struct AgentPanel<Chat: AgentChat>: View {
         }
     }
 
-    /// runText says what a lone run did: undone, the blocks it edited,
-    /// or, one that changed pages rather than blocks, its last edit.
     private func runText(_ run: AgentState.Run) -> String {
         if run.undone { return L.pageRunUndone(agent: run.agentName) }
         let blocks = Set(run.blockIDs ?? []).count
@@ -131,8 +108,6 @@ struct AgentPanel<Chat: AgentChat>: View {
         HStack(alignment: .bottom, spacing: 8) {
             if let allPages { scopeMenu(allPages) }
             Menu {
-                // Each agent, at the model Settings chose for it, the one
-                // the chat asks checked.
                 ForEach(state.options) { o in
                     Toggle(
                         o.label,
@@ -179,7 +154,6 @@ struct AgentPanel<Chat: AgentChat>: View {
                 .background(palette.panel, in: .rect(cornerRadius: 10))
                 .focused($composing)
                 .onSubmit { send(model.chatDraft) }
-                // As Ask the agent opens the chat.
                 .onAppear { takeFocus() }
                 .onChange(of: scene.focusChat) { takeFocus() }
             if state.running, let run = state.runs.last(where: { $0.running && $0.stoppable }) {
@@ -190,8 +164,6 @@ struct AgentPanel<Chat: AgentChat>: View {
                 .imageScale(.large)
                 .frame(minWidth: 28, minHeight: line)
             } else {
-                // A run the server works on can't be stopped here: what is
-                // typed waits for it to end, as the core asks one at a time.
                 Button(L.panelSend, systemImage: "arrow.up.circle.fill") { send(model.chatDraft) }
                     .labelStyle(.iconOnly)
                     .imageScale(.large)
@@ -207,8 +179,6 @@ struct AgentPanel<Chat: AgentChat>: View {
         .padding(10)
     }
 
-    /// scopeMenu chooses what the chat asks about: this page, of its agent,
-    /// or all the user's pages, of the workspace agent's.
     private func scopeMenu(_ allPages: Binding<Bool>) -> some View {
         Menu {
             Picker(selection: allPages) {
@@ -227,22 +197,16 @@ struct AgentPanel<Chat: AgentChat>: View {
         .accessibilityValue(allPages.wrappedValue ? L.panelScopeAll : L.panelScopePage)
     }
 
-    /// openProviders opens Settings, for its agent providers: over the
-    /// panel beside the page, or once the panel as a sheet has gone.
     private func openProviders() {
         scene.openSettings()
     }
 
-    /// takeFocus gives the composer the keyboard, once, as Ask the agent
-    /// asked.
     private func takeFocus() {
         guard scene.focusChat else { return }
         scene.focusChat = false
         composing = true
     }
 
-    /// send asks the chat's agent text. While a run works, which the core
-    /// asks one at a time, it waits in the composer.
     private func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !state.running, let client = app.client else { return }
@@ -251,14 +215,10 @@ struct AgentPanel<Chat: AgentChat>: View {
     }
 }
 
-/// MessageView is one turn of the chat: the user's, or the agent's reply
-/// with what its run changed.
 struct MessageView: View {
     let message: AgentState.Message
     let run: AgentState.Run?
-    /// pageID is the chat's: its page's, or "workspace".
     let pageID: String
-    /// isSheet says the chat is a sheet, which goes as a page opens.
     var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
@@ -270,7 +230,6 @@ struct MessageView: View {
                 Text(name).font(.caption.weight(.semibold)).foregroundStyle(palette.textMuted)
             }
             if message.pending && !message.streamed {
-                // What the run is doing, bare, as the desktop shows it.
                 if message.text.isEmpty {
                     ProgressView().controlSize(.small)
                 } else {
@@ -286,10 +245,6 @@ struct MessageView: View {
                     )
                     .foregroundStyle(message.error ? palette.dangerText : palette.text)
                     .textSelection(.enabled)
-                    // A link to a page, a block of one or a moment of a video
-                    // opens it here, as one in the page does, with no page
-                    // open too, as the workspace agent's chat may be. One
-                    // to a page not here, as one not synced yet, goes nowhere.
                     .environment(
                         \.openURL,
                         OpenURLAction { [scene, app, pageID, isSheet] url in
@@ -311,16 +266,11 @@ struct MessageView: View {
     }
 }
 
-/// StatusLine is what an agent's run is doing, as a terminal agent's
-/// "Thinking…" line: muted text that a brighter band sweeps across, over
-/// and over, as on the desktop; still where motion is reduced.
 struct StatusLine: View {
     let text: String
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// band is the band's half width, as a share of the text; cycle, the
-    /// seconds it takes to cross it.
     private static let band = 0.3
     private static let cycle = 2.0
 
@@ -332,7 +282,6 @@ struct StatusLine: View {
                 let t =
                     context.date.timeIntervalSinceReferenceDate
                     .truncatingRemainder(dividingBy: Self.cycle) / Self.cycle
-                // From wholly before the text to wholly past it.
                 let at = -Self.band + (1 + 2 * Self.band) * t
                 Text(text).foregroundStyle(
                     LinearGradient(
@@ -344,11 +293,9 @@ struct StatusLine: View {
     }
 }
 
-/// RunCard is what a run changed, with Undo or Redo as one step.
 struct RunCard: View {
     let run: AgentState.Run
     let pageID: String
-    /// isSheet says the card is in a sheet, which goes as a page opens.
     var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
@@ -356,10 +303,7 @@ struct RunCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // By place: two edits can say the same.
             ForEach(Array(run.edits.enumerated()), id: \.offset) { i, e in
-                // A page the run made opens, unless undone: then it is gone.
-                // One that has not come yet goes nowhere.
                 if let page = run.page(i), !run.undone, app.opens(page) {
                     Button {
                         scene.openFromChat(
@@ -372,7 +316,6 @@ struct RunCard: View {
                     Label(e, systemImage: "pencil.line").font(.footnote)
                 }
             }
-            // What the agent said is in its message above.
             HStack {
                 Spacer()
                 if run.undone {
@@ -391,8 +334,6 @@ struct RunCard: View {
         .background(palette.agentSection, in: .rect(cornerRadius: 10))
     }
 
-    /// step undoes or redoes the run, saying in a toast why it couldn't:
-    /// the core says, and leaves the run as it was.
     private func step(_ body: @escaping @MainActor (CoreClient) async throws -> Void) {
         guard let client = app.client else { return }
         Task {

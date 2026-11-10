@@ -11,14 +11,10 @@ import (
 	"leaflet/locales"
 )
 
-// renderedBlock shows a math or diagram block. While the pointer is over
-// it, a border and a bar that names it and, while editing, opens its source
-// show; they keep their room otherwise, so nothing moves.
 func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	_, source := doc.BlockSource(n)
 	name, empty, edit := locales.RenderedMath(), locales.RenderedWriteFormula(), locales.RenderedEditMath()
-	// The page, with KaTeX or Pele in it, is made only as the view loads.
 	page := func() string { return rendered.MathPage(source) }
 	if n.Type == "diagram" {
 		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
@@ -57,7 +53,6 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 			}
 		})
 		if strings.TrimSpace(source) == "" {
-			// Nothing to draw yet: a button to write it.
 			b := ui.ButtonBase(c.Key("write")).Height(56).FillWidth().Center().Gap(6).Radius(6).Background(pal.Ground).
 				TextColor(pal.TextMuted).Label(empty)
 			if b.Hovered() {
@@ -76,8 +71,6 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		if n.Type == "diagram" {
 			height = 220
 		}
-		// The frame takes its content's height. Math gives the page the
-		// wheel; a diagram keeps Ctrl and the wheel to zoom.
 		in := embedInput{src: source, kind: n.Type, toPage: n.Type == "math_equation"}
 		a.sandbox(c, blockView(n.ID), in, page, width-2-2*pad, func(content float32) float32 {
 			return min(max(content, 32), 1600)
@@ -85,8 +78,6 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	})
 }
 
-// barButton is an icon button of a rendered block's bar, shown as much as
-// shown says.
 func barButton(c *ui.Context, key, icon, label string, shown float32) ui.Element {
 	pal := theme.Of(c)
 	b := ui.ButtonBase(c.Key(key)).Size(24, 24).Center().Radius(6).TextColor(pal.TextMuted).
@@ -98,8 +89,6 @@ func barButton(c *ui.Context, key, icon, label string, shown float32) ui.Element
 	return b
 }
 
-// zoomTools are the buttons that zoom the diagram of embed key, and fit it
-// again while it is zoomed in.
 func (a *App) zoomTools(c *ui.Context, key string, shown float32) {
 	if a.embedZoomed[key] && barButton(c, "zoom-fit", "rotate-ccw", locales.RenderedZoomFit(), shown).Clicked() {
 		a.zoomEmbed(key, "fit")
@@ -112,8 +101,6 @@ func (a *App) zoomTools(c *ui.Context, key string, shown float32) {
 	}
 }
 
-// fullDiagram fills the page's body with diagram n, to zoom and move about
-// it; Escape or its button brings back the page where it was.
 func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)
 	key := fullView(n.ID)
@@ -133,8 +120,6 @@ func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 	c.OnShortcut(0, ui.KeyEscape, a.leaveFullDiagram)
 }
 
-// leaveFullDiagram brings back the page from a diagram's full screen view,
-// and lets its frame go.
 func (a *App) leaveFullDiagram() {
 	ps := a.page
 	if ps == nil || ps.fullDiagram == "" {
@@ -146,8 +131,6 @@ func (a *App) leaveFullDiagram() {
 	delete(a.embedIn, key)
 	delete(a.embedSizes, key)
 }
-
-// Math and diagram source --------------------------------------------------
 
 func (d *dialogs) openSource(n *doc.Node) {
 	d.sourceOpen, d.sourceID, d.sourceKind = true, n.ID, n.Type

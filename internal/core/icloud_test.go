@@ -14,8 +14,6 @@ import (
 	"leaflet/locales"
 )
 
-// iCloudCore is a Core whose Leaflet folder in iCloud Drive is root, and
-// the watches of it it was told.
 func iCloudCore(t *testing.T, root string) (*Core, *[]bool) {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())
@@ -34,8 +32,6 @@ func iCloudCore(t *testing.T, root string) (*Core, *[]bool) {
 	return c, &watched
 }
 
-// iCloud sync turns on through a folder it can use, and off again; the
-// settings keep it, and the folder is watched while it is on.
 func TestSwitchICloud(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "Leaflet")
 	if err := os.Mkdir(root, 0o750); err != nil {
@@ -61,8 +57,6 @@ func TestSwitchICloud(t *testing.T) {
 	}
 }
 
-// A folder that can't be used leaves iCloud sync off, though it was on,
-// and says why as it came.
 func TestSwitchICloudWithoutTheFolder(t *testing.T) {
 	c, _ := iCloudCore(t, filepath.Join(t.TempDir(), "gone", "Leaflet"))
 	c.Sync.SetICloud(true)
@@ -74,8 +68,6 @@ func TestSwitchICloudWithoutTheFolder(t *testing.T) {
 	}
 }
 
-// Signed in, pages sync through the server: iCloud sync does not turn on,
-// nor stay on in the settings once signing in came between.
 func TestICloudStaysOffSignedIn(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "Leaflet")
 	if err := os.Mkdir(root, 0o750); err != nil {
@@ -91,7 +83,6 @@ func TestICloudStaysOffSignedIn(t *testing.T) {
 	if c.Sync.ICloudOn() {
 		t.Error("iCloud sync turned on")
 	}
-	// Turned on just before signing in.
 	c.Sync.SetICloud(true)
 	c.KeepICloud(true)
 	if c.Sync.ICloudOn() || c.Store.Settings().ICloudSync || !slices.Equal(*watched, []bool{false}) {

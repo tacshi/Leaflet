@@ -9,7 +9,6 @@ import (
 	"image/png"
 	"slices"
 
-	// Pictures of these kinds are made smaller too, as JPEG and PNG.
 	_ "image/gif"
 
 	_ "golang.org/x/image/bmp"
@@ -17,23 +16,10 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// printPixels is the widest a printed picture is kept, in pixels: about
-// twice the widest page's text, Letter's 8.5 inches less its margins of
-// 0.6 inch, at CSS's 96 pixels an inch, as paper's dots are finer than a
-// screen's. A picture is never shown wider than the text, so one this
-// wide prints as large as it did.
 const printPixels = 1400
 
-// maxDecodedBytes is the most memory a picture takes decoded to be made
-// smaller: a larger one, which a phone may not have to spare, is kept as
-// it is.
 const maxDecodedBytes = 256 << 20
 
-// forPrint is a picture, data, made as small as printing it needs, and
-// its media type: no wider than printPixels as it is seen, turned as its
-// EXIF says to see it, as JPEG, or PNG when it is not opaque. A picture
-// that is no wider already, or can't be decoded, or would not come out
-// smaller, is kept as it is: ok is false.
 func forPrint(data []byte) (small []byte, typ string, ok bool) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
@@ -51,10 +37,6 @@ func forPrint(data []byte) (small []byte, typ string, ok bool) {
 	if err != nil {
 		return nil, "", false
 	}
-	// Each pixel is first the mean of those it stands for, as many each
-	// way as the picture is times wider than it prints, and then what is
-	// left to shrink, less than half, is taken between those. A picture
-	// thinner than that, as a line, keeps a pixel across.
 	scaled := shrunk(img, min(seenWidth/printPixels, cfg.Width, cfg.Height))
 	scale := float64(printPixels) / float64(seenWidth)
 	w, h := max(1, int(float64(cfg.Width)*scale+0.5)), max(1, int(float64(cfg.Height)*scale+0.5))
@@ -76,9 +58,6 @@ func forPrint(data []byte) (small []byte, typ string, ok bool) {
 	return buf.Bytes(), typ, true
 }
 
-// shrunk is img k times smaller each way, as RGBA, each of its pixels the
-// mean of the k by k it stands for. The picture is read a row at a time,
-// so it takes no more memory than it does decoded.
 func shrunk(img image.Image, k int) *image.RGBA {
 	b := img.Bounds()
 	k = max(k, 1)
@@ -109,7 +88,6 @@ func shrunk(img image.Image, k int) *image.RGBA {
 	return out
 }
 
-// decodedBytes is about how much memory a picture of cfg takes decoded.
 func decodedBytes(cfg image.Config) int {
 	per := 4
 	switch cfg.ColorModel {
@@ -128,8 +106,6 @@ func decodedBytes(cfg image.Config) int {
 	return cfg.Width * cfg.Height * per
 }
 
-// orientation is how a JPEG's EXIF says to turn its pixels to see it, 1
-// to 8, as browsers turn it; 1, as they are, for a picture without one.
 func orientation(data []byte) int {
 	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
 		return 1
@@ -141,11 +117,9 @@ func orientation(data []byte) int {
 		marker := data[i+1]
 		switch marker {
 		case 0xff:
-			// A fill byte before a marker.
 			i++
 			continue
 		case 0xda, 0xd9:
-			// The pixels start, after the headers, or the picture ends.
 			return 1
 		}
 		size := int(binary.BigEndian.Uint16(data[i+2:]))
@@ -160,8 +134,6 @@ func orientation(data []byte) int {
 	return 1
 }
 
-// exifOrientation is the orientation in EXIF's TIFF header and first
-// directory, tiff, or 1 where it has none.
 func exifOrientation(tiff []byte) int {
 	if len(tiff) < 8 {
 		return 1
@@ -194,8 +166,6 @@ func exifOrientation(tiff []byte) int {
 	return 1
 }
 
-// turned is img as EXIF's orientation turn says to see it: mirrored,
-// turned a half, or turned a quarter either way, mirrored or not.
 func turned(img *image.RGBA, turn int) *image.RGBA {
 	if turn <= 1 || turn > 8 {
 		return img

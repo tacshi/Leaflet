@@ -11,9 +11,6 @@ import (
 	"leaflet/locales"
 )
 
-// A panic on the queue comes back to the caller of do, for the exported
-// function to return as an error, and the queue goes on; one off the
-// queue is caught the same.
 func TestPanicReturnsAnError(t *testing.T) {
 	c, _ := open(t)
 	onQueue := func() (err error) {
@@ -30,7 +27,7 @@ func TestPanicReturnsAnError(t *testing.T) {
 	offQueue := func() (_ string, err error) {
 		defer catch(&err)
 		var m map[string]int
-		m["x"] = 1 //nolint:staticcheck // The panic is the point.
+		m["x"] = 1 //nolint:staticcheck
 		return "done", nil
 	}
 	if out, err := offQueue(); out != "" || err == nil || !strings.Contains(err.Error(), "nil map") {
@@ -38,8 +35,6 @@ func TestPanicReturnsAnError(t *testing.T) {
 	}
 }
 
-// Every function the app calls catches a panic first: gomobile would turn
-// it into a crash of the app.
 func TestExportedFunctionsCatch(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -66,8 +61,6 @@ func TestExportedFunctionsCatch(t *testing.T) {
 	}
 }
 
-// exportedRecv reports whether fd is a function or a method of an
-// exported type: what gomobile binds.
 func exportedRecv(fd *ast.FuncDecl) bool {
 	if fd.Recv == nil {
 		return true
@@ -80,8 +73,6 @@ func exportedRecv(fd *ast.FuncDecl) bool {
 	return ok && id.IsExported()
 }
 
-// catches reports whether fd begins with defer catch(&err), its error
-// result, or defer catch(nil) when it returns none.
 func catches(fd *ast.FuncDecl) bool {
 	if len(fd.Body.List) == 0 {
 		return false

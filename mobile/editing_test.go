@@ -10,8 +10,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// The app reads the kinds of blocks the core has: those that hold text,
-// and those that hold blocks.
 func TestBlockTypes(t *testing.T) {
 	var got blockTypes
 	if err := json.Unmarshal([]byte(BlockTypes()), &got); err != nil {
@@ -25,7 +23,6 @@ func TestBlockTypes(t *testing.T) {
 	}
 }
 
-// Enter's rule comes to the app as its action and the new block.
 func TestEnterAsJSON(t *testing.T) {
 	var got struct {
 		Action string         `json:"action"`
@@ -54,8 +51,6 @@ func TestEnterAsJSON(t *testing.T) {
 	}
 }
 
-// Code's offsets come and go in UTF-16 units, as UIKit counts them: an
-// emoji is two.
 func TestCodeOffsetsAreUTF16(t *testing.T) {
 	var enter codeEnter
 	_ = json.Unmarshal([]byte(CodeEnter("😀\n\n", 4)), &enter)
@@ -79,7 +74,6 @@ func TestCodeOffsetsAreUTF16(t *testing.T) {
 	}
 }
 
-// The blocks folds hide come back a digit each, in the page's order.
 func TestFolded(t *testing.T) {
 	blocks := "toggle_list,0,0,1\nparagraph,1,0,0\nheading,0,2,1\nheading,0,3,0\nheading,0,1,0\n"
 	if got := Folded(blocks); got != "01010" {
@@ -90,8 +84,6 @@ func TestFolded(t *testing.T) {
 	}
 }
 
-// A link the page follows is a page's, or a web or mail link: not a
-// file's or an app's, nor a page link with no page.
 func TestLinkTarget(t *testing.T) {
 	for href, want := range map[string]string{
 		"leaflet://page/abc":       "leaflet://page/abc",
@@ -110,8 +102,6 @@ func TestLinkTarget(t *testing.T) {
 	}
 }
 
-// A table's cells show as their text, in the rows and columns the core
-// reads, an empty row too.
 func TestTableText(t *testing.T) {
 	table, _ := doc.TableNode([][]string{{"**A**", "B"}, {"", ""}}, "")
 	raw, _ := json.Marshal(table)
@@ -126,8 +116,6 @@ func TestTableText(t *testing.T) {
 	}
 }
 
-// A due date's chip says when it is in the app's language, and whether it
-// is today or overdue; a date it can't read says nothing.
 func TestDue(t *testing.T) {
 	now := time.Date(2026, 10, 26, 20, 0, 0, 0, time.Local)
 	var tomorrow, morning due
@@ -145,9 +133,6 @@ func TestDue(t *testing.T) {
 	}
 }
 
-// A page opens in the app with the children of a block that can't hold
-// them after it, as the app's editor keeps blocks: nested only in the
-// blocks that hold blocks.
 func TestPagesOpenLifted(t *testing.T) {
 	c, _ := open(t)
 	raw, _ := c.CreatePage(`{"title":"Plan"}`)

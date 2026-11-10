@@ -14,9 +14,6 @@ type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// A share link is followed to the video it leads to, its watch link kept
-// without what the share added; any other link, or a share of what is no
-// video, stays as it is, and so does one the site can't be asked about.
 func TestVideoLink(t *testing.T) {
 	was := shortLinkClient
 	t.Cleanup(func() { shortLinkClient = was })
@@ -51,9 +48,6 @@ func TestVideoLink(t *testing.T) {
 	}
 }
 
-// A Bilibili video gets its part's cid, asked once a run; one Bilibili
-// can't tell of now is asked again once a while has passed, not each time
-// it shows, and another site's video is as it is.
 func TestVideoPart(t *testing.T) {
 	was, wasRetry := partsFetch, partsRetry
 	bilibiliParts.Lock()

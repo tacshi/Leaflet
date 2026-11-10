@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// realtimeTest is a client signed in to a project whose Realtime f stands
-// in for, and its connection.
 func realtimeTest(t *testing.T) (*Client, *RealtimeForTest, *Realtime) {
 	t.Helper()
 	f := &RealtimeForTest{}
@@ -24,7 +22,6 @@ func realtimeTest(t *testing.T) (*Client, *RealtimeForTest, *Realtime) {
 	return c, f, r
 }
 
-// next is the connection's next event, or fails the test after a while.
 func next(t *testing.T, r *Realtime) RealtimeEvent {
 	t.Helper()
 	select {
@@ -53,8 +50,6 @@ func TestRealtimeURL(t *testing.T) {
 	}
 }
 
-// A channel is joined private, as the person signed in, and hears its
-// broadcasts, not another's.
 func TestRealtimeHearsTheChannelsJoined(t *testing.T) {
 	_, f, r := realtimeTest(t)
 	if err := r.Join(t.Context(), "page:p1"); err != nil {
@@ -88,7 +83,6 @@ func TestRealtimeHearsTheChannelsJoined(t *testing.T) {
 	}
 }
 
-// A join Realtime refuses says why, as for a page the person may not read.
 func TestRealtimeRefusesAJoin(t *testing.T) {
 	_, f, r := realtimeTest(t)
 	const reason = "Unauthorized: You do not have permissions to read from this Channel topic: page:p1"
@@ -101,7 +95,6 @@ func TestRealtimeRefusesAJoin(t *testing.T) {
 	}
 }
 
-// A channel the server closes is told of; one left here is not.
 func TestRealtimeTellsOfAChannelClosed(t *testing.T) {
 	_, f, r := realtimeTest(t)
 	for _, topic := range []string{"page:p1", "page:p2"} {
@@ -120,8 +113,6 @@ func TestRealtimeTellsOfAChannelClosed(t *testing.T) {
 	}
 }
 
-// The connection beats, and gives its channels the session's access token
-// as it is renewed.
 func TestRealtimeBeatsAndRenewsItsToken(t *testing.T) {
 	old := realtimeBeat
 	realtimeBeat = 20 * time.Millisecond
@@ -136,7 +127,6 @@ func TestRealtimeBeatsAndRenewsItsToken(t *testing.T) {
 	if sent := f.Sent("access_token"); len(sent) != 0 {
 		t.Errorf("the same token went again: %+v", sent)
 	}
-	// Renewed as a refresh renews it.
 	c.mu.Lock()
 	was := c.sess
 	c.mu.Unlock()
@@ -157,8 +147,6 @@ func TestRealtimeBeatsAndRenewsItsToken(t *testing.T) {
 	}
 }
 
-// A connection whose heartbeat goes unanswered ends, as does one whose
-// person signs out.
 func TestRealtimeEnds(t *testing.T) {
 	old := realtimeBeat
 	realtimeBeat = 20 * time.Millisecond
@@ -191,8 +179,6 @@ func TestRealtimeEnds(t *testing.T) {
 	}
 }
 
-// A heartbeat answered before the sender goes on is answered all the same,
-// as a server close by may: the connection stays.
 func TestRealtimeHeartbeatAnsweredAtOnce(t *testing.T) {
 	beat, beaten := realtimeBeat, realtimeBeaten
 	realtimeBeat = 30 * time.Millisecond

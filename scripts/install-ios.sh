@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# Builds the iOS app and installs it on one or more connected iPhones and
-# iPads: the Go core (make ios-core), the Xcode project (make ios-project),
-# then xcodebuild, signed by the team of DEVELOPER_ID_APPLICATION, the
-# identity the desktop's release builds sign with.
-#
-#   scripts/install-ios.sh                 # Release, asks which devices
-#   scripts/install-ios.sh --debug --launch
-#   scripts/install-ios.sh --all --skip-core
-#
-# Release installs app.capyvibe.leaflet; Debug installs "Leaflet Debug",
-# app.capyvibe.leaflet.debug, beside it, with data of its own.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +6,6 @@ PROJECT_PATH="${ROOT_DIR}/ios/Leaflet.xcodeproj"
 SCHEME="Leaflet"
 DERIVED_DATA="${ROOT_DIR}/ios/build/DerivedData"
 DESTINATION_TIMEOUT_SECONDS="${DESTINATION_TIMEOUT_SECONDS:-20}"
-# xcodebuild's output, kept here rather than shown, unless --verbose.
 BUILD_LOG="${ROOT_DIR}/ios/build/xcodebuild.log"
 
 BUILD_TYPE="release"
@@ -29,9 +17,6 @@ VERBOSE=0
 ALL_DEVICES=0
 APP_PATH=""
 
-# UDIDs asked for on the command line (repeatable --device), and the devices
-# targeted after discovery and preflight. The app is built once and installed
-# on each of SELECTED_UDIDS; the build is pointed at index 0.
 REQUESTED_UDIDS=()
 SELECTED_UDIDS=()
 SELECTED_NAMES=()
@@ -104,19 +89,8 @@ xcode_configuration() {
   fi
 }
 
-# A device build is signed, by the team check_team picks.
 source "${ROOT_DIR}/scripts/lib/ios.sh"
 
-# Lists the physical iOS devices through devicectl, each with whether it is
-# reachable now, which is shown rather than used to hide it.
-#
-# Not `xcodebuild -showdestinations`: with no timeout, it waits on every device
-# ever paired with this Mac, so one phone that isn't here hangs the script.
-# devicectl answers at once and takes --timeout.
-#
-# Reachable is booted, or with a transport (wired or localNetwork). A Mac
-# keeps old pairings, so most entries are neither; they are offered all the
-# same, since devicectl isn't always right about what is plugged in.
 discover_devices() {
   local devices_json
   devices_json="$(mktemp)"
@@ -155,31 +129,23 @@ for device in devices:
     hardware = device.get("hardwareProperties", {})
     properties = device.get("deviceProperties", {})
     connection = device.get("connectionProperties", {})
-    # A device paired but not connected to yet reports no reality at all,
-    # so keep everything that isn't a simulator.
     if hardware.get("reality") == "simulated":
         continue
     if hardware.get("platform") != "iOS":
         continue
-    # The UDID, which xcodebuild's destinations take and devicectl does
-    # too, rather than devicectl's own identifier, which only it knows.
     identifier = hardware.get("udid") or device.get("identifier")
     name = properties.get("name")
     if not identifier or not name:
         continue
-    # Either is enough: a wired device not woken yet can report a transport
-    # before a bootState.
     reachable = (
         properties.get("bootState") == "booted"
         or connection.get("transportType") is not None
     )
-    # The model and iOS version tell apart devices whose names don't.
     kind = hardware.get("deviceType") or "iOS"
     version = properties.get("osVersionNumber")
     label = name + " (" + kind + (", iOS " + version if version else "") + ")"
     rows.append((0 if reachable else 1, name.lower(), reachable, identifier, label))
 
-# Reachable first, so the connected devices are the low numbers.
 for _, _, reachable, identifier, label in sorted(rows):
     print(("1" if reachable else "0") + "\t" + identifier + "\t" + label)
 DEVICES_JSON
@@ -190,8 +156,6 @@ DEVICES_JSON
   ((${#device_udids[@]} > 0)) || die "No physical iOS devices are paired with this Mac."
 }
 
-# Adds the device at discovery index $1 to the targets, once: `--device X
-# --device X`, or "1,1", installs once.
 select_index() {
   local index="$1" udid="${device_udids[$1]}" existing
   for existing in ${SELECTED_UDIDS[@]+"${SELECTED_UDIDS[@]}"}; do
@@ -219,8 +183,6 @@ select_all_devices() {
   done
 }
 
-# The devices devicectl says are here, which --all and a bare Enter mean:
-# the others are targeted only when picked by number.
 select_reachable_devices() {
   local i
   for i in "${!device_udids[@]}"; do
@@ -229,15 +191,10 @@ select_reachable_devices() {
   ((${#SELECTED_UDIDS[@]} > 0))
 }
 
-# Turns a line typed at the prompt into targets: numbers separated by commas
-# or spaces ("1,3", "1 3", "1, 3"), or "a"/"all". It returns non-zero, having
-# selected nothing, when the line doesn't parse, to ask again.
 parse_selection() {
   local line="$1" token
   local -a picked=()
 
-  # Bare Enter: the devices that are here, most often the one phone plugged
-  # in among several pairings.
   if [[ -z "${line// /}" ]]; then
     select_reachable_devices && return 0
     echo "No device is reachable now: pick one by number to try it anyway."
@@ -264,8 +221,6 @@ parse_selection() {
 select_devices() {
   discover_devices
 
-  # Every --device has to be found, or the run would cover fewer devices
-  # than asked for.
   if ((${#REQUESTED_UDIDS[@]} > 0)); then
     local requested index
     for requested in "${REQUESTED_UDIDS[@]}"; do
@@ -277,11 +232,9 @@ select_devices() {
     select_reachable_devices ||
       die "No device is reachable now. Pass --device UDID to try one anyway."
   elif [[ ! -t 0 ]]; then
-    # No one to ask (piped, CI): whatever is connected.
     select_reachable_devices ||
       die "No device is reachable now. Pass --device UDID (repeatable) or --all."
   else
-    # Asked even with one device: the list also shows what this Mac sees.
     echo "Devices:"
     local i suffix
     for i in "${!device_udids[@]}"; do
@@ -307,8 +260,6 @@ select_devices() {
   done
 }
 
-# Returns non-zero, with why on stderr, rather than exiting, so one device
-# not ready doesn't stop the others.
 preflight_device() {
   local udid="$1" name="$2" preflight_output
   preflight_output="$(mktemp)"
@@ -331,8 +282,6 @@ preflight_device() {
   rm -f "${preflight_output}"
 }
 
-# Drops the targets that can't be prepared, such as a locked iPad, and stops
-# only when none is left.
 preflight_devices() {
   local -a ready_udids=() ready_names=()
   local i
@@ -370,9 +319,6 @@ build_ios() {
     rm -rf "${DERIVED_DATA}"
   fi
 
-  # Built once, for the first target: a device .app installs on any of them,
-  # as long as the signing profile has them all. -allowProvisioningUpdates
-  # lets automatic signing register the device and make the profile.
   local -a settings=()
   [[ -n "${TEAM}" ]] && settings+=("DEVELOPMENT_TEAM=${TEAM}")
   local -a build=(
@@ -391,7 +337,6 @@ build_ios() {
     "${build[@]}" 2>&1 | tee "${BUILD_LOG}"
     return
   fi
-  # Only what went wrong is shown: every step xcodebuild takes is in the log.
   if ! "${build[@]}" >"${BUILD_LOG}" 2>&1; then
     local errors
     errors="$(grep -E 'error:' "${BUILD_LOG}" | sort -u | head -40 || true)"
@@ -405,7 +350,6 @@ build_ios() {
   log "Built."
 }
 
-# Runs a command, showing its output only if it fails, or with --verbose.
 quietly() {
   if [[ "${VERBOSE}" -eq 1 ]]; then
     "$@"
@@ -445,8 +389,6 @@ launch_app() {
   quietly xcrun devicectl device process launch --device "${udid}" "${bundle_id}" || return 1
 }
 
-# Installs, and launches with --launch, on every target. One that fails
-# doesn't stop the rest; the run fails at the end, naming them.
 install_all() {
   [[ -d "${APP_PATH}" ]] || die ".app bundle not found: ${APP_PATH}"
 
@@ -523,7 +465,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_command xcrun
-# Parses devicectl's JSON in discover_devices.
 require_command python3
 if [[ "${SKIP_BUILD}" -eq 0 ]]; then
   require_command xcodebuild

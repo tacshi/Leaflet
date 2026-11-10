@@ -9,9 +9,6 @@ import (
 	"leaflet/locales"
 )
 
-// Languages are the languages speech engines take, by ISO 639-1 code
-// (Whisper's set, which OpenAI-compatible endpoints follow), with their
-// English names, which name the ones CLDR has no name of.
 var Languages = map[string]string{
 	"af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese", "az": "Azerbaijani",
 	"ba": "Bashkir", "be": "Belarusian", "bg": "Bulgarian", "bn": "Bengali", "bo": "Tibetan",
@@ -35,10 +32,8 @@ var Languages = map[string]string{
 	"vi": "Vietnamese", "yi": "Yiddish", "yo": "Yoruba", "yue": "Cantonese", "zh": "Chinese",
 }
 
-// autonymCodes are the CLDR tags of codes Whisper writes otherwise.
 var autonymCodes = map[string]string{"jw": "jv"}
 
-// LanguageCodes lists "auto" then the codes by the names they show.
 func LanguageCodes() []string {
 	codes := make([]string, 0, len(Languages)+1)
 	for c := range Languages {
@@ -50,9 +45,6 @@ func LanguageCodes() []string {
 	return append([]string{"auto"}, codes...)
 }
 
-// LanguageName names a code in its own language, as menus of languages
-// do ("Deutsch", "日本語"), or in English where CLDR has no name of it;
-// "auto" and unknown codes detect.
 func LanguageName(code string) string {
 	n, ok := Languages[code]
 	if !ok {

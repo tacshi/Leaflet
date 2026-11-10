@@ -7,9 +7,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// A card goes where it is put, or at the end of the page when that place
-// has gone meanwhile, open or not; a page with a card for the subpage
-// gets no second one.
 func TestLinkSubpage(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "", block("p1", "Plans"))
@@ -29,7 +26,6 @@ func TestLinkSubpage(t *testing.T) {
 	if got := f.cards(trip.ID); !slices.Equal(got, []string{packing.ID, tickets.ID}) {
 		t.Errorf("open: cards %v", got)
 	}
-	// A copy's goes after its original's.
 	cp := f.page(t, "Packing copy", trip.ID)
 	if err := f.LinkSubpage(trip.ID, cp.ID, packing.ID); err != nil {
 		t.Fatal(err)
@@ -42,9 +38,6 @@ func TestLinkSubpage(t *testing.T) {
 	}
 }
 
-// Unlinking takes every card for the subpage, leaving a page whose only
-// block was one a block to type in; a page with no card for it is left as
-// it is, its editor given nothing.
 func TestUnlinkSubpage(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "")
@@ -66,8 +59,6 @@ func TestUnlinkSubpage(t *testing.T) {
 	}
 }
 
-// Moving a page takes its card out of the parent it leaves and puts one
-// at the end of the parent it goes into.
 func TestMovePageKeepsItsCard(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "")
@@ -89,8 +80,6 @@ func TestMovePageKeepsItsCard(t *testing.T) {
 	}
 }
 
-// Deleting a page takes its card, which Undo puts back where it was, the
-// parent open or not.
 func TestDeletePageTakesItsCard(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		f := newPagesFixture(t)
@@ -122,8 +111,6 @@ func TestDeletePageTakesItsCard(t *testing.T) {
 	}
 }
 
-// A page that could not be deleted keeps its card: the page goes first,
-// and only then its card.
 func TestFailedDeleteKeepsTheCard(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "")
@@ -143,8 +130,6 @@ func TestFailedDeleteKeepsTheCard(t *testing.T) {
 	}
 }
 
-// A card that could not be taken out as its page was deleted is told of,
-// and the page is deleted all the same.
 func TestCardNotSavedIsTold(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "")
@@ -161,8 +146,6 @@ func TestCardNotSavedIsTold(t *testing.T) {
 	}
 }
 
-// A page moved out of its parent says where its card was there, and moved
-// back to it at that place, as Undo moves it, its card goes back there.
 func TestMovePageAtPutsTheCardBack(t *testing.T) {
 	f := newPagesFixture(t)
 	trip := f.page(t, "Trip", "", block("t1", "Plan"), block("t2", "More"))

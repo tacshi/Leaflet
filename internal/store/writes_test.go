@@ -9,8 +9,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// The app and `leaflet mcp` making folders at the same time give them keys
-// of their own, each after the last.
 func TestCreateFolderKeysAreTheirOwn(t *testing.T) {
 	dir := t.TempDir()
 	var stores []*Store
@@ -50,8 +48,6 @@ func TestCreateFolderKeysAreTheirOwn(t *testing.T) {
 	}
 }
 
-// fail makes the database refuse a write to a table, as a full disk or
-// a locked database would, by a trigger raising an error.
 func fail(t *testing.T, s *Store, when, table string) {
 	t.Helper()
 	if _, err := s.DB().Exec(`CREATE TRIGGER fail_` + table + ` BEFORE ` + when + ` ON ` + table + ` BEGIN SELECT RAISE(ABORT, 'refused'); END`); err != nil {
@@ -59,9 +55,6 @@ func fail(t *testing.T, s *Store, when, table string) {
 	}
 }
 
-// A Wipe that fails part way leaves everything as it was: a queue left
-// without its pages, or pages without their queue, would go up as the
-// next account's.
 func TestWipeIsAllOrNothing(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "kept"})
@@ -84,7 +77,6 @@ func TestWipeIsAllOrNothing(t *testing.T) {
 	}
 }
 
-// A write that fails tells no one of a change.
 func TestFailedWritesNotifyNoOne(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{})
@@ -126,8 +118,6 @@ func TestFailedWritesNotifyNoOne(t *testing.T) {
 	}
 }
 
-// A search whose rows fail part way says so, rather than answer with the
-// hits it read before.
 func TestSearchFailsWithItsRows(t *testing.T) {
 	s := open(t)
 	for _, text := range []string{"apple one", "apple two"} {
@@ -143,8 +133,6 @@ func TestSearchFailsWithItsRows(t *testing.T) {
 	if hits, err := s.Search("apple", 10); err != nil || len(hits) != 2 {
 		t.Fatalf("hits %+v, %v", hits, err)
 	}
-	// A row the database fails to read, as json_extract of what is not
-	// JSON fails, as the second is stepped to.
 	for _, q := range []string{
 		`ALTER TABLE page_contents RENAME TO contents`,
 		`CREATE VIEW page_contents AS SELECT page_id, CASE WHEN plain_text LIKE '%two%' THEN json_extract('not json', '$') ELSE plain_text END AS plain_text FROM contents`,
@@ -158,9 +146,6 @@ func TestSearchFailsWithItsRows(t *testing.T) {
 	}
 }
 
-// A default model whose provider is gone, as one removed on another
-// device, reads as none, so the next provider added becomes the default;
-// it reads as set again once the provider is back.
 func TestDefaultModelOfAProviderGoneIsNone(t *testing.T) {
 	s := open(t)
 	settings := s.Settings()
@@ -179,8 +164,6 @@ func TestDefaultModelOfAProviderGoneIsNone(t *testing.T) {
 	}
 }
 
-// A speech provider the app knows stays as saved; one it does not reads as
-// an endpoint.
 func TestSpeechProviders(t *testing.T) {
 	s := open(t)
 	for provider, want := range map[string]string{
@@ -197,12 +180,8 @@ func TestSpeechProviders(t *testing.T) {
 	}
 }
 
-// A file copied into the app is whole or not there: one that cannot be
-// read to the end leaves nothing, and one that can leaves only itself, as
-// does one downloaded over it.
 func TestFileCopiesAreWholeOrNone(t *testing.T) {
 	s := open(t)
-	// A folder opens as a file does, and fails as it is read.
 	if _, err := s.AddFile(t.TempDir(), "", "", ""); err == nil {
 		t.Fatal("added a folder")
 	}
@@ -227,8 +206,6 @@ func TestFileCopiesAreWholeOrNone(t *testing.T) {
 	}
 }
 
-// A conflict met again, as a merge tried again meets it, is recorded once;
-// one taken back goes.
 func TestHoldConflictsOnce(t *testing.T) {
 	st := open(t)
 	p, err := st.CreatePage(NewPageOptions{Title: "Plan"})

@@ -16,9 +16,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// A page the agent makes of its own is the user's, at the top level of
-// their space or in their folder, wherever the page the run is on is: one
-// shared from another space is its owner's.
 func TestCreatePageMakesAPageOfTheUsersOwn(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -61,7 +58,6 @@ func TestCreatePageMakesAPageOfTheUsersOwn(t *testing.T) {
 	if op := x.Ops[len(x.Ops)-1]; op.Page == nil || op.Page.FolderID != f.ID || op.Page.ParentID != "" {
 		t.Errorf("op %+v", op)
 	}
-	// Nothing changed on the page the run is on.
 	if len(x.Ctx.Content.Children) != len(page().Children) {
 		t.Errorf("the page has %d blocks", len(x.Ctx.Content.Children))
 	}
@@ -82,8 +78,6 @@ func TestCreatePageMakesAPageOfTheUsersOwn(t *testing.T) {
 	}
 }
 
-// A subpage's card goes at the end of the page it is in, as the app puts
-// one there, before the op that made it: Undo takes both away.
 func TestCreateSubpageLinksItHere(t *testing.T) {
 	x := executor(page())
 	x.Ctx.CreateSubpage = func(string, []*doc.Node) (string, error) { return "page-2", nil }
@@ -110,8 +104,6 @@ func TestCreateSubpageLinksItHere(t *testing.T) {
 	}
 }
 
-// Listing the folders reads nothing someone else wrote: the web's links
-// stay the run's to write, as they are before it reads another page.
 func TestListFoldersKeepsTheWebsLinks(t *testing.T) {
 	x := executor(page())
 	x.Ctx.ReadWeb = func(link string) (web.Page, error) {
@@ -133,10 +125,6 @@ func TestListFoldersKeepsTheWebsLinks(t *testing.T) {
 	}
 }
 
-// Listing the folders spends the run's one read of the web that may go to
-// any page, as a first read does: after it the run reads only the pages
-// the user gave it, as what it would pick could spell out their folders'
-// names, and what it writes keeps to the URLs it may.
 func TestListFoldersSpendsTheFreeReadOfTheWeb(t *testing.T) {
 	x := executor(page())
 	x.Ctx.ReadWeb = func(link string) (web.Page, error) { return web.Page{URL: link, Title: "Article"}, nil }
@@ -158,8 +146,6 @@ func TestListFoldersSpendsTheFreeReadOfTheWeb(t *testing.T) {
 	}
 }
 
-// Undo takes a subpage and its card away together, and Redo brings both
-// back.
 func TestUndoOfASubpageTakesItsCardAway(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -202,10 +188,6 @@ func TestUndoOfASubpageTakesItsCardAway(t *testing.T) {
 	}
 }
 
-// Undo puts back what a run did to the pages around its page, and Redo
-// does it again: a folder made, a page moved into it, renamed and tagged,
-// and a page made, with the subpage added to it since, which goes with it
-// and comes back with it.
 func TestUndoOfPageOps(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -249,8 +231,6 @@ func TestUndoOfPageOps(t *testing.T) {
 	}
 }
 
-// A page the user changed since the run keeps their change: Undo leaves
-// it, and does the rest.
 func TestUndoKeepsWhatTheUserChangedSince(t *testing.T) {
 	st := openStore(t)
 	home, _ := st.CreatePage(store.NewPageOptions{Title: "Home"})
@@ -260,7 +240,6 @@ func TestUndoKeepsWhatTheUserChangedSince(t *testing.T) {
 		{Op: "rename_page", PageID: article.ID, Title: "Saved", PrevTitle: "Article"},
 		{Op: "set_page_tags", PageID: article.ID, Title: "Saved", Tags: []string{"read"}},
 	}}}
-	// The user named it again since.
 	if err := st.RenamePage(article.ID, "Mine"); err != nil {
 		t.Fatal(err)
 	}
@@ -272,9 +251,6 @@ func TestUndoKeepsWhatTheUserChangedSince(t *testing.T) {
 	}
 }
 
-// A move whose page would go back under a parent the user deleted since
-// is passed over, as one of a page they changed since: the page stays
-// where it shows, and Undo does the rest, as Redo does.
 func TestUndoOfAMoveOutOfAPageDeletedSince(t *testing.T) {
 	st := openStore(t)
 	home, _ := st.CreatePage(store.NewPageOptions{Title: "Home"})
@@ -285,7 +261,6 @@ func TestUndoOfAMoveOutOfAPageDeletedSince(t *testing.T) {
 		{Op: "move_page", PageID: article.ID, Title: "Saved", Place: &doc.PagePlace{}, PrevPlace: &doc.PagePlace{ParentID: old.ID}},
 		{Op: "rename_page", PageID: article.ID, Title: "Saved", PrevTitle: "Article"},
 	}}}
-	// The user deleted the page the run moved it out of.
 	if _, err := st.DeletePage(old.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -303,10 +278,6 @@ func TestUndoOfAMoveOutOfAPageDeletedSince(t *testing.T) {
 	}
 }
 
-// A page of the user's own is made only from a page no one else writes or
-// reads: from one shared, or one a guest commented on, the run has no
-// create_page, and its prompt has it make a subpage instead; listing the
-// folders it may not, its prompt names none.
 func TestNoPagesOfTheirOwnFromSharedPages(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, readingHost{})
@@ -350,17 +321,12 @@ func TestNoPagesOfTheirOwnFromSharedPages(t *testing.T) {
 	}
 }
 
-// A run that reads a page someone else writes or reads makes no page of
-// the user's own after it, nor a subpage of its page, which is theirs too:
-// what was written there could go into it. Reading one of the user's
-// alone, it still makes them. The pages a run reads are counted as its
-// own page is.
 func TestNoPagesOfTheirOwnAfterReadingSharedPages(t *testing.T) {
 	st := openStore(t)
 	f := &fakeModel{}
 	models := httptest.NewServer(f)
 	defer models.Close()
-	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine", Content: page()})
@@ -421,10 +387,6 @@ func TestNoPagesOfTheirOwnAfterReadingSharedPages(t *testing.T) {
 	}
 }
 
-// A turn of a chat that read a page someone else writes or reads keeps the
-// turns after it from making pages of the user's own, as what it read is
-// in what they read: a later "make that a page" is refused, and the turn
-// is kept as having read it, under the name the server's jobs give it.
 func TestNoPagesOfTheirOwnInTurnsAfterReadingSharedPages(t *testing.T) {
 	st := openStore(t)
 	f := &fakeModel{replies: []map[string]any{
@@ -435,7 +397,7 @@ func TestNoPagesOfTheirOwnInTurnsAfterReadingSharedPages(t *testing.T) {
 	}}
 	models := httptest.NewServer(f)
 	defer models.Close()
-	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine", Content: page()})

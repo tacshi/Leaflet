@@ -18,18 +18,12 @@ import (
 	"leaflet/internal/store"
 )
 
-// nextStamp waits for the clock to read a later millisecond, so what is
-// done next is stamped after what was done before. A sleep of a few
-// milliseconds does not do that on Windows, whose clock moves on every
-// 15 ms or so.
 func nextStamp() {
 	for now := time.Now().UnixMilli(); time.Now().UnixMilli() == now; {
 		time.Sleep(time.Millisecond)
 	}
 }
 
-// cloudDevice is a device that syncs through a folder standing in for
-// iCloud Drive's.
 type cloudDevice struct {
 	t   *testing.T
 	st  *store.Store
@@ -54,8 +48,6 @@ func (d *cloudDevice) sync() {
 	}
 }
 
-// syncAll syncs the devices in turn, twice round, as a pass on each
-// brings what the others sent.
 func syncAll(devices ...*cloudDevice) {
 	for range 2 {
 		for _, d := range devices {
@@ -73,7 +65,6 @@ func (d *cloudDevice) page(title string, blocks ...*doc.Node) store.Page {
 	return p
 }
 
-// edit changes a block's text, as typing does.
 func (d *cloudDevice) edit(pageID, blockID, text string) {
 	d.t.Helper()
 	c := d.st.Content(pageID)
@@ -137,9 +128,6 @@ func TestICloudJoinsOneSpace(t *testing.T) {
 	}
 }
 
-// Every new device makes starter pages: those of the device that starts
-// the folder's library are the library's, and a device joining it leaves
-// its own out, while its other pages go in.
 func TestICloudJoiningLeavesStarterPagesOut(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -164,7 +152,6 @@ func TestICloudJoiningLeavesStarterPagesOut(t *testing.T) {
 	}
 }
 
-// A page's tags go to the other devices with its row.
 func TestICloudCarriesTags(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -191,14 +178,10 @@ func TestICloudRowsAgree(t *testing.T) {
 	if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
 		t.Fatal(err)
 	}
-	// B's rename was waiting when A's came: it still wins, being newer
-	// than what B had seen, and the devices agree.
 	syncAll(b, a)
 	if a.title(p.ID) != "Plan B" || b.title(p.ID) != "Plan B" {
 		t.Errorf("titles %q / %q", a.title(p.ID), b.title(p.ID))
 	}
-	// A change made here while another device's waited wins, whatever
-	// the clocks: its version comes after the one it passed over.
 	if err := a.st.RenamePage(p.ID, "Plan A again"); err != nil {
 		t.Fatal(err)
 	}
@@ -213,9 +196,6 @@ func TestICloudRowsAgree(t *testing.T) {
 	}
 }
 
-// A row goes as the columns changed on a device: an offline rename on one
-// undoes no move or deletion made on another, whichever came first or
-// waited.
 func TestICloudChangesGoColumnByColumn(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -251,8 +231,6 @@ func TestICloudChangesGoColumnByColumn(t *testing.T) {
 			t.Errorf("deleted page is %q, deleted %v", rr.Title, rr.DeletedAt)
 		}
 	}
-	// A rename still waiting here when the move comes keeps its title, and
-	// takes the move once it has gone.
 	if err := b.st.RenamePage(p.ID, "Plan B2"); err != nil {
 		t.Fatal(err)
 	}
@@ -270,9 +248,6 @@ func TestICloudChangesGoColumnByColumn(t *testing.T) {
 	check("Plan B2", "")
 }
 
-// Through iCloud Drive too, a page marked to keep on this device, and
-// every page once all are kept, brings what another device wrote in it
-// while it was not kept; a page still not kept does not come.
 func TestICloudKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -340,8 +315,6 @@ func TestICloudMergesContent(t *testing.T) {
 			t.Errorf("%d conflicts on different blocks", d.conflicts())
 		}
 	}
-	// The same block on both: the later edit wins on both, and only the
-	// device whose edit lost hears of it.
 	a.edit(p.ID, "x", "mine")
 	nextStamp()
 	b.edit(p.ID, "x", "theirs")
@@ -354,9 +327,6 @@ func TestICloudMergesContent(t *testing.T) {
 	}
 }
 
-// Another device's version of a page whose merge's conflict cannot be
-// recorded is not recorded as merged either: the next sync merges it
-// again, and records the side this device's edit lost.
 func TestICloudMergeKeepsItsConflictsWithItsVersion(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -379,9 +349,6 @@ func TestICloudMergeKeepsItsConflictsWithItsVersion(t *testing.T) {
 	}
 }
 
-// A device's version of a page that cannot be read here, as one a newer
-// Leaflet wrote, is not merged, and the page waits for it rather than
-// being taken for up to date: once it can be read, it merges.
 func TestICloudUnreadablePageWaits(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -423,7 +390,7 @@ func TestICloudRelayedEditIsNoConflict(t *testing.T) {
 	syncAll(a, b, c)
 	a.edit(p.ID, "x", "a")
 	a.sync()
-	b.sync() // B takes A's edit
+	b.sync()
 	nextStamp()
 	c.edit(p.ID, "x", "c")
 	c.sync()
@@ -443,12 +410,11 @@ func TestICloudWaitsForFilesNotDownloaded(t *testing.T) {
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	p := a.page("Later")
 	a.sync()
-	// iCloud has not downloaded A's batch to B's device yet.
 	me := a.st.DeviceID()
 	rel, _ := icloud.BatchPath(me, 1)
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	hidden := filepath.Join(filepath.Dir(path), ".0000000000000001.json.icloud")
-	data, err := os.ReadFile(path) // #nosec G304 -- a file of the test's own folder.
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,9 +440,6 @@ func TestICloudWaitsForFilesNotDownloaded(t *testing.T) {
 	}
 }
 
-// iCloud on iOS downloads only the files asked for. A device catching up
-// on another's log asks for every batch it has not downloaded in one pass,
-// and takes them all on the next, not one batch a pass.
 func TestICloudAsksForEveryBatchNotDownloaded(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -505,7 +468,6 @@ func TestICloudAsksForEveryBatchNotDownloaded(t *testing.T) {
 	icloud.StartDownload = func(path string) error { asked = append(asked, path); return nil }
 	t.Cleanup(func() { icloud.StartDownload = was })
 	b.sync()
-	// iCloud brings what B asked for before its next pass.
 	for _, path := range asked {
 		_ = os.Rename(hidden(path), path)
 	}
@@ -536,7 +498,6 @@ func TestICloudCompacts(t *testing.T) {
 	if err != nil || len(seqs) > compactAfter+1 {
 		t.Fatalf("log holds %v, %v", seqs, err)
 	}
-	// A device that comes now reads the snapshot.
 	c := newCloudDevice(t, root)
 	syncAll(c)
 	if c.title(p.ID) != a.title(p.ID) || c.text(p.ID, "x") != a.text(p.ID, "x") {
@@ -544,8 +505,6 @@ func TestICloudCompacts(t *testing.T) {
 	}
 }
 
-// A snapshot keeps the change to each column: a device that had the row
-// takes from it the tags set before the renames that came after.
 func TestICloudCompactionKeepsEachColumnsChange(t *testing.T) {
 	old := compactAfter
 	compactAfter = 3
@@ -573,8 +532,6 @@ func TestICloudCompactionKeepsEachColumnsChange(t *testing.T) {
 	}
 }
 
-// A log with batches cut short before its last still compacts, once each
-// has stayed so as long as the other devices wait to pass over it.
 func TestICloudCompactsPastABatchCutShort(t *testing.T) {
 	old, tries, wait := compactAfter, damagedTries, damagedWait
 	compactAfter, damagedTries, damagedWait = 3, 2, 0
@@ -587,7 +544,6 @@ func TestICloudCompactsPastABatchCutShort(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	// Two of them, each counted on its own.
 	for _, seq := range []int64{1, 2} {
 		rel, _ := icloud.BatchPath(a.st.DeviceID(), seq)
 		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entr`), 0o600); err != nil {
@@ -609,7 +565,6 @@ func TestICloudCompactsPastABatchCutShort(t *testing.T) {
 	}
 }
 
-// The same entry held again is held once.
 func TestHoldingAnEntryAgainHoldsItOnce(t *testing.T) {
 	e := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Changed: []string{"title"}}
 	held := foldEntry(nil, e)
@@ -617,15 +572,12 @@ func TestHoldingAnEntryAgainHoldsItOnce(t *testing.T) {
 	if len(held) != 1 {
 		t.Errorf("held %d entries", len(held))
 	}
-	// One of other columns, of the same version, is held beside it.
 	other := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Changed: []string{"parent_id"}}
 	if held = foldEntry(held, other); len(held) != 2 {
 		t.Errorf("held %d entries", len(held))
 	}
 }
 
-// Entries held for a row that cannot be read are not written over with
-// only the entry held next, nor let go as applied: they would be lost.
 func TestHeldEntriesUnreadAreKept(t *testing.T) {
 	d := newCloudDevice(t, cloudRoot(t))
 	key := heldKey("pages", "p")
@@ -676,7 +628,6 @@ func TestICloudFolderGoneOrReplaced(t *testing.T) {
 	if err := a.svc.SyncNow(); !errors.Is(err, icloud.ErrOtherLibrary) {
 		t.Errorf("replaced: %v", err)
 	}
-	// Turned off and on, the device joins the folder as it is now.
 	a.svc.SetICloud(false)
 	if err := a.svc.EnableICloud(); err != nil {
 		t.Fatal(err)
@@ -687,8 +638,6 @@ func TestICloudFolderGoneOrReplaced(t *testing.T) {
 }
 
 func TestICloudTwoDevicesMadeTheSpace(t *testing.T) {
-	// A and B each made the folder at once: iCloud keeps both devices'
-	// folders, and B's space.json as a copy beside A's.
 	root, rootB := cloudRoot(t), cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, rootB)
 	pa := a.page("A's")
@@ -698,7 +647,7 @@ func TestICloudTwoDevicesMadeTheSpace(t *testing.T) {
 	if err := os.CopyFS(filepath.Join(root, "devices"), os.DirFS(filepath.Join(rootB, "devices"))); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(rootB, "space.json")) // #nosec G304 -- a file of the test's own folder.
+	raw, err := os.ReadFile(filepath.Join(rootB, "space.json")) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,8 +664,6 @@ func TestICloudTwoDevicesMadeTheSpace(t *testing.T) {
 			t.Errorf("titles %q %q", d.title(pa.ID), d.title(pb.ID))
 		}
 	}
-	// The copy that lost stays a while, for a device that joined its
-	// space, and then goes.
 	if _, losers, _ := a.svc.ICloud.ReadSpace(); len(losers) != 1 {
 		t.Errorf("copies left: %v", losers)
 	}
@@ -740,8 +687,6 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	}
 	a.sync()
 	old := a.st.DeviceID()
-	// A backup of A from before its last sync, restored: its log goes on
-	// past what the device knows, compacted from its second batch.
 	for k, v := range map[string]string{"icloud.seq": "1", "icloud.writing": writing, "icloud.log_from": "2"} {
 		if err := a.st.SetValue(k, v); err != nil {
 			t.Fatal(err)
@@ -754,7 +699,6 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	if a.st.DeviceID() == old {
 		t.Fatal("kept the ID another device writes under")
 	}
-	// The new ID's log is read from its first batch.
 	if from := a.svc.intValue("icloud.log_from"); from != 0 {
 		t.Errorf("the new log starts at %d", from)
 	}
@@ -845,8 +789,6 @@ func TestICloudOffAndOnSendsWhatWaited(t *testing.T) {
 	}
 }
 
-// iCloud may bring a batch before the page file it names, in either
-// order: the page waits until the version the batch named is there.
 func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -854,17 +796,16 @@ func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 	syncAll(a, b)
 	rel, _ := icloud.PagePath(a.st.DeviceID(), p.ID)
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	old, err := os.ReadFile(path) // #nosec G304 -- a file of the test's own folder.
+	old, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.edit(p.ID, "x", "xa")
 	a.sync()
-	fresh, err := os.ReadFile(path) // #nosec G304 -- a file of the test's own folder.
+	fresh, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The older page file is still there when the batch comes.
 	if err := os.WriteFile(path, old, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -876,7 +817,6 @@ func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 	if b.text(p.ID, "x") != "xa" {
 		t.Errorf("older file first: B has %q", b.text(p.ID, "x"))
 	}
-	// A new page whose file is not there yet when its batch comes.
 	q := a.page("Later", para("y", "y0"))
 	a.sync()
 	rel, _ = icloud.PagePath(a.st.DeviceID(), q.ID)
@@ -895,8 +835,6 @@ func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 	}
 }
 
-// A batch that could not be written leaves its page to go again, with
-// the notice the other devices need.
 func TestICloudSendsAgainAfterABatchFailed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("a folder made read-only stops no one running as root")
@@ -909,14 +847,14 @@ func TestICloudSendsAgainAfterABatchFailed(t *testing.T) {
 	p := a.page("Notes", para("x", "x0"))
 	syncAll(a, b)
 	logDir := filepath.Join(root, "devices", a.st.DeviceID(), "log")
-	if err := os.Chmod(logDir, 0o500); err != nil { // #nosec G302 -- a test's own folder, made read-only.
+	if err := os.Chmod(logDir, 0o500); err != nil { // #nosec G302
 		t.Fatal(err)
 	}
 	a.edit(p.ID, "x", "xa")
 	if err := a.svc.SyncNow(); err == nil {
 		t.Fatal("wrote a batch to a folder it may not write to")
 	}
-	if err := os.Chmod(logDir, 0o700); err != nil { // #nosec G302 -- a test's own folder.
+	if err := os.Chmod(logDir, 0o700); err != nil { // #nosec G302
 		t.Fatal(err)
 	}
 	syncAll(a, b)
@@ -925,8 +863,6 @@ func TestICloudSendsAgainAfterABatchFailed(t *testing.T) {
 	}
 }
 
-// A compaction cut short leaves batches before its snapshot: a reader
-// goes on from the snapshot.
 func TestICloudReadsPastACompactionCutShort(t *testing.T) {
 	old := compactAfter
 	compactAfter = 1000
@@ -945,7 +881,7 @@ func TestICloudReadsPastACompactionCutShort(t *testing.T) {
 	saved := map[int64][]byte{}
 	for _, seq := range []int64{3, 4} {
 		rel, _ := icloud.BatchPath(me, seq)
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) // #nosec G304 -- a file of the test's own folder.
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) // #nosec G304
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -956,7 +892,6 @@ func TestICloudReadsPastACompactionCutShort(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	// It removed batches 1 and 2 only.
 	for seq, data := range saved {
 		rel, _ := icloud.BatchPath(me, seq)
 		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), data, 0o600); err != nil {
@@ -970,9 +905,6 @@ func TestICloudReadsPastACompactionCutShort(t *testing.T) {
 	}
 }
 
-// Joining a folder afresh sends everything again: comments and
-// recordings too, and files and audio this device has only in the
-// folder it leaves.
 func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 	root := cloudRoot(t)
 	a := newCloudDevice(t, root)
@@ -996,7 +928,6 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	syncAll(a)
-	// The folder goes; turned off and on, A makes a new one.
 	moved := filepath.Join(t.TempDir(), "old")
 	if err := os.Rename(root, moved); err != nil {
 		t.Fatal(err)
@@ -1004,7 +935,6 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(root), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	// What only the old folder had stays reachable while A moves it.
 	a.svc.SetICloudRoot(moved)
 	a.svc.SetICloud(false)
 	if !a.svc.CanFetch() {
@@ -1037,9 +967,6 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 	}
 }
 
-// A device joins the folder only once everything it had is queued for
-// it: one that could not queue it all joins again on the next pass, so
-// what it had still reaches the other devices.
 func TestICloudJoinsOnceAllIsQueued(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1048,7 +975,6 @@ func TestICloudJoinsOnceAllIsQueued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The disk refuses the folder's entry, as one that is full would.
 	if _, err := b.st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON outbox WHEN NEW.entity = 'folders'
 		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
 		t.Fatal(err)
@@ -1078,9 +1004,6 @@ func TestICloudJoinsOnceAllIsQueued(t *testing.T) {
 	}
 }
 
-// A file this device has only in iCloud Drive, not downloaded yet when
-// everything is sent again, waits with its old place, and goes once it
-// comes.
 func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	old := moveWait
 	moveWait = 200 * time.Millisecond
@@ -1121,7 +1044,6 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Signing in turns iCloud sync off, and the file goes up from here.
 	a.svc.SetICloud(false)
 	const space = "00000000-0000-0000-0000-0000000000a2"
 	if err := a.svc.moveInto(space, "My space", "00000000-0000-0000-0000-0000000000b1", false); err != nil {
@@ -1133,8 +1055,6 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	if got := file(); got.StoragePath != f.StoragePath || a.st.HasPending("files", f.ID) {
 		t.Errorf("file moved before it came: %+v", got)
 	}
-	// Stopping the pass, as when an iOS app's background time runs out,
-	// stops the wait too.
 	moveWait = time.Minute
 	stopped, stop := context.WithCancel(context.Background())
 	stop()
@@ -1165,8 +1085,6 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	}
 }
 
-// A device that sends everything again to iCloud Drive leaves there what
-// it has only there: a file not downloaded does not hold up the pass.
 func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
 	old := moveWait
 	moveWait = 200 * time.Millisecond
@@ -1194,7 +1112,6 @@ func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
 	if err := os.Rename(path, filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")); err != nil {
 		t.Fatal(err)
 	}
-	// A's last batch was cut short: it sends everything again.
 	batch, _ := icloud.BatchPath(a.st.DeviceID(), a.svc.intValue("icloud.seq"))
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(batch)), []byte(`{"format":1,"entr`), 0o600); err != nil {
 		t.Fatal(err)
@@ -1216,8 +1133,6 @@ func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
 	}
 }
 
-// A device that stopped between writing a batch and keeping its seq finds
-// the batch its own, not one another device wrote under its ID.
 func TestICloudStoppedAfterWritingABatch(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1248,8 +1163,6 @@ func TestICloudStoppedAfterWritingABatch(t *testing.T) {
 	}
 }
 
-// A batch a crash cut short holds up no device: its writer writes it again
-// and sends everything once it runs again.
 func TestICloudRewritesItsOwnBatchCutShort(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1269,8 +1182,6 @@ func TestICloudRewritesItsOwnBatchCutShort(t *testing.T) {
 	if b.title(p.ID) != "Plan" {
 		t.Fatalf("B read a batch cut short: %q", b.title(p.ID))
 	}
-	// A runs again, before iCloud has brought the batch back: it reads it
-	// once it comes.
 	a.svc = New(a.st, remote.New(remote.Settings{}, a.st))
 	a.svc.ICloud = b.svc.ICloud
 	a.svc.ICloud.Temp = filepath.Join(t.TempDir(), "tmp")
@@ -1292,8 +1203,6 @@ func TestICloudRewritesItsOwnBatchCutShort(t *testing.T) {
 	}
 }
 
-// A batch of another device's that stays cut short, with batches after
-// it, is passed over in the end, so it does not hold up the rest.
 func TestICloudPassesOverABatchThatStaysCutShort(t *testing.T) {
 	tries, wait := damagedTries, damagedWait
 	damagedTries, damagedWait = 3, 0
@@ -1326,8 +1235,6 @@ func TestICloudPassesOverABatchThatStaysCutShort(t *testing.T) {
 	}
 }
 
-// A deleted file's copy leaves the folder once the batch with its
-// deletion is written, and leaves each device that reads the batch.
 func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1371,9 +1278,6 @@ func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
 	}
 }
 
-// A file whose deletion is queued but that lives here again, as when the
-// deletion gave way to another's row, keeps its copy in the folder, as it
-// keeps its object on the server.
 func TestICloudFileThatLivesKeepsItsCopy(t *testing.T) {
 	root := cloudRoot(t)
 	a := newCloudDevice(t, root)
@@ -1415,9 +1319,6 @@ func TestICloudFileThatLivesKeepsItsCopy(t *testing.T) {
 	}
 }
 
-// A folder deleted on a device that has not yet heard of a deletion of a
-// file in it moves the file to the top level, and the file stays deleted:
-// only the move goes.
 func TestICloudDeletedFolderKeepsAFileDeletedElsewhere(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1450,9 +1351,6 @@ func TestICloudDeletedFolderKeepsAFileDeletedElsewhere(t *testing.T) {
 	}
 }
 
-// Sending everything again queues each file as stored once those before
-// it have come from iCloud Drive: a file deleted while it waited for one
-// stays deleted.
 func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 	old := moveWait
 	moveWait = 400 * time.Millisecond
@@ -1473,7 +1371,6 @@ func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 		nextStamp()
 		return f
 	}
-	// Newest first: the file that waits goes before the other.
 	kept, waits := add("kept.txt"), add("waits.txt")
 	a.sync()
 	w, _ := a.st.File(waits.ID)
@@ -1509,13 +1406,10 @@ func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 	}
 }
 
-// A change held for a row that then does not apply is held again, and
-// does not hold up the other devices' batches.
 func TestICloudHeldChangeThatFailsLetsPullsGoOn(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	syncAll(a, b)
-	// A row B cannot read, so the change held for it does not apply.
 	id := doc.NewRowID()
 	if _, err := b.st.DB().Exec(`INSERT INTO comments (id, page_id, block_id, body, created_at, updated_at)
 		VALUES (?, 'p', 'b', 'x', 'bad', 'bad')`, id); err != nil {
@@ -1536,9 +1430,6 @@ func TestICloudHeldChangeThatFailsLetsPullsGoOn(t *testing.T) {
 	}
 }
 
-// Two devices that move pages inside each other at once would leave them
-// in a loop, each under the other: both put the page of it with the least
-// ID back at the top level, and keep the other under it.
 func TestICloudBreaksALoopOfMoves(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1561,8 +1452,6 @@ func TestICloudBreaksALoopOfMoves(t *testing.T) {
 	}
 }
 
-// A page copied on a device that has its file and audio only in iCloud
-// Drive brings them here first, and the copy gets them as its own there.
 func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1598,8 +1487,6 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	}
 	syncAll(a, b)
 
-	// What B has only in iCloud Drive comes here first: the copy goes up
-	// with its own, never later from the originals'.
 	ctx := context.Background()
 	needs, err := b.st.CopyNeeds(p.ID)
 	if err != nil {
@@ -1642,8 +1529,6 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	}
 }
 
-// A copy an earlier version queued, whose file iCloud has not downloaded
-// yet, goes up on a later pass; the rest of the pass goes meanwhile.
 func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1696,8 +1581,6 @@ func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 	}
 }
 
-// A file deleted while a copy of it an earlier version queued waits to go
-// up from it stays in the folder until the copy has gone up.
 func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1754,10 +1637,6 @@ func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}
 }
 
-// A copy an earlier version queued, of a file iCloud Drive does not list
-// yet, as while the device that has it still copies it there, waits for
-// it while the file lives, rather than go without it; the copy's row
-// waits with it, as a batch names only what is in the folder.
 func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1806,9 +1685,6 @@ func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
 	}
 }
 
-// Sending everything again keeps a change of some columns waiting a change
-// of only those: whole, it would undo another device's change to the
-// others, held here meanwhile, on every device.
 func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1840,8 +1716,6 @@ func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
 	}
 }
 
-// As TestICloudSendingAgainKeepsAHeldChange, for a file: sent again whole,
-// a file moved here would undo its deletion on another device.
 func TestICloudSendingAgainKeepsAHeldFileChange(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1884,8 +1758,6 @@ func TestICloudSendingAgainKeepsAHeldFileChange(t *testing.T) {
 	}
 }
 
-// Entries held for a row stay held until they have applied: a stop while
-// they apply leaves them to apply on the next pass.
 func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1928,9 +1800,6 @@ func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
 	}
 }
 
-// A recording's audio that went through iCloud Drive but is not listed
-// there yet waits to go up to the server until it is, as a file does:
-// queued now, the recording would go up naming audio stored nowhere.
 func TestICloudAudioNotListedYetWaitsToGoUp(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1979,9 +1848,6 @@ func TestICloudAudioNotListedYetWaitsToGoUp(t *testing.T) {
 	}
 }
 
-// A file that went through iCloud Drive but is not listed there yet waits
-// to go up to the server until it is: queued now, it would go up with a
-// path of its own and nothing stored there.
 func TestICloudFileNotListedYetWaitsToGoUp(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2021,8 +1887,6 @@ func TestICloudFileNotListedYetWaitsToGoUp(t *testing.T) {
 	}
 }
 
-// A device that settles at startup a recording it pulled mid-transcription
-// does not undo the transcript the device transcribing it finished.
 func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2054,9 +1918,6 @@ func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
 	}
 }
 
-// A device that joined the space of a space.json that lost, before it
-// lost, joins the one that won, after the device that made the losing
-// one has moved: that one stays a while for it.
 func TestICloudJoinedTheLosingSpace(t *testing.T) {
 	rootA, rootB := cloudRoot(t), cloudRoot(t)
 	a, b := newCloudDevice(t, rootA), newCloudDevice(t, rootB)
@@ -2076,7 +1937,7 @@ func TestICloudJoinedTheLosingSpace(t *testing.T) {
 	if err := os.CopyFS(filepath.Join(wonRoot, "devices"), os.DirFS(filepath.Join(lostRoot, "devices"))); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(lostRoot, "space.json")) // #nosec G304 -- a file of the test's own folder.
+	raw, err := os.ReadFile(filepath.Join(lostRoot, "space.json")) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2094,9 +1955,6 @@ func TestICloudJoinedTheLosingSpace(t *testing.T) {
 	}
 }
 
-// Another device's page file, as it was when this device merged it, by its
-// time and size, is not read again as a third device's change to the page
-// comes: it has nothing new.
 func TestICloudPageFilesMergedAreNotReadAgain(t *testing.T) {
 	root := cloudRoot(t)
 	a, b, c := newCloudDevice(t, root), newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2107,8 +1965,6 @@ func TestICloudPageFilesMergedAreNotReadAgain(t *testing.T) {
 	if c.text(p.ID, "b1") != "two, from B" {
 		t.Fatalf("C has %q", c.text(p.ID, "b1"))
 	}
-	// B's file stays as it is to its time and size, but reads as nothing:
-	// read again, it would hold the page up.
 	rel, err := icloud.PagePath(b.st.DeviceID(), p.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -2135,8 +1991,6 @@ func TestICloudPageFilesMergedAreNotReadAgain(t *testing.T) {
 	}
 }
 
-// A device's own page file is not read to learn the version it wrote: the
-// highest it wrote is kept, and the next is after it.
 func TestICloudPublishGoesOnFromTheVersionKept(t *testing.T) {
 	root := cloudRoot(t)
 	a := newCloudDevice(t, root)
@@ -2158,11 +2012,6 @@ func TestICloudPublishGoesOnFromTheVersionKept(t *testing.T) {
 	}
 }
 
-// What this device knew of another's page files goes with what it merged
-// from them: wiped and joining the folder again in the same run, it reads
-// them again and has the page's content back, and with its iCloud sync
-// forgotten alone, it merges and keeps their versions again. What it
-// writes on the page after goes to the others with what it had.
 func TestICloudPageFilesAreReadAgainOnceTheirBasesGo(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2206,9 +2055,6 @@ func TestICloudPageFilesAreReadAgainOnceTheirBasesGo(t *testing.T) {
 	}
 }
 
-// A page file older than the version a batch named is read again though
-// its time and size are as they were when it was merged: it may have been
-// written again so.
 func TestICloudPageFileBehindItsBatchIsReadAgain(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2224,7 +2070,6 @@ func TestICloudPageFileBehindItsBatchIsReadAgain(t *testing.T) {
 	if err := a.svc.folder().ReadJSON(rel, &file); err != nil {
 		t.Fatal(err)
 	}
-	// A's next version, as long as the last, at the same time.
 	theirs := doc.MustDecode(string(file.Content))
 	theirs.Find("a1").SetDelta(doc.Delta{{Text: "two"}})
 	theirs.Blocks["a1"]++
@@ -2250,9 +2095,6 @@ func TestICloudPageFileBehindItsBatchIsReadAgain(t *testing.T) {
 	}
 }
 
-// A device serving a public link says so in its device.json, which the
-// other devices read, and says so no more once it stops; what a Leaflet
-// from before reads of the file is as it was.
 func TestICloudPublicLinkLeases(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2285,8 +2127,6 @@ func TestICloudPublicLinkLeases(t *testing.T) {
 		t.Errorf("device.json as read before: %+v, %v", before, err)
 	}
 
-	// Another lease of the page, as the link started again, stands when
-	// the first stops.
 	again := a.svc.ICloudLease(p.ID)
 	leases(2)
 	stop()
@@ -2308,9 +2148,6 @@ func TestICloudPublicLinkLeases(t *testing.T) {
 	}
 }
 
-// A lease that ends as iCloud sync turns off, as the app ends it then, or
-// as signing in turns iCloud sync off, is gone from device.json at once,
-// though no pass writes it with iCloud sync off.
 func TestICloudPublicLinkEndsWithICloudOff(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2335,8 +2172,6 @@ func TestICloudPublicLinkEndsWithICloudOff(t *testing.T) {
 	}
 }
 
-// A lease of a run of the app that quit without stopping it ends with its
-// time: the next device.json leaves it out, and it is forgotten.
 func TestICloudPublicLinkLeaseRunsOut(t *testing.T) {
 	d := newCloudDevice(t, cloudRoot(t))
 	now := time.Now()
@@ -2358,9 +2193,6 @@ func TestICloudPublicLinkLeaseRunsOut(t *testing.T) {
 	}
 }
 
-// otherSpacePage stores a page of another account's space on d, as one
-// shared with the user stays after their session ended on its own, with
-// content d edited since.
 func otherSpacePage(t *testing.T, d *cloudDevice, title string) store.Page {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -2378,9 +2210,6 @@ func otherSpacePage(t *testing.T, d *cloudDevice, title string) store.Page {
 	return p
 }
 
-// A page another account shared with the user stays out of iCloud Drive,
-// with its comments, files and recordings, as does the user's change to
-// it: the other devices would take it for one of the user's own.
 func TestICloudLeavesOtherSpacesOut(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2436,7 +2265,6 @@ func TestICloudLeavesOtherSpacesOut(t *testing.T) {
 	if blob, _ := icloud.RecordingBlobPath(rec.ID); a.svc.ICloud.Exists(blob) {
 		t.Error("its audio is in iCloud Drive")
 	}
-	// A keeps them as they were, in their space.
 	if p, err := a.st.Page(shared.ID); err != nil || p.SpaceID != shared.SpaceID {
 		t.Errorf("A's copy: %+v, %v", p, err)
 	}
@@ -2445,9 +2273,6 @@ func TestICloudLeavesOtherSpacesOut(t *testing.T) {
 	}
 }
 
-// A row of another space that a device wrote to iCloud Drive, as a
-// Leaflet from before did, is not stored: neither as a page of the
-// space the devices sync, nor over a page of another space here.
 func TestICloudRefusesRowsOfOtherSpaces(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2493,8 +2318,6 @@ func TestICloudRefusesRowsOfOtherSpaces(t *testing.T) {
 	}
 }
 
-// linksElsewhere are the public links the other devices say d's in
-// iCloud Drive that they serve, all of them read.
 func linksElsewhere(t *testing.T, d *cloudDevice) map[string]time.Time {
 	t.Helper()
 	links, err := d.svc.ICloudLinksElsewhere()
@@ -2504,11 +2327,6 @@ func linksElsewhere(t *testing.T, d *cloudDevice) map[string]time.Time {
 	return links
 }
 
-// A device.json that cannot be read, as one iCloud has not downloaded,
-// one cut short or one a newer Leaflet wrote, may say a link of any page:
-// the links are unknown then, as they are when the devices cannot be
-// listed. One that has not changed for longer than any lease it says
-// lasts has none that still counts.
 func TestICloudLinksOfADeviceNotReadAreUnknown(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2518,7 +2336,7 @@ func TestICloudLinksOfADeviceNotReadAreUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	good, err := os.ReadFile(path) // #nosec G304 -- a file of the test's own folder.
+	good, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2561,14 +2379,12 @@ func TestICloudLinksOfADeviceNotReadAreUnknown(t *testing.T) {
 	if err := os.Chmod(devices, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(devices, 0o750) }) // #nosec G302 -- the test's own folder.
+	t.Cleanup(func() { _ = os.Chmod(devices, 0o750) }) // #nosec G302
 	if runtime.GOOS != "windows" {
 		unknown("devices not listed")
 	}
 }
 
-// A lease kept since device.json was last written goes into it though
-// the pass fails after this device knows its ID.
 func TestICloudLeaseIsWrittenThoughThePassFails(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -2592,7 +2408,6 @@ func TestICloudLeaseIsWrittenThoughThePassFails(t *testing.T) {
 	}
 }
 
-// idsOf is the set of IDs svc keeps under key.
 func idsOf(t *testing.T, svc *Service, key string) map[string]bool {
 	t.Helper()
 	ids, err := svc.ids(key)
@@ -2602,13 +2417,11 @@ func idsOf(t *testing.T, svc *Service, key string) map[string]bool {
 	return ids
 }
 
-// waitingOn are the pages whose content waits on svc.
 func waitingOn(t *testing.T, svc *Service) map[string]bool {
 	t.Helper()
 	return idsOf(t, svc, "sync.content_waiting")
 }
 
-// heldOf are the entries svc holds for a row.
 func heldOf(t *testing.T, svc *Service, table, id string) []icloud.Entry {
 	t.Helper()
 	held, err := svc.held(table, id)

@@ -3,8 +3,6 @@ import worker, { type Env, type RateLimit } from "./index.ts";
 
 const ORIGIN = "https://leaflet-auth.example.workers.dev";
 
-// withSupabase runs fn against a token endpoint that records what it was
-// sent and answers with a token.
 async function withSupabase(fn: (env: Env, sent: { auth?: string; form?: URLSearchParams }) => Promise<void>) {
   const sent: { auth?: string; form?: URLSearchParams } = {};
   const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
@@ -47,7 +45,6 @@ Deno.test("the site association names the iOS apps for their web sessions", asyn
   assertEquals(await res.json(), {
     webcredentials: { apps: ["ABCDE12345.app.capyvibe.leaflet", "ABCDE12345.app.capyvibe.leaflet.debug"] },
   });
-  // Without a team, it names no app.
   assertEquals((await worker.fetch(req(), {} as Env)).status, 404);
 });
 
@@ -111,9 +108,6 @@ Deno.test("anything else is refused before Supabase", async () => {
   });
 });
 
-// Supabase out of reach is a 502 in OAuth's JSON, which the app reads, not
-// the platform's page of an exception, nor a 400 the app would take for
-// its refresh token refused.
 Deno.test("Supabase out of reach fails as OAuth does", async () => {
   const env: Env = {
     CLIENT_ID: "leaflet-app",
@@ -128,8 +122,6 @@ Deno.test("Supabase out of reach fails as OAuth does", async () => {
   assertEquals((await res.json()).error, "server_error");
 });
 
-// One address exchanges tokens only so often: past the limit it is told
-// to slow down (429), before Supabase is asked.
 Deno.test("token exchanges are rate limited by address", async () => {
   await withSupabase(async (env, sent) => {
     const keys: string[] = [];

@@ -3,8 +3,6 @@ import Testing
 
 @testable import Leaflet
 
-/// CoreClientTests drive the Go core through the bridge, in a folder of
-/// their own, as the app does.
 @MainActor
 struct CoreClientTests {
     let core: ScratchCore
@@ -42,8 +40,6 @@ struct CoreClientTests {
         #expect(texts == ["Milk"])
     }
 
-    /// A search whose task is cancelled before its turn, as one typed over
-    /// is, never reaches the core.
     @Test func aCancelledSearchNeverReachesTheCore() async throws {
         let search = Task {
             withUnsafeCurrentTask { $0?.cancel() }
@@ -52,9 +48,6 @@ struct CoreClientTests {
         await #expect(throws: CancellationError.self) { try await search.value }
     }
 
-    /// Calls made one after another without waiting, each from a task of
-    /// its own, as a slider's changes are, reach the core in that order:
-    /// the last one made is the one kept.
     @Test func callsReachTheCoreInTheOrderMade() async throws {
         let tasks = (1...40).map { size in
             Task { try await client.saveSettings(#"{"text_size":\#(size)}"#) }
@@ -65,9 +58,6 @@ struct CoreClientTests {
         #expect(settings["text_size"]?.double == 40)
     }
 
-    /// Every answer the app reads decodes from a core just opened, as the
-    /// app's types have them: a key the core leaves out, or a list it
-    /// sends as null, fails here rather than show an empty sidebar.
     @Test func everyAnswerDecodesFromAFreshCore() async throws {
         let page = try await client.createPage(NewPage(title: "Plan"))
         _ = try await client.library()
@@ -90,8 +80,6 @@ struct CoreClientTests {
         await client.closePage(page.id, editor: opened.editor)
     }
 
-    /// The To-dos tab's sections come from the core in order, overdue
-    /// first, each by date.
     @Test func toDosComeInTheirSections() async throws {
         let page = try await client.createPage(NewPage(title: "Chores"))
         var opened = try await client.openPage(page.id)
@@ -110,7 +98,6 @@ struct CoreClientTests {
         try await client.editPage(
             page.id, editor: opened.editor, content: opened.content, rev: opened.rev)
         await client.closePage(page.id, editor: opened.editor)
-        // Those of this page: the welcome page may have its own.
         let mine = try await client.todos().map { group in
             (group, group.todos.filter { $0.pageID == page.id }.map(\.text))
         }.filter { !$0.1.isEmpty }

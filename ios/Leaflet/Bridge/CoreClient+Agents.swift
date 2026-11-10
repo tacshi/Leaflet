@@ -1,8 +1,6 @@
 import Foundation
 import LeafletCore
 
-/// AgentState is a page's agent state: its chat, its runs, and the agents
-/// to pick from.
 struct AgentState: Codable, Sendable {
     struct Message: Codable, Hashable, Sendable {
         var mine: Bool
@@ -11,8 +9,6 @@ struct AgentState: Codable, Sendable {
         var pending: Bool
         var error: Bool
         var agentName: String?
-        /// streamed is a pending reply whose text is the answer as far as
-        /// it has come, not what the run is doing.
         var streamed: Bool
 
         enum CodingKeys: String, CodingKey {
@@ -31,21 +27,12 @@ struct AgentState: Codable, Sendable {
         var undone: Bool
         var error: String?
         var edits: [String]
-        /// editPages are the pages the edits made, an edit each, "" for
-        /// one that made none: a tap on one opens its page.
         var editPages: [String]?
         var blockIDs: [String]?
         var summary: String
         var stoppable: Bool
-        /// answer is the model's answer as far as it has come, while the
-        /// run works and has not edited the page.
         var answer: String?
-        /// activity is what the run is doing while a call takes a while,
-        /// as searching the web.
         var activity: String?
-        /// settled is a run whose Undo shows only in its chat message, as
-        /// the desktop's run bar hides it: a version restored since put
-        /// the page back to before or after it.
         var settled = false
 
         enum CodingKeys: String, CodingKey {
@@ -58,7 +45,6 @@ struct AgentState: Codable, Sendable {
 
         var running: Bool { status == "running" }
 
-        /// page is the page edit i made, nil for one that made none.
         func page(_ i: Int) -> String? {
             guard let pages = editPages, pages.indices.contains(i), !pages[i].isEmpty else {
                 return nil
@@ -72,17 +58,15 @@ struct AgentState: Codable, Sendable {
         var model: String
         var name: String
         var label: String
-        var local: Bool
 
         var id: String { providerID + "/" + model }
 
         enum CodingKeys: String, CodingKey {
-            case model, name, label, local
+            case model, name, label
             case providerID = "provider_id"
         }
     }
 
-    /// Choice is an agent and the model it runs.
     struct Choice: Codable, Hashable, Sendable {
         var providerID: String
         var model: String
@@ -98,16 +82,10 @@ struct AgentState: Codable, Sendable {
     var running: Bool
     var options: [Option]
     var available: Bool
-    /// current is the agent the chat asks: the one picked for the page,
-    /// else the one last picked anywhere.
     var current: Choice?
-    /// defaultAgent is the agent asked where none is named: the one last
-    /// picked.
     var defaultAgent: Choice?
-    /// past are the page's earlier conversations, the latest first.
     var past: [Past] = []
 
-    /// Past is an earlier conversation to go back to.
     struct Past: Codable, Hashable, Identifiable, Sendable {
         var id: String
         var title: String
@@ -121,17 +99,12 @@ struct AgentState: Codable, Sendable {
     static let empty = AgentState(
         messages: [], runs: [], running: false, options: [], available: false)
 
-    /// runToUndo is the run Undo in the page takes back: the latest with
-    /// edits, once it is done. While one works, Undo takes back nothing:
-    /// the steps on screen are its own, and an earlier run's are not what
-    /// the user sees written.
     var runToUndo: Run? {
         guard !running, !runs.contains(where: \.running) else { return nil }
         return runs.last { !$0.edits.isEmpty && !$0.undone }
     }
 }
 
-/// CommentThread is a first comment and its replies.
 struct CommentThread: Codable, Hashable, Identifiable, Sendable {
     struct Comment: Codable, Hashable, Identifiable, Sendable {
         var id: String
@@ -142,13 +115,8 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
         var quote: String?
         var resolved: Bool
         var createdAt: Int64
-        /// deleted is a first comment deleted, kept for its replies,
-        /// without its words.
         var deleted: Bool?
-        /// mayDelete says the user may delete it, as the server lets them.
         var mayDelete: Bool
-        /// askedBy says who else had an agent write it, in words for the
-        /// user.
         var askedBy: String?
 
         enum CodingKeys: String, CodingKey {
@@ -166,8 +134,6 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
 
     var root: Comment
     var replies: [Comment]
-    /// mayResolve says the user may resolve or reopen the thread, as the
-    /// server lets them: another's change would never go up.
     var mayResolve: Bool
     var id: String { root.id }
 
@@ -177,7 +143,6 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// ProviderPreset is a kind of agent provider to add.
 struct ProviderPreset: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -194,7 +159,6 @@ struct ProviderPreset: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// AgentProvider is a service agents run on.
 struct AgentProvider: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var preset: String
@@ -207,10 +171,8 @@ struct AgentProvider: Codable, Hashable, Identifiable, Sendable {
     var hasKey: Bool
     var apiKey: String?
     var supportsTools: Bool?
-    /// email is who a ChatGPT provider signed in as.
     var email: String?
 
-    /// isAccount says the provider runs on a ChatGPT plan, signed in to.
     var isAccount: Bool { authKind == "account" }
 
     enum CodingKeys: String, CodingKey {
@@ -225,8 +187,6 @@ struct AgentProvider: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// ProviderTest is what trying a provider found: whether its model
-/// answers and calls tools, and the models it serves.
 struct ProviderTest: Codable, Sendable {
     var ok: Bool
     var supportsTools: Bool
@@ -244,8 +204,6 @@ extension CoreClient {
         String(decoding: (try? JSONEncoder().encode(v)) ?? Data("null".utf8), as: UTF8.self)
     }
 
-    // MARK: Agents
-
     nonisolated(nonsending) func agentState(_ pageID: String) async throws -> AgentState {
         try await call(AgentState.self) { core in
             try Self.answer { e in core.agentState(pageID, error: e) }
@@ -257,14 +215,10 @@ extension CoreClient {
         try? await call { $0.chat(pageID, text: text, focus: f) }
     }
 
-    /// workspaceChat asks the workspace agent, the agent of all the user's
-    /// pages, telling it of the page open, "" for none.
     nonisolated(nonsending) func workspaceChat(_ text: String, openPageID: String) async {
         try? await call { $0.workspaceChat(text, openPageID: openPageID) }
     }
 
-    /// ask starts a run from the editor, and returns its ID, or throws why
-    /// it could not start, as when another run of the page's is working.
     nonisolated(nonsending) func ask(
         _ pageID: String, surface: String, instruction: String, focus: [String], selection: String,
         agent: AgentState.Option?
@@ -284,15 +238,10 @@ extension CoreClient {
         try? await call { $0.stopAgent(pageID, runID: runID) }
     }
 
-    /// undoRun takes a run's edits back off the page, as one step. Edits
-    /// later ones changed leave the run as it was, and it throws why.
     nonisolated(nonsending) func undoRun(_ pageID: String, runID: String) async throws {
         try await call { try $0.undoRun(pageID, runID: runID) }
     }
 
-    /// replyBlocks are a run's answer in words as the blocks of its
-    /// Markdown, for the editor to put after the block it was asked about,
-    /// as the desktop's Insert does; none for a run that edited the page.
     nonisolated(nonsending) func replyBlocks(_ pageID: String, runID: String) async throws
         -> [DocNode]
     {
@@ -301,20 +250,16 @@ extension CoreClient {
         }
     }
 
-    /// redoRun puts an undone run's edits back, or leaves it undone and
-    /// throws why.
     nonisolated(nonsending) func redoRun(_ pageID: String, runID: String) async throws {
         try await call { try $0.redoRun(pageID, runID: runID) }
     }
 
-    /// selectAgent picks the agent and model the page's chat asks.
     nonisolated(nonsending) func selectAgent(_ pageID: String, providerID: String, model: String)
         async
     {
         try? await call { $0.selectAgent(pageID, providerID: providerID, model: model) }
     }
 
-    /// openConversation goes back to an earlier conversation of a page.
     nonisolated(nonsending) func openConversation(_ pageID: String, id: String) async {
         try? await call { $0.openConversation(pageID, id_: id) }
     }
@@ -322,8 +267,6 @@ extension CoreClient {
     nonisolated(nonsending) func newConversation(_ pageID: String) async {
         try? await call { $0.newConversation(pageID) }
     }
-
-    // MARK: Comments
 
     nonisolated(nonsending) func threads(_ pageID: String) async throws -> [CommentThread] {
         try await call([CommentThread].self) { core in
@@ -350,8 +293,6 @@ extension CoreClient {
         try await call { try $0.deleteComment(id) }
     }
 
-    // MARK: Providers
-
     nonisolated(nonsending) func presets() async throws -> [ProviderPreset] {
         try await call([ProviderPreset].self) { core in try Self.answer { e in core.presets(e) } }
     }
@@ -365,8 +306,6 @@ extension CoreClient {
         try await call(waiting: true) { try $0.saveProvider(raw) }
     }
 
-    /// testProvider tries a provider, with the key typed in its apiKey or
-    /// the one kept for it.
     nonisolated(nonsending) func testProvider(_ provider: AgentProvider) async throws
         -> ProviderTest
     {
@@ -380,9 +319,6 @@ extension CoreClient {
         try await call(waiting: true) { try $0.removeProvider(id) }
     }
 
-    /// beginChatGPTSignIn begins signing in with ChatGPT for the provider
-    /// providerID ("" for a new one), and returns OpenAI's page to open,
-    /// with the attempt's number.
     nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws
         -> ChatGPTSignIn
     {
@@ -391,43 +327,32 @@ extension CoreClient {
         }
     }
 
-    /// finishChatGPTSignIn waits for the sign-in begun to come back.
     nonisolated(nonsending) func finishChatGPTSignIn() async throws -> ChatGPTAccount {
         try await call(ChatGPTAccount.self, waiting: true) { core in
             try Self.answer { e in core.finishChatGPTSign(in: e) }
         }
     }
 
-    /// chatGPTModels are the models the plan signed in to serves.
     nonisolated(nonsending) func chatGPTModels() async throws -> [String] {
         try await call([String].self, waiting: true) { core in
             try Self.answer { e in core.chatGPTModels(e) }
         }
     }
 
-    /// cancelChatGPTSignIn gives up the sign-in attempt, as its page
-    /// closes; one already made stays, to save, and one begun since goes
-    /// on.
     func cancelChatGPTSignIn(_ attempt: Int64) {
         Task { try? await call(waiting: true) { $0.cancelChatGPTSign(in: attempt) } }
     }
 
-    /// forgetChatGPTSignIn gives up the sign-in attempt, and forgets it
-    /// made and not saved, as the form closes; one begun since stays.
     func forgetChatGPTSignIn(_ attempt: Int64) {
         Task { try? await call(waiting: true) { $0.forgetChatGPTSign(in: attempt) } }
     }
 }
 
-/// ChatGPTSignIn is a sign-in begun: OpenAI's page to open, and the
-/// number by which it is given up or forgotten.
 struct ChatGPTSignIn: Decodable, Sendable {
     var url: URL
     var attempt: Int64
 }
 
-/// ChatGPTAccount is who signed in with ChatGPT, and the models their plan
-/// serves.
 struct ChatGPTAccount: Codable, Sendable {
     var email: String
     var models: [String]

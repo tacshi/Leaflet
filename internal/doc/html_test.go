@@ -138,7 +138,6 @@ func TestPageHTMLVideoCodeCallout(t *testing.T) {
 	if strings.Contains(out, "x()") {
 		t.Errorf("an embed's HTML is in the page:\n%s", out)
 	}
-	// The frame may play, once the visitor asks.
 	if strings.Contains(out, "autoplay=1") || !strings.Contains(out, `allow="autoplay;`) {
 		t.Errorf("a video plays as the page loads, or can't when asked:\n%s", out)
 	}
@@ -153,8 +152,6 @@ func TestPageHTMLWithoutScripts(t *testing.T) {
 	}
 }
 
-// A column of short labels stays on one line; a column with a sentence in
-// it wraps.
 func TestPageHTMLTableShortColumns(t *testing.T) {
 	table, err := TableNode([][]string{
 		{"Step", "What to do"},
@@ -174,9 +171,6 @@ func TestPageHTMLTableShortColumns(t *testing.T) {
 	}
 }
 
-// A table's stored size, from another client or a newer app, may be
-// negative or huge: it shows the cells it has, and never panics or makes
-// room for cells that are not there.
 func TestTableWithBadSize(t *testing.T) {
 	for _, size := range [][2]any{{-1, 2}, {2, -5}, {1e9, 1e9}, {"x", 2}, {3, 3}} {
 		table, err := TableNode([][]string{{"A", "B"}, {"1", "2"}}, "tb")
@@ -193,7 +187,6 @@ func TestTableWithBadSize(t *testing.T) {
 			t.Errorf("size %v is %d×%d", size, rows, cols)
 		}
 	}
-	// Cells far apart make room for no more than maxTableCells.
 	table := &Node{ID: "tb", Type: "table", Data: map[string]any{"rowsLen": 1 << 30, "colsLen": 1 << 30}, Children: []*Node{
 		{ID: "a", Type: "table/cell", Data: map[string]any{"rowPosition": 1 << 29, "colPosition": 0}},
 		{ID: "b", Type: "table/cell", Data: map[string]any{"rowPosition": 0, "colPosition": 1 << 29}},
@@ -204,8 +197,6 @@ func TestTableWithBadSize(t *testing.T) {
 	_ = PageHTML("T", &Content{Children: []*Node{table}}, HTMLOptions{})
 }
 
-// A long transcript shows its first lines on a web page, and the rest
-// under Show all; a short one shows whole.
 func TestPageHTMLFoldsLongTranscript(t *testing.T) {
 	n := &Node{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": "rec", "title": "Call"}}
 	lines := func(count int) []TranscriptLine {
@@ -230,9 +221,6 @@ func TestPageHTMLFoldsLongTranscript(t *testing.T) {
 	}
 }
 
-// A printed page is in light colors alone, with every fold open, each
-// video a link to it, its pictures loaded with it and its scripts in it,
-// after the blocks they draw.
 func TestPageHTMLPrint(t *testing.T) {
 	text := func(id, typ, s string) *Node {
 		n := &Node{ID: id, Type: typ}
@@ -297,8 +285,6 @@ func TestPageHTMLPrint(t *testing.T) {
 	if strings.Contains(paper, "<script src=") {
 		t.Error("the printed page links a script")
 	}
-	// Chinese and Japanese are in fonts found by name: Japanese pages'
-	// in Hiragino Sans, Taiwan's and Hong Kong's Chinese in theirs.
 	for lang, font := range map[string]string{"": "PingFangSC-Regular", "zh-Hans": "PingFangSC-Regular", "ja": "HiraginoSans-W3"} {
 		opts.Lang = lang
 		if page := PageHTML("Trip", c, opts); !strings.Contains(page, `@font-face{font-family:"Leaflet CJK";src:local("`+font+`")`) {

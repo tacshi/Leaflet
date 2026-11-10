@@ -11,8 +11,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// A row of each synced table, read as the other devices have it, is stored
-// on another device as it was: a comment with its author's name.
 func TestSyncedRowsGoAsTheyAre(t *testing.T) {
 	from, to := New(openStore(t), nil), New(openStore(t), nil)
 	p, err := from.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -61,8 +59,6 @@ func TestSyncedRowsGoAsTheyAre(t *testing.T) {
 	}
 }
 
-// A table whose rows stay on each device has no row to send, and stores
-// none.
 func TestUnsyncedTableHasNoRows(t *testing.T) {
 	svc := New(openStore(t), nil)
 	if synced("page_history") {

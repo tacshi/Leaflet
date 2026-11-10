@@ -14,21 +14,12 @@ import (
 	"leaflet/locales"
 )
 
-// Code blocks: a card of monospace text, colored by its language, with the
-// language to choose and a copy button in a bar above the code.
-
 const (
-	// codeMargin is the room above and below a code block's card,
-	// codeBar the height of the bar in it above the code, and codePad
-	// the room around the code.
 	codeMargin = 6
 	codeBar    = 32
 	codePad    = 14
 )
 
-// codeSpans colors a code block's text with MyGo's highlighting of its
-// language, in MyGo's colors for its kinds of tokens. The spans hold
-// exactly the block's text, so offsets in the layout stay the text's.
 func codeSpans(code, language string, font ui.Font, pal *theme.Palette) []ui.Span {
 	plain := []ui.Span{{Text: code, Font: font.Family, Size: font.Size}}
 	lang := codeeditor.LanguageNamed(language)
@@ -72,8 +63,6 @@ func codeSpans(code, language string, font ui.Font, pal *theme.Palette) []ui.Spa
 
 var codeThemes = map[*theme.Palette]*codeeditor.Theme{}
 
-// CodeTheme is MyGo's code theme for a palette: GitHub's colors of
-// tokens, light or dark, over the palette's text.
 func CodeTheme(pal *theme.Palette) *codeeditor.Theme {
 	if ct, ok := codeThemes[pal]; ok {
 		return ct
@@ -84,17 +73,12 @@ func CodeTheme(pal *theme.Palette) *codeeditor.Theme {
 	return ct
 }
 
-// codeBarView builds a code block's bar: its language, to choose while
-// editing, and a button that copies the code.
 func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered bool, pal *theme.Palette) {
-	// A toolbar's buttons take no face until hovered, so the bar reads as
-	// a label over the code rather than a form above it.
 	ui.Toolbar(c.Key("code-bar"), func() {
 		name := codeLanguageName(n.Str("language"))
 		if e.ReadOnly {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Padding(0, 6)
 		} else {
-			// Its name lines up with the code, as the read-only label does.
 			lang := ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
 				for _, l := range doc.CodeLanguages {
 					if m.Item(codeLanguageName(l.ID)).Radio(l.ID == n.Str("language")).Chosen() {
@@ -119,7 +103,6 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 		}
 		b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(13) })
 		if copied {
-			// Show the copy icon again once the check has been seen.
 			wait := 1500*time.Millisecond - time.Since(e.copiedAt)
 			b.Draw(func(p *ui.Painter, _ ui.Rect) { p.After(wait) })
 		}
@@ -130,14 +113,11 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 	}).Label(locales.HostSlashCode()).Absolute().Top(codeMargin).Left(left + codePad - 6).Right(codePad - 6).Height(codeBar).Padding(0).Gap(2)
 }
 
-// inCodeBar reports whether a point in the window is on a code block's
-// bar, whose controls take the press.
 func (e *Editor) inCodeBar(n *doc.Node, wy float32) bool {
 	box, ok := e.box(n.ID)
 	return ok && n.Type == "code" && wy >= box.Y && wy < box.Y+codeMargin+codeBar
 }
 
-// SetCodeLanguage sets the language of a code block.
 func (e *Editor) SetCodeLanguage(id, language string) {
 	n := e.node(id)
 	if n == nil || n.Type != "code" || e.ReadOnly {
@@ -149,17 +129,12 @@ func (e *Editor) SetCodeLanguage(id, language string) {
 	e.changed()
 }
 
-// inCode reports whether the selection is within one code block.
 func (e *Editor) inCode() bool {
 	a, b := e.ordered()
 	n := e.node(a.ID)
 	return a.ID == b.ID && n != nil && n.Type == "code"
 }
 
-// codeEnter breaks the line at the caret, indenting the new line as the
-// one it leaves. Enter on the second blank line at the end leaves the
-// block, without the blank lines, for a paragraph after it: the empty one
-// already there, or a new one.
 func (e *Editor) codeEnter(n *doc.Node) {
 	runes := []rune(n.Delta().Plain())
 	off := e.focus.Off
@@ -188,9 +163,6 @@ func (e *Editor) codeEnter(n *doc.Node) {
 	e.changed()
 }
 
-// fenceEnter turns a paragraph of a Markdown fence, as "```go", into a
-// code block in that language, and reports whether it did. A Mermaid
-// fence makes a diagram, and "$$" math, each opened to write.
 func (e *Editor) fenceEnter(n *doc.Node) bool {
 	text := n.Delta().Plain()
 	language, ok := doc.CodeFence(text)
@@ -220,21 +192,14 @@ func (e *Editor) fenceEnter(n *doc.Node) bool {
 	return true
 }
 
-// roomAfterCode leaves a paragraph after a new code block at the end of
-// the page, for a click or Down to leave it by.
 func (e *Editor) roomAfterCode(n *doc.Node) {
 	if us := e.units(); len(us) > 0 && us[len(us)-1].ID == n.ID {
 		_ = e.Content.Insert(doc.Position{After: n.ID}, newText("paragraph", nil))
 	}
 }
 
-// indentCode indents the lines of the selection in a code block, or
-// outdents them, by the block's own step (rules.IndentCode). Tab at a
-// caret puts a step there.
 func (e *Editor) indentCode(n *doc.Node, out bool) {
 	code, anchor, focus, ok := rules.IndentCode(n.Delta().Plain(), e.anchor.Off, e.focus.Off, out)
-	// Outdenting lines with no indent changes nothing, so it makes no
-	// step of undo, and keeps the steps of redo.
 	if !ok {
 		return
 	}
@@ -246,8 +211,6 @@ func (e *Editor) indentCode(n *doc.Node, out bool) {
 	e.changed()
 }
 
-// codeLanguageName is how a language ID shows: its name, or plain text
-// in the app's language.
 func codeLanguageName(id string) string {
 	if id == "" {
 		return locales.EditorCodePlainText()

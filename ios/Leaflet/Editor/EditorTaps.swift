@@ -1,11 +1,6 @@
 import LeafletCore
 import UIKit
 
-/// EditorTaps takes the taps and presses the page's text leaves to the
-/// editor: on a block's marker (a to-do's box, a toggle's or a heading's
-/// fold, a callout's icon), a code block's bar, a due date's chip and a
-/// link; a tap that ends a selection; a long press in one, which shows its
-/// menu; and a long press on a block's view, which offers to edit it.
 @MainActor
 final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
     @preconcurrency UIEditMenuInteractionDelegate, UIContextMenuInteractionDelegate
@@ -15,7 +10,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
     private var text: BlockText { editor.text }
     private var storage: NSTextStorage { editor.text.storage }
 
-    /// selectionMenu shows the selection's menu on a long press in it.
     private lazy var selectionMenu = UIEditMenuInteraction(delegate: self)
 
     init(_ editor: EditorController) {
@@ -23,31 +17,20 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         super.init()
     }
 
-    /// attach puts the taps and presses on the text view.
     func attach() {
         let tap = UITapGestureRecognizer(target: self, action: #selector(tap(_:)))
         tap.delegate = self
         textView.addGestureRecognizer(tap)
-        // A tap ends a selection; a long press in it shows its menu.
         let press = UILongPressGestureRecognizer(
             target: self, action: #selector(pressSelection(_:)))
         press.delegate = self
         textView.addGestureRecognizer(press)
         textView.addInteraction(selectionMenu)
-        // A long press on a chart, a formula, a diagram or an embed offers
-        // to edit it, where the desktop shows Edit on hover.
         textView.addInteraction(UIContextMenuInteraction(delegate: self))
     }
 
-    // MARK: Hits
-
-    /// markerHit finds the block whose marker is at point: its checkbox,
-    /// its fold arrow or its callout's icon, its own paragraph's or the
-    /// empty block's after the last. It reaches around the marker, but not
-    /// into the text, whose taps place the caret.
     private func markerHit(_ point: CGPoint) -> (BlockInfo, Int)? {
         guard let tlm = textView.textLayoutManager else { return nil }
-        // A page that can't be changed still folds, as the desktop's does.
         let kinds: Set<String> =
             textView.isEditable
             ? ["todo_list", "toggle_list", "heading", "callout"] : ["toggle_list", "heading"]
@@ -76,11 +59,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         return nil
     }
 
-    /// linkHit finds where the link at point goes, when a tap there opens
-    /// it, as a click does on the desktop: a page's at once, and the web's
-    /// with ⌘, or while the page isn't being written in, for a tap to put
-    /// the caret in it otherwise. On a page that can't be changed the text
-    /// view opens links itself.
     private func linkHit(_ point: CGPoint, command: Bool) -> URL? {
         guard textView.isEditable, let position = textView.closestPosition(to: point) else {
             return nil
@@ -97,15 +75,11 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         return nil
     }
 
-    /// codeBarHit finds the code block whose bar is at point, and whether
-    /// the point is on its copy button rather than its language.
     private func codeBarHit(_ point: CGPoint) -> (BlockInfo, Int, copy: Bool)? {
         guard let tlm = textView.textLayoutManager else { return nil }
         let p = CGPoint(
             x: point.x - textView.textContainerInset.left,
             y: point.y - textView.textContainerInset.top)
-        // The bar is above the code's first line, in the room the block's
-        // spacing leaves.
         for dy: CGFloat in [0, BlockLayoutFragment.codeBar] {
             guard
                 let fragment = tlm.textLayoutFragment(for: CGPoint(x: p.x, y: p.y + dy))
@@ -119,7 +93,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
                 dx: fragment.layoutFragmentFrame.minX, dy: fragment.layoutFragmentFrame.minY)
             let parts = BlockLayoutFragment.codeBarParts(card)
             if parts.copy.insetBy(dx: -6, dy: -4).contains(p) { return (info, location, true) }
-            // Its language is chosen only on a page that can be changed.
             if textView.isEditable, parts.language.insetBy(dx: -6, dy: -4).contains(p) {
                 return (info, location, false)
             }
@@ -127,8 +100,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         return nil
     }
 
-    /// dueChipHit finds the to-do whose due date's chip is at point, and
-    /// the chip, in the text view.
     private func dueChipHit(_ point: CGPoint) -> (BlockInfo, CGRect)? {
         guard textView.isEditable, let tlm = textView.textLayoutManager else { return nil }
         let inset = CGPoint(x: textView.textContainerInset.left, y: textView.textContainerInset.top)
@@ -144,17 +115,11 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         return nil
     }
 
-    /// inSelection reports whether point is on the text selected.
     private func inSelection(_ point: CGPoint) -> Bool {
         guard collapses(at: point), let range = textView.selectedTextRange else { return false }
         return textView.selectionRects(for: range).contains { $0.rect.contains(point) }
     }
 
-    /// collapses reports whether a tap at point puts the caret there, out
-    /// of a selection, as a click does on the desktop: the text's own tap
-    /// in a selection shows the edit menu instead, so none ends a
-    /// selection of everything. A long press still shows the menu. Not on
-    /// the title or the ways to start, which take their own taps.
     private func collapses(at point: CGPoint) -> Bool {
         guard textView.selectedRange.length > 0, textView.isFirstResponder else { return false }
         for v in [textView.header, textView.footer] {
@@ -162,8 +127,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         }
         return true
     }
-
-    // MARK: Gestures
 
     func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
         let at = g.location(in: textView)
@@ -173,8 +136,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
             || collapses(at: at)
     }
 
-    /// While text is selected, the text's own taps wait for this one,
-    /// which takes the caret where the tap is.
     func gestureRecognizer(
         _ g: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
     ) -> Bool {
@@ -210,16 +171,12 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         }
     }
 
-    /// tapMarker does what a tap on a block's marker does: checks a to-do,
-    /// gives a callout its next tone, or folds a toggle or a heading.
     func tapMarker(_ info: BlockInfo, at location: Int) {
         let edits = editor.edits
         if info.type == "todo_list" {
             edits.setBlock(info.setting("checked", .bool(!info.checked)), at: location)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } else if info.type == "callout" {
-            // Its icon gives it the next tone, as the desktop's does
-            // (mobile.NextTone).
             let next = MobileNextTone(info.data["tone"]?.string ?? "")
             edits.setBlock(info.setting("tone", .string(next)), at: location)
         } else if !textView.isEditable {
@@ -227,12 +184,9 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
                 info.setting("collapsed", .bool(!(info.data["collapsed"]?.bool ?? false))),
                 at: location)
         } else {
-            // Folding is how the page shows, not an edit to undo, as on the
-            // desktop, though it is kept.
             edits.setBlock(
                 info.setting("collapsed", .bool(!(info.data["collapsed"]?.bool ?? false))),
                 at: location, undoable: false)
-            // A caret folded away goes to the end of the toggle's line.
             let caret = textView.selectedRange.location
             if caret < storage.length,
                 let inside = storage.attribute(.leafletBlock, at: caret, effectiveRange: nil)
@@ -245,7 +199,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         }
     }
 
-    /// tapCodeBar copies a code block's code, or offers its languages.
     func tapCodeBar(_ info: BlockInfo, at location: Int, copy: Bool, from point: CGPoint) {
         let (para, _) = text.paragraph(at: location)
         if copy {
@@ -278,13 +231,7 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         textView.window?.rootViewController?.topmost.present(sheet, animated: true)
     }
 
-    // MARK: Menus
-
-    /// pressSelection shows the selection's menu (Ask agent, Comments, the
-    /// formats), which a tap in it no longer does.
     @objc private func pressSelection(_ g: UILongPressGestureRecognizer) {
-        // As the finger lifts: shown while it is down, the menu goes with
-        // the touch.
         guard g.state == .ended else { return }
         selectionMenu.presentEditMenu(
             with: UIEditMenuConfiguration(identifier: nil, sourcePoint: g.location(in: textView)))
@@ -294,8 +241,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
         suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
-        // The text's own menu, with the system's Cut, Copy and the rest,
-        // which the text answers as the first responder.
         return editor.menus.editMenu(for: textView.selectedRange, suggested: suggestedActions)
     }
 
@@ -340,7 +285,6 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         blockPreview(configuration)
     }
 
-    /// blockPreview lifts the block the menu is for, in its card's shape.
     private func blockPreview(_ configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
         guard let id = configuration.identifier as? String,
             let view = textView.blocks.shownView(id)

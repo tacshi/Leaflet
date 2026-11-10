@@ -1,33 +1,16 @@
 #!/usr/bin/env bash
-# Builds the iOS app for the App Store and publishes it to TestFlight's
-# internal group: the Go core (make ios-core), the Xcode project (make
-# ios-project), an archive exported for App Store Connect, signed by the
-# team scripts/install-ios.sh signs with, then asc, which uploads it, waits
-# for Apple to process it and gives it to the group.
-#
-#   scripts/publish_testflight.sh 0.1.0 1
-#
-# The version and build are the IPA's only: ios/Config/Base.xcconfig is
-# left as it is. Every upload needs a build number its version hasn't had.
-#
-# App Store Connect shows the icon of the builds uploaded, so the IPA is
-# checked for it, as for the version, the build, the export-compliance
-# answer and the privacy manifest, before anything is uploaded.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_PATH="${ROOT_DIR}/ios/Leaflet.xcodeproj"
 SCHEME="Leaflet"
 BUNDLE_ID="app.capyvibe.leaflet"
-# Leaflet's App Store Connect app, "Leaflet: Notes & Agents", and its
-# internal group; the environment can point a release elsewhere.
 APP_ID="${ASC_APP_ID:-6829665849}"
 TESTFLIGHT_GROUP="${ASC_TESTFLIGHT_GROUP:-Leaflet Testers}"
 TIMEOUT="${ASC_TESTFLIGHT_TIMEOUT:-45m}"
 DERIVED_DATA="${ROOT_DIR}/ios/build/DerivedData"
 ARCHIVE_PATH="${ROOT_DIR}/ios/build/Leaflet.xcarchive"
 EXPORT_DIR="${ROOT_DIR}/ios/build/testflight"
-# xcodebuild's output, kept here rather than shown.
 BUILD_LOG="${ROOT_DIR}/ios/build/xcodebuild-testflight.log"
 
 usage() {
@@ -74,8 +57,6 @@ require_command() {
 
 source "${ROOT_DIR}/scripts/lib/ios.sh"
 
-# Runs xcodebuild with its output in BUILD_LOG, showing only its errors if
-# it fails.
 run_xcodebuild() {
   if ! xcodebuild "$@" >>"${BUILD_LOG}" 2>&1; then
     local errors
@@ -89,8 +70,6 @@ run_xcodebuild() {
   fi
 }
 
-# Prints the value at the key path $1 of the IPA's Info.plist, or nothing
-# when it has none.
 info_value() {
   plutil -extract "$1" raw -o - "${WORK_DIR}/Info.plist" 2>/dev/null || true
 }
@@ -113,8 +92,6 @@ done
 
 cd "${ROOT_DIR}"
 
-# Untracked files count too: the project builds every Swift file under
-# ios/Leaflet, committed or not.
 [[ -z "$(git status --porcelain)" ]] ||
   die "The worktree isn't clean. Commit or stash the changes before publishing."
 
@@ -123,8 +100,6 @@ check_team
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/leaflet-testflight.XXXXXX")"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
-# Checked before building, which takes minutes: the app is Leaflet's, and
-# the group is one of its internal ones.
 log "Checking App Store Connect..."
 asc auth doctor >/dev/null || die "asc isn't signed in to App Store Connect. Run asc auth doctor to see why."
 asc apps view --id "${APP_ID}" --output json >"${WORK_DIR}/app.json"
@@ -153,9 +128,6 @@ mkdir -p "$(dirname "${BUILD_LOG}")"
 : >"${BUILD_LOG}"
 rm -rf "${ARCHIVE_PATH}" "${EXPORT_DIR}"
 
-# The version and build override Base.xcconfig's for this build only.
-# -allowProvisioningUpdates lets automatic signing make the App Store
-# profile, and the distribution certificate if the team has none.
 settings=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
 [[ -n "${TEAM}" ]] && settings+=("DEVELOPMENT_TEAM=${TEAM}")
 log "Archiving Leaflet ${VERSION} (${BUILD_NUMBER})..."
@@ -170,7 +142,6 @@ run_xcodebuild archive \
   -allowProvisioningUpdates \
   "${settings[@]}"
 
-# Exported as it was built: Xcode leaves the version and build alone.
 EXPORT_OPTIONS="${WORK_DIR}/ExportOptions.plist"
 plutil -create xml1 "${EXPORT_OPTIONS}"
 plutil -insert method -string app-store-connect "${EXPORT_OPTIONS}"
@@ -191,7 +162,6 @@ IPAS=("${EXPORT_DIR}"/*.ipa)
 [[ ${#IPAS[@]} -eq 1 ]] || die "Expected one IPA in ${EXPORT_DIR}, found ${#IPAS[@]}."
 IPA="${IPAS[0]}"
 
-# BSD awk wants the / escaped even in a bracket expression.
 APP_DIR="$(unzip -Z1 "${IPA}" | awk '/^Payload\/[^\/]+\.app\/Info\.plist$/ { sub(/Info\.plist$/, ""); print; exit }')"
 [[ -n "${APP_DIR}" ]] || die "No app Info.plist in ${IPA}."
 unzip -p "${IPA}" "${APP_DIR}Info.plist" >"${WORK_DIR}/Info.plist"
@@ -205,8 +175,6 @@ unzip -p "${IPA}" "${APP_DIR}Info.plist" >"${WORK_DIR}/Info.plist"
 [[ "$(info_value ITSAppUsesNonExemptEncryption)" == "false" ]] ||
   die "The IPA must say ITSAppUsesNonExemptEncryption = NO (ios/project.yml)."
 
-# The icon: named in Info.plist for iPhone and iPad, in the compiled asset
-# catalog, and the loose 120 and 152 point PNGs App Store Connect looks for.
 for key in "CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName" "CFBundleIcons~ipad.CFBundlePrimaryIcon.CFBundleIconName"; do
   [[ "$(info_value "${key}")" == "AppIcon" ]] ||
     die "The IPA's Info.plist names no AppIcon at ${key}."
@@ -216,8 +184,6 @@ for icon in Assets.car AppIcon60x60@2x.png AppIcon76x76@2x~ipad.png; do
   grep -qxF "${APP_DIR}${icon}" "${WORK_DIR}/files" ||
     die "The IPA has no ${icon}, so it would have no icon."
 done
-# App Store Connect refuses an upload without the privacy manifest's
-# reasons for the APIs the app uses.
 grep -qxF "${APP_DIR}PrivacyInfo.xcprivacy" "${WORK_DIR}/files" ||
   die "The IPA has no PrivacyInfo.xcprivacy (ios/Leaflet/Resources)."
 log "Built ${IPA#"${ROOT_DIR}"/}, with its icon."

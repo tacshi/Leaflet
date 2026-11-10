@@ -10,8 +10,6 @@ import (
 	"leaflet/locales"
 )
 
-// The command line's card installs the command, says how to run it, and
-// removes it.
 func TestCommandSettings(t *testing.T) {
 	commandDir = filepath.Join(t.TempDir(), "bin")
 	t.Cleanup(func() { commandDir = "/usr/local/bin" })
@@ -20,7 +18,7 @@ func TestCommandSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe = filepath.Join(exe, "Leaflet")
-	if err := os.WriteFile(exe, nil, 0o755); err != nil { // #nosec G306 -- an executable, as the app's is.
+	if err := os.WriteFile(exe, nil, 0o755); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	a := templatesApp(t)
@@ -64,7 +62,7 @@ func TestInstallCommand(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(exe), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(exe, nil, 0o755); err != nil { // #nosec G306 -- an executable, as an app's is.
+		if err := os.WriteFile(exe, nil, 0o755); err != nil { // #nosec G306
 			t.Fatal(err)
 		}
 		exe, _ = filepath.EvalSymlinks(exe)
@@ -76,14 +74,12 @@ func TestInstallCommand(t *testing.T) {
 	if s := commandState("leaflet", exe); !s.supported || s.installed || s.other || s.taken != "" {
 		t.Errorf("before installing %+v", s)
 	}
-	// The folder made, as /usr/local/bin may not be there.
 	if err := installCommand("leaflet", exe, ""); err != nil {
 		t.Fatal(err)
 	}
 	if s := commandState("leaflet", exe); !s.installed {
 		t.Errorf("after installing %+v", s)
 	}
-	// Another copy's link, or a link to one deleted, is replaced.
 	for _, target := range []string{old, filepath.Join(root, "Gone.app", "Contents", "MacOS", "Gone")} {
 		_ = os.Remove(link)
 		if err := os.Symlink(target, link); err != nil {
@@ -112,14 +108,13 @@ func TestInstallCommand(t *testing.T) {
 		t.Errorf("after removing: %v", err)
 	}
 
-	// Another program's command, a file or a link to one, is left alone.
 	other := filepath.Join(root, "other")
-	if err := os.WriteFile(other, nil, 0o755); err != nil { // #nosec G306 -- an executable.
+	if err := os.WriteFile(other, nil, 0o755); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	for _, place := range []func() error{
 		func() error { return os.Symlink(other, link) },
-		func() error { return os.WriteFile(link, []byte("#!/bin/sh\n"), 0o755) }, // #nosec G306 -- an executable.
+		func() error { return os.WriteFile(link, []byte("#!/bin/sh\n"), 0o755) }, // #nosec G306
 	} {
 		_ = os.Remove(link)
 		if err := place(); err != nil {

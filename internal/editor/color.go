@@ -10,7 +10,6 @@ import (
 	"leaflet/locales"
 )
 
-// hexColor reads a color runs keep, clear for none.
 func hexColor(s string) ui.Color {
 	if !doc.ValidColor(s) {
 		return ui.Color{}
@@ -18,8 +17,6 @@ func hexColor(s string) ui.Color {
 	return ui.Hex(s)
 }
 
-// colorHex is a color as runs keep it, as hexColor reads it: "" for
-// none.
 func colorHex(c ui.Color) string {
 	switch c.A {
 	case 0:
@@ -30,19 +27,14 @@ func colorHex(c ui.Color) string {
 	return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
 }
 
-// SetColor colors the selected text, or what is typed next; "" takes the
-// color away.
 func (e *Editor) SetColor(hex string) {
 	e.Format(func(a doc.Attrs) bool { return a.Color == hex }, func(a *doc.Attrs, _ bool) { a.Color = hex })
 }
 
-// SetHighlight highlights the selected text, or what is typed next; ""
-// takes the highlight away.
 func (e *Editor) SetHighlight(hex string) {
 	e.Format(func(a doc.Attrs) bool { return a.Background == hex }, func(a *doc.Attrs, _ bool) { a.Background = hex })
 }
 
-// selectionAttrs are the formats of the first selected character.
 func (e *Editor) selectionAttrs() doc.Attrs {
 	a, _ := e.ordered()
 	n := e.node(a.ID)
@@ -52,19 +44,13 @@ func (e *Editor) selectionAttrs() doc.Attrs {
 	return n.Delta().AttrsAt(a.Off + 1)
 }
 
-// SelectionView is the selection as it reads from outside the editor: the
-// start before the end, offsets in runes.
 type SelectionView struct {
-	Start, End Pos
-	Text       string
-	// Color and Highlight are the first selected character's, or at a
-	// caret those of what is typed next. Mixed says that not all the
-	// selected text has them.
+	Start, End       Pos
+	Text             string
 	Color, Highlight string
 	Mixed            bool
 }
 
-// SelectionView reads the selection.
 func (e *Editor) SelectionView() SelectionView {
 	var v SelectionView
 	e.indexed(func() {
@@ -86,16 +72,10 @@ func (e *Editor) SelectionView() SelectionView {
 	return v
 }
 
-// colored reports whether any selected text has a color or a highlight.
 func (e *Editor) colored() bool {
 	return !e.Collapsed() && !e.Has(func(a doc.Attrs) bool { return a.Color == "" && a.Background == "" })
 }
 
-// colors are the colors a run takes, MyGo's color picker's swatches, by
-// key, with the names people read; a highlight is one at a quarter of its
-// strength, which text reads through. Text in one shows in dark its dark
-// shade, lighter, which reads on dark paper at 4.5:1 or more, as WCAG's
-// AA asks; the run keeps the color itself.
 var colors = []struct {
 	key, hex, dark string
 	name           func() string
@@ -108,9 +88,6 @@ var colors = []struct {
 	{"gray", "#71717a", "#a1a1aa", locales.EditorColorGray},
 }
 
-// textColor is how text in a run's color shows in pal: in a dark palette,
-// one of colors in its dark shade, as strong as the run has it; any other
-// color as it is.
 func textColor(hex string, pal *theme.Palette) ui.Color {
 	c := hexColor(hex)
 	if !pal.Dark || c.A == 0 {
@@ -124,18 +101,12 @@ func textColor(hex string, pal *theme.Palette) ui.Color {
 	return c
 }
 
-// highlightAlpha is the strength of a highlight, in hex.
 const highlightAlpha = "40"
 
-// colorButton is the toolbar's color button, a dot of the selected text's
-// color, the theme's text color while it has none, which opens a popover
-// of dots: the text's colors and the highlights, each row after one that
-// takes it away.
 func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	attrs := e.selectionAttrs()
 	b := ui.Button(c.Key("color"), "").Label(locales.EditorColor()).Tooltip(locales.EditorColor()).KeepFocus()
 	b.Children(func() {
-		// The text's color: the theme's while it has none of its own.
 		dot := ui.Box(c).Size(12, 12).Radius(999).Background(pal.Text)
 		if attrs.Color != "" {
 			dot.Background(textColor(attrs.Color, pal))
@@ -156,8 +127,6 @@ func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	})
 }
 
-// colorDots is a row of dots choosing a color, alpha its strength, after
-// one, named none, that takes the color away; show is how a color shows.
 func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, key, label, none, value, alpha string,
 	show func(string, *theme.Palette) ui.Color, set func(string)) {
 	ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.TextMuted)

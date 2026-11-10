@@ -2,16 +2,11 @@ import LeafletCore
 import QuickLook
 import SwiftUI
 
-/// FileDialogs are what a page's files ask for over it: the share sheet,
-/// Quick Look, naming a speaker in a file's notes, and whether a transcript
-/// may replace the notes a file has.
 struct FileDialogs: ViewModifier {
     let scene: SceneModel
 
     func body(content: Content) -> some View {
         content
-            // At the top, where no keyboard comes: the iPad's shortcuts bar
-            // floats over the page's foot without moving what is there.
             .overlay(alignment: .top) {
                 NowPlayingBar(editor: scene.editor)
             }
@@ -56,7 +51,6 @@ struct FileDialogs: ViewModifier {
         return L.cardRenameSpeaker(name: from)
     }
 
-    /// save names the speaker, on all their lines or on the line asked for.
     private func save(_ edit: SpeakerEdit) {
         let name = scene.blockName
         FileBlock.editSpeakers(edit.node.id, in: scene.editor) { notes, names in

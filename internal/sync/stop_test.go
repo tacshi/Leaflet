@@ -8,9 +8,6 @@ import (
 	"leaflet/internal/remote"
 )
 
-// Stop ends the loop and the pass it runs, as an iOS app's scene going to
-// the background does; a pass asked for after it runs to its end, and
-// Start starts the loop again.
 func TestStopAndStartAgain(t *testing.T) {
 	st := openStore(t)
 	s := New(st, remote.New(remote.Config(), st))
@@ -34,8 +31,6 @@ func TestStopAndStartAgain(t *testing.T) {
 	}
 }
 
-// Stop cuts short a pass SyncNow asked for while no loop runs, as an iOS
-// app's background refresh does when its time runs out.
 func TestStopCutsAPassAskedFor(t *testing.T) {
 	st := openStore(t)
 	s := New(st, remote.New(remote.Config(), st))
@@ -53,7 +48,6 @@ func TestStopCutsAPassAskedFor(t *testing.T) {
 	}
 }
 
-// A pass of the loop's that panics is logged, and the loop runs the next.
 func TestTheLoopOutlastsAPassThatPanics(t *testing.T) {
 	root := cloudRoot(t)
 	d := newCloudDevice(t, root)
@@ -81,13 +75,10 @@ func TestTheLoopOutlastsAPassThatPanics(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("no pass after the one that panicked")
 	}
-	// The loop is stopped before its folders go.
 	d.svc.Stop()
 	d.svc.Hold(func() {})
 }
 
-// A pass that panics ends as one that failed: the app is told it stopped,
-// and never shows it syncing for good.
 func TestAPassThatPanicsEnds(t *testing.T) {
 	d := newCloudDevice(t, cloudRoot(t))
 	d.svc.DeviceName = func() string { panic("a pass's bug") }
@@ -102,9 +93,6 @@ func TestAPassThatPanicsEnds(t *testing.T) {
 	}
 }
 
-// A pass of the loop's that waits for the one before, or for Hold, to be
-// done doesn't run once Stop has ended the loop, as an iOS app's scene
-// went to the background meanwhile.
 func TestStopEndsAPassWaitingToRun(t *testing.T) {
 	d := newCloudDevice(t, cloudRoot(t))
 	var runs atomic.Int32

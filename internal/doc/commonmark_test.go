@@ -8,17 +8,12 @@ import (
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
-// commonMarkText is what a CommonMark reader, GitHub's as MyGo has it,
-// makes of a page's Markdown: each block of text, as its kind and the
-// text it shows, a line break a space, and the address of each link in
-// it. Raw HTML, which a reader shows as markup or not at all, is "html".
 func commonMarkText(md string) (blocks []string, links []string) {
 	d := parser.New(parser.GFM | parser.ExtAlerts)
 	d.Set(md)
 	for i := 1; i < d.Len(); i++ {
 		switch b := d.Block(i); b.Kind {
 		case parser.Paragraph, parser.Heading:
-			// An alert's marker leaves a paragraph of no lines.
 			if b.Kind == parser.Paragraph && d.LineCount(i) == 0 {
 				continue
 			}
@@ -40,12 +35,6 @@ func commonMarkText(md string) (blocks []string, links []string) {
 	return blocks, links
 }
 
-// Text that only a CommonMark reader would take for markup, as a line of
-// ='s under another, which makes it a heading, the line under a table's
-// header, which makes the line before it a table, an HTML block or tag, an
-// entity, an autolink, or a heading's closing #s, is escaped in a page's
-// Markdown: GitHub shows each block as the page does, and Leaflet reads
-// it back as it was.
 func TestPageMarkdownReadsAsWrittenInCommonMark(t *testing.T) {
 	texts := []string{
 		"Total\n===",
@@ -99,9 +88,6 @@ func TestPageMarkdownReadsAsWrittenInCommonMark(t *testing.T) {
 	}
 }
 
-// A link's address goes where the page's link does in a CommonMark
-// reader, an entity in it as written; an & that starts none stays as it
-// is.
 func TestPageMarkdownLinksReadAsWrittenInCommonMark(t *testing.T) {
 	for _, href := range []string{"https://x.dev/a&amp;b", "https://x.dev/?a=1&b=2", "https://x.dev/a(b)&#65;"} {
 		n := textNode("paragraph", Delta{{Text: "x", Attrs: Attrs{Href: href}}})
@@ -123,10 +109,6 @@ func TestPageMarkdownLinksReadAsWrittenInCommonMark(t *testing.T) {
 	}
 }
 
-// A web address written out in a page's text is the link GitHub makes of
-// it, whole: no backslash goes into it, for a ~ or a _ of its path or for
-// the hard break after it, which is still one. Leaflet reads the text
-// back as it was, the spaces before a line break too.
 func TestPageMarkdownKeepsAddressesWhole(t *testing.T) {
 	for _, tc := range []struct {
 		text  string
@@ -138,8 +120,6 @@ func TestPageMarkdownKeepsAddressesWhole(t *testing.T) {
 		{"www.x.dev/~a/b_-c and http://x.dev:80/?q=a_-b#~c", []string{"http://www.x.dev/~a/b_-c", "http://x.dev:80/?q=a_-b#~c"}},
 		{"go to https://x.dev\nnext", []string{"https://x.dev"}},
 		{"https://x.dev/~a \nwww.x.dev  \n\nHTTPS://X.DEV/A_-B\nend", []string{"https://x.dev/~a", "http://www.x.dev", "HTTPS://X.DEV/A_-B"}},
-		// What stays escaped: a ~ beside another, which is a strike's
-		// marker, a _ that could open italics, and either outside a path.
 		{"~a~ https://x.dev/a~~b~~ https://x.dev/_a_-b_ x_-y", nil},
 	} {
 		for _, typ := range []string{"paragraph", "bulleted_list", "quote", "todo_list"} {
@@ -173,8 +153,6 @@ func TestPageMarkdownKeepsAddressesWhole(t *testing.T) {
 			}
 		}
 	}
-	// A link's text is no link of its own: an address there is escaped as
-	// any text is, where a ~ of it could strike text through.
 	n := textNode("paragraph", Delta{{Text: "https://x.dev/~a/b~c", Attrs: Attrs{Href: "https://x.dev"}}})
 	if md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{}); md != "[https://x.dev/\\~a/b\\~c](https://x.dev)\n" {
 		t.Errorf("a link's text wrote %q", md)

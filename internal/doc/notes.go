@@ -8,35 +8,20 @@ import (
 	"unicode/utf8"
 )
 
-// A video block's notes are its own lines of text, under its player, as a
-// video's description is on its site: a time in them plays the video from
-// there, and one that starts a line makes the line a moment, with its time
-// beside it, as a recording's transcript has.
-
-// MaxNotes is the most characters a block's notes hold, as on the server:
-// room for three hours of speech at 15 characters a second, and its times.
 const MaxNotes = 200000
 
-// NoteLine is a line of a video's notes: the time it starts with, in
-// seconds, or -1, and its text after that time, in parts.
 type NoteLine struct {
-	At    int
-	Parts []NotePart
-	// Line is its place among the notes' lines, and Speaker who it names,
-	// as SpokenLines reads them.
+	At      int
+	Parts   []NotePart
 	Line    int
 	Speaker string
 }
 
-// NotePart is a piece of a note's text: a time in it, at seconds into the
-// video, or text, at -1.
 type NotePart struct {
 	Text string
 	At   int
 }
 
-// Clock writes seconds as a video or a recording shows a time: 3:05, or
-// 1:02:05.
 func Clock(sec int) string {
 	sec = max(sec, 0)
 	if sec >= 3600 {
@@ -45,8 +30,6 @@ func Clock(sec int) string {
 	return fmt.Sprintf("%d:%02d", sec/60, sec%60)
 }
 
-// ParseClock reads a time as Clock writes it, or as people do: 1:23,
-// 01:23, 75:00 or 1:02:03, in seconds.
 func ParseClock(s string) (int, bool) {
 	n, ok := clockLen(s)
 	if !ok || n != len(s) {
@@ -55,9 +38,6 @@ func ParseClock(s string) (int, bool) {
 	return clockSeconds(s), true
 }
 
-// clockLen is how long the time that s starts with is, in bytes: minutes
-// and seconds, the minutes up to three digits, or hours, minutes and
-// seconds, two digits each but the hours.
 func clockLen(s string) (int, bool) {
 	var groups []int
 	i := 0
@@ -91,7 +71,6 @@ func clockLen(s string) (int, bool) {
 	return i, true
 }
 
-// clockSeconds is the seconds of a time clockLen found.
 func clockSeconds(s string) int {
 	sec := 0
 	for p := range strings.SplitSeq(s, ":") {
@@ -101,17 +80,12 @@ func clockSeconds(s string) int {
 	return sec
 }
 
-// NormalizeNotes is a video's notes as a block keeps them: a line break
-// for each of any kind, and no space around them.
 func NormalizeNotes(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	return strings.TrimSpace(s)
 }
 
-// NoteLines reads a video's notes as their block shows them, its blank
-// lines left out. A time at a line's start, in brackets or not, is the
-// line's time, with a dash or colon after it left out as well.
 func NoteLines(notes string) []NoteLine {
 	var out []NoteLine
 	for line := range strings.SplitSeq(NormalizeNotes(notes), "\n") {
@@ -125,8 +99,6 @@ func NoteLines(notes string) []NoteLine {
 	return out
 }
 
-// leadingTime is the time a line starts with and what follows it, or -1
-// and the line.
 func leadingTime(line string) (int, string) {
 	s := line
 	bracket := strings.HasPrefix(s, "[")
@@ -144,7 +116,6 @@ func leadingTime(line string) (int, string) {
 			return -1, line
 		}
 	}
-	// The time stands alone: 1:23pm is not one.
 	if runsOn(rest) {
 		return -1, line
 	}
@@ -155,11 +126,8 @@ func leadingTime(line string) (int, string) {
 	return at, rest
 }
 
-// noteSeparators may follow a line's time, before its text.
 const noteSeparators = "-–—:|·"
 
-// noteParts splits text at the times in it, each standing alone: not part
-// of a longer number or a word, as 12:34:56:78, 1.2:30 and 10:30am are.
 func noteParts(text string) []NotePart {
 	var parts []NotePart
 	start := 0
@@ -184,9 +152,6 @@ func noteParts(text string) []NotePart {
 	return parts
 }
 
-// standsAlone tells whether the time at text[i:j] is not part of
-// something longer: no letter or digit next to it, nor a colon or a point
-// before it, nor one after it that more digits follow.
 func standsAlone(text string, i, j int) bool {
 	word := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 	if r, _ := utf8.DecodeLastRuneInString(text[:i]); i > 0 && (word(r) || r == ':' || r == '.') {
@@ -195,9 +160,6 @@ func standsAlone(text string, i, j int) bool {
 	return !runsOn(text[j:])
 }
 
-// runsOn reports whether what follows a time makes it part of something
-// longer: a letter or a digit, as 1:23pm, or a colon or a point before a
-// digit, as 12:34:56:78 or 1:23.5.
 func runsOn(rest string) bool {
 	r, size := utf8.DecodeRuneInString(rest)
 	switch {
@@ -209,7 +171,6 @@ func runsOn(rest string) bool {
 	return (r == ':' || r == '.') && size < len(rest) && rest[size] >= '0' && rest[size] <= '9'
 }
 
-// Text is the line's text without its time.
 func (l NoteLine) Text() string {
 	var b strings.Builder
 	for _, p := range l.Parts {

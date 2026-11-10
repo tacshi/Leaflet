@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// A heading nests in the nearest one before it of a higher level, and
-// those of one level stay side by side.
 func TestOutline(t *testing.T) {
 	h := func(id string, level int) *Node {
 		n := &Node{ID: id, Type: "heading"}

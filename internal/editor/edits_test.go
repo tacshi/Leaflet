@@ -11,9 +11,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// Deleting a selection from a code block into a formatted one leaves the
-// code plain: the text after the selection joins it without its formats
-// or mentions.
 func TestDeleteIntoCodeKeepsItPlain(t *testing.T) {
 	code := doc.CodeNode("let x", "js")
 	rich := newText("paragraph", doc.Delta{
@@ -30,9 +27,6 @@ func TestDeleteIntoCodeKeepsItPlain(t *testing.T) {
 	}
 }
 
-// A line pasted on a block selected whole goes in a paragraph after it, as
-// typing does, in one step; Shift-Enter there, with no line to break, does
-// nothing and makes no step.
 func TestPasteAndSoftBreakOnABlockSelectedWhole(t *testing.T) {
 	div := &doc.Node{ID: "D", Type: "divider"}
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div}), &fakeHost{})
@@ -51,8 +45,6 @@ func TestPasteAndSoftBreakOnABlockSelectedWhole(t *testing.T) {
 	}
 }
 
-// A page mention linked elsewhere, or unlinked, is its text: no mention
-// of the page is left linking to something else.
 func TestLinkOverAPageMention(t *testing.T) {
 	for _, url := range []string{"https://x.dev", ""} {
 		n := newText("paragraph", doc.Delta{{Text: "see "}, {Text: "Plan", Attrs: doc.PageMention("p1", "Plan")}})
@@ -65,7 +57,6 @@ func TestLinkOverAPageMention(t *testing.T) {
 			}
 		}
 	}
-	// Linked to its own page, it stays a mention.
 	n := newText("paragraph", doc.Delta{{Text: "Plan", Attrs: doc.PageMention("p1", "Plan")}})
 	e := New(doc.FromBlocks([]*doc.Node{n}), &fakeHost{})
 	e.Select(Pos{n.ID, 0}, Pos{n.ID, 4})
@@ -75,8 +66,6 @@ func TestLinkOverAPageMention(t *testing.T) {
 	}
 }
 
-// Control-Y puts back what Control-K killed as it was, in one step: no
-// Markdown is read in it, nor a shortcut typed.
 func TestYankPutsBackTextAsItWas(t *testing.T) {
 	e, _, _ := setup(t)
 	nodes := page(e, "x")
@@ -92,8 +81,6 @@ func TestYankPutsBackTextAsItWas(t *testing.T) {
 	}
 }
 
-// Text copied for another app keeps a block's line breaks as hard breaks,
-// escaping a line that would start a block, so it reads back as it was.
 func TestCopiedTextKeepsLineBreaks(t *testing.T) {
 	e := New(doc.FromBlocks(nil), &fakeHost{})
 	item := newText("bulleted_list", doc.Delta{{Text: "one\ntwo"}})
@@ -112,7 +99,6 @@ func TestCopiedTextKeepsLineBreaks(t *testing.T) {
 	}
 }
 
-// Cmd-K on a read-only page opens no link editor.
 func TestReadOnlyOpensNoLinkEditor(t *testing.T) {
 	e, tt, _ := setup(t)
 	nodes := page(e, "some text")
@@ -124,8 +110,6 @@ func TestReadOnlyOpensNoLinkEditor(t *testing.T) {
 	}
 }
 
-// The @ menu counts what is typed after it in characters, not bytes: a
-// name of Chinese or Japanese with a space in it keeps the menu open.
 func TestMentionMenuCountsCharacters(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("会議は@")
@@ -135,8 +119,6 @@ func TestMentionMenuCountsCharacters(t *testing.T) {
 	}
 }
 
-// Typing after the caret is put elsewhere in the same block, by the app
-// as by a click, is an undo step of its own.
 func TestPlaceCaretBreaksTyping(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("abc")
@@ -151,7 +133,6 @@ func TestPlaceCaretBreaksTyping(t *testing.T) {
 			t.Errorf("after undo %v, want %v", got, want)
 		}
 	}
-	// Backspaces in a row, which move the caret, are still one step.
 	e, tt, _ = setup(t)
 	tt.Type("abc")
 	e.BreakUndo()
@@ -163,8 +144,6 @@ func TestPlaceCaretBreaksTyping(t *testing.T) {
 	}
 }
 
-// Shift-Tab goes back a cell, from a row's first to the last of the row
-// before, and stays in the first cell of all.
 func TestTableCellsShiftTab(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"", ""}}, "")
@@ -182,9 +161,6 @@ func TestTableCellsShiftTab(t *testing.T) {
 	}
 }
 
-// A table missing a cell, as another client can write one, shows the
-// cell empty and makes it as it is typed in; one whose rows are of other
-// lengths has the cells of its longest.
 func TestTableMissingACell(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"1"}}, "")
@@ -214,8 +190,6 @@ func TestTableMissingACell(t *testing.T) {
 	}
 }
 
-// A web link put in a code block is its text, not a link: code holds no
-// formats.
 func TestLinkInCodeIsPlain(t *testing.T) {
 	code := doc.CodeNode("x", "")
 	e := New(doc.FromBlocks([]*doc.Node{code}), &fakeHost{})
@@ -226,8 +200,6 @@ func TestLinkInCodeIsPlain(t *testing.T) {
 	}
 }
 
-// Leaflet's own blocks pasted into code go in as text, where the caret is:
-// as blocks they split the code, and took their formats into it.
 func TestOwnBlocksPasteIntoCodeAsText(t *testing.T) {
 	freshClipboard(t)
 	src := New(doc.FromBlocks([]*doc.Node{newText("paragraph", doc.FromMarkdown("**bold** one")), newText("paragraph", doc.FromMarkdown("two"))}), &fakeHost{})
@@ -249,8 +221,6 @@ func TestOwnBlocksPasteIntoCodeAsText(t *testing.T) {
 	}
 }
 
-// Text pasted with the breaks other apps end a paragraph at, as a lone
-// "\r", goes in as lines, a block each: none stays in a block's text.
 func TestPastedParagraphBreaksAreLines(t *testing.T) {
 	for _, brk := range []string{"\r", "\r\n", "\u2029", "\u0085"} {
 		e, _, _ := setup(t)
@@ -261,8 +231,6 @@ func TestPastedParagraphBreaksAreLines(t *testing.T) {
 	}
 }
 
-// A click on a page link's letters opens the page, its last letter too; a
-// click past its end, beside it, places the caret.
 func TestClickOnALinkOpensIt(t *testing.T) {
 	e, tt, host := setup(t)
 	n := e.units()[0]
@@ -286,8 +254,6 @@ func TestClickOnALinkOpensIt(t *testing.T) {
 	}
 }
 
-// Paste and Match Style takes Leaflet's own copy without its formats, as
-// it takes another app's: bold copied pastes plain.
 func TestPasteAndMatchStyleOwnCopy(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("v1 and more")

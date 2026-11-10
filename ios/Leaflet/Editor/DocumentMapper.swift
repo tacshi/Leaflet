@@ -1,22 +1,8 @@
 import UIKit
 
-/// DocumentMapper turns a page's content into the editor's text, and back.
-/// Each block is one paragraph, carrying its BlockInfo; blocks nested in
-/// lists follow them, deeper. A block without text (an image, a table) is
-/// a paragraph of one attachment that keeps the whole block.
 enum DocumentMapper {
-    // MARK: Content to text
-
-    /// Block is a block as a paragraph of the editor's text has it, and how
-    /// deep it is: a block of text without the blocks nested in it, which
-    /// are paragraphs of their own after it.
     typealias Block = (node: DocNode, depth: Int)
 
-    /// flatten is the content's blocks in the order of the editor's
-    /// paragraphs. A block of text has its children after it, one deeper:
-    /// the core gives the page with those of text that holds no blocks
-    /// lifted after it (doc.Content.Lifted). A block without text keeps its
-    /// own, a table's cells.
     static func flatten(_ content: DocContent) -> [Block] {
         var out: [Block] = []
         func add(_ nodes: [DocNode], depth: Int) {
@@ -35,10 +21,6 @@ enum DocumentMapper {
         return out
     }
 
-    /// attributedString is the content as the editor's text. Each
-    /// paragraph's separator carries its block too, which keeps an empty
-    /// block's; the last block, when empty, is returned apart, for the
-    /// editor to keep in its typing attributes.
     static func attributedString(_ content: DocContent, tinted: Set<String> = [])
         -> (text: NSAttributedString, trailing: BlockInfo?)
     {
@@ -46,11 +28,6 @@ enum DocumentMapper {
         return (text, trailing)
     }
 
-    /// attributedString is blocks, as flatten has them, as the editor's
-    /// paragraphs, apart by their separators, and each block's BlockInfo,
-    /// in order: a part of the page, as a change from outside puts in the
-    /// blocks it changed alone. The last block, when empty, is returned
-    /// apart too.
     static func attributedString(_ blocks: some Collection<Block>, tinted: Set<String> = [])
         -> (text: NSAttributedString, infos: [BlockInfo], trailing: BlockInfo?)
     {
@@ -76,8 +53,6 @@ enum DocumentMapper {
         return (out, infos, lastEmpty ? infos.last : nil)
     }
 
-    /// paragraph is a block as its paragraph, without the separator, and
-    /// its BlockInfo.
     static func paragraph(_ node: DocNode, depth: Int) -> (NSAttributedString, BlockInfo) {
         var data = node.data ?? [:]
         let delta = data.removeValue(forKey: "delta")
@@ -99,10 +74,6 @@ enum DocumentMapper {
         return (s, info)
     }
 
-    /// lines is text with each of the breaks TextKit ends a paragraph at,
-    /// "\r\n", "\r", U+2029 and U+0085, made "\n": a block's text from
-    /// another app or device may hold them, and shown as they are, they
-    /// would split the block in two, one more each time the page is saved.
     static func lines(_ text: String) -> String {
         text.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
@@ -129,28 +100,18 @@ enum DocumentMapper {
         return out
     }
 
-    // MARK: Text to content
-
-    /// Paragraph is one paragraph of the editor's text: its block and its
-    /// text, without the separator.
     struct Paragraph {
         var info: BlockInfo
         var text: NSAttributedString
         var range: NSRange
     }
 
-    /// paragraphs splits the editor's text into its paragraphs. The last,
-    /// when empty, is trailing's block; a paragraph without a block gets
-    /// one.
     static func paragraphs(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [Paragraph] {
         blocks(s, trailing: trailing).map {
             Paragraph(info: $0.info, text: s.attributedSubstring(from: $0.range), range: $0.range)
         }
     }
 
-    /// blocks are the paragraphs' blocks and ranges alone, as paragraphs
-    /// has them, without copying their text: for what goes through the
-    /// whole page as each key is typed.
     static func blocks(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [(
         info: BlockInfo, range: NSRange
     )] {
@@ -171,15 +132,11 @@ enum DocumentMapper {
             at = NSMaxRange(range)
         } while at < ns.length
         if ns.length > 0, ns.character(at: ns.length - 1) == 0x0A {
-            // Text ending in a separator has an empty paragraph after it.
             out.append((trailing ?? BlockInfo.paragraph(), NSRange(location: ns.length, length: 0)))
         }
         return out
     }
 
-    /// content returns the page's content as the editor's text has it,
-    /// with meta as the page last had it: the core stamps the blocks that
-    /// changed.
     static func content(_ s: NSAttributedString, trailing: BlockInfo? = nil, meta: JSONValue?)
         -> DocContent
     {
@@ -188,16 +145,11 @@ enum DocumentMapper {
         }
     }
 
-    /// content returns the page's content as the editor's text s has it,
-    /// its paragraphs as blocks has them, each block as made gives it from
-    /// its paragraph's block and text, as node(for:text:) does.
     static func content(
         _ s: NSAttributedString, blocks: [(info: BlockInfo, range: NSRange)], meta: JSONValue?,
         made: (BlockInfo, NSRange) -> DocNode
     ) -> DocContent {
         var roots: [Built] = []
-        // chain is the last block that holds blocks at each depth so far,
-        // and the depth it is at.
         var chain: [(depth: Int, built: Built)] = []
         var seen = Set<String>()
         for p in blocks {
@@ -212,8 +164,6 @@ enum DocumentMapper {
             seen.insert(info.id)
             let built = Built(node)
             while let top = chain.last, top.depth >= info.depth { chain.removeLast() }
-            // A nested block goes in the block before it that holds blocks;
-            // one deeper than that can be goes as deep as it can.
             let depth: Int
             if let parent = chain.last {
                 parent.built.children.append(built)
@@ -229,10 +179,6 @@ enum DocumentMapper {
             meta: meta)
     }
 
-    /// Built is a block of the content being made, the blocks in it added
-    /// as they come and put in it once all are (node): kept as values, each
-    /// block added to one would copy those before it, and the blocks it is
-    /// in, a page of many blocks in one list as many times over.
     private final class Built {
         private let made: DocNode
         var children: [Built] = []
@@ -254,11 +200,8 @@ enum DocumentMapper {
             {
                 var n = attachment.node
                 n.id = info.id
-                // A table's cells and the like stay as they were.
                 return n
             }
-            // A block without text whose attachment went is a paragraph, as
-            // the editor shows it: the block it was is gone.
             return DocNode(
                 id: info.id, type: "paragraph", data: ["delta": delta(text)], children: nil)
         }
@@ -267,7 +210,6 @@ enum DocumentMapper {
         return DocNode(id: info.id, type: info.type, data: data, children: nil)
     }
 
-    /// delta is a paragraph's text as the core's delta JSON.
     static func delta(_ text: NSAttributedString) -> JSONValue {
         var ops: [JSONValue] = []
         text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attrs, range, _ in
@@ -291,7 +233,6 @@ enum DocumentMapper {
             }
             var op: [String: JSONValue] = ["insert": .string(s)]
             if !a.isEmpty { op["attributes"] = .object(a) }
-            // Runs that read back alike join, as the core's Compact does.
             if case .object(var last) = ops.last ?? .null,
                 last["attributes"] == op["attributes"],
                 let prev = last["insert"]?.string

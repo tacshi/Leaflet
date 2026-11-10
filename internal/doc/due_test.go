@@ -7,8 +7,6 @@ import (
 	"leaflet/locales"
 )
 
-// The To-dos tab's sections come in order, overdue first, each by date,
-// and those of no date as they came; a section with none is left out.
 func TestTodoGroups(t *testing.T) {
 	now := time.Date(2026, 11, 3, 15, 0, 0, 0, time.Local)
 	day := func(d int) time.Time { return time.Date(2026, 11, d, 0, 0, 0, 0, time.Local) }
@@ -51,9 +49,6 @@ func TestTodoGroups(t *testing.T) {
 	}
 }
 
-// A due date says when it is from now: Today, Tomorrow, Yesterday, or the
-// day, with its year when not this one's, and its time when timed; a day
-// is overdue once it has passed, and a time as soon as it has.
 func TestDueLabel(t *testing.T) {
 	en := locales.In("en")
 	now := time.Date(2026, 10, 26, 20, 0, 0, 0, time.Local)
@@ -79,8 +74,6 @@ func TestDueLabel(t *testing.T) {
 	}
 }
 
-// The days are counted on the calendar: the day the clocks go forward is
-// 23 hours long, and the day after it is still tomorrow.
 func TestDueLabelOverAChangeOfClocks(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {

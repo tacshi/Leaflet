@@ -8,8 +8,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// ⌘P lists matches in MyGo's list: the field's Down moves the choice,
-// Enter opens it, and a click opens the row clicked.
 func TestSearchList(t *testing.T) {
 	a := templatesApp(t)
 	var ids []string
@@ -46,7 +44,6 @@ func TestSearchList(t *testing.T) {
 	}
 }
 
-// #tag in ⌘P keeps to the pages with the tag, which show their tags.
 func TestSearchByTag(t *testing.T) {
 	a := templatesApp(t)
 	plan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work"}})
@@ -65,8 +62,6 @@ func TestSearchByTag(t *testing.T) {
 	}
 }
 
-// selectBox is MyGo's Select over the options' names: choosing a name
-// sets the option it shows.
 func TestSelectBox(t *testing.T) {
 	value := "en"
 	names := map[string]string{"en": "English", "fr": "French"}
@@ -87,8 +82,6 @@ func TestSelectBox(t *testing.T) {
 	}
 }
 
-// Options shown by the same name leave the value as it is until one is
-// chosen: the last of them took it on every frame.
 func TestSelectBoxKeepsOneOfTwoAlike(t *testing.T) {
 	value := "p1"
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -101,9 +94,6 @@ func TestSelectBoxKeepsOneOfTwoAlike(t *testing.T) {
 	}
 }
 
-// A search's match is marked in a result's text whatever its case, in
-// other scripts too; where folding the case changes the text's length,
-// the text shows unmarked rather than marked in the wrong place.
 func TestMatchSpansFoldCase(t *testing.T) {
 	color := ui.RGB(200, 0, 0)
 	for _, tc := range []struct{ text, query, want string }{

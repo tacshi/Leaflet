@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// Text comes out as it reads, whatever its encoding, and a guess says so.
 func TestDecode(t *testing.T) {
 	for _, c := range []struct {
 		name, lang string
@@ -34,7 +33,6 @@ func TestDecode(t *testing.T) {
 	}
 }
 
-// A long file is read to its limit, not within a character.
 func TestReadCut(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(path, []byte("ab字字"), 0o600); err != nil {
@@ -52,8 +50,6 @@ func TestReadCut(t *testing.T) {
 	}
 }
 
-// A file in a legacy encoding cut within a character keeps its encoding,
-// rather than going to one that reads any bytes.
 func TestDecodeCutLegacy(t *testing.T) {
 	gb, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("中文文本"))
 	if err != nil {
@@ -68,8 +64,6 @@ func TestDecodeCutLegacy(t *testing.T) {
 	}
 }
 
-// A table takes uneven rows and its bounds, and shows what comes before a
-// line it can't read.
 func TestParseCSV(t *testing.T) {
 	rows, cut := ParseCSV("a,b\n1\n\"x,y\",2,3\n", ',')
 	if len(rows) != 3 || len(rows[1]) != 1 || rows[2][0] != "x,y" || cut {

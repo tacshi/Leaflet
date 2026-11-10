@@ -13,16 +13,12 @@ import (
 )
 
 type signInState struct {
-	// email, code and sent are the email-code form of a server the build
-	// or environment fixes, such as the local stack.
-	email string
-	code  string
-	sent  bool
-	busy  bool
-	err   string
-	info  string
-	// asking is the account signed in as while signInAlert asks about
-	// the previous account's changes that signing in removes, lost.
+	email  string
+	code   string
+	sent   bool
+	busy   bool
+	err    string
+	info   string
 	asking *store.User
 	lost   int
 }
@@ -83,12 +79,8 @@ func (a *App) runAuth(fn func() (*store.User, error)) {
 	}()
 }
 
-// supabaseSignIn is signing in with Supabase: one button, then the steps
-// of finding, creating and setting up the project.
 func (a *App) supabaseSignIn(c *ui.Context) {
 	pal := theme.Of(c)
-	// A step under way can be cancelled, to start again: the browser's
-	// wait, the one most often left, holds the sign-in's port till then.
 	busy := func(text string) {
 		ui.Row(c.Key("busy")).Gap(10).AlignItems(ui.Center).Justify(ui.Center).Padding(8, 0).Children(func() {
 			ui.Spinner(c).Size(16, 16)
@@ -102,7 +94,6 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 	}
 	switch a.supa.step {
 	case "":
-		// One way of syncing at a time: iCloud's, while it is on.
 		if tip := a.supabaseTip(); tip != "" {
 			ui.Column(c.Key("supabase-tip")).FillWidth().Tooltip(tip).Children(func() {
 				primary(c, "supabase", "", locales.SigninContinueSupabase()).FillWidth().Disabled(true)
@@ -141,11 +132,8 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 	}
 }
 
-// supabaseSignUp is where people without a Supabase account make one.
 const supabaseSignUp = "https://supabase.com/dashboard/sign-up"
 
-// projectChoice lists the account's Leaflet projects to use, those
-// Leaflet made and did not finish, and a new project to create.
 func (a *App) projectChoice(c *ui.Context) {
 	f := &a.supa.found
 	label(c, locales.SigninChooseProject())
@@ -194,13 +182,9 @@ func (a *App) projectChoice(c *ui.Context) {
 	})
 }
 
-// emailCodeForm signs in to a server the build or environment fixes,
-// such as the local stack, with a code sent by email.
 func (a *App) emailCodeForm(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &a.signIn
-	// The email a code went to stays as it was, for the code to sign in
-	// with: another email is changed to, and sent a code of its own.
 	email := field(c, "email", &s.email, locales.CommonEmail()).Disabled(s.sent)
 	if !s.sent {
 		email.AutoFocus()
@@ -215,7 +199,6 @@ func (a *App) emailCodeForm(c *ui.Context) {
 	if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
 		a.doVerify()
 	}
-	// A code mistyped or too old for the server comes again.
 	ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 		if ghost(c, "resend", "", locales.SigninResendCode()).Disabled(s.busy).Clicked() {
 			a.doSendCode()
@@ -227,8 +210,6 @@ func (a *App) emailCodeForm(c *ui.Context) {
 	})
 }
 
-// doSendCode emails a code to sign in with, again for one sent before;
-// what the last send said goes as this one starts.
 func (a *App) doSendCode() {
 	s := &a.signIn
 	email := strings.TrimSpace(s.email)
@@ -250,13 +231,8 @@ func (a *App) doVerify() {
 	a.runAuth(func() (*store.User, error) { return a.backend.VerifyCode(email, code) })
 }
 
-// signedIn sets the session up after signing in and starts syncing. As
-// someone else than the account whose pages this device keeps, whose
-// changes not uploaded yet would go, it asks first; an open page that
-// could not be saved stops it, as it stops signing out.
 func (a *App) signedIn(user *store.User) {
 	if !a.flush() && a.replacesAccount(user) {
-		// The save said why; the new account signs out again.
 		go a.backend.SignOut()
 		return
 	}
@@ -267,17 +243,10 @@ func (a *App) signedIn(user *store.User) {
 	a.useAccount(user, false)
 }
 
-// replacesAccount reports whether signing in as user removes the pages of
-// another account this device keeps.
 func (a *App) replacesAccount(user *store.User) bool { return a.core().ReplacesAccount(user) }
 
-// lostBySigningIn counts the changes signing in as user removes: those of
-// another account this device keeps the pages of, which never went up.
 func (a *App) lostBySigningIn(user *store.User) int { return a.core().LostBySigningIn(user) }
 
-// useAccount makes user the session: the previous account's pages go, if
-// it was another's, once the open page's edits are saved; with their
-// changes not uploaded yet only when drop says the user agreed.
 func (a *App) useAccount(user *store.User, drop bool) {
 	replaces := a.replacesAccount(user)
 	if replaces && !a.flush() {
@@ -285,28 +254,21 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		return
 	}
 	if err := a.core().UseAccount(user, drop); err != nil {
-		// A change made since it counted, by leaflet mcp: it asks again.
 		if errors.Is(err, store.ErrUnsynced) {
 			a.signIn.asking, a.signIn.lost = user, a.st.PendingCount()
 			return
 		}
-		// The new account signs out again, as when the person says no.
 		go a.backend.SignOut()
 		a.toast(err.Error())
 		return
 	}
 	a.session = a.st.Session()
-	// What was typed to the workspace agent, of no page, goes with the
-	// account whose pages went.
 	if replaces {
 		delete(a.drafts, agents.WorkspaceID)
 	}
 	a.signIn = signInState{}
-	// The name field shows the account's name now, not one typed before.
 	a.account.nameEdited = false
 	a.toast(locales.SettingsSignedInAs(user.Email))
-	// A sign-in that finished after the person went to a page leaves them
-	// there.
 	if a.route.Kind == "signin" {
 		a.back()
 		if a.route.Kind == "signin" {
@@ -316,10 +278,6 @@ func (a *App) useAccount(user *store.User, drop bool) {
 	a.sync.Kick()
 }
 
-// signInAlert asks before signing in as another account removes the
-// previous one's changes not uploaded yet; not signing in signs the new
-// account out again. The window shows it over whatever it shows, as a
-// sign-in may finish after the person has left its page.
 func (a *App) signInAlert(c *ui.Context) {
 	s := &a.signIn
 	user := s.asking

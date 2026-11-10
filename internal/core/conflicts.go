@@ -10,22 +10,11 @@ import (
 	"leaflet/locales"
 )
 
-// Settings › Conflicts: the blocks two devices changed at once, as sync
-// merged them, kept one way, for the user to settle another.
-
-// ConflictSides is a conflict as Conflicts lists it.
 type ConflictSides struct {
-	// Kept is the start of the block's text as merged, Other the side's
-	// that was not kept: "" when Deleted names that side, "here" or
-	// "there", as the block one device deleted and the other edited.
 	Kept, Other, Deleted string
-	// KeptHere is whether the version kept is this device's, so the other
-	// device's is the one to put back (UseOtherDevice), or the other way
-	// (UseThisDevice).
-	KeptHere bool
+	KeptHere             bool
 }
 
-// SidesOf is conflict cf as Conflicts lists it.
 func SidesOf(cf store.ConflictRow) ConflictSides {
 	kept, other := cf.LocalNode, cf.RemoteNode
 	if cf.Kept == "remote" {
@@ -41,7 +30,6 @@ func SidesOf(cf store.ConflictRow) ConflictSides {
 	return s
 }
 
-// textOf is the start of a block's text, on one line.
 func textOf(n *doc.Node) string {
 	if n == nil {
 		return ""
@@ -53,13 +41,8 @@ func textOf(n *doc.Node) string {
 	return string(rs)
 }
 
-// Resolution is how ResolveConflict settles a conflict.
 type Resolution string
 
-// The ways to settle a conflict: as merged (the newer version, or the
-// block one device deleted kept), with this device's version put back, or
-// the other device's, or with the block deleted again, for one the other
-// device deleted.
 const (
 	KeepMerged     Resolution = "keep"
 	UseThisDevice  Resolution = "this_device"
@@ -67,16 +50,7 @@ const (
 	DeleteBlock    Resolution = "delete"
 )
 
-// ResolveConflict settles conflict id as how says. The page keeps a version
-// from before in its history first, its edits saved, when its block
-// changes, open or not. One the user can no longer edit is put back
-// nothing, and stays to resolve, as does one whose page's edits, or the
-// version put back, could not be saved: the version chosen may be only
-// in the page open, and the conflict is all that keeps it. A page whose content this device doesn't
-// keep takes the block as an empty page, as a subpage's card goes into
-// one, rather than the version chosen being lost.
 func (p Pages) ResolveConflict(id string, how Resolution) error {
-	// Any other how would delete the block.
 	switch how {
 	case KeepMerged, UseThisDevice, UseOtherDevice, DeleteBlock:
 	default:
@@ -108,13 +82,7 @@ func (p Pages) ResolveConflict(id string, how Resolution) error {
 	return p.Store.ResolveConflict(cf.ID)
 }
 
-// putBack puts node, a version of a conflict's block, back, or with node
-// nil deletes the block. The version is of the block itself, its type and
-// data: the blocks under it as the merge found them are not put back
-// over those the page has now.
 func (p Pages) putBack(cf store.ConflictRow, node *doc.Node) error {
-	// Edits that could not be saved would be in no version kept, and the
-	// version put back is not stored over them.
 	if !p.save(cf.PageID) {
 		return errNotSaved()
 	}
@@ -131,20 +99,13 @@ func (p Pages) putBack(cf store.ConflictRow, node *doc.Node) error {
 				c.Children = doc.Empty().Children
 			}
 		case cur != nil:
-			// The blocks under it stay as they are, edited, added or moved
-			// since, as a replace keeps them; a table's cells are the
-			// table, and come back with it.
 			n := node.Clone()
 			if n.Type != "table" && cur.Type != "table" {
 				n.Children = cur.Children
 			}
 			_ = c.Replace(cf.BlockID, n)
-			// Under a version that holds none, as an item put back as the
-			// paragraph it was, they come out after it.
 			c.Children = c.Lifted().Children
 		default:
-			// Blocks of it the page has elsewhere now stay there, rather
-			// than being on the page twice.
 			_ = c.Apply(doc.InsertOp(doc.Position{At: "end"}, node.Clone()))
 		}
 		return true

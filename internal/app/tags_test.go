@@ -11,9 +11,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// The byline's tag button edits the page's tags in a token field, which
-// saves each one added; closed, the byline shows them, and a click on one
-// shows its pages in the sidebar.
 func TestBylineTags(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -35,8 +32,6 @@ func TestBylineTags(t *testing.T) {
 	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"work"}) {
 		t.Fatalf("tags %q", got.Tags)
 	}
-	// Escape closes the suggestions first, as in MyGo's comboboxes, then
-	// the field.
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
 	tt.Key(0, ui.KeyEscape)

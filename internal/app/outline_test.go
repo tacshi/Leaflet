@@ -43,8 +43,6 @@ func TestOutlineAndBlockLinks(t *testing.T) {
 			t.Errorf("the outline has no %s", h)
 		}
 	}
-	// Rollout is in Design's folded section, out of the page but in the
-	// outline; going to it unfolds Design.
 	if _, shown := a.page.editor.BlockTop("h3"); shown {
 		t.Fatal("Rollout shows in the page while Design is folded")
 	}
@@ -56,7 +54,6 @@ func TestOutlineAndBlockLinks(t *testing.T) {
 		t.Errorf("caret %v, Design folded %v, tinted %v", ed.Caret(), ed.Content.Find("h2").Bool("collapsed"), a.page.tinted)
 	}
 
-	// A link to a block opens its page there.
 	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
 	a.reloadAll()
 	a.openPage(other.ID)
@@ -82,8 +79,6 @@ func TestCurrentHeading(t *testing.T) {
 	}
 }
 
-// Choosing a heading in the outline brings it to the top of the page, and
-// the outline then marks it as the one the page is at.
 func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -129,8 +124,6 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	if got := currentHeading(ed.Headings(), ed.BlockTop, viewTop+2*scrollMargin); got != "h1" {
 		t.Errorf("current heading %q", got)
 	}
-	// The arrows go from heading to heading in the outline, which keeps the
-	// keyboard: the page shows each, and Enter goes into it.
 	if ed.Focused() {
 		t.Fatal("a click in the outline gave the page the keyboard")
 	}
@@ -153,8 +146,6 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	}
 }
 
-// A block gone to stays at the top of the page while what is above it
-// grows, as a picture loading does, until the page is scrolled.
 func TestGoToBlockHoldsAsThePageGrows(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -186,7 +177,6 @@ func TestGoToBlockHoldsAsThePageGrows(t *testing.T) {
 		top, _ := a.page.editor.BlockTop("p40")
 		return top - a.page.view.Bounds(ctx).Y
 	}
-	// As a picture arrives: no edit, and the caret stays.
 	grow := func(id string) {
 		a.page.editor.SetData(id, "delta", doc.Delta{{Text: strings.Repeat("A picture's worth of words. ", 200)}}.JSON())
 		for range 3 {
@@ -208,8 +198,6 @@ func TestGoToBlockHoldsAsThePageGrows(t *testing.T) {
 	}
 }
 
-// The sidebar's edge is MyGo's split: the arrows move it, within the
-// sidebar's range.
 func TestSidebarSplit(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -234,8 +222,6 @@ func TestSidebarSplit(t *testing.T) {
 	}
 }
 
-// A link to a block inside a closed toggle opens the toggle to show it,
-// and a block that never shows is not waited for forever.
 func TestBlockLinkOpensToggle(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -276,9 +262,6 @@ func TestBlockLinkOpensToggle(t *testing.T) {
 	}
 }
 
-// Going to a block lights it for a moment, from the frame it shows lit,
-// which leaves the tint of an agent run that changed it, whether it ran
-// before or meanwhile.
 func TestGoToBlockKeepsAgentTint(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)

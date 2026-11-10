@@ -15,9 +15,6 @@ import (
 )
 
 func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	// A size from another client, negative or huge, draws only the cells
-	// the table has; the same goes for the rows and columns added or
-	// taken away.
 	rows, cols := doc.TableSize(n)
 	if rows == 0 || cols == 0 {
 		return
@@ -50,10 +47,6 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 				}
 			})
 		})
-		// The row and column buttons show while a cell is being edited, so
-		// they take no room otherwise, and act on its row and column: they
-		// leave it the focus, which stays in the cell, as the cell at its
-		// place after the change.
 		r, col, ok := e.editedCell(n)
 		if !e.ReadOnly && editing && ok {
 			ui.Row(c).Gap(6).Children(func() {
@@ -76,8 +69,6 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	})
 }
 
-// small is a table's button, showing an icon and label, that does what
-// hint says.
 func small(c *ui.Context, key, icon, label, hint string, pal *theme.Palette) bool {
 	b := ui.ButtonBase(c.Key(key)).Height(24).Padding(0, 8).Gap(4).Radius(6).Border(1, pal.Divider).
 		Background(pal.Surface).TextColor(pal.TextMuted).AlignItems(ui.Center).Label(hint).Tooltip(hint).KeepFocus()
@@ -91,7 +82,6 @@ func small(c *ui.Context, key, icon, label, hint string, pal *theme.Palette) boo
 	return b.Clicked()
 }
 
-// Moves between a table's cells, from Tab, Shift-Tab and Enter.
 const (
 	cellNext = 1 + iota
 	cellPrev
@@ -100,8 +90,6 @@ const (
 
 func cellKey(table string, r, col int) string { return fmt.Sprintf("%s:%d:%d", table, r, col) }
 
-// editedCell is the row and column of the cell of table n being edited;
-// ok is false when none is.
 func (e *Editor) editedCell(n *doc.Node) (r, col int, ok bool) {
 	rest, in := strings.CutPrefix(e.cellEdit, n.ID+":")
 	if !in {
@@ -111,10 +99,6 @@ func (e *Editor) editedCell(n *doc.Node) (r, col int, ok bool) {
 	return r, col, err == nil
 }
 
-// moveCell makes the move asked for in a cell of table n: Tab past the
-// last cell adds a row, as other editors do, and Enter on the last row
-// leaves the table for the block after it, a new paragraph when the table
-// ends the page.
 func (e *Editor) moveCell(n *doc.Node) {
 	move := e.cellMove
 	e.cellMove = 0
@@ -175,7 +159,6 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 	id := cellKey(table.ID, r, col)
 	box.Children(func() {
 		if e.ReadOnly || e.cellEdit != id {
-			// Its text formatted, wrapping in the column; a click edits it.
 			view := ui.Box(c.Key("view")).FillWidth().MinHeight(font.Size * 1.3).Cursor(ui.CursorText)
 			view.Children(func() {
 				if para != nil && para.Delta().Len() > 0 {
@@ -187,7 +170,6 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 			}
 			return
 		}
-		// The cell's Markdown, wrapping, while it is edited.
 		stored := ""
 		if para != nil {
 			stored = para.Delta().ToMarkdown()
@@ -205,7 +187,7 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 				case k.Key == ui.KeyTab && k.Mods == ui.Shift:
 					e.cellMove = cellPrev
 				case k.Key == ui.KeyEnter && k.Mods == 0:
-					e.cellMove = cellDown // a cell holds one paragraph
+					e.cellMove = cellDown
 				default:
 					return false
 				}
@@ -214,8 +196,6 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 		if in.Focused() {
 			e.cellFocused = true
 		} else if e.cellFocused && e.cellMove == 0 {
-			// The focus went elsewhere: show the cell formatted now,
-			// not at whatever next redraws the window.
 			e.cellEdit, e.cellFocused = "", false
 			e.services.Invalidate()
 		}
@@ -240,8 +220,6 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 	})
 }
 
-// cellTools offers Comment and Ask agent on text selected in a table
-// cell, as the selection toolbar does in the page's text.
 func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, from, to int, pal *theme.Palette) {
 	runes := []rune(text)
 	from, to = max(min(from, to, len(runes)), 0), min(max(from, to), len(runes))
@@ -250,7 +228,6 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 		bar := ui.Row(c.Key("cell-tools")).AttachTo(in, ui.AnchorTopLeft, ui.AnchorBottomLeft).Top(-8).Padding(4).Gap(2).
 			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
 		bar.Children(func() {
-			// Comment shows its icon alone, as in the selection toolbar.
 			text := func(key, icon, label string, iconOnly bool, fn func()) {
 				b := ui.ButtonBase(c.Key(key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
 				if b.Hovered() {
@@ -275,8 +252,6 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 	})
 }
 
-// shiftCells moves the cells of table n whose place at key, a row or a
-// column, is at or after at, by by; with by -1, those at at go.
 func shiftCells(n *doc.Node, key string, at, by int) {
 	kept := n.Children[:0]
 	for _, cell := range n.Children {
@@ -291,8 +266,6 @@ func shiftCells(n *doc.Node, key string, at, by int) {
 	n.Children = kept
 }
 
-// insertTableRow puts an empty row in table n at row at, the rows from it
-// on going one down.
 func insertTableRow(n *doc.Node, at int) {
 	rows, cols := doc.TableSize(n)
 	at = min(max(at, 0), rows)
@@ -304,8 +277,6 @@ func insertTableRow(n *doc.Node, at int) {
 	doc.SortTableCells(n)
 }
 
-// insertTableColumn puts an empty column in table n at column at, the
-// columns from it on going one right.
 func insertTableColumn(n *doc.Node, at int) {
 	rows, cols := doc.TableSize(n)
 	at = min(max(at, 0), cols)
@@ -317,32 +288,25 @@ func insertTableColumn(n *doc.Node, at int) {
 	doc.SortTableCells(n)
 }
 
-// removeTableRow takes row at out of table n, the rows after it going one
-// up.
 func removeTableRow(n *doc.Node, at int) {
 	rows, _ := doc.TableSize(n)
 	shiftCells(n, "rowPosition", at, -1)
 	n.Set("rowsLen", rows-1)
 }
 
-// removeTableColumn takes column at out of table n, the columns after it
-// going one left.
 func removeTableColumn(n *doc.Node, at int) {
 	_, cols := doc.TableSize(n)
 	shiftCells(n, "colPosition", at, -1)
 	n.Set("colsLen", cols-1)
 }
 
-// ChartSeries is one series of a chart block.
 type ChartSeries = doc.ChartSeries
 
-// ChartOf reads a chart block's data, as doc.ChartOf does.
 func ChartOf(n *doc.Node) (kind, title, caption string, labels []string, series []ChartSeries) {
 	ch := doc.ChartOf(n)
 	return ch.Kind, ch.Title, ch.Caption, ch.Labels, ch.Series
 }
 
-// FormatValue writes a chart's value as its bars show it.
 func FormatValue(v float64) string {
 	if v == math.Trunc(v) && math.Abs(v) < 1e12 {
 		return strconv.FormatInt(int64(v), 10)
@@ -391,11 +355,8 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	})
 }
 
-// ChartColors are the colors of a chart's series after the first, which
-// is the accent.
 var ChartColors = []string{"#2F9E8F", "#D9822B", "#B04A9A", "#5B8DEF", "#8C6D46"}
 
-// seriesColors are the colors of a chart's series: the accent first.
 func seriesColors(pal *theme.Palette, n int) []ui.Color {
 	base := []ui.Color{pal.Accent}
 	for _, h := range ChartColors {
@@ -408,8 +369,6 @@ func seriesColors(pal *theme.Palette, n int) []ui.Color {
 	return out
 }
 
-// sliceColors are the colors of a pie's n slices: those of as many series,
-// but never the first's on the last slice, which is beside it.
 func sliceColors(pal *theme.Palette, n int) []ui.Color {
 	base := seriesColors(pal, 1+len(ChartColors))
 	out := make([]ui.Color, n)
@@ -419,10 +378,6 @@ func sliceColors(pal *theme.Palette, n int) []ui.Color {
 	return out
 }
 
-// SliceColor is which of k colors, taken in turn, slice i of a pie of n
-// slices takes: the last slice, beside the first, takes the second when
-// the turn would give it the first's. A shared page's pies take theirs so
-// too.
 func SliceColor(i, n, k int) int {
 	if i == n-1 && i > 0 && i%k == 0 {
 		return 1 % k
@@ -453,10 +408,6 @@ func legend(c *ui.Context, kind string, labels []string, series []ChartSeries, p
 	})
 }
 
-// Charts are MyGo's: its scales, plot and axes, marks and paths, in the
-// palette's colors.
-
-// values are all the values of a chart's series.
 func values(series []ChartSeries) []float64 {
 	var out []float64
 	for _, s := range series {
@@ -465,16 +416,12 @@ func values(series []ChartSeries) []float64 {
 	return out
 }
 
-// axisLabel is a tick's label, under or beside a plot.
 func axisLabel(c *ui.Context, pal *theme.Palette) func(chart.Side, chart.Tick) {
 	return func(_ chart.Side, t chart.Tick) {
 		ui.Text(c, t.Label).FontSize(12).TextColor(pal.TextMuted).NoWrap()
 	}
 }
 
-// barChart shows bars from zero with their values above them and their
-// labels below: one series' tallest in the accent and the others muted,
-// several series side by side in their own colors.
 func barChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
 	lo, hi := chart.Extent(append(values(series), 0)...)
 	y := chart.NewLinear(lo, hi).Nice(4)
@@ -513,11 +460,9 @@ func barChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.P
 				})
 			}
 		}
-	}).FillWidth().Height(220).Gap(6).Padding(18, 0, 0) // room for the tallest bar's value
+	}).FillWidth().Height(220).Gap(6).Padding(18, 0, 0)
 }
 
-// lineChart shows lines with a dot at each value, over gridlines whose
-// values are at the left.
 func lineChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
 	lo, hi := chart.Extent(values(series)...)
 	y := chart.NewLinear(lo, hi).Nice(3)
@@ -549,8 +494,6 @@ func lineChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.
 	}).FillWidth().Height(220).Gap(8)
 }
 
-// pieChart shows the first series' shares as slices, with the share of
-// each one large enough on it.
 func pieChart(c *ui.Context, series []ChartSeries, pal *theme.Palette) {
 	vals := series[0].Values
 	total := 0.0

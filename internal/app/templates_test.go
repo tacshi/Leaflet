@@ -35,7 +35,6 @@ func templatesApp(t *testing.T) *App {
 	return a
 }
 
-// ownTemplates are the user's templates, without their subpages, by title.
 func ownTemplates(a *App) []store.Page {
 	var out []store.Page
 	for _, t := range a.templateChoices() {
@@ -52,8 +51,6 @@ func textNode(text string) *doc.Node {
 	return n
 }
 
-// Duplicate puts the copy after the page, links it after the page's link
-// in the parent, and opens it with its title selected.
 func TestDuplicatePage(t *testing.T) {
 	a := templatesApp(t)
 	product, _ := a.st.CreatePage(store.NewPageOptions{Title: "Product"})
@@ -88,8 +85,6 @@ func TestDuplicatePage(t *testing.T) {
 	}
 }
 
-// A page, or one under it, with a recording still being transcribed is not
-// copied until it is done: the copy would keep the recording unfinished.
 func TestDuplicateWaitsForRecording(t *testing.T) {
 	a := templatesApp(t)
 	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -111,7 +106,6 @@ func TestDuplicateWaitsForRecording(t *testing.T) {
 			t.Fatalf("%s: %d pages, want %d; toasts %+v", p.Title, n, before, a.toasts)
 		}
 	}
-	// A page beside it is copied.
 	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
 	a.reloadAll()
 	before = count()
@@ -128,8 +122,6 @@ func TestDuplicateWaitsForRecording(t *testing.T) {
 	}
 }
 
-// A page saved as a template leaves the page list, and a blank page lists
-// it under Start with; choosing it fills the page and takes its title.
 func TestStartFromTemplate(t *testing.T) {
 	a := templatesApp(t)
 	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{textNode("Problem"), textNode("Goals")})})
@@ -149,8 +141,6 @@ func TestStartFromTemplate(t *testing.T) {
 		}
 	}
 
-	// A template's row shows its first line, or, with no text, its
-	// subpages: a subpage made under a template is one too.
 	if got := a.templateHint(roots[0]); got != "Problem" {
 		t.Errorf("hint %q", got)
 	}
@@ -187,7 +177,6 @@ func TestStartFromTemplate(t *testing.T) {
 		t.Errorf("subpages %+v", kids)
 	}
 
-	// A template's own blank page offers no templates.
 	a.openPage(roots[0].ID)
 	a.page.editor.Edit(func(c *doc.Content) { c.Children = doc.Empty().Children })
 	tt.Frame()
@@ -196,8 +185,6 @@ func TestStartFromTemplate(t *testing.T) {
 	}
 }
 
-// Deleting the open page from its own menu, as a template opened from
-// search is deleted, closes it in the middle of drawing it.
 func TestDeleteOpenPageFromItsMenu(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -226,9 +213,6 @@ func TestDeleteOpenPageFromItsMenu(t *testing.T) {
 	}
 }
 
-// A blank page offers the starters too, until the user has a template of
-// the same title: choosing one fills the page, and editing one makes it
-// the user's own.
 func TestStarterTemplates(t *testing.T) {
 	a := templatesApp(t)
 	a.newPage("", "")
@@ -268,9 +252,6 @@ func TestStarterTemplates(t *testing.T) {
 	}
 }
 
-// / lists the templates, by name or for "template"; one chosen puts its
-// blocks at the caret, after what the page holds, and its subpages under
-// the page.
 func TestSlashTemplate(t *testing.T) {
 	a := templatesApp(t)
 	kit, _ := a.st.CreatePage(store.NewPageOptions{Title: "Kit", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Checklist")})})
@@ -310,15 +291,12 @@ func TestSlashTemplate(t *testing.T) {
 		t.Errorf("title %q", p.Title)
 	}
 
-	// A template doesn't list itself.
 	a.openPage(kit.ID)
 	if got := keys("kit"); len(got) != 0 {
 		t.Errorf("a template lists %v", got)
 	}
 }
 
-// In search, a template or a starter starts a new page; a subpage of a
-// template opens.
 func TestSearchStartsPageFromTemplate(t *testing.T) {
 	a := templatesApp(t)
 	kit, _ := a.st.CreatePage(store.NewPageOptions{Title: "Kit", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Checklist")})})
@@ -355,8 +333,6 @@ func TestSearchStartsPageFromTemplate(t *testing.T) {
 	}
 }
 
-// A folder's new pages, and a page's new subpages, start from the template
-// set for them; a page's menu sets it, making a starter the user's own.
 func TestDefaultTemplate(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -400,7 +376,6 @@ func TestDefaultTemplate(t *testing.T) {
 		t.Errorf("subpage %+v holding %q", p, a.page.editor.Content.PlainText())
 	}
 
-	// A template deleted leaves new pages blank.
 	if _, err := a.st.DeletePage(journal.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -411,8 +386,6 @@ func TestDefaultTemplate(t *testing.T) {
 	}
 }
 
-// A starter's menu deletes it on this device, with Undo; a starter made
-// the user's own stays gone once that template is deleted.
 func TestDeleteStarter(t *testing.T) {
 	a := templatesApp(t)
 	a.newPage("", "")
@@ -420,8 +393,6 @@ func TestDeleteStarter(t *testing.T) {
 		ui.Column(c).Fill().Padding(20).Children(func() { a.emptyActions(c) })
 	}, 600, 900)
 	tt.Frame()
-	// Out of sight, the menu button leaves Tab to the rows, until hovered:
-	// from a starter's row, Tab goes to the next one.
 	for range 20 {
 		if tt.Focused("Meeting notes") {
 			break
@@ -437,7 +408,6 @@ func TestDeleteStarter(t *testing.T) {
 	if !tt.Focused("To-do list") {
 		t.Error("Tab went from the starter to its hidden menu button")
 	}
-	// The menu key opens the focused row's menu instead.
 	tt.Key(0, ui.KeyContextMenu)
 	tt.Frame()
 	if !tt.HasText("Delete template") {
@@ -464,7 +434,7 @@ func TestDeleteStarter(t *testing.T) {
 	if _, ok := a.templateByKey("starter:meeting"); ok {
 		t.Error("the deleted starter is still a choice")
 	}
-	a.goneStarters = nil // as when the app starts again
+	a.goneStarters = nil
 	if _, ok := a.templateByKey("starter:meeting"); ok {
 		t.Error("the deleted starter came back")
 	}
@@ -492,9 +462,6 @@ func TestDeleteStarter(t *testing.T) {
 	}
 }
 
-// A page made from a template while the open page's edits can't be saved
-// is not made: the open page stays as it is, not filled from the
-// template, and no blank page is left behind.
 func TestNewPageWhileTheOpenPageCannotSave(t *testing.T) {
 	a := templatesApp(t)
 	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
@@ -530,8 +497,6 @@ func TestNewPageWhileTheOpenPageCannotSave(t *testing.T) {
 	}
 }
 
-// A template fills only an empty page: one with something in it already
-// is left as it is.
 func TestTemplateFillsOnlyAnEmptyPage(t *testing.T) {
 	a := templatesApp(t)
 	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
@@ -553,8 +518,6 @@ func TestTemplateFillsOnlyAnEmptyPage(t *testing.T) {
 	}
 }
 
-// A template with a recording still being transcribed in it is not used
-// until it is done, as it is not copied.
 func TestTemplateWaitsForRecording(t *testing.T) {
 	a := templatesApp(t)
 	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
@@ -584,8 +547,6 @@ func TestTemplateWaitsForRecording(t *testing.T) {
 	}
 }
 
-// A template of no blocks leaves the page its empty paragraph, to type
-// in, and still gives it its subpages and title.
 func TestEmptyTemplate(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -620,8 +581,6 @@ func TestEmptyTemplate(t *testing.T) {
 	tt.Frame()
 }
 
-// A page whose edits could not be saved isn't copied without them: no
-// duplicate, nor template, is made.
 func TestCopiesWaitForTheSave(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -640,12 +599,7 @@ func TestCopiesWaitForTheSave(t *testing.T) {
 	}
 }
 
-// A page whose file is only stored is duplicated once the file has come
-// to this device, the copy with a file of its own made from it; one whose
-// recording's audio is still uploading from where it was made is not
-// duplicated, and says why.
 func TestDuplicateBringsFilesFirst(t *testing.T) {
-	// The file comes once the test lets it, after a second copy is tried.
 	release := make(chan struct{})
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/files/") {
@@ -687,7 +641,6 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	if pages() != before || len(a.toasts) == 0 || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingFiles() {
 		t.Fatalf("copied before the file came: %d pages; toasts %+v", pages(), a.toasts)
 	}
-	// A second copy meanwhile says why it waits.
 	a.duplicatePage(*a.pageByID(p.ID))
 	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
 		t.Fatalf("a second copy while the first downloads: %d pages; toasts %+v", pages(), a.toasts)
@@ -703,7 +656,6 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	}
 	close(release)
 	next("the file never came")
-	// The copy is made off the main thread, and opens once it is.
 	next("the copy was never made")
 	if pages() != before+1 || a.page == nil || a.page.id == p.ID {
 		t.Fatalf("not copied once the file came: %d pages", pages())
@@ -734,10 +686,6 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	}
 }
 
-// Audio that comes for a copy stays until the copy has its own, then goes
-// as Keep the audio says, though another copy is refused meanwhile; and
-// the copy is of the page as it is once the audio has come, here moved
-// into a folder meanwhile.
 func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/recordings/") {
@@ -788,8 +736,6 @@ func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
 	if got, _ := a.st.Recording(r.ID); got.LocalPath == "" {
 		t.Fatal("the audio went before the copy was made")
 	}
-	// Another copy asked for while it is made is not, and leaves the
-	// audio to it.
 	a.duplicatePage(*a.pageByID(other.ID))
 	if a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
 		t.Errorf("a second copy while the first is made: toasts %+v", a.toasts)
@@ -819,8 +765,6 @@ func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
 	}
 }
 
-// A page deleted while its files come for a copy is not copied once they
-// have.
 func TestCopyOfAPageDeletedMeanwhile(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/files/") {
@@ -871,8 +815,6 @@ func TestCopyOfAPageDeletedMeanwhile(t *testing.T) {
 	}
 }
 
-// A page closed while a template's copy is made for it still takes the
-// template's blocks, with the subpages the copy made under it.
 func TestTemplateFillsAPageClosedDuringTheCopy(t *testing.T) {
 	a := templatesApp(t)
 	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true,

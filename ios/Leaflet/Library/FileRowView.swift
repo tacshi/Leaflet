@@ -1,9 +1,6 @@
 import QuickLook
 import SwiftUI
 
-/// FileRowView is a file of the sidebar, uploaded to a folder as the
-/// desktop's are: a tap shows it, downloading it first if it isn't here,
-/// and its menu deletes it, from every device, once asked.
 struct FileRowView: View {
     let file: FileRow
     @Environment(AppModel.self) private var app
@@ -52,9 +49,6 @@ struct FileRowView: View {
     }
 }
 
-/// PageDrops makes a page's row a place to drop another page: on its top
-/// half before it, on its bottom half after it, among the same pages, as
-/// the desktop's tree does. A page the user may change can be dragged.
 struct PageDrops: ViewModifier {
     let page: PageRow
     @Environment(AppModel.self) private var app

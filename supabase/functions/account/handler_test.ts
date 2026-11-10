@@ -2,10 +2,6 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { handle, ownAudioPath } from "./handler.ts";
 import { Project, Whole } from "../_testing/project.ts";
 
-// Only a recording's own path, {created_by}/{id}.{ext}, is removed with
-// the pages it is on: a row naming another path would have the service
-// role delete someone else's audio. One whose recorder's account went
-// keeps the path it had, in any folder.
 Deno.test("a recording's audio is removed only at its own path", () => {
   assertEquals(ownAudioPath("bob/rec.wav", "bob", "rec"), true);
   assertEquals(ownAudioPath("bob/rec", "bob", "rec"), true);
@@ -18,13 +14,8 @@ Deno.test("a recording's audio is removed only at its own path", () => {
   assertEquals(ownAudioPath("gone/rec.wav", null, "rec"), true);
 });
 
-/** Ann, by her account's ID: Auth's admin API takes no other. */
 const ANN = "a0000000-0000-4000-8000-000000000001";
 
-// The audio of every recording Ann made on others' pages stays as her
-// account goes, however many there are: the paths to keep come whole, not
-// as rows the Data API stops at a thousand of (max_rows). Her own audio
-// goes.
 Deno.test("an account's kept recordings all stay, past a thousand", async () => {
   const p = new Project({ maxRows: 1000 });
   p.user(ANN, "ann-token");
@@ -41,8 +32,6 @@ Deno.test("an account's kept recordings all stay, past a thousand", async () => 
   assertEquals(p.deletedUsers, [ANN]);
 });
 
-// An answer that is no list of paths keeps nothing it could name: the
-// account stays, and its audio with it, rather than all of it going.
 Deno.test("an account whose audio to keep is not known stays", async () => {
   const p = new Project();
   p.user(ANN, "ann-token");

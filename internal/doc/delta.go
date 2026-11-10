@@ -5,29 +5,23 @@ import (
 	"unicode/utf8"
 )
 
-// Mention is a person or an agent named inline.
 type Mention struct {
-	Kind string `json:"kind"` // "user" or "agent"
+	Kind string `json:"kind"`
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// Attrs are the inline formats of a run of text.
 type Attrs struct {
-	Bold    bool
-	Italic  bool
-	Under   bool
-	Strike  bool
-	Code    bool
-	Href    string
-	Mention *Mention
-	// Color colors the text and Background highlights it, as hex
-	// ("#rrggbbaa"), as MyGo's rich text does; "" for none.
+	Bold              bool
+	Italic            bool
+	Under             bool
+	Strike            bool
+	Code              bool
+	Href              string
+	Mention           *Mention
 	Color, Background string
 }
 
-// ValidColor reports whether s is a color as runs keep one: "#" and 6 or
-// 8 hex digits.
 func ValidColor(s string) bool {
 	if len(s) != 7 && len(s) != 9 || s[0] != '#' {
 		return false
@@ -40,10 +34,8 @@ func ValidColor(s string) bool {
 	return true
 }
 
-// Zero reports whether the run is plain text.
 func (a Attrs) Zero() bool { return a == Attrs{} }
 
-// Equal compares two sets of formats.
 func (a Attrs) Equal(b Attrs) bool {
 	if a.Bold != b.Bold || a.Italic != b.Italic || a.Under != b.Under ||
 		a.Strike != b.Strike || a.Code != b.Code || a.Href != b.Href ||
@@ -56,16 +48,13 @@ func (a Attrs) Equal(b Attrs) bool {
 	return a.Mention == nil || *a.Mention == *b.Mention
 }
 
-// Run is text in one set of formats: one insert of an appflowy delta.
 type Run struct {
 	Text  string
 	Attrs Attrs
 }
 
-// Delta is a block's rich text, runs in order.
 type Delta []Run
 
-// DeltaFromJSON reads an appflowy delta: [{insert, attributes?}].
 func DeltaFromJSON(v any) Delta {
 	var out Delta
 	switch ops := v.(type) {
@@ -147,7 +136,6 @@ func (a Attrs) json() map[string]any {
 	return m
 }
 
-// JSON returns the delta as plain JSON values.
 func (d Delta) JSON() []any {
 	out := make([]any, 0, len(d))
 	for _, r := range d {
@@ -163,7 +151,6 @@ func (d Delta) JSON() []any {
 	return out
 }
 
-// Compact drops empty runs and joins neighbours with equal formats.
 func (d Delta) Compact() Delta {
 	out := make(Delta, 0, len(d))
 	for _, r := range d {
@@ -179,7 +166,6 @@ func (d Delta) Compact() Delta {
 	return out
 }
 
-// Plain returns the text without formats.
 func (d Delta) Plain() string {
 	var b strings.Builder
 	for _, r := range d {
@@ -188,7 +174,6 @@ func (d Delta) Plain() string {
 	return b.String()
 }
 
-// Len is the length of the text in runes.
 func (d Delta) Len() int {
 	n := 0
 	for _, r := range d {
@@ -197,7 +182,6 @@ func (d Delta) Len() int {
 	return n
 }
 
-// Slice returns the runes from start to end, with their formats.
 func (d Delta) Slice(start, end int) Delta {
 	var out Delta
 	at := 0
@@ -214,7 +198,6 @@ func (d Delta) Slice(start, end int) Delta {
 	return out
 }
 
-// Concat returns d followed by e.
 func (d Delta) Concat(e Delta) Delta {
 	out := make(Delta, 0, len(d)+len(e))
 	out = append(out, d...)
@@ -222,8 +205,6 @@ func (d Delta) Concat(e Delta) Delta {
 	return out.Compact()
 }
 
-// MentionAround returns where the mention that a rune offset is inside
-// starts and ends; ok is false when the offset is not inside one.
 func (d Delta) MentionAround(off int) (start, end int, ok bool) {
 	at := 0
 	for _, r := range d {
@@ -239,8 +220,6 @@ func (d Delta) MentionAround(off int) (start, end int, ok bool) {
 	return 0, 0, false
 }
 
-// Widen widens a range of runes to the whole of each mention it cuts: a
-// mention is one unit, taken out or formatted whole.
 func (d Delta) Widen(start, end int) (int, int) {
 	if s, _, ok := d.MentionAround(start); ok {
 		start = s
@@ -251,8 +230,6 @@ func (d Delta) Widen(start, end int) (int, int) {
 	return start, end
 }
 
-// Insert inserts text in the given formats at a rune offset; inside a
-// mention, after it.
 func (d Delta) Insert(at int, text string, attrs Attrs) Delta {
 	if _, end, ok := d.MentionAround(at); ok {
 		at = end
@@ -263,8 +240,6 @@ func (d Delta) Insert(at int, text string, attrs Attrs) Delta {
 	return out.Compact()
 }
 
-// Delete removes the runes from start to end, and the whole of a mention
-// they are part of.
 func (d Delta) Delete(start, end int) Delta {
 	if start < end {
 		start, end = d.Widen(start, end)
@@ -272,8 +247,6 @@ func (d Delta) Delete(start, end int) Delta {
 	return d.Slice(0, start).Concat(d.Slice(end, d.Len()))
 }
 
-// Format changes the formats of the runes from start to end, and of the
-// whole of a mention they are part of.
 func (d Delta) Format(start, end int, fn func(*Attrs)) Delta {
 	if start < end {
 		start, end = d.Widen(start, end)
@@ -288,9 +261,6 @@ func (d Delta) Format(start, end int, fn func(*Attrs)) Delta {
 	return out.Compact()
 }
 
-// AttrsAt returns the formats typing at a rune offset continues: those of
-// the rune before it, or at the start those of the first, without links
-// or mentions.
 func (d Delta) AttrsAt(at int) Attrs {
 	pos := 0
 	var last Attrs
@@ -311,7 +281,6 @@ func (d Delta) AttrsAt(at int) Attrs {
 	return last
 }
 
-// All reports whether every rune from start to end has a format.
 func (d Delta) All(start, end int, has func(Attrs) bool) bool {
 	if start >= end {
 		return false

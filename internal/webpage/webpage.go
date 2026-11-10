@@ -1,8 +1,3 @@
-// Package webpage writes a page as a web page that stands alone: as a
-// public link shares it, and as Export › PDF prints it, on the desktop and
-// on iOS. It holds nothing of MyGo's interface, which the iOS core goes
-// without: what the desktop draws with it, code's colors and charts, it
-// passes in.
 package webpage
 
 import (
@@ -23,59 +18,31 @@ import (
 	"leaflet/locales"
 )
 
-// Server is where the web page finds the files of this device it shows:
-// those of its page alone, which HTML has checked are.
 type Server interface {
-	// Image returns where a picture at path, of type typ, is served, or
-	// "" to leave it out.
 	Image(path, typ string) string
-	// File returns where a file at path, named name, is served to
-	// download, or "" for nowhere: its card shows it all the same.
 	File(path, name string) string
-	// Audio returns where a recording's audio at path is served, or ""
-	// for nowhere, which leaves out its player.
 	Audio(path string) string
 }
 
-// Options are what a page needs to be written as a web page.
 type Options struct {
-	Store *store.Store
-	// Page is the page's ID and Title its title.
+	Store       *store.Store
 	Page, Title string
-	// Titles are the pages' titles by ID, which name its subpages.
-	Titles map[string]string
-	// Files are the files the app knows, of every page.
-	Files []store.File
-	// Lang is the page's language.
-	Lang string
-	// Head, Tail, Script and Embed are as doc.HTMLOptions has them; a
-	// printed page takes no Script.
-	Head, Tail string
-	Script     func(name string) string
-	Embed      func(n *doc.Node) string
-	// Serve serves the page's own files.
-	Serve Server
-	// Code colors code and Chart draws charts, as the desktop does; nil
-	// writes code plain and a chart's numbers as a table.
-	Code  func(code, language string) string
-	Chart func(n *doc.Node) string
-	// Print writes the page to be printed, as doc.HTMLOptions.Print does,
-	// with its scripts in it, and Region is where, as
-	// doc.HTMLOptions.Region has it.
-	Print  bool
-	Region string
-	// Video is as doc.HTMLOptions.Video.
-	Video func(v doc.Video) doc.Video
+	Titles      map[string]string
+	Files       []store.File
+	Lang        string
+	Head, Tail  string
+	Script      func(name string) string
+	Embed       func(n *doc.Node) string
+	Serve       Server
+	Code        func(code, language string) string
+	Chart       func(n *doc.Node) string
+	Print       bool
+	Region      string
+	Video       func(v doc.Video) doc.Video
 }
 
-// PrintCSP is a printed page's policy: it runs only its own two scripts,
-// which draw formulas and diagrams, and shows pictures of its own and of
-// the web.
 var PrintCSP = rendered.ScriptsCSP(rendered.PageMathJS, rendered.PrintDiagramJS) + "; img-src data: https:"
 
-// HTML writes the page c as a web page. Only the page's own files and
-// recordings are shown: a block may name any, as one an editor of the page
-// wrote could.
 func HTML(c *doc.Content, o Options) string {
 	localPath, _ := export.OwnFiles(o.Files)
 	own, ownPaths := map[string]bool{}, map[string]bool{}
@@ -101,8 +68,6 @@ func HTML(c *doc.Content, o Options) string {
 			if !ok {
 				return ""
 			}
-			// An uploaded file's url is a path on the device that uploaded
-			// it: this device keeps its copy elsewhere, or none.
 			if id := n.Str("file_id"); id != "" {
 				if !own[id] {
 					return ""
@@ -132,8 +97,6 @@ func HTML(c *doc.Content, o Options) string {
 				if f.ID != n.Str("file_id") {
 					continue
 				}
-				// Another page's file is named as the block names it, and
-				// is neither served nor said to be missing.
 				if !own[f.ID] {
 					if name == "" {
 						name = locales.CardFile()
@@ -159,7 +122,6 @@ func HTML(c *doc.Content, o Options) string {
 		},
 		Recording: func(n *doc.Node) doc.RecordingView {
 			rec, err := o.Store.Recording(n.Str("recording_id"))
-			// Another page's recording shows its block's title alone.
 			if err == nil && rec.PageID != o.Page {
 				return doc.RecordingView{Title: recording.BlockTitle(n.Str("title"), time.Time{}, false, o.Title)}
 			}
@@ -168,7 +130,6 @@ func HTML(c *doc.Content, o Options) string {
 				return v
 			}
 			v.Length = recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)
-			// Audio still being recorded, or not on this device, has no player.
 			if path := rec.LocalPath; rec.Status != "recording" && export.InFolder(o.Store.Dir, path) {
 				if _, err := os.Stat(path); err == nil {
 					v.Audio = o.Serve.Audio(path)
@@ -191,8 +152,6 @@ func HTML(c *doc.Content, o Options) string {
 		},
 	}
 	if o.Print {
-		// A printed page is loaded from a string: its scripts are in it,
-		// and its policy, as no server sends one, before them.
 		opts.Script = nil
 		opts.ScriptSource = func(name string) string {
 			switch name {
@@ -208,15 +167,12 @@ func HTML(c *doc.Content, o Options) string {
 	return doc.PageHTML(o.Title, c, opts)
 }
 
-// Inline serves a printed page's pictures in the page itself, as data
-// URLs, each made as small as printing it needs, and its files and audio
-// nowhere: paper neither downloads nor plays.
 var Inline Server = inline{}
 
 type inline struct{}
 
 func (inline) Image(path, typ string) string {
-	data, err := os.ReadFile(path) // #nosec G304 -- a picture of the page's own, which HTML checked.
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return ""
 	}
@@ -230,9 +186,6 @@ func (inline) File(string, string) string { return "" }
 
 func (inline) Audio(string) string { return "" }
 
-// DueText names a to-do's due date for a web page: as the editor does,
-// but as a date, not Today or Tomorrow, which go stale while the page
-// stays as it was written; "" for none.
 func DueText(n *doc.Node) string {
 	due, timed, ok := n.Due()
 	if !ok {
@@ -248,7 +201,6 @@ func DueText(n *doc.Node) string {
 	return label
 }
 
-// FileSize is a file's size as people read it.
 func FileSize(n int64) string {
 	switch {
 	case n >= 1<<30:
@@ -258,5 +210,5 @@ func FileSize(n int64) string {
 	case n >= 1<<10:
 		return locales.CardSizeKB(int(math.Round(float64(n) / (1 << 10))))
 	}
-	return locales.CardSizeBytes(int(n)) // #nosec G115 -- under a kilobyte here.
+	return locales.CardSizeBytes(int(n)) // #nosec G115
 }

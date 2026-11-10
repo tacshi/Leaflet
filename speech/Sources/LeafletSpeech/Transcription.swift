@@ -2,16 +2,8 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// Transcription is the device's own speech recognition, SpeechTranscriber:
-/// on the device, offline, once its language's model is downloaded. A
-/// language is an ISO 639-1 code, or "auto" for the device's own.
 @available(macOS 26, iOS 26, *)
 public enum Transcription {
-    /// stream transcribes audio, the core's 16-bit mono PCM at 16 kHz, as
-    /// it comes, until it ends: audio sent while the model downloads waits
-    /// for it, in order. text takes the words so far as they come, and
-    /// beat says the transcription goes on, as its model downloads or its
-    /// words come. Cancelled, it ends with what it has.
     public static func stream(
         _ audio: AsyncStream<Data>, language: String,
         text: @escaping @Sendable (String) -> Void, beat: @escaping @Sendable () -> Void = {}
@@ -45,7 +37,6 @@ public enum Transcription {
         return try await collect.value
     }
 
-    /// file transcribes the WAV file at path, beat saying it goes on.
     public static func file(
         _ path: String, language: String, beat: @escaping @Sendable () -> Void = {}
     ) async throws -> [SpeechSegment] {
@@ -57,8 +48,6 @@ public enum Transcription {
         return try await collect.value
     }
 
-    /// transcriber is a transcriber of language, its model downloaded first
-    /// if this is its first time, which beats beat as it goes.
     static func transcriber(for language: String, beat: @escaping @Sendable () -> Void)
         async throws -> SpeechTranscriber
     {
@@ -79,9 +68,6 @@ public enum Transcription {
         return transcriber
     }
 
-    /// locale is the language's locale the device can transcribe: for
-    /// "auto", the device's, or the first of the user's languages it can.
-    /// One it can't fails with its code, for the core to name it.
     static func locale(for language: String) async throws -> Locale {
         let wanted =
             language == "auto" || language.isEmpty
@@ -97,9 +83,6 @@ public enum Transcription {
             language: wanted[0].language.languageCode?.identifier)
     }
 
-    /// collect gathers a transcriber's final results as the transcript, a
-    /// segment each, telling text the words so far as they come, if it is
-    /// there, and beating beat.
     static func collect(
         _ transcriber: SpeechTranscriber, text: (@Sendable (String) -> Void)?,
         beat: @Sendable () -> Void
@@ -126,7 +109,6 @@ public enum Transcription {
         return segments
     }
 
-    /// buffer is the core's PCM in the recognizer's format.
     static func buffer(
         _ pcm: Data, from: AVAudioFormat, with converter: AVAudioConverter, to format: AVAudioFormat
     ) -> AVAudioPCMBuffer? {

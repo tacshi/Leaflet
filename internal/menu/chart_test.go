@@ -7,8 +7,6 @@ import (
 	"leaflet/locales"
 )
 
-// A chart's dialog makes its block's data from the text typed, and says
-// what is wrong with the text in the app's language.
 func TestChartData(t *testing.T) {
 	data, err := ChartData("line", "Sales", "By month", "Month, Sales\nJan, 1\nFeb, 2")
 	if err != nil {

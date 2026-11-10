@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// A file that would run as a program is shown in its folder, not opened.
 func TestRunsAsProgram(t *testing.T) {
 	dir := t.TempDir()
 	for name, mode := range map[string]os.FileMode{"notes.pdf": 0o600, "setup.EXE": 0o600, "run.command": 0o600, "tool": 0o700} {
@@ -21,15 +20,11 @@ func TestRunsAsProgram(t *testing.T) {
 			t.Errorf("runsAsProgram(%s) = %v", name, got)
 		}
 	}
-	// Shortcuts, links and launchers, which run or send elsewhere as they
-	// open, though they are no programs themselves.
 	for _, name := range []string{"app.desktop", "site.url", "site.webloc", "site.inetloc", "share.library-ms", "find.search-ms", "help.chm"} {
 		if !runsAsProgram(filepath.Join(dir, name)) {
 			t.Errorf("runsAsProgram(%s) = false", name)
 		}
 	}
-	// Disk images, which open mounted, and plug-ins and zipped Python
-	// apps, which install or run.
 	for _, name := range []string{"disk.iso", "disk.img", "disk.cdr", "disk.sparseimage", "disk.sparsebundle", "disk.vhd", "disk.VHDX",
 		"app.pyz", "app.pyzw", "pane.prefpane", "screen.saver"} {
 		if !runsAsProgram(filepath.Join(dir, name)) {

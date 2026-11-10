@@ -13,8 +13,6 @@ import (
 	"unicode/utf8"
 )
 
-// ToolError is a tool call an agent made that cannot be applied. The
-// message goes back to the model so it can correct itself.
 type ToolError struct{ Message string }
 
 func (e *ToolError) Error() string { return e.Message }
@@ -23,7 +21,6 @@ func toolErr(format string, args ...any) error {
 	return &ToolError{Message: fmt.Sprintf(format, args...)}
 }
 
-// AgentTypes are the block types agents may write.
 var AgentTypes = []string{
 	"paragraph", "heading", "bulleted_list", "numbered_list", "todo_list", "quote",
 	"divider", "image", "table", "chart", "embed", "video", "code", "callout", "toggle_list", "link_preview", "math_equation", "diagram",
@@ -31,26 +28,18 @@ var AgentTypes = []string{
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
 
-// maxEmbedHTML caps an embed's source, as the server does.
 const maxEmbedHTML = 200_000
 
-// A block's nested items go at most maxSpecDepth deep, and a call makes
-// at most maxSpecNodes in all, its blocks and those nested in them, as on
-// the server.
 const (
 	maxSpecDepth = 16
 	maxSpecNodes = 2000
 )
 
-// SpecToNode turns a BlockSpec (docs/protocol.md §2) into a block. id is
-// kept when given.
 func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 	made := 0
 	return specToNode(spec, id, author, 0, &made)
 }
 
-// SpecsToNodes turns a call's list of BlockSpecs into blocks, which count
-// together toward maxSpecNodes, as the server counts a call's.
 func SpecsToNodes(specs []any, author string) ([]*Node, error) {
 	made := 0
 	var out []*Node
@@ -96,7 +85,6 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 	}
 	text, _ := spec["text"].(string)
 	if typ == "paragraph" && IsRule(text) {
-		// A Markdown rule written as text is the divider it stands for.
 		typ = "divider"
 	}
 	n := &Node{ID: id, Type: typ}
@@ -138,7 +126,6 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		n.SetDelta(FromMarkdown(text))
 		n.Set("tone", CalloutTone(tone))
 	case "code":
-		// The code as it is: no markdown.
 		language, _ := spec["language"].(string)
 		n = CodeNode(strings.TrimSuffix(text, "\n"), language)
 		n.ID = id
@@ -149,8 +136,6 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			img = spec
 		}
 		url, _ := img["url"].(string)
-		// A web link with a host, its scheme in any case, as the server
-		// takes it: the app loads it by itself.
 		if url = strings.TrimSpace(url); !agentURL(url) {
 			return nil, toolErr("An image block needs image.url (http or https).")
 		}
@@ -161,7 +146,6 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		if !ok {
 			return nil, toolErr("A table needs rows: a list of rows, each a list of cells.")
 		}
-		// Each cell is a block, and counts as one.
 		cols := 0
 		for _, r := range rows {
 			cols = max(cols, len(r))
@@ -256,9 +240,6 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 	return n, nil
 }
 
-// IsRule tells whether a line is a Markdown horizontal rule: three or
-// more of the same one of -, * or _, with spaces or tabs between them and
-// around them, as CommonMark has it, and the server's isRule.
 func IsRule(line string) bool {
 	s := strings.Trim(line, " \t")
 	if s == "" || !strings.ContainsRune("-*_", rune(s[0])) {
@@ -276,7 +257,6 @@ func IsRule(line string) bool {
 	return marks >= 3
 }
 
-// ChartData validates a chart spec and returns its stored data.
 func ChartData(chart map[string]any) (map[string]any, error) {
 	kind, _ := chart["chart_type"].(string)
 	if kind == "" {
@@ -301,8 +281,6 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 					values = append(values, chartValue(v))
 				}
 			}
-			// A series without a name is named by its place, as the
-			// server names it.
 			name := fmt.Sprintf("Series %d", i+1)
 			if v, ok := s["name"]; ok && v != nil {
 				name = JSONText(v)
@@ -331,8 +309,6 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	}, nil
 }
 
-// rowsOf reads a table spec's rows, and reports whether they are a list
-// of lists, as the server takes only.
 func rowsOf(v any) ([][]string, bool) {
 	raw, ok := v.([]any)
 	if !ok {
@@ -353,10 +329,6 @@ func rowsOf(v any) ([][]string, bool) {
 	return rows, true
 }
 
-// JSONText is a JSON value as text, as the server writes it: a string as
-// it is, null as nothing, and a number or a boolean as it reads, a number
-// as JavaScript writes one. A spec's cells and labels are read so, and a
-// transcript's speakers.
 func JSONText(v any) string {
 	switch x := v.(type) {
 	case nil:
@@ -366,14 +338,11 @@ func JSONText(v any) string {
 	case float64:
 		return jsNumber(x)
 	case []any, map[string]any:
-		// A list or an object is no text, as on the server.
 		return ""
 	}
 	return fmt.Sprint(v)
 }
 
-// jsNumber writes a number as JavaScript's String does: in decimals from
-// 1e-6 to below 1e21, and as 1.5e+21 or 1e-7 past them.
 func jsNumber(f float64) string {
 	if f == 0 {
 		return "0"
@@ -386,12 +355,8 @@ func jsNumber(f float64) string {
 	return mant + "e" + sign + digits
 }
 
-// decimal is a number written as text, as a chart's value may be.
 var decimal = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`)
 
-// chartValue reads a chart's value, as the server does: a JSON number, or
-// a string of a decimal one. What is not one, NaN and infinity among them,
-// is no value: 0.
 func chartValue(v any) float64 {
 	if s, ok := v.(string); ok {
 		s = strings.TrimSpace(s)
@@ -404,9 +369,6 @@ func chartValue(v any) float64 {
 	return f
 }
 
-// agentURL reports whether an agent's link for a block the app loads by
-// itself, an image or a link card, is a web link with a host's name and no
-// space of any kind, as the server takes one.
 func agentURL(s string) bool {
 	if !WebURL(s) || strings.ContainsFunc(s, unicode.IsSpace) {
 		return false
@@ -415,9 +377,6 @@ func agentURL(s string) bool {
 	return err == nil && u.Hostname() != ""
 }
 
-// CallNodes checks blocks a call writes against the most a call makes,
-// and how deep they nest, as SpecsToNodes counts them: each block once,
-// and a table's cells too.
 func CallNodes(nodes []*Node) error {
 	made, deep := 0, 0
 	var count func([]*Node, int)
@@ -442,9 +401,6 @@ func CallNodes(nodes []*Node) error {
 	return nil
 }
 
-// clampInt reads a spec's whole number between lo and hi, def when it has
-// none: a number cut to its whole part, as the server reads it, however
-// far past them it is.
 func clampInt(v any, def, lo, hi int) int {
 	if f, ok := v.(float64); ok {
 		if math.IsNaN(f) {
@@ -455,8 +411,6 @@ func clampInt(v any, def, lo, hi int) int {
 	return min(max(AsInt(v, def), lo), hi)
 }
 
-// TableNode builds a table block from rows of cells, in appflowy's order:
-// column by column, each cell a table/cell holding one paragraph.
 func TableNode(rows [][]string, id string) (*Node, error) {
 	cols := 0
 	for _, r := range rows {
@@ -487,18 +441,12 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 	return n, nil
 }
 
-// TableCellNode is a new table cell at a row and column, holding a
-// paragraph of text.
 func TableCellNode(row, col int, text Delta) *Node {
 	p := &Node{ID: NewBlockID(), Type: "paragraph"}
 	p.SetDelta(text)
 	return &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": col, "rowPosition": row}, Children: []*Node{p}}
 }
 
-// SetTableRows makes table n's cells rows, as TableRows reads them: a
-// cell TableCells finds keeps its ID, and its text as it was when its
-// Markdown is the same, so only what changed is new; other cells go, and
-// those it grows to are made.
 func SetTableRows(n *Node, rows [][]string) error {
 	cols := 0
 	for _, r := range rows {
@@ -542,8 +490,6 @@ func SetTableRows(n *Node, rows [][]string) error {
 	return nil
 }
 
-// DropCells takes table cells out of a block that is no longer a table,
-// as when a replace makes a list of one: its nested items, if any, stay.
 func DropCells(n *Node) {
 	if n.Type == "table" {
 		return
@@ -554,9 +500,6 @@ func DropCells(n *Node) {
 	}
 }
 
-// TableCells is a table's cells by row and column, as many as TableSize
-// makes room for, nil where one is missing; of two cells at one place, the
-// first.
 func TableCells(table *Node) [][]*Node {
 	rows, cols := TableSize(table)
 	grid := make([][]*Node, rows)
@@ -572,7 +515,6 @@ func TableCells(table *Node) [][]*Node {
 	return grid
 }
 
-// SortTableCells puts a table's cells in appflowy's column-major order.
 func SortTableCells(table *Node) {
 	sort.SliceStable(table.Children, func(i, j int) bool {
 		a, b := table.Children[i], table.Children[j]
@@ -584,12 +526,8 @@ func SortTableCells(table *Node) {
 	})
 }
 
-// maxTableCells is the most cells TableSize makes room for.
 const maxTableCells = 1 << 16
 
-// TableSize is a stored table's rows and columns, as far as it has cells
-// for them: a size from another client or a newer app, negative or huge,
-// never makes room for more cells than are there, or than maxTableCells.
 func TableSize(n *Node) (rows, cols int) {
 	lastRow, lastCol := -1, -1
 	for _, cell := range n.Children {
@@ -605,19 +543,12 @@ func TableSize(n *Node) (rows, cols int) {
 	return min(rows, maxTableCells/cols), cols
 }
 
-// TableRows rebuilds the rows of a stored table, as inline markdown.
 func TableRows(n *Node) [][]string { return tableRows(n, Delta.ToMarkdown) }
 
-// ReadableTableRows is TableRows for people to read, its cells written as
-// ReadableMarkdown writes text.
 func ReadableTableRows(n *Node) [][]string { return tableRows(n, Delta.ReadableMarkdown) }
 
-// PlainTableRows is TableRows as the cells show, their text without its
-// formats.
 func PlainTableRows(n *Node) [][]string { return tableRows(n, Delta.Plain) }
 
-// tableRows writes the cells TableCells finds: of two at one place, the
-// first, as every reader of the table shows it.
 func tableRows(n *Node, markdown func(Delta) string) [][]string {
 	cells := TableCells(n)
 	grid := make([][]string, len(cells))
@@ -637,8 +568,6 @@ func tableRows(n *Node, markdown func(Delta) string) [][]string {
 	return grid
 }
 
-// BlockViews is the flattened, model-readable view of a page (BlockView in
-// the protocol).
 func BlockViews(c *Content) []map[string]any {
 	var out []map[string]any
 	var visit func([]*Node, int, string)
@@ -660,7 +589,6 @@ func BlockViews(c *Content) []map[string]any {
 			case "toggle_list":
 				v["collapsed"] = n.Bool("collapsed")
 			case "heading":
-				// Within 1 and 6, however far past them it is stored.
 				v["level"] = clampInt(n.Data["level"], 1, 1, 6)
 			case "todo_list":
 				v["checked"] = n.Bool("checked")
@@ -672,8 +600,6 @@ func BlockViews(c *Content) []map[string]any {
 			case "chart":
 				v["chart"] = present(n, "chart_type", "title", "labels", "series", "caption")
 			case "embed":
-				// The source too, so an agent can change an embed with
-				// replace_block rather than write a new one blind.
 				v["embed"] = present(n, "title", "height", "html")
 			case "image":
 				v["image"] = present(n, "url", "alt")
@@ -704,10 +630,6 @@ func BlockViews(c *Content) []map[string]any {
 	return out
 }
 
-// present are the keys of a block's data it has, with their values: one
-// it lacks is left out, not null, as the server's views have it.
-// checkedNotes is notes as a block of kind, "video" or "file", keeps them,
-// or why it can't.
 func checkedNotes(notes, kind string) (string, error) {
 	if notes = NormalizeNotes(notes); utf8.RuneCountInString(notes) > MaxNotes {
 		return "", toolErr("A %s's notes take at most %d characters.", kind, MaxNotes)

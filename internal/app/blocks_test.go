@@ -21,16 +21,13 @@ func TestRenderedPages(t *testing.T) {
 	if !strings.Contains(rendered.PeleModule, "\nconst peleRender = ") || strings.Contains(rendered.PeleModule[len(rendered.PeleModule)-400:], "export{") {
 		t.Fatal("Pele's render function was not found")
 	}
-	// Source goes in as a string the page cannot break out of.
 	page := rendered.DiagramPage("graph TD\n  A[</script><b>x</b>]-->B", "#ffffff", false)
 	if strings.Contains(page, "</script><b>") || strings.Contains(page, "<b>x</b>") {
 		t.Error("diagram source not escaped")
 	}
-	// Only the full screen page fills its frame and asks to leave.
 	if strings.Contains(page, `"full":true`) || strings.Contains(page, "#v{height:100%}") {
 		t.Error("inline diagram page fills its frame")
 	}
-	// Edge labels sit on the color behind the diagram, over the lines.
 	if !strings.Contains(page, "--pele-bg:#ffffff") {
 		t.Error("diagram labels have no background")
 	}
@@ -56,8 +53,6 @@ func TestRenderedBlockShowsChromeOnHover(t *testing.T) {
 	if !ok {
 		t.Fatal("no Math label")
 	}
-	// Inked: pixels of the border's left edge and of the label that differ
-	// from the page around them.
 	inked := func() (border, text int) {
 		img := tt.Image()
 		scale := float32(img.Bounds().Dx()) / 500
@@ -83,8 +78,6 @@ func TestRenderedBlockShowsChromeOnHover(t *testing.T) {
 	}
 }
 
-// Editing an image's or video's link points it at the new link, as one
-// undo step.
 func TestSetMediaLink(t *testing.T) {
 	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png", "align": "center"}}
 	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Old"}}
@@ -114,8 +107,6 @@ func TestSetMediaLink(t *testing.T) {
 	}
 }
 
-// A link card's info is kept in its page though the page closed before
-// the link's page answered.
 func TestLinkInfoKeptInAClosedPage(t *testing.T) {
 	a := templatesApp(t)
 	card := &doc.Node{ID: "l1", Type: "link_preview", Data: map[string]any{"url": "https://go.dev/"}}
@@ -131,9 +122,6 @@ func TestLinkInfoKeptInAClosedPage(t *testing.T) {
 	}
 }
 
-// A question to the web that failed, as offline, is asked again once a
-// while has passed, not at each frame that shows its card, nor never; an
-// answer is kept.
 func TestWebAnswersAskAgainAfterAFailure(t *testing.T) {
 	a := &App{}
 	var w webAnswers[string]

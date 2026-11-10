@@ -1,13 +1,8 @@
-# A leaf for Leaflet's icon, drawn from curves: an asymmetric outline, a
-# curving midrib, and veins that arc toward the tip and stop short of the
-# edge. Writes the leaf's parts as SVG fragments in leaf coordinates (tip
-# up, base at 0,300).
 import math, json
 
 def cubic(p0, p1, p2, p3, t):
     return tuple((1-t)**3*p0[i] + 3*(1-t)**2*t*p1[i] + 3*(1-t)*t*t*p2[i] + t**3*p3[i] for i in range(2))
 
-# Outline: base, left shoulder, tip, right shoulder, back to base.
 segs = [
     ((0, 300), (-118, 262), (-232, 140), (-228, -20)),
     ((-228, -20), (-222, -170), (-120, -282), (36, -334)),
@@ -28,22 +23,19 @@ def inside(p):
 def edge_dist(p):
     return min(math.hypot(p[0] - q[0], p[1] - q[1]) for q in poly[::2])
 
-# Midrib: from the base to just short of the tip, a gentle curve.
 mid = ((0, 300), (-22, 150), (-12, -120), (30, -318))
 midrib = f"M0 300 C-22 150 -12 -120 30 -318"
 
 veins = []
 for side in (-1, 1):
     for k, t in enumerate([0.16, 0.30, 0.44, 0.58, 0.72]):
-        t += 0.06 if side > 0 else 0          # alternate, as leaves do
+        t += 0.06 if side > 0 else 0
         p = cubic(*mid, t)
         q = cubic(*mid, t + 0.01)
         tx, ty = q[0] - p[0], q[1] - p[1]; l = math.hypot(tx, ty); tx, ty = tx / l, ty / l
-        # the normal on this side: left of the midrib for -1, right for +1
         nx, ny = (-ty, tx) if side > 0 else (ty, -tx)
         if (nx > 0) != (side > 0):
             nx, ny = -nx, -ny
-        # leave the midrib at 50 degrees, heading toward the tip
         a = math.radians(50)
         dx, dy = nx * math.sin(a) + tx * math.cos(a), ny * math.sin(a) + ty * math.cos(a)
         L = 0

@@ -3,9 +3,6 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// RecordingLiveActivity draws the recording in progress on the Lock
-/// Screen and in the Dynamic Island: whether it records or is paused, its
-/// time, and Pause and Stop, which the app performs.
 struct RecordingLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RecordingAttributes.self) { context in
@@ -53,7 +50,6 @@ struct RecordingLiveActivity: Widget {
     }
 }
 
-/// Dot is the red dot of a recording, grey while it is paused.
 private struct Dot: View {
     let paused: Bool
 
@@ -64,8 +60,6 @@ private struct Dot: View {
     }
 }
 
-/// Status says whether it records, is paused, or stopped without the app
-/// saying so, as when the app quit: the activity then went stale.
 private struct Status: View {
     let paused: Bool
     let stopped: Bool
@@ -89,11 +83,8 @@ private struct Status: View {
     }
 }
 
-/// Time is how long the recording has run: counting on by itself while it
-/// records, and still while it is paused, or its microphone isn't on yet.
 private struct Time: View {
     let state: RecordingAttributes.ContentState
-    /// stopped leaves the time out: how long it ran, only the app knows.
     let stopped: Bool
 
     var body: some View {
@@ -110,7 +101,6 @@ private struct Time: View {
     }
 }
 
-/// Controls are Pause, or Resume while it is paused, and Stop.
 private struct Controls: View {
     let paused: Bool
 

@@ -36,8 +36,6 @@ func content(t *testing.T, c *Core, id string) *doc.Content {
 	return pg.Content
 }
 
-// closeEditors closes every editor content opened of page id, and so the
-// page.
 func closeEditors(c *Core, id string) {
 	var editors []int64
 	c.q.do(func() {
@@ -64,7 +62,6 @@ func TestTemplatesStartPages(t *testing.T) {
 		t.Fatalf("no meeting starter: %+v", meeting)
 	}
 
-	// An empty, untitled page takes a starter's blocks and title.
 	page := create(t, c, `{}`)
 	title, err := c.ApplyTemplate(page.ID, meeting.Key)
 	if err != nil || title != meeting.Title {
@@ -73,12 +70,10 @@ func TestTemplatesStartPages(t *testing.T) {
 	if len(content(t, c, page.ID).Children) < 2 {
 		t.Fatal("the page took no blocks")
 	}
-	// A page with something in it is left as it is.
 	if title, _ := c.ApplyTemplate(page.ID, meeting.Key); title != "" {
 		t.Fatalf("applied again: %q", title)
 	}
 
-	// Editing a starter makes it the user's own, in its place.
 	id, err := c.EditTemplate(meeting.Key)
 	if err != nil || id == "" {
 		t.Fatal(err)
@@ -89,7 +84,6 @@ func TestTemplatesStartPages(t *testing.T) {
 		}
 	}
 
-	// A folder's default template fills the pages started in it.
 	folder, _ := c.CreateFolder("Meetings")
 	var f folderRow
 	_ = json.Unmarshal([]byte(folder), &f)
@@ -130,7 +124,6 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 		t.Fatalf("template %+v", tpl)
 	}
 
-	// A named version comes back on restore, the page as it was kept too.
 	closeEditors(c, child.ID)
 	if err := c.NameVersion(child.ID, "Empty"); err != nil {
 		t.Fatal(err)
@@ -163,9 +156,6 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	if md.Name != "Trip.md" || !strings.HasPrefix(md.Markdown, "# Trip") {
 		t.Fatalf("export %+v", md)
 	}
-	// A PDF is the page as its link shares it, laid out for the region's
-	// paper: its subpages by their titles, in a file of its own in the
-	// folder given.
 	dir := t.TempDir()
 	for region, width := range map[string]float64{"US": 8.5, "DE": 8.27, "": 8.27} {
 		raw, err = c.ExportPDFPage(parent.ID, region, dir)
@@ -174,7 +164,7 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 		}
 		var pdf exportedPDF
 		_ = json.Unmarshal([]byte(raw), &pdf)
-		data, err := os.ReadFile(pdf.Path) // #nosec G304 -- the file the core just wrote.
+		data, err := os.ReadFile(pdf.Path) // #nosec G304
 		html := string(data)
 		if err != nil || filepath.Dir(pdf.Path) != dir || pdf.Name != "Trip.pdf" || pdf.Width != width ||
 			!strings.Contains(html, `<h1 class="title">Trip</h1>`) || !strings.Contains(html, ">Packing</p>") ||
@@ -198,10 +188,8 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 		t.Fatalf("file block %s", raw)
 	}
 
-	// The file is found by its ID, where it is kept here; gone from here
-	// and never uploaded, it can't be had.
 	local, err := c.LocalFile(n.Str("file_id"), 0)
-	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" { // #nosec G304 -- the file the core just kept.
+	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" { // #nosec G304
 		t.Fatalf("local file %q, %v", local, err)
 	}
 	_ = os.Remove(local)
@@ -210,8 +198,6 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	}
 }
 
-// A page with a recording still being made in it is not copied, as on the
-// desktop: the copy would stay without what the recording gets.
 func TestNoCopyWhileRecording(t *testing.T) {
 	c, _ := open(t)
 	p := create(t, c, `{"title":"Interview"}`)
@@ -234,7 +220,6 @@ func TestNoCopyWhileRecording(t *testing.T) {
 	var tpl pageRow
 	_ = json.Unmarshal([]byte(raw), &tpl)
 
-	// Nor is a template a recording is being made in used.
 	recording(true, tpl.ID)
 	page := create(t, c, `{}`)
 	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err == nil || err.Error() != wait {
@@ -246,9 +231,6 @@ func TestNoCopyWhileRecording(t *testing.T) {
 	}
 }
 
-// One copy is made at a time, as on the desktop: another asked for while
-// one is made says so, and makes nothing. A starter, which copies nothing,
-// still fills a page meanwhile.
 func TestOneCopyAtATime(t *testing.T) {
 	c, _ := open(t)
 	p := create(t, c, `{"title":"Notes"}`)
@@ -284,8 +266,6 @@ func TestOneCopyAtATime(t *testing.T) {
 	}
 }
 
-// A copy that fails while it fetches what it needs leaves none of what
-// came on this device, as Keep the audio says, as a copy made would.
 func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
 	c, _ := open(t)
 	row := create(t, c, `{"title":"Standup"}`)
@@ -323,7 +303,6 @@ func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The first one's audio is in iCloud Drive; the second's never came.
 	rel, _ := icloud.RecordingBlobPath(ids[0])
 	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o750); err != nil {
 		t.Fatal(err)
@@ -341,8 +320,6 @@ func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
 	}
 }
 
-// A call the app gives up on ends at once, whether it runs already or has
-// yet to begin.
 func TestCancel(t *testing.T) {
 	c, _ := open(t)
 	ctx, done := c.cancellable(1, time.Minute)
@@ -364,8 +341,6 @@ func TestCancel(t *testing.T) {
 	}
 }
 
-// A copy whose card can't be put in its parent, unreadable, is still made
-// and given back once, and says the card is missing.
 func TestDuplicateKeepsTheCopyWithoutItsCard(t *testing.T) {
 	c, ev := open(t)
 	parent := create(t, c, `{"title":"Trip"}`)
@@ -373,8 +348,6 @@ func TestDuplicateKeepsTheCopyWithoutItsCard(t *testing.T) {
 	if _, err := c.core.Store.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, parent.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The notices told so far, which go to the app on a queue of their
-	// own, are passed over.
 	c.ev.q.do(func() {})
 	for len(ev.notices) > 0 {
 		<-ev.notices

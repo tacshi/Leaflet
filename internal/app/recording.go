@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
 	"leaflet/internal/guard"
@@ -22,9 +23,6 @@ import (
 	"leaflet/locales"
 )
 
-// exportRecordingAudio saves a recording's audio where the user chooses,
-// as it comes, for one that is not on this device any more, and never all
-// in memory.
 func (a *App) exportRecordingAudio(rec store.Recording, title string) {
 	a.saveExport(export.SafeName(title)+".wav", func(path string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -38,7 +36,6 @@ func (a *App) exportRecordingAudio(rec store.Recording, title string) {
 	})
 }
 
-// exportTranscript saves a recording's transcript as a file of format.
 func (a *App) exportTranscript(rec store.Recording, title, format string) {
 	text := recording.TranscriptFile(rec.Transcript, format)
 	a.saveExport(export.SafeName(title)+"."+format, func(path string) error {
@@ -46,8 +43,6 @@ func (a *App) exportTranscript(rec store.Recording, title, format string) {
 	})
 }
 
-// saveExport asks where to save a file, by default named name, and has
-// save write it there, off the main thread, saying how it went.
 func (a *App) saveExport(name string, save func(path string) error) {
 	guard.Go(func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
@@ -65,8 +60,6 @@ func (a *App) saveExport(name string, save func(path string) error) {
 	})
 }
 
-// startRecording records into the open page, transcribed by provider, or
-// the one marked for the page when it is "".
 func (a *App) startRecording(pageID, provider string) {
 	ed := a.openEditor(pageID)
 	err := a.rec.Start(pageID, a.sttFor(pageID, provider), a.online && !a.settings.WorkOffline, func(n *doc.Node) {
@@ -87,7 +80,6 @@ func (a *App) startRecording(pageID, provider string) {
 	}
 }
 
-// recordingPill shows the recording in progress in the page's header.
 func (a *App) recordingPill(c *ui.Context) {
 	pal := theme.Of(c)
 	st := &a.rec.State
@@ -103,7 +95,6 @@ func (a *App) recordingPill(c *ui.Context) {
 		}
 		ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText).FontFeatures("tnum")
 		c.After(500 * time.Millisecond)
-		// Before the microphone starts there is nothing to pause.
 		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText).
 			Disabled(st.Starting)
 		pause.Children(func() {
@@ -116,7 +107,6 @@ func (a *App) recordingPill(c *ui.Context) {
 		if pause.Clicked() {
 			a.rec.TogglePause()
 		}
-		// A square in a circle, as on the iPad.
 		stop := ui.ButtonBase(c.Key("stop")).Size(22, 22).Center().Radius(999).Background(pal.Danger).Label(locales.RecStop()).Tooltip(locales.RecStop())
 		stop.Children(func() { ui.Box(c).Size(8, 8).Radius(2).Background(pal.OnAccent) })
 		if stop.Clicked() {
@@ -125,7 +115,6 @@ func (a *App) recordingPill(c *ui.Context) {
 	})
 }
 
-// recView is the recording's capture page, if one is running.
 func (a *App) recView() *mygo.WebView {
 	if a.rec == nil || a.capture == nil || !a.rec.Active() {
 		return nil
@@ -133,8 +122,6 @@ func (a *App) recView() *mygo.WebView {
 	return a.capture.View()
 }
 
-// player is the playback of one recording; from is where it starts once
-// its audio loads, as a time chosen before then asks.
 type player struct {
 	sound   *audio.Sound
 	p       *audio.Player
@@ -142,8 +129,6 @@ type player struct {
 	from    time.Duration
 }
 
-// dropGonePlayers stops the recordings playing whose block is no longer
-// in the open page, as one deleted, and lets their audio go.
 func (a *App) dropGonePlayers() {
 	if len(a.players) == 0 {
 		return
@@ -166,8 +151,6 @@ func (a *App) dropGonePlayers() {
 	}
 }
 
-// dropPlayers stops the recordings playing and lets their audio go, as
-// the page that shows them closes.
 func (a *App) dropPlayers() {
 	for id, pl := range a.players {
 		if pl.p != nil {
@@ -213,7 +196,7 @@ func (a *App) play(rec store.Recording) {
 		a.update(func() {
 			pl.loading = false
 			if a.players[rec.ID] != pl {
-				return // the page closed meanwhile
+				return
 			}
 			if err != nil {
 				a.toast(locales.RecCouldNotPlay(err.Error()))
@@ -230,17 +213,12 @@ func (a *App) play(rec store.Recording) {
 	}()
 }
 
-// recView is a recording as its block shows it: its row, or why there is
-// none, and its transcript tidied into lines.
 type recView struct {
 	rec   store.Recording
 	err   error
 	lines []store.Segment
 }
 
-// recordingView is recording id as its block shows it, read once until
-// the recordings change: a block is drawn each frame, and each quarter
-// second while it plays.
 func (a *App) recordingView(id string) recView {
 	if v, ok := a.recs[id]; ok {
 		return v
@@ -263,7 +241,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 	v := a.recordingView(id)
 	rec, err := v.rec, v.err
 	live := a.rec.Active() && a.rec.State.ID == id
-	// On a page that can't be changed, the transcript only copies.
 	ro := a.page == nil || a.page.editor.ReadOnly || !a.canEdit(a.page.id)
 	ui.Column(c.Key("rec:"+n.ID)).Padding(14, 16).Gap(12).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -331,7 +308,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 							}
 						}
 					}).Disabled(len(rec.Transcript) == 0)
-					// The agent reads the transcript with the block.
 					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available() || ro).Chosen() {
 						a.openPageAgent()
 						a.hub.Chat(a.page.id, locales.RecSummarizePrompt(a.recordingTitle(n, rec, true)), []string{n.ID})
@@ -343,15 +319,12 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					if len(rec.Transcript) == 0 {
 						label = locales.RecTranscribe()
 					}
-					// Not while a transcription runs, which the new one would race.
 					a.transcribeItem(m, a.openPageID(), label, ro || a.rec.Transcribing[id], func(provider string) {
 						if err := a.rec.Retranscribe(id, a.sttFor(a.openPageID(), provider), a.online && !a.settings.WorkOffline); err != nil {
 							a.toast(err.Error())
 						}
 					})
 					m.Separator()
-					// The block goes as one step to undo; its recording stays,
-					// for the undo to bring back.
 					if m.Item(locales.CommonDelete()).Danger().Disabled(ro).Chosen() {
 						a.page.editor.Edit(func(content *doc.Content) { content.Remove(n.ID) })
 					}
@@ -361,9 +334,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 		if live {
 			a.levelMeter(c, a.rec.State.Levels)
 			if t := a.rec.State.LiveText; t != "" {
-				// Its last two lines, from the bottom up, so the block keeps
-				// its height as the words come: the whole transcript shows
-				// once it stops.
 				ui.Column(c.Key("live")).MaxHeight(2 * liveLine).Reverse().Clip().Children(func() {
 					ui.Text(c, t).FontSize(13.5).FixedLineHeight(liveLine).Shrink(0).TextColor(pal.TextSecondary).Font(theme.PageFamily(t))
 				})
@@ -376,8 +346,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 		if pl := a.players[id]; pl != nil && pl.p != nil {
 			a.scrubber(c, pl)
 		}
-		// What went wrong, until it is read and closed: a failure, or a
-		// warning over a transcript that may be short.
 		if rec.Error != "" {
 			kind := "warn"
 			if rec.Status == "failed" {
@@ -394,7 +362,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			closableNotice(c, kind, "circle-alert", rec.Error, nil, dismiss)
 		}
 		if len(rec.Transcript) > 0 {
-			// A long transcript shows its first lines until it is opened.
 			lines := v.lines
 			long := doc.FoldsTranscript(len(lines))
 			open := a.recOpen[n.ID]
@@ -408,8 +375,6 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					current = i
 				}
 			}
-			// A click on a line plays from it, so its text is not selectable;
-			// the menu's Copy transcript copies it.
 			col := timeColumn(c, []string{recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)}, 12)
 			ui.Column(c).Gap(8).Children(func() {
 				line := func(i int) ui.Element {
@@ -450,18 +415,12 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 	})
 }
 
-// liveLine is the height of a line of the words heard while recording,
-// two of which show.
 const liveLine = 20
 
-// openRenameRecording opens the dialog renaming the recording block of
-// id, named title.
 func (d *dialogs) openRenameRecording(id, title string) {
 	d.recOpen, d.recBlock, d.recName, d.recSelect = true, id, title, true
 }
 
-// recordingDialog renames a recording block of the open page; a name
-// left empty keeps the one it has.
 func (a *App) recordingDialog(c *ui.Context) {
 	d := &a.dialogs
 	dialog(c, &d.recOpen, 380, func() {
@@ -502,10 +461,6 @@ func (a *App) recordingDialog(c *ui.Context) {
 	})
 }
 
-// recordingTitle is the name a recording block shows: its title, with the
-// time it was made where the title, as older blocks', gives only the day,
-// or just "Recording" on a page of the same name, as the menu bar makes.
-// Older blocks were titled in English, "Recording · Jan 2".
 func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) string {
 	page := ""
 	if a.page != nil {
@@ -514,13 +469,10 @@ func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) strin
 	return recordingName(n, rec, found, page)
 }
 
-// recordingName is recordingTitle for a block on the page titled page;
-// a block with no title is a Recording too.
 func recordingName(n *doc.Node, rec store.Recording, found bool, page string) string {
 	return recording.BlockTitle(n.Str("title"), rec.CreatedAt, found, page)
 }
 
-// seek plays a recording from t, once its audio loads if it has not.
 func (a *App) seek(rec store.Recording, t time.Duration) {
 	pl := a.players[rec.ID]
 	if pl == nil || pl.p == nil {
@@ -542,8 +494,6 @@ func (a *App) scrubber(c *ui.Context, pl *player) {
 	})
 }
 
-// scrubBar shows where audio of length dur is, at pos, for a drag to move
-// by seek.
 func (a *App) scrubBar(c *ui.Context, pos, dur time.Duration, seek func(time.Duration)) {
 	pal := theme.Of(c)
 	frac := 0.0
@@ -567,8 +517,6 @@ func (a *App) scrubBar(c *ui.Context, pos, dur time.Duration, seek func(time.Dur
 
 func (a *App) levelMeter(c *ui.Context, levels []float64) {
 	pal := theme.Of(c)
-	// One thin bar per 50 ms, newest at the right, filling the width: about
-	// seven seconds at the page's width.
 	ui.Box(c.Key("meter")).Height(36).FillWidth().Draw(func(p *ui.Painter, r ui.Rect) {
 		const bar, step = 2.5, 4.5
 		n := int(r.W / step)
@@ -587,7 +535,6 @@ func (a *App) levelMeter(c *ui.Context, levels []float64) {
 	})
 }
 
-// insertTranscript puts a recording's transcript after its block as text.
 func (a *App) insertTranscript(blockID string, rec store.Recording) {
 	ed := a.page.editor
 	if ed.ReadOnly {
@@ -597,15 +544,7 @@ func (a *App) insertTranscript(blockID string, rec store.Recording) {
 	ed.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{After: blockID}, nodes...) })
 }
 
-// Speech to text ---------------------------------------------------------
-
-// findSpeech gives the recorder the Mac's own speech engine, where the app
-// ships its helper and macOS can transcribe. A Mac that has one
-// transcribes with it unless another engine is set up: speech settings
-// left at an endpoint with no address turn to it, as on the iPad.
 func (a *App) findSpeech() {
-	// Finding it takes up to 10 s: a recording meanwhile waits for it to
-	// transcribe, rather than keeping only its audio.
 	a.rec.FindingEngine()
 	dir, err := mygo.App.Path(mygo.PathResources)
 	if err != nil {
@@ -626,52 +565,49 @@ func (a *App) findSpeech() {
 }
 
 type speechState struct {
-	key string
-	// keyLoaded is set once the keys kept here are being read, off the
-	// main thread; keyTyped once the endpoint key is typed, which keeps
-	// what the keychain had from replacing it; keyTimer keeps it once
-	// typing pauses (keepEndpointKey).
+	key, keyURL         string
+	kept                recording.KeptKey
 	keyLoaded, keyTyped bool
 	keyTimer            *time.Timer
 	soniox              string
-	// sonioxSaved is whether this device's keychain has a Soniox key.
-	sonioxSaved bool
-	// moss is the MOSS key typed, and mossSaved whether this device's
-	// keychain has one.
-	moss      string
-	mossSaved bool
-	// open is the speech provider whose settings show under its row, and
-	// adding one being added, listed until it is set up.
-	open, adding string
-	saving       bool
-	testing      bool
-	testResult   string
-	testOK       bool
-	// micTesting is whether Record a test is running; micText is what it
-	// heard, or why it heard nothing.
-	micTesting bool
-	micText    string
+	sonioxSaved         bool
+	moss                string
+	mossSaved           bool
+	open, adding        string
+	saving              bool
+	testing             bool
+	testResult          string
+	testOK              bool
+	micTesting          bool
+	micText             string
 }
 
-// sttControlW is the width of Speech to text's fields and lists; a
-// field's input is that less its box's padding.
+func (s *speechState) keyAt(url string) {
+	if url == s.keyURL {
+		return
+	}
+	if !endpoint.SameOrigin(url, s.keyURL) {
+		s.key = s.kept.For(url)
+	}
+	s.keyURL = url
+}
+
 const sttControlW = 280
 
-// loadSpeechKeys reads the speech keys kept here, once, off the main
-// thread: the keychain can take a while, or ask first.
 func (a *App) loadSpeechKeys() {
 	s := &a.speech
 	if s.keyLoaded {
 		return
 	}
 	s.keyLoaded = true
-	var key string
+	var kept recording.KeptKey
 	var soniox, moss bool
 	a.offMain(func() {
-		key, soniox, moss = recording.EndpointKey(), recording.LocalSonioxKey() != "", recording.MossKey() != ""
+		kept, soniox, moss = recording.LoadEndpointKey(), recording.LocalSonioxKey() != "", recording.MossKey() != ""
 	}, func() {
 		if !s.keyTyped {
-			s.key = key
+			s.kept, s.keyURL = kept, a.settings.Stt.BaseURL
+			s.key = kept.For(s.keyURL)
 		}
 		s.sonioxSaved, s.mossSaved = soniox, moss
 	})
@@ -682,15 +618,11 @@ func (a *App) speechSettings(c *ui.Context) {
 	stt := &a.settings.Stt
 	a.loadSpeechKeys()
 	changed := false
-	keys := recording.KeysOf(*stt, s.sonioxSaved, s.mossSaved, a.session.SignedIn, a.rec.Engine != nil)
+	keys := recording.KeysOf(s.sonioxSaved, s.mossSaved, a.rec.Engine != nil)
 	set, addable := recording.SpeechProviders(*stt, keys)
-	// A provider open whose settings no longer set it up, as an endpoint's
-	// address emptied to type another, is being added again: it would go
-	// from the list with the field being typed in.
 	if s.adding == "" && s.open != "" && !recording.SetUp(s.open, *stt, keys) {
 		s.adding = s.open
 	}
-	// A provider being added shows with its settings until it is set up.
 	if s.adding != "" {
 		if recording.SetUp(s.adding, *stt, keys) {
 			s.adding = ""
@@ -709,9 +641,6 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 		})
 	})
-	// One card for the providers, each opening its settings, as Agent
-	// providers has them, the controls one width so their left edges line
-	// up. There is no default: each transcription picks its provider.
 	pal := theme.Of(c)
 	card(c, "engine", func() {
 		if len(set) == 0 {
@@ -752,8 +681,6 @@ func (a *App) speechSettings(c *ui.Context) {
 		if len(set) == 0 {
 			return
 		}
-		// Each transcription picks its provider: speakers are labelled by
-		// those that can, Soniox and MOSS.
 		if recording.SetUp("soniox", *stt, keys) || recording.SetUp(recording.Moss, *stt, keys) {
 			sp := stt.SpeakerLabels
 			settingRow(c, "speakers", locales.RecSttSpeakers(), "", false, func() {
@@ -764,7 +691,6 @@ func (a *App) speechSettings(c *ui.Context) {
 			})
 		}
 	})
-	// Both engines' Test buttons report here.
 	if s.testResult != "" {
 		notice(c, map[bool]string{true: "ok", false: "danger"}[s.testOK], map[bool]string{true: "check", false: "circle-alert"}[s.testOK], s.testResult, nil)
 	}
@@ -795,7 +721,6 @@ func (a *App) speechSettings(c *ui.Context) {
 		}
 		settingRow(c, "test", locales.RecSttTestMic(), desc, false, func() {
 			if v := a.recView(); s.micTesting && v != nil {
-				// The capture page must be in the window to keep running.
 				ui.WebView(c, v).Size(1, 1).Opacity(0.01)
 			}
 			label := locales.RecSttRecordTest()
@@ -814,15 +739,11 @@ func (a *App) speechSettings(c *ui.Context) {
 		})
 	})
 	if changed {
-		// An endpoint's address typed sets it up.
 		recording.PreferSetUp(stt, keys)
 		a.saveSettings()
-		a.rec.MirrorSettings(a.settings.Stt)
 	}
 }
 
-// speechFields are provider p's own settings, under its row: its key,
-// address or model, a test of them, and taking it off the list.
 func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store.SttSettings, changed *bool) {
 	s := &a.speech
 	switch p.ID {
@@ -839,44 +760,18 @@ func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store
 				*changed = true
 			}
 		})
-		if strings.TrimSpace(stt.BaseURL) == "" {
-			// The key row comes with an address: where it is says
-			// where the key is kept.
-		} else if recording.IsLocalEndpoint(stt.BaseURL) {
+		s.keyAt(stt.BaseURL)
+		if strings.TrimSpace(stt.BaseURL) != "" {
 			settingRow(c, "key", locales.RecSttApiKey(), locales.RecSttKeyInKeychain(), false, func() {
 				ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
 					if growPassword(c, "key", &s.key, locales.RecSttOptional()).Changed() {
-						a.keepEndpointKey(s.key)
+						a.keepEndpointKey(stt.BaseURL, s.key)
 					}
-					// The test goes on while the fields change: it has
-					// them as they are now.
 					url, model, key := stt.BaseURL, stt.Model, s.key
 					a.sttTestButton(c, func(ctx context.Context) error {
 						return recording.TestEndpoint(ctx, url, model, key)
 					})
 				})
-			})
-		} else {
-			// The server calls a cloud endpoint with the key of one of
-			// the agent providers.
-			var ids []string
-			names := map[string]string{"": locales.RecSttNoKey()}
-			for _, p := range a.providers {
-				if !p.IsLocal {
-					ids = append(ids, p.ID)
-					names[p.ID] = p.Name
-				}
-			}
-			desc := locales.RecSttKeyFromDesc()
-			if len(ids) == 0 {
-				desc = locales.RecSttAddProvider()
-			}
-			settingRow(c, "key", locales.RecSttKeyFrom(), desc, false, func() {
-				choice := stt.ProviderID
-				if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, sttControlW); choice != stt.ProviderID {
-					stt.ProviderID = choice
-					*changed = true
-				}
 			})
 		}
 	case recording.Moss:
@@ -902,20 +797,15 @@ func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store
 			})
 		})
 	case "soniox":
-		where, ph := locales.RecSttSonioxOnServer(), locales.RecSttPasteKey()
-		if !a.session.SignedIn {
-			where = locales.RecSttSonioxOnDevice()
-		}
+		ph := locales.RecSttPasteKey()
 		if s.sonioxSaved {
 			ph = locales.RecSttKeySaved()
 		}
-		settingRow(c, "key", locales.RecSttSonioxKey(), where, true, func() {
+		settingRow(c, "key", locales.RecSttSonioxKey(), locales.RecSttSonioxOnDevice(), true, func() {
 			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
 				if growPassword(c, "key", &s.soniox, ph).Changed() {
 					s.testResult = ""
 				}
-				// With none typed, the test reads the one kept here, as it
-				// runs: not the keychain each frame.
 				key, saved := strings.TrimSpace(s.soniox), s.sonioxSaved
 				a.sttTestButton(c, func(ctx context.Context) error {
 					if key == "" && saved {
@@ -943,14 +833,12 @@ func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store
 	}
 }
 
-// sttTestButton is a Test button that runs test and shows how it went.
 func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error) {
 	s := &a.speech
 	label := locales.RecSttTest()
 	if s.testing {
 		label = locales.RecSttTesting()
 	}
-	// Wide enough for "Testing…", so the row keeps its layout.
 	if !button(c, "test", "", label).MinWidth(82).Justify(ui.Center).Disabled(s.testing).Clicked() {
 		return
 	}
@@ -970,13 +858,13 @@ func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error)
 	}()
 }
 
-// keepEndpointKey keeps the endpoint key typed in the keychain once typing
-// pauses, off the main thread, as the keychain can take a while, or ask
-// first; an empty one it removes. The writes go one at a time, and only
-// the last.
-func (a *App) keepEndpointKey(key string) {
+func (a *App) keepEndpointKey(url, key string) {
 	s := &a.speech
 	s.keyTyped = true
+	s.kept = recording.KeptKey{}
+	if key != "" {
+		s.kept = recording.KeptKey{Key: key, Address: url}
+	}
 	if s.keyTimer != nil {
 		s.keyTimer.Stop()
 	}
@@ -988,33 +876,27 @@ func (a *App) keepEndpointKey(key string) {
 		if a.endpointKeys.Load() != n {
 			return
 		}
-		if err := recording.SetEndpointKey(key); err != nil {
+		if err := recording.SetEndpointKey(url, key); err != nil {
 			a.update(func() { a.toast(locales.RecSttKeyNotSaved(err.Error())) })
 		}
 	})
 }
 
-// speechKeys are the speech keys kept, as last read.
 func (a *App) speechKeys() recording.Keys {
 	s := &a.speech
 	a.loadSpeechKeys()
-	return recording.KeysOf(a.settings.Stt, s.sonioxSaved, s.mossSaved, a.session.SignedIn, a.rec.Engine != nil)
+	return recording.KeysOf(s.sonioxSaved, s.mossSaved, a.rec.Engine != nil)
 }
 
-// sttFor is the speech settings a transcription on page pageID takes, with
-// provider picked, or the one marked for the page when it is "": there is
-// no default. One picked is kept as the one last picked anywhere.
 func (a *App) sttFor(pageID, provider string) store.SttSettings {
 	stt, last := a.rec.For(pageID, provider, a.settings.Stt, a.speechKeys())
 	if last {
 		a.settings.Stt.Provider = provider
 		a.saveSettings()
-		a.rec.MirrorSettings(a.settings.Stt)
 	}
 	return stt
 }
 
-// openPageID is the open page's ID, or "" with none open.
 func (a *App) openPageID() string {
 	if a.page == nil {
 		return ""
@@ -1022,9 +904,6 @@ func (a *App) openPageID() string {
 	return a.page.id
 }
 
-// transcribeItems are menu m's items picking the provider a transcription
-// on page pageID takes, the one last picked there checked; do runs with
-// the one picked.
 func (a *App) transcribeItems(m *ui.Menu, pageID string, do func(provider string)) {
 	keys := a.speechKeys()
 	cur := a.rec.Choice(pageID, a.settings.Stt, keys)
@@ -1035,10 +914,6 @@ func (a *App) transcribeItems(m *ui.Menu, pageID string, do func(provider string
 	}
 }
 
-// transcribeItem is menu m's item that transcribes on page pageID, as
-// label says: with more than one provider set up, a submenu picking it,
-// the one last picked there checked; do runs with the provider picked, or
-// "" for the one marked.
 func (a *App) transcribeItem(m *ui.Menu, pageID, label string, disabled bool, do func(provider string)) {
 	choices := recording.Choices(a.settings.Stt, a.speechKeys())
 	if len(choices) < 2 {
@@ -1050,18 +925,12 @@ func (a *App) transcribeItem(m *ui.Menu, pageID, label string, disabled bool, do
 	m.Submenu(label, func(m *ui.Menu) { a.transcribeItems(m, pageID, do) }).Disabled(disabled)
 }
 
-// preferSetUp has the speech settings transcribe with a provider set up,
-// when the one they name is not, saving them if so: the first provider
-// set up transcribes.
 func (a *App) preferSetUp() {
 	if recording.PreferSetUp(&a.settings.Stt, a.speechKeys()) {
 		a.saveSettings()
-		a.rec.MirrorSettings(a.settings.Stt)
 	}
 }
 
-// removeSpeechProvider takes a speech provider off Settings' list, its key
-// off this device, off the main thread.
 func (a *App) removeSpeechProvider(id string) {
 	s := &a.speech
 	s.saving = true
@@ -1075,16 +944,13 @@ func (a *App) removeSpeechProvider(id string) {
 		}
 		s.sonioxSaved, s.mossSaved, s.open, s.testResult = keys.SonioxHere, keys.MossHere, "", ""
 		if id == recording.Endpoint {
-			s.key = ""
+			s.key, s.kept = "", recording.KeptKey{}
 		}
 		a.settings.Stt = stt
 		a.saveSettings()
-		a.rec.MirrorSettings(a.settings.Stt)
 	})
 }
 
-// saveMossKey keeps the MOSS key typed in this device's keychain, off the
-// main thread.
 func (a *App) saveMossKey() {
 	s := &a.speech
 	key := strings.TrimSpace(s.moss)
@@ -1105,8 +971,6 @@ func (a *App) saveMossKey() {
 	})
 }
 
-// saveSonioxKey keeps the Soniox key typed on the server, or in this
-// device's keychain when signed out, off the main thread.
 func (a *App) saveSonioxKey() {
 	s := &a.speech
 	key := strings.TrimSpace(s.soniox)
@@ -1114,24 +978,14 @@ func (a *App) saveSonioxKey() {
 		return
 	}
 	s.saving = true
-	rec := a.rec
-	var onServer bool
 	var err error
-	a.offMain(func() { onServer, err = rec.SaveSonioxKey(key) }, func() {
+	a.offMain(func() { err = recording.SaveSonioxKey(key) }, func() {
 		s.saving = false
 		if err != nil {
 			a.toast(err.Error())
 			return
 		}
-		s.soniox, s.testResult = "", ""
-		if onServer {
-			a.settings.Stt.SonioxOnServer = true
-			a.saveSettings()
-			a.preferSetUp()
-			a.toast(locales.RecSttSavedOnServer())
-			return
-		}
-		s.sonioxSaved = true
+		s.soniox, s.sonioxSaved, s.testResult = "", true, ""
 		a.preferSetUp()
 		a.toast(locales.RecSttSavedOnDevice())
 	})

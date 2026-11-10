@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-// tables are the store's tables, each with the column that names the page
-// a row is of, "" where rows are of no page: removing everything, an
-// account or some pages goes by them, so a table schema gains is left out
-// of none.
 var tables = []struct{ name, page string }{
 	{"spaces", ""}, {"folders", ""}, {"pages", "id"}, {"page_contents", "page_id"}, {"comments", "page_id"},
 	{"recordings", "page_id"}, {"files", "page_id"}, {"ai_jobs", "page_id"}, {"model_providers", ""},
@@ -18,25 +14,19 @@ var tables = []struct{ name, page string }{
 	{"key_values", ""}, {"peer_contents", "page_id"}, {"row_versions", ""},
 }
 
-// accountRows are, of the tables that hold the device's own rows too,
-// the rows that go with an account: the device's own model connections
-// stay, and its settings.
 var accountRows = map[string]string{
-	"model_providers": `is_local = 0`,
+	"model_providers": `FALSE`,
 	"key_values": `key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting')
 		OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%' OR key LIKE 'mcp_edited:%'`,
 }
 
-// Wipe removes everything stored on this device.
-// It is one transaction: a table left behind by a failure part way, as
-// the outbox with the pages gone, would go up as the next account's.
 func (s *Store) Wipe() error {
 	err := s.inTx(func(tx *sql.Tx) error {
 		if err := forgetSearch(tx); err != nil {
 			return err
 		}
 		for _, t := range tables {
-			if _, err := tx.Exec("DELETE FROM " + t.name); err != nil { // #nosec G202 -- one of the tables listed here.
+			if _, err := tx.Exec("DELETE FROM " + t.name); err != nil { // #nosec G202
 				return err
 			}
 		}
@@ -49,20 +39,10 @@ func (s *Store) Wipe() error {
 	return s.removeCopies()
 }
 
-// ForgetAccount removes the account's pages, and everything synced or
-// waiting to sync with them, from this device, its files and recordings'
-// audio included. Settings and the device's
-// own model connections stay. The next session starts with an empty space,
-// and the device registers anew, as the server's row is the account's.
 func (s *Store) ForgetAccount() error { return s.forgetAccount(false) }
 
-// ErrUnsynced is ForgetSyncedAccount finding changes still to go up.
 var ErrUnsynced = errors.New("changes made on this device have not gone up yet")
 
-// ForgetSyncedAccount is ForgetAccount once every change here has gone up:
-// it removes nothing, and returns ErrUnsynced, while one waits. It checks
-// in the transaction that removes, so a change stored meanwhile, by leaflet
-// mcp too, is never removed with the rest.
 func (s *Store) ForgetSyncedAccount() error { return s.forgetAccount(true) }
 
 func (s *Store) forgetAccount(synced bool) error {
@@ -76,7 +56,6 @@ func (s *Store) forgetAccount(synced bool) error {
 				return ErrUnsynced
 			}
 		}
-		// Every page goes, and what search kept of them with it.
 		if err := forgetSearch(tx); err != nil {
 			return err
 		}
@@ -85,7 +64,7 @@ func (s *Store) forgetAccount(synced bool) error {
 			if where, ok := accountRows[t.name]; ok {
 				q += " WHERE " + where
 			}
-			if _, err := tx.Exec(q); err != nil { // #nosec G202 -- the tables listed here, and the literals of accountRows.
+			if _, err := tx.Exec(q); err != nil { // #nosec G202
 				return err
 			}
 		}
@@ -98,8 +77,6 @@ func (s *Store) forgetAccount(synced bool) error {
 	return s.removeCopies()
 }
 
-// forgetSearch empties search_index and text_writes at once, as all the
-// texts they follow go: the triggers would take them out one by one.
 func forgetSearch(tx *sql.Tx) error {
 	if _, err := tx.Exec(`INSERT INTO search_index (search_index) VALUES ('delete-all')`); err != nil {
 		return err
@@ -108,12 +85,6 @@ func forgetSearch(tx *sql.Tx) error {
 	return err
 }
 
-// RemoveSharedPages removes from this device a page shared with the user
-// whose share was withdrawn, with the pages under it and everything kept
-// of them: content, history, comments, recordings and files with their
-// copies here, members, conflicts, chats, and changes waiting, which the
-// server would refuse now. A page of the user's own space stays, as does
-// everything when the page is not here. It returns the pages removed.
 func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 	own := s.Session().SpaceID
 	var ids, copies []string
@@ -138,9 +109,6 @@ func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 	return ids, nil
 }
 
-// RemovePages removes pages from this device with everything kept of
-// them (removePages), as if they had never been made here: none of it
-// goes to the server.
 func (s *Store) RemovePages(ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -161,11 +129,6 @@ func (s *Store) RemovePages(ids []string) error {
 	return nil
 }
 
-// removePages removes pages from this device with everything kept of
-// them: content, history, comments, recordings and files, members,
-// conflicts, chats, and changes waiting to go up. It returns the paths of
-// the files' and recordings' copies here, to remove once the transaction
-// is done.
 func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 	in := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
 	args := make([]any, len(ids))
@@ -173,7 +136,7 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 		args[i] = id
 	}
 	rows, err := tx.Query(`SELECT local_path FROM files WHERE local_path IS NOT NULL AND page_id IN (`+in+`)
-		UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, slices.Concat(args, args)...) // #nosec G202 -- placeholders only.
+		UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, slices.Concat(args, args)...) // #nosec G202
 	copies, err := collect(rows, err, func(sc scanner) (string, error) {
 		path, err := scanString(sc)
 		return s.Path(path), err
@@ -181,8 +144,6 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The files' entries are dropped by the files: ones queued before
-	// they went with their page's have no page_id.
 	files, err := filesIn(tx, s.Dir, `page_id IN (`+in+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -197,12 +158,11 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 		if t.page == "" {
 			continue
 		}
-		if _, err := tx.Exec(`DELETE FROM `+t.name+` WHERE `+t.page+` IN (`+in+`)`, args...); err != nil { // #nosec G202 -- the tables listed in tables, and placeholders.
+		if _, err := tx.Exec(`DELETE FROM `+t.name+` WHERE `+t.page+` IN (`+in+`)`, args...); err != nil { // #nosec G202
 			return nil, err
 		}
 	}
-	// The page's own rows may be queued without its page_id.
-	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202 -- placeholders only.
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202
 		return nil, err
 	}
 	for _, id := range ids {

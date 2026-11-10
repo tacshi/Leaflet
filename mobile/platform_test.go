@@ -13,8 +13,6 @@ import (
 	"leaflet/locales"
 )
 
-// failingKeychain is the app's keychain failing each call with err, as
-// the app's Keychain.Failure says it.
 type failingKeychain struct {
 	*fakePlatform
 	err error
@@ -24,9 +22,6 @@ func (k failingKeychain) SecretGet(string) ([]byte, error) { return nil, k.err }
 func (k failingKeychain) SecretSet(string, []byte) error   { return k.err }
 func (k failingKeychain) SecretDelete(name string) error   { return k.err }
 
-// The keychain's statuses reach package keychain as it tells them apart:
-// none kept, the user's refusal, and anything else, as the device still
-// locked since it restarted, to try again.
 func TestKeychainStatuses(t *testing.T) {
 	for _, tc := range []struct {
 		message           string
@@ -51,14 +46,12 @@ func TestKeychainStatuses(t *testing.T) {
 			t.Errorf("%q: Delete failed with %v", tc.message, err)
 		}
 	}
-	// No bytes, and no error, is none kept.
 	s := secrets{&fakePlatform{t: t, secrets: map[string][]byte{}}}
 	if _, err := s.Get("session"); !errors.Is(err, keychain.ErrNotFound) {
 		t.Errorf("an empty answer: %v", err)
 	}
 }
 
-// syncEvents is the app, keeping the failures SyncState says.
 type syncEvents struct {
 	fakeEvents
 	failures chan string
@@ -66,9 +59,6 @@ type syncEvents struct {
 
 func (e *syncEvents) SyncState(running bool, failure string) { e.failures <- failure }
 
-// A sync pass the server or iCloud Drive failed reaches the app in the
-// desktop's words for it, no access as the folder picked, lost; another
-// error as it came.
 func TestSyncStateWordsTheServersFailures(t *testing.T) {
 	to := &syncEvents{failures: make(chan string, 1)}
 	e := &events{to: to, q: newQueue()}

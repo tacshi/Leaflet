@@ -8,8 +8,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// conflict records a conflict on block b1 of page id, as sync would, and
-// returns it as listed.
 func (f *pagesFixture) conflict(t *testing.T, id string, c doc.Conflict) store.ConflictRow {
 	t.Helper()
 	if err := f.st.AddConflict(id, c); err != nil {
@@ -22,8 +20,6 @@ func (f *pagesFixture) conflict(t *testing.T, id string, c doc.Conflict) store.C
 	return rows[0]
 }
 
-// A conflict lists the start of the text kept over the other side's, on
-// one line, and which side deleted the block, when one did.
 func TestSidesOf(t *testing.T) {
 	long := strings.Repeat("word ", 20)
 	s := SidesOf(store.ConflictRow{LocalNode: block("b1", "Mine\nhere"), RemoteNode: block("b1", long), Kept: "remote"})
@@ -40,9 +36,6 @@ func TestSidesOf(t *testing.T) {
 	}
 }
 
-// Putting a version back keeps the page as it was in its history first,
-// open or not, with the edits typed in it; the block one device deleted
-// can be deleted again.
 func TestResolveConflict(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		f := newPagesFixture(t)
@@ -81,7 +74,6 @@ func TestResolveConflict(t *testing.T) {
 	}
 }
 
-// item is a list item with text and the blocks under it.
 func item(id, text string, kids ...*doc.Node) *doc.Node {
 	n := block(id, text)
 	n.Type = "bulleted_list"
@@ -89,10 +81,6 @@ func item(id, text string, kids ...*doc.Node) *doc.Node {
 	return n
 }
 
-// A version put back is of the block alone: what is under it stays as
-// the page has it, as the other device added it or the user moved it out
-// since, not as the merge found it; and a block deleted since comes back
-// without what of it the page has elsewhere.
 func TestResolveConflictKeepsWhatIsUnder(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Plans", "", item("x", "Theirs", item("a1", "child"), item("r1", "added there")))
@@ -105,7 +93,6 @@ func TestResolveConflictKeepsWhatIsUnder(t *testing.T) {
 		t.Errorf("put back %q", got)
 	}
 
-	// The user moves a1 out, deletes x, and puts this device's x back.
 	if err := f.EditPage(p.ID, func(c *doc.Content) bool {
 		_ = c.Move("a1", doc.Position{At: "start"})
 		c.Remove("x")
@@ -122,8 +109,6 @@ func TestResolveConflictKeepsWhatIsUnder(t *testing.T) {
 	}
 }
 
-// A conflict whose version kept is this device's, the newer, can bring
-// back the other device's: keeping the newer would keep this one's again.
 func TestResolveConflictWithTheOtherDevicesVersion(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Plans", "", block("b1", "Mine"))
@@ -139,9 +124,6 @@ func TestResolveConflictWithTheOtherDevicesVersion(t *testing.T) {
 	}
 }
 
-// A conflict is not resolved a way that isn't one, nor once it is gone,
-// nor by putting back a block in a page the user can't change: it stays to
-// resolve, and the page as it is.
 func TestResolveConflictRefused(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Plans", "", block("b1", "Theirs"))
@@ -163,8 +145,6 @@ func TestResolveConflictRefused(t *testing.T) {
 	}
 }
 
-// A version put back in a page whose content this device doesn't keep
-// goes into an empty page, rather than being lost with the conflict.
 func TestResolveConflictWithNoContentHere(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Plans", "", block("b1", "Theirs"))
@@ -183,9 +163,6 @@ func TestResolveConflictWithNoContentHere(t *testing.T) {
 	}
 }
 
-// A conflict stays to resolve while the version chosen isn't stored: its
-// page's edits could not be saved before it, or the version put back
-// could not be.
 func TestResolveConflictNotSaved(t *testing.T) {
 	for _, typed := range []bool{false, true} {
 		f := newPagesFixture(t)

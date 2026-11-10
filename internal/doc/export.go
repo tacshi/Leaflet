@@ -9,26 +9,14 @@ import (
 	"leaflet/locales"
 )
 
-// MarkdownOptions are what a page written as Markdown gets from the app
-// around it.
 type MarkdownOptions struct {
-	// Lang is the language of what stands for a block Markdown can't
-	// show, as an embed, which can't run there: "" for the catalogs' own.
-	Lang string
-	// PageTitle names a page a subpage block links to; it may be nil.
+	Lang      string
 	PageTitle func(id string) string
-	// Link is where a link of the page goes, in its text and of its
-	// blocks alike: an export's go to its own files and pages. nil keeps
-	// each as the page has it.
-	Link func(href string) string
+	Link      func(href string) string
 }
 
-// DefaultEmbedTitle is the title an agent's embed takes when it gives
-// none; the app gives a new one the same, in its own language.
 const DefaultEmbedTitle = "Interactive embed"
 
-// PageMarkdown writes a whole page as CommonMark with GitHub's tables and
-// task lists.
 func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	msgs := locales.In(o.Lang)
 	href := func(s string) string { return s }
@@ -41,9 +29,6 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 		b.WriteString("# " + headingMarkdown(escapeCommonMark(title)) + "\n\n")
 	}
 	text := func(indent, lead, pad, md string) { b.WriteString(TextMarkdown(indent, lead, pad, md)) }
-	// block writes Markdown that is already a block at an indent, every
-	// line of it, so a block nested under a list item stays in the item,
-	// and a blank line after it.
 	block := func(indent, md string) {
 		if md == "" {
 			return
@@ -59,25 +44,18 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	link := func(text, to string) string {
 		return "[" + escapeLinkText(text) + "](" + commonMarkDestination(href(to)) + ")"
 	}
-	// indent is the room before a block, nested under list items: as much
-	// as each item's marker takes, as CommonMark nests by ("1. " three).
 	var visit func(nodes []*Node, indent string)
 	visit = func(nodes []*Node, indent string) {
 		number := 0
 		for _, n := range nodes {
-			marker := 2 // "- ", and a task's "- " before its box
+			marker := 2
 			md := n.Delta().ReadableMarkdown()
 			if n.Type != "numbered_list" {
 				number = 0
 			}
-			// An empty paragraph, or one only of spaces, is no block in
-			// Markdown: it is not written, nor the blank line before it.
 			if n.Type == "paragraph" && len(n.Children) == 0 && strings.TrimSpace(TextMarkdown("", "", "", md)) == "" {
 				continue
 			}
-			// A toggle is a <details>, not a list item. A block other than
-			// an item starts after a blank line, at any depth: right after
-			// an item, it would read as more of the item's text.
 			item := NestableTypes[n.Type] && n.Type != "toggle_list"
 			if out := b.String(); !item && strings.HasSuffix(out, "\n") && !strings.HasSuffix(out, "\n\n") {
 				b.WriteString("\n")
@@ -110,14 +88,12 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "callout":
 				block(indent, CalloutMarkdown(n))
 			case "toggle_list":
-				// A toggle open on the page is open where the Markdown shows.
 				details := "<details>"
 				if !n.Bool("collapsed") {
 					details = "<details open>"
 				}
 				block(indent, details+"\n<summary>"+summaryMarkdown(md)+"</summary>")
 				visit(n.Children, indent)
-				// After a blank line, so it ends the toggle, not a list in it.
 				if out := b.String(); !strings.HasSuffix(out, "\n\n") {
 					b.WriteString("\n")
 				}
@@ -151,8 +127,6 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					block(indent, "*"+escapeCommonMark(cap)+"*")
 				}
 			case "embed":
-				// An embed with no title, or the one a new embed takes, in
-				// any language, is named only for what it is.
 				if title := n.Str("title"); title == "" || defaultEmbedTitle(title) {
 					block(indent, "*"+escapeCommonMark(msgs.ExportEmbed())+"*")
 				} else {
@@ -175,8 +149,6 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "file":
 				block(indent, link(cardTitle(n), n.Str("url")))
-				// Its times link into the file where it has an address that
-				// goes anywhere, as a zip's does.
 				to := href(n.Str("url"))
 				block(indent, notesMarkdown(ShownNotes(n), func(at int) string {
 					if to == "" || strings.HasPrefix(to, "file:") {
@@ -206,9 +178,6 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-// mathMarkdown writes a formula between lines of $$. One with a line of
-// $$ in it, which no TeX draws, goes in a code block instead: that line
-// would end it, and the last open a formula of the blocks after it.
 func mathMarkdown(formula string) string {
 	for l := range strings.Lines(formula) {
 		if strings.TrimSpace(l) == "$$" {
@@ -218,11 +187,6 @@ func mathMarkdown(formula string) string {
 	return "$$\n" + formula + "\n$$"
 }
 
-// notesMarkdown writes a block's notes as a list, a line an item, its times
-// links to where to gives for each, which plays from there, or plain where
-// it gives none. A line's text that would start another kind of block in
-// its item, or make the item a rule, is escaped, as TextMarkdown escapes a
-// list item's.
 func notesMarkdown(notes string, to func(at int) string) string {
 	time := func(text string, at int) string {
 		if dest := to(at); dest != "" {
@@ -254,7 +218,6 @@ func notesMarkdown(notes string, to func(at int) string) string {
 	return strings.Join(lines, "\n")
 }
 
-// withLinks is a copy of c whose text links go where link says.
 func withLinks(c *Content, link func(string) string) *Content {
 	c = c.Copy()
 	c.Walk(func(n, _ *Node) {
@@ -272,9 +235,6 @@ func withLinks(c *Content, link func(string) string) *Content {
 	return c
 }
 
-// defaultEmbedTitle reports whether title is the one a new embed takes,
-// as an agent gives it or the app in any of its languages: an embed made
-// in one language keeps it when the page is read in another.
 func defaultEmbedTitle(title string) bool {
 	if strings.EqualFold(title, DefaultEmbedTitle) {
 		return true
@@ -287,8 +247,6 @@ func defaultEmbedTitle(title string) bool {
 	return false
 }
 
-// OneLine is text on one line, as a heading's Markdown is: a line break
-// in it is a space.
 func OneLine(d Delta) Delta {
 	out := make(Delta, len(d))
 	for i, r := range d {
@@ -298,17 +256,6 @@ func OneLine(d Delta) Delta {
 	return out
 }
 
-// TextMarkdown writes a text block's Markdown at an indent a line at a
-// time, the first line after lead, a list item's marker, and the others
-// after pad, the room it takes, so they stay in the block. A line break
-// is a hard break, a backslash ending the line, as ParseLines reads one,
-// after a space where the line ends in a web address, which GitHub's
-// Markdown would take the backslash into, and a line that would start
-// another block, as a line break then "- x" would a list, is escaped.
-// Markdown keeps no spaces at a line's start:
-// they would indent it, under a list item before it, so they go, as do
-// line breaks at the text's end, which a hard break can't be, and a line
-// only of spaces, which would be blank.
 func TextMarkdown(indent, lead, pad, md string) string {
 	var b strings.Builder
 	lines := markdownLines(md)
@@ -319,11 +266,9 @@ func TextMarkdown(indent, lead, pad, md string) string {
 		if i > 0 {
 			lead = pad
 		}
-		// A line of spaces of any kind is a blank one, which ends a block.
 		if l = strings.TrimLeft(l, " \t"); strings.TrimSpace(l) == "" {
 			l = ""
 		}
-		// After a list item's "- ", text such as "--" would make a rule.
 		if l = EscapeBlockStart(l); l != "" && IsRule(lead+l) {
 			l = `\` + l
 		}
@@ -339,10 +284,6 @@ func TextMarkdown(indent, lead, pad, md string) string {
 	return b.String()
 }
 
-// markdownLines splits inline Markdown into its lines. A code span over a
-// line break is a span on each line: a line can't start inside one, where
-// its text would read as the start of a block, or end inside one, where
-// its hard break would be code.
 func markdownLines(md string) []string {
 	md = lineEnds.Replace(md)
 	if !strings.Contains(md, "\n") {
@@ -361,8 +302,6 @@ func markdownLines(md string) []string {
 				continue
 			}
 		case '[':
-			// A link's text may go over lines; its address, where a
-			// backtick opens no code span, is on the line its text ends.
 			if text, _, n, ok := links.link(i); ok {
 				parts := markdownLines(string(text))
 				b.WriteString("[" + parts[0])
@@ -408,10 +347,6 @@ func markdownLines(md string) []string {
 	return append(lines, b.String())
 }
 
-// summaryMarkdown writes a toggle's text for its <summary>, a </summary>
-// in its text escaped, as summaryEnd reads it; one in a code span, which
-// keeps its text as it is, summaryEnd passes over. Lines after the first
-// start without spaces, as ParseLines reads them.
 func summaryMarkdown(md string) string {
 	lines := markdownLines(md)
 	for i, l := range lines {
@@ -447,7 +382,6 @@ func summaryMarkdown(md string) string {
 	return strings.Join(lines, "\n")
 }
 
-// tableMarkdown writes rows as a GitHub table, the first its header.
 func tableMarkdown(rows [][]string) string {
 	if len(rows) == 0 {
 		return ""
@@ -459,7 +393,6 @@ func tableMarkdown(rows [][]string) string {
 	line := func(r []string) string {
 		cells := make([]string, cols)
 		for i := range cells {
-			// A cell keeps no spaces at its ends, which a row's |s take.
 			if i < len(r) {
 				cells[i] = cellMarkdown(strings.TrimSpace(r[i]))
 			}
@@ -473,11 +406,6 @@ func tableMarkdown(rows [][]string) string {
 	return strings.Join(lines, "\n")
 }
 
-// cellMarkdown writes a table cell's Markdown to stay in its cell of a
-// GitHub table: a | escaped, even in a code span, and a line break a
-// <br>, as ParseLines reads them, a <br> of the text escaped. In a code
-// span, where a <br> is text, a line break is a space, as CommonMark
-// reads one there.
 func cellMarkdown(md string) string {
 	if !strings.ContainsAny(md, "|\n<") {
 		return md
@@ -492,8 +420,6 @@ func cellMarkdown(md string) string {
 			i += 2
 			continue
 		case '[':
-			// A link's text is the cell's Markdown, and its address only
-			// has its |s escaped: a backtick there opens no code span.
 			if text, _, n, ok := links.link(i); ok {
 				b.WriteString("[" + cellMarkdown(string(text)) + strings.ReplaceAll(string(s[i+1+len(text):i+n]), "|", `\|`))
 				i += n
@@ -503,8 +429,6 @@ func cellMarkdown(md string) string {
 			if code, n := codeSpanAt(s[i:]); n > 0 {
 				span := string(s[i : i+n])
 				if strings.Contains(code, "\n") {
-					// Written again, as a space at either end now may
-					// need one more inside the backticks.
 					span = codeSpan(strings.ReplaceAll(code, "\n", " "))
 				}
 				b.WriteString(strings.ReplaceAll(span, "|", `\|`))

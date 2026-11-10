@@ -19,10 +19,6 @@ func ids(pages []store.Page) string {
 	return fmt.Sprint(out)
 }
 
-// Pages nest under their parents and sit in their folders, each by sort
-// key and then ID; templates and pages shared with the user are apart
-// from the user's own, and a shared page whose parent the user has not is
-// a top one of what is shared.
 func TestArrange(t *testing.T) {
 	tmpl := page("t", "", "", "me", "a")
 	tmpl.Template = true
@@ -58,10 +54,6 @@ func TestArrange(t *testing.T) {
 	}
 }
 
-// A page of a folder that is gone, as another device deleted the folder
-// while this one put the page in it, is at the top level, as are its
-// siblings, not in no place at all; so is one in a folder of another
-// space, which the user's tree does not show.
 func TestPagesOfAFolderGone(t *testing.T) {
 	tree := Arrange("me", []store.Page{page("a", "", "", "me", "a"), page("left", "", "gone", "me", "b"), page("odd", "", "x", "me", "c")},
 		[]store.Folder{{ID: "x", SpaceID: "them"}})
@@ -76,10 +68,6 @@ func TestPagesOfAFolderGone(t *testing.T) {
 	}
 }
 
-// A page of the user's whose parent is gone, as another device deleted it
-// while this one made the page in it, is at the top level, or in its
-// folder, among the pages there, not in no place at all. A shared one is
-// among what is shared, and a template's stays under it.
 func TestPagesOfAParentGone(t *testing.T) {
 	tmpl := page("t1", "gone", "", "me", "c")
 	tmpl.Template = true
@@ -100,8 +88,6 @@ func TestPagesOfAParentGone(t *testing.T) {
 	}
 }
 
-// Pages whose parents go round in a loop, as two devices' moves can leave
-// them, are under each other, and at no top level.
 func TestALoopOfParents(t *testing.T) {
 	tree := Arrange("me", []store.Page{page("x", "y", "", "me", "a"), page("y", "x", "", "me", "a")}, nil)
 	if len(tree.Top) != 0 || ids(tree.Children["x"]) != "[y]" || ids(tree.Children["y"]) != "[x]" {
@@ -109,8 +95,6 @@ func TestALoopOfParents(t *testing.T) {
 	}
 }
 
-// A tag's pages are those with it in any case, by title, but templates;
-// the tags are by name, with how many pages have each.
 func TestTagged(t *testing.T) {
 	tagged := func(id, title string, tags ...string) store.Page {
 		p := page(id, "", "", "me", "a")

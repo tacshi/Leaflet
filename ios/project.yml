@@ -1,33 +1,19 @@
-# The Xcode project for Leaflet on iPhone and iPad. XcodeGen makes
-# Leaflet.xcodeproj from this file (make ios-project), so only this file
-# is kept in git.
 name: Leaflet
 options:
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
   developmentLanguage: en
-# The packages are pinned to a version each, as Package.resolved, kept
-# beside this file, pins them to a commit: make ios-project puts it where
-# Xcode reads it, inside the project git ignores, so every build, and
-# osv-scanner, has the same ones. A new version is taken by changing it
-# here and running make ios-packages.
 packages:
-  # Code blocks' syntax colors: highlight.js, run in JavaScriptCore.
   Highlightr:
     url: https://github.com/raspu/Highlightr
     exactVersion: 2.3.0
-  # Image blocks' SVGs, which UIImage can't read.
   SwiftDraw:
     url: https://github.com/swhitty/SwiftDraw
     exactVersion: 0.29.0
-  # The device's model, which names it in Account › Devices.
   DeviceKit:
     url: https://github.com/devicekit/DeviceKit
     exactVersion: 5.10.0
-  # Transcription with the device's own speech recognition, which the
-  # Mac's speech helper is built with too: the repository's own, so not
-  # pinned.
   LeafletSpeech:
     path: ../speech
 settings:
@@ -41,16 +27,10 @@ targets:
     platform: iOS
     sources:
       - path: Leaflet
-      # What the app and its widgets share: a recording's Live Activity
-      # and the intents that start, pause and stop one.
       - path: Shared
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
-    # The keys Xcode's generated Info.plist can't take, which it merges
-    # in: background refresh, for sync passes while the app is away, and
-    # audio, for a recording to go on with the screen locked, which a Live
-    # Activity shows. The versions stay Config's, over XcodeGen's own.
     info:
       path: Leaflet/Sync/Info.plist
       properties:
@@ -59,11 +39,6 @@ targets:
         UIBackgroundModes: [fetch, audio]
         NSSupportsLiveActivities: true
         BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).sync"]
-    # Signing in with Supabase: the web session takes the Worker's
-    # https redirect as its callback, which needs this domain's
-    # webcredentials (worker/: /.well-known/apple-app-site-association).
-    # A to-do's reminder is Time Sensitive, to get through a Focus; without
-    # this entitlement iOS shows it as an ordinary notification.
     entitlements:
       path: Config/Leaflet.entitlements
       properties:
@@ -71,20 +46,16 @@ targets:
           - webcredentials:leaflet-auth.capyvibe.app
         com.apple.developer.usernotifications.time-sensitive: true
     dependencies:
-      # The Go core, built by make ios-core. gomobile makes a static
-      # framework, so it is linked and not embedded.
       - framework: build/LeafletCore.xcframework
         embed: false
       - package: Highlightr
       - package: SwiftDraw
       - package: DeviceKit
       - package: LeafletSpeech
-      # Embedded in the app, as XcodeGen does an extension.
       - target: LeafletWidgets
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"
-        # Resources/Assets.xcassets, made from docs/icon/compose.py.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
@@ -93,35 +64,16 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
-        # In English; Resources/Debug and Resources/Release have it, and
-        # the Debug build's name, in each language.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Leaflet records audio into recording blocks when you press Record.
-        # Agents and speech to text can run on a computer on the same
-        # network (Ollama, LM Studio, a speech server), which iOS asks
-        # about the first time one is reached; so do Resources/Debug and
-        # Resources/Release, in each language.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: Leaflet connects to the AI models and speech-to-text servers you set up on your local network.
-        # No NSSpeechRecognitionUsageDescription: SpeechAnalyzer and
-        # SpeechTranscriber, which transcribe on the device, ask for no
-        # permission, as SFSpeechRecognizer does; the desktop's speech
-        # helper runs them with none.
-        # The app's only cryptography is HTTPS, hashes and checking
-        # signatures, which export rules exempt, so App Store Connect
-        # doesn't ask about it for each build.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        # Go's net package resolves names through libresolv.
         OTHER_LDFLAGS: -lresolv
-  # A recording's Live Activity, and Record Voice Note for Control Center,
-  # the Lock Screen and the Action Button. The app performs their intents,
-  # which they have too, to name them: WIDGETS leaves out what performs
-  # them.
   LeafletWidgets:
     type: app-extension
     platform: iOS
     sources:
       - path: Widgets
       - path: Shared
-    # Config's team and versions, which the app's must match.
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
@@ -138,7 +90,6 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGETS
-      # Inside the app's own, each build's.
       configs:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: app.capyvibe.leaflet.debug.widgets

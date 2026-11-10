@@ -15,15 +15,8 @@ import (
 	"leaflet/internal/store"
 )
 
-// errStale means someone saved the page's content between reading it and
-// saving over it.
 var errStale = errors.New("the page changed on the server while saving")
 
-// notApplied reports whether err is the server answering that it did not
-// apply a save: one another went before (errStale), one it refused (4xx),
-// or one the database failed, as a statement that ran out of time, which
-// it answers with the database's code, the change undone. A save that met
-// no answer, or a gateway's, may have been applied.
 func notApplied(err error) bool {
 	if errors.Is(err, errStale) {
 		return true
@@ -32,32 +25,20 @@ func notApplied(err error) bool {
 	return ok && (re.Status >= 400 && re.Status < 500 || re.Code != "")
 }
 
-// errServerUnreadable is a page whose content on the server cannot be
-// read here, as one a newer version of Leaflet wrote may not be. It is
-// neither merged nor saved over, as an empty page would take its place:
-// the server's copy stays, this device keeps its own, and its change
-// stays queued.
 var errServerUnreadable = errors.New("the page's content on the server could not be read, so it was not synced")
 
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
-	// A page that is gone has nothing to send; one that cannot be read now
-	// stays queued.
 	if _, err := s.st.Page(pageID); store.IsNotFound(err) {
 		return true, nil
 	} else if err != nil {
 		return false, err
 	}
-	// Another device or an agent may save in between: merge with what it
-	// saved and try again.
 	for range 3 {
 		done, err := s.saveContent(ctx, pageID)
 		if !errors.Is(err, errStale) {
 			return done, err
 		}
 	}
-	// The server saves over no row for someone who may no longer edit the
-	// page, as for a save that lost the race: its members, as the server
-	// has them now, tell which.
 	if cannot, err := s.cannotEdit(ctx, pageID); err != nil {
 		return false, err
 	} else if cannot {
@@ -66,8 +47,6 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 	return false, errors.New("the page kept changing on the server")
 }
 
-// saveContent merges this device's content with the server's and saves the
-// result, if the server still has the revision it merged with.
 func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) {
 	row, err := s.st.ContentRow(pageID)
 	if store.IsNotFound(err) {
@@ -79,8 +58,6 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	if err != nil {
 		return false, errUnreadable
 	}
-	// The server's revision tells whether it has content this device has
-	// not merged: its content comes only then, as a page may be large.
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: savedCols, Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
 		return false, err
@@ -88,8 +65,6 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	merged := local
 	var conflicts []doc.Conflict
 	if remoteRow != nil && behind(row, remoteRow) {
-		// What came is the revision the save goes over: one saved since
-		// the first read is merged too.
 		if remoteRow, err = s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}}); err != nil {
 			return false, err
 		}
@@ -101,8 +76,6 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		}
 		merged, conflicts = doc.Merge(baseOf(row), local, theirs)
 	}
-	// What the server keeps is what this device keeps then, as the base
-	// they agree on.
 	encoded := merged.Encode()
 	if clean := store.CleanJSON(encoded); clean != encoded {
 		if merged, err = doc.Decode(clean); err != nil {
@@ -111,15 +84,10 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		encoded = clean
 	}
 	values := map[string]any{"content": json.RawMessage(encoded), "plain_text": store.CleanText(merged.PlainText())}
-	// The merge's conflicts are recorded before it goes: once the server
-	// has it, the side each one lost is nowhere else, whether or not this
-	// device then stores the merge.
 	held, err := s.st.HoldConflicts(pageID, conflicts)
 	if err != nil {
 		return false, err
 	}
-	// The server answers with the revision and time it saved, not the
-	// content this device sent it.
 	var saved []map[string]any
 	if remoteRow == nil {
 		values["page_id"] = pageID
@@ -136,11 +104,6 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		}
 	}
 	if notApplied(err) {
-		// The server did not take the merge, as another was saved first or
-		// it refused it: the merge tried again meets its own conflicts.
-		// One that failed otherwise may have reached the server, and keeps
-		// them; tried again, it meets them again, and they are not
-		// recorded twice.
 		return false, errors.Join(err, s.st.DropConflicts(held))
 	}
 	if err != nil {
@@ -150,18 +113,12 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	if len(saved) > 0 {
 		savedAt, savedRev = store.Time(saved[0]["updated_at"]), store.Int(saved[0], "revision")
 	}
-	// The user may have kept typing while this was in flight, or type while
-	// this merges: the merge is stored only over the content it merged.
-	// What that merge's conflicts lose is kept, as the first merge's is.
 	var meanwhile []doc.Conflict
-	// The server has the merge now: unless it is stored here, with its
-	// revision and the conflicts of what was typed meanwhile, the change
-	// stays queued, and goes again over it.
 	before, next, err := s.storeMerge(pageID, func(now store.ContentRow, kept bool) (*doc.Content, error) {
 		meanwhile = nil
 		switch {
 		case !kept:
-			return nil, nil // the page went meanwhile
+			return nil, nil
 		case now.Content == row.Content:
 			return merged, nil
 		}
@@ -182,26 +139,18 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	if err != nil || next == nil {
 		return err == nil, err
 	}
-	// What was typed meanwhile is not on the server yet.
 	return before == row.Content, nil
 }
 
-// savedCols are the columns of a page's content on the server that say
-// which version it has, and contentCols those with the content too.
 const (
 	savedCols   = "revision, updated_at"
 	contentCols = "content, revision, updated_at"
 )
 
-// behind reports whether the server has content this device has not
-// merged: it never synced the page, or the server has a revision it has
-// not seen.
 func behind(row store.ContentRow, remoteRow map[string]any) bool {
 	return row.RemoteUpdatedAt.IsZero() || store.Int(remoteRow, "revision") != row.RemoteRevision
 }
 
-// baseOf is the content a page had when it last synced, which merges
-// start from: nil before the first sync, and when it cannot be read.
 func baseOf(row store.ContentRow) *doc.Content {
 	if row.BaseContent == "" {
 		return nil
@@ -210,7 +159,6 @@ func baseOf(row store.ContentRow) *doc.Content {
 	return base
 }
 
-// contentOf reads a page's content as the server sent it.
 func contentOf(v any) (*doc.Content, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -219,13 +167,8 @@ func contentOf(v any) (*doc.Content, error) {
 	return doc.Decode(string(raw))
 }
 
-// errCannotEdit is page content the server will not save, as the user may
-// no longer edit the page: the change gives way to the server's content.
 var errCannotEdit = errors.New("you can no longer edit the page")
 
-// cannotEdit reports whether the user may not edit a page shared with
-// them, by its members loaded again from the server. Their own pages they
-// may always edit.
 func (s *Service) cannotEdit(ctx context.Context, pageID string) (bool, error) {
 	p, err := s.st.Page(pageID)
 	if err != nil || p.SpaceID == s.st.Session().SpaceID {
@@ -234,7 +177,6 @@ func (s *Service) cannotEdit(ctx context.Context, pageID string) (bool, error) {
 	if err := s.LoadMembers(ctx, pageID); err != nil {
 		return false, err
 	}
-	// A share withdrawn takes the page from this device.
 	if p, err = s.st.Page(pageID); store.IsNotFound(err) {
 		return true, nil
 	} else if err != nil {
@@ -243,12 +185,6 @@ func (s *Service) cannotEdit(ctx context.Context, pageID string) (bool, error) {
 	return !s.st.CanEdit(p), nil
 }
 
-// takeServerContent has a page's content the server refused give way to
-// the server's, as pushRow's change does to its row: the pulls pass over
-// a page while its change waits, so the edits of those who may edit it
-// would never come. The change leaves the queue as the server's content
-// is stored, or not at all. A change made here since stays queued, and
-// merges.
 func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, refused error) (bool, error) {
 	pageID := e.EntityID
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}})
@@ -265,11 +201,9 @@ func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, re
 	if theirs == nil {
 		return true, nil
 	}
-	// A change made since, which replaced e, keeps the server's content
-	// out: that change merges on the next push.
 	_, _, err = s.storeMerge(pageID, func(_ store.ContentRow, kept bool) (*doc.Content, error) {
 		if !kept {
-			return nil, nil // gone
+			return nil, nil
 		}
 		return theirs, nil
 	}, func(over string, c *doc.Content) error {
@@ -278,9 +212,6 @@ func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, re
 	return err == nil, err
 }
 
-// refreshRemote brings a page's content up to date with the server's. The
-// content comes only when the server has a revision this device has not
-// merged.
 func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Content, error) {
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: savedCols, Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
@@ -299,10 +230,6 @@ func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Conten
 	return s.fetchRemote(ctx, pageID)
 }
 
-// checkRemote brings a page's content up to date with the server's, as
-// refreshRemote does, for the checks of the open pages every few seconds
-// (watchOpen): the revision this device merged is read from its index, so
-// the content, here or there, is read only once the server's moved.
 func (s *Service) checkRemote(ctx context.Context, pageID string) error {
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: savedCols, Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil || remoteRow == nil {
@@ -319,8 +246,6 @@ func (s *Service) checkRemote(ctx context.Context, pageID string) error {
 	return err
 }
 
-// fetchRemote merges the server's content of a page into this device's, as
-// it has a revision this device has not merged.
 func (s *Service) fetchRemote(ctx context.Context, pageID string) (*doc.Content, error) {
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
@@ -332,8 +257,6 @@ func (s *Service) fetchRemote(ctx context.Context, pageID string) (*doc.Content,
 	return s.storeRemote(pageID, remoteRow)
 }
 
-// storeRemote merges the server's content of a page, a row of contentCols,
-// into this device's, and stores it.
 func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Content, error) {
 	remoteAt := store.Time(remoteRow["updated_at"])
 	remoteContent, err := contentOf(remoteRow["content"])
@@ -352,8 +275,6 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 			here = c
 			return nil, nil
 		}
-		// Content here that cannot be read, with no change waiting, is the
-		// server's now.
 		if !kept || !s.st.HasPending("page_content", pageID) {
 			return remoteContent, nil
 		}
@@ -365,18 +286,12 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 		next, conflicts = doc.Merge(baseOf(local), mine, remoteContent)
 		return next, nil
 	}, func(over string, c *doc.Content) error {
-		// The conflicts are recorded with the revision: once it is stored,
-		// the page is no longer behind, and this merge never runs again.
 		return s.st.PutSyncedContentOver(pageID, over, c, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision"), conflicts...)
 	})
 	if err != nil {
 		return nil, err
 	}
 	if next == nil {
-		// This device has that revision, which the server stamped again
-		// without changing it, as a move of the page does: kept as of then,
-		// it is passed over by the pulls after, rather than fetched again
-		// by each while it is among the rows they read again (overlap).
 		if err := s.st.MergedRemoteAt(pageID, store.Int(remoteRow, "revision"), remoteAt); err != nil {
 			return nil, err
 		}
@@ -385,31 +300,20 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 	return next, nil
 }
 
-// pullContents brings the content of the pages changed on the server since
-// the cursor, then that of the pages that wait (pullWaiting): the pages
-// that wait never hold up the ones the cursor passes over.
 func (s *Service) pullContents(ctx context.Context) error {
 	s.contentsAsked, s.contentsSlow = false, false
 	err := s.paged("page_content", func(bool) (bool, error) { return s.pullContentsPage(ctx) })
 	if err == nil {
 		err = s.pullWaiting(ctx)
 	}
-	// A pull that asked for content, and took no such wait, leaves the
-	// next to ask for more: one that asked for none tells nothing.
 	if err == nil && s.contentsAsked && !s.contentsSlow {
 		s.contentsAt = min(2*s.contentsAt, contentBatch)
 	}
 	return err
 }
 
-// contentBatch is how many pages' content one request fetches; tests make
-// it smaller.
 var contentBatch = 50
 
-// pullContentsPage is a page of pullContents: the content changed after
-// the cursor, which moves on past each page handled. A page not here yet
-// waits for its row, which a later pull brings; one this device does not
-// keep is brought as it is opened.
 func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 	rows, full, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), 200)
 	if err != nil {
@@ -421,15 +325,11 @@ func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	start := s.cursor("page_content")
-	// handled says, of each row, whether it is done with; fetch are the
-	// pages whose content comes, in the rows' order.
 	handled := make([]bool, len(rows))
 	var fetch []string
 	var failed error
 	for i, r := range rows {
 		id := store.S(r, "page_id")
-		// Content this device has merged as of that version or later, as
-		// the one it pushed itself, does not come again.
 		if s.hasContentAt(id, store.Time(r["updated_at"])) {
 			handled[i] = true
 			continue
@@ -460,8 +360,6 @@ func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 			}
 		}
 	}
-	// The cursor moves on past the rows handled, up to the first that is
-	// not; rows of the overlap behind it leave it where it is.
 	cur := start
 	for i, r := range rows {
 		if !handled[i] {
@@ -471,8 +369,6 @@ func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 			cur = cursor{store.S(r, "updated_at"), store.S(r, "page_id")}
 		}
 	}
-	// The pages that wait are kept before the cursor passes them: the
-	// other way round, a crash between would lose them.
 	if err := s.setWaiting(waiting); err != nil {
 		return false, errors.Join(failed, err)
 	}
@@ -482,17 +378,8 @@ func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
 	return full, failed
 }
 
-// waitingBatch is how many of the pages that wait one pass brings, the
-// open ones first, then the others from after the one the pass before
-// brought last: a pass that left more to bring, and brought some, has the
-// next run soon. Tests make it smaller.
 var waitingBatch = 500
 
-// pullWaiting brings the content of the pages that wait, as their row came
-// after their content changed, or as this device keeps them from now on
-// (KeepContent), if it keeps them. Pages that stay waiting, as content
-// this version cannot read, do not keep the others from coming: each pass
-// goes on round them from where the last stopped.
 func (s *Service) pullWaiting(ctx context.Context) error {
 	waiting, err := s.waiting()
 	if err != nil || len(waiting) == 0 {
@@ -503,7 +390,7 @@ func (s *Service) pullWaiting(ctx context.Context) error {
 	for _, id := range slices.Sorted(maps.Keys(waiting)) {
 		p, err := s.st.Page(id)
 		if err != nil {
-			continue // its row comes later
+			continue
 		}
 		if !s.keepsContent(p, allOffline) {
 			delete(waiting, id)
@@ -550,16 +437,6 @@ func (s *Service) pullWaiting(ctx context.Context) error {
 	return failed
 }
 
-// fetchContents fetches the content of pages from the server, up to
-// contentBatch at a time, in order, and stores each merged. It reports the
-// pages done with, which leave waiting: those stored, those the server has
-// no content of, and those whose content cannot be read, which wait, so
-// the other pages' content still comes. It stops at the first that fails,
-// which waits too. Pages whose content together takes longer than a
-// request may, by this client, the database or a gateway, are asked for in
-// fewer at a time, from then on: asked for the same way, they would never
-// come. A page too heavy alone, of a server that still answers, waits, so
-// the others come.
 func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[string]bool) (map[string]bool, error) {
 	done := map[string]bool{}
 	s.contentsAsked = s.contentsAsked || len(ids) > 0
@@ -600,8 +477,6 @@ func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[s
 				_, err = s.storeRemote(id, r)
 			}
 			if unreadable(err) {
-				// The page keeps its content here, and waits until both
-				// copies can be read; the other pages' content still comes.
 				log.Printf("pull %s: %v", id, err)
 				waiting[id], done[id] = true, true
 				err = nil
@@ -620,8 +495,6 @@ func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[s
 	return done, nil
 }
 
-// hasContentAt reports whether this device has merged the server's
-// content of a page as of a time, or later. The content is not read.
 func (s *Service) hasContentAt(pageID string, at time.Time) bool {
 	merged, _, err := s.st.RemoteAt(pageID)
 	return err == nil && !merged.IsZero() && merged.UnixMilli() >= at.UnixMilli()

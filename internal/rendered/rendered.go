@@ -1,8 +1,3 @@
-// Package rendered makes the pages that draw math and diagram blocks:
-// TeX drawn by KaTeX as MathML, and Mermaid drawn by Pele as SVG. The
-// desktop shows them in sandboxed frames, the iOS app in web views; either
-// way their policy keeps them off the network. The scripts are in
-// third_party.
 package rendered
 
 import (
@@ -18,17 +13,12 @@ import (
 	"leaflet/internal/doc"
 )
 
-// KatexJS is KaTeX, which draws TeX.
-//
 //go:embed third_party/katex/katex.min.js
 var KatexJS string
 
 //go:embed third_party/pele/pele.js
 var peleJS string
 
-// PeleModule is Pele's module with its render function as peleRender, for
-// the script after it to call: the module's own export names it by a
-// minified name.
 var PeleModule = func() string {
 	m := regexp.MustCompile(`export\{([^}]*)\};?\s*$`).FindStringSubmatchIndex(peleJS)
 	if m == nil {
@@ -42,29 +32,19 @@ var PeleModule = func() string {
 	return "var peleRender = null;"
 }()
 
-// ScriptString is s as a JavaScript string inside a script element.
 func ScriptString(s string) string {
 	b, _ := json.Marshal(s)
 	return strings.ReplaceAll(string(b), "</", `<\/`)
 }
 
-// renderedStyle is the look both pages share: the page's text colors in
-// either theme, and an error as a note in the danger color.
 const renderedStyle = `html,body{margin:0;background:transparent;color:#16181d}
 :root[data-theme="dark"] body{color:#e9ebef}
 body{padding:6px 0;overflow:hidden;text-align:center}
 .err{font:12.5px -apple-system,system-ui,sans-serif;color:#a61b1b;white-space:pre-wrap;text-align:left;padding:2px 4px}
 :root[data-theme="dark"] .err{color:#ffa3a3}`
 
-// scriptsCSP is the policy of a page that runs only scripts, by their
-// hashes: nothing a formula or a diagram's source makes of the page, as an
-// element with an event handler in the SVG, runs, and nothing comes from
-// the network but pictures in data URLs.
 func scriptsCSP(scripts ...string) string { return ScriptsCSP(scripts...) + "; img-src data:" }
 
-// ScriptsCSP is the policy of a page whose scripts are written in it: it
-// runs those alone, by their hashes, and inline styles, and loads nothing.
-// What else a page loads, as pictures, follows it.
 func ScriptsCSP(scripts ...string) string {
 	policy := "default-src 'none'; script-src"
 	for _, s := range scripts {
@@ -74,28 +54,21 @@ func ScriptsCSP(scripts ...string) string {
 	return policy + "; style-src 'unsafe-inline'"
 }
 
-// dataScript is v as JSON in a script element that runs nothing, for a
-// page's own script to read by its id.
 func dataScript(id string, v any) string {
 	b, _ := json.Marshal(v)
 	return `<script type="application/json" id="` + id + `">` + strings.ReplaceAll(string(b), "</", `<\/`) + `</script>`
 }
 
-// mathScript draws the formula in the page's data.
 const mathScript = `var m = document.getElementById("m");
 try { katex.render(JSON.parse(document.getElementById("formula").textContent), m, {displayMode: true, output: "mathml", throwOnError: true}); }
 catch (e) { m.className = "err"; m.textContent = e.message; }`
 
-// PageMathJS draws a page's formulas, its .math elements with their TeX in
-// data-tex, with KaTeX: a shared page's, and a printed page's.
 var PageMathJS = KatexJS + "\n" + `document.querySelectorAll(".math[data-tex]").forEach(function (el) {
   try { katex.render(el.dataset.tex, el, {displayMode: true, output: "mathml", throwOnError: true}); } catch (e) {}
 });`
 
-// MathCSP is the math page's policy: KaTeX and the script that calls it.
 var MathCSP = scriptsCSP(KatexJS, mathScript)
 
-// MathPage draws a TeX formula in display style.
 func MathPage(formula string) string {
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
 		`<meta http-equiv="Content-Security-Policy" content="` + MathCSP + `"><style>` + renderedStyle + `
@@ -104,16 +77,6 @@ math{font-size:1.35em}</style></head><body><div id="m"></div>` + dataScript("for
 <script>` + mathScript + `</script></body></html>`
 }
 
-// ZoomScript defines leafletZoom(view, box, on, full, zoomed), which lets
-// the diagram drawn in box zoom and move over view: at a point with a
-// pinch, or Ctrl and the wheel, over on, from 1 to 8 times its fitted
-// size; zoomed in, a drag moves it and a double click fits it again. Where
-// a browser tells a pinch only as two touches, those zoom it too. It tells
-// zoomed whether it is zoomed in, and gives a function that zooms "in",
-// "out" or to "fit".
-//
-// full draws it to fill view, up to twice its size: there the wheel moves a
-// zoomed diagram rather than the page.
 const ZoomScript = `function leafletZoom(view, box, on, full, zoomed) {
   const svg = box.querySelector("svg");
   if (full && svg) {
@@ -228,17 +191,6 @@ const ZoomScript = `function leafletZoom(view, box, on, full, zoomed) {
   };
 }`
 
-// DiagramPage draws Mermaid source, in the page's colors. It zooms at the
-// pointer with a pinch, or Ctrl and the wheel, and from 1 to 8 times;
-// zoomed in, a drag moves it and a double click fits it again. Its bar
-// sends "in", "out" and "fit", and hears whether it is zoomed in.
-//
-// full draws it to fill the frame, up to twice its size, for the page's
-// full screen view: there the wheel moves a zoomed diagram rather than
-// the page, and Escape asks to leave.
-//
-// bg is the color behind it, which its edge labels and notes are set on
-// so lines do not run through their text.
 func DiagramPage(source, bg string, full bool) string {
 	fill := ""
 	if full {
@@ -262,8 +214,6 @@ svg{max-width:100%;height:auto}
 <script type="module">` + diagramScript + `</script></body></html>`
 }
 
-// diagramScript draws the diagram in the page's data with Pele, and lets
-// it zoom.
 var diagramScript = PeleModule + "\n" + ZoomScript + `
 // In a block of its own, clear of the names Pele's module takes.
 {
@@ -289,9 +239,6 @@ var diagramScript = PeleModule + "\n" + ZoomScript + `
   });
 }`
 
-// PrintDiagramJS draws a printed page's diagrams, its .diagram elements
-// with their source in data-source, with Pele, as a module: still, as
-// paper shows them.
 var PrintDiagramJS = PeleModule + `
 {
   document.querySelectorAll(".diagram[data-source]").forEach((el) => {
@@ -302,29 +249,14 @@ var PrintDiagramJS = PeleModule + `
   });
 }`
 
-// DiagramCSP is the diagram page's policy: its one script, with Pele.
 var DiagramCSP = scriptsCSP(diagramScript)
 
-// Video blocks play their site's player, or the file, in a page of their
-// own, once play is pressed.
-
-// VideoOrigin is the origin of the page a video's player is framed in.
-// YouTube's player wants the page that frames it named in the Referer, as
-// an https origin of the app's bundle ID for an app; from about:blank it
-// gets none, and refuses to play.
 const VideoOrigin = "https://app.capyvibe.leaflet/"
 
-// SafariAgent is what Safari adds to WebKit's user agent, which a web view
-// of WebKit's sends without it: the sites' players, as Vimeo's, play only
-// in a browser they know.
 const SafariAgent = "Version/26.0 Safari/605.1.15"
 
-// VideoCSP lets a video's page frame only the sites' players, or play
-// only web video files, and run nothing of its own.
 const VideoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src " + doc.VideoPlayers + "; media-src https: http:"
 
-// VideoPage frames a video's player, or plays the file, to fill the web
-// view.
 func VideoPage(v doc.Video) string {
 	player := `<iframe src="` + html.EscapeString(v.PlayerURL(true)) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`
 	if v.Provider == "file" {
@@ -336,12 +268,8 @@ func VideoPage(v doc.Video) string {
 		player + `</body></html>`
 }
 
-// FilePlayerCSP lets a file's player page play the file beside it, and run
-// nothing of its own: the app seeks it with Eval.
 const FilePlayerCSP = "default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-// FilePlayerPage plays the file at media beside it, an audio bar or a
-// video filling the web view, from at seconds in.
 func FilePlayerPage(video bool, at int) string {
 	src := "media"
 	if at > 0 {
@@ -356,16 +284,12 @@ func FilePlayerPage(video bool, at int) string {
 		`<` + el + ` src="` + src + `" controls autoplay playsinline></` + el + `></body></html>`
 }
 
-// FilePlayerStatus is the expression that asks a file's player how it is.
 const FilePlayerStatus = `(function () {
   var el = document.querySelector("audio, video");
   if (!el || el.error) return {failed: true};
   return {at: el.currentTime, length: isFinite(el.duration) ? el.duration : 0, paused: el.paused, rate: el.playbackRate};
 })()`
 
-// FileMetadata is the expression that names a file's player where the
-// system shows media, with the cover beside it: a web view plays in a
-// process of its own, which the system would show by its own name.
 func FileMetadata(title string) string {
 	name, err := json.Marshal(title)
 	if err != nil {
@@ -377,8 +301,6 @@ func FileMetadata(title string) string {
 		`, artist: "Leaflet", artwork: [{src: "cover"}]}); return true; })()`
 }
 
-// FilePlaying is the expression that plays a file's player or pauses it:
-// said outright, as it may be starting on its own when told.
 func FilePlaying(on bool) string {
 	act := "pause"
 	if on {
@@ -387,26 +309,17 @@ func FilePlaying(on bool) string {
 	return `(function () { var el = document.querySelector("audio, video"); if (el) el.` + act + `(); })()`
 }
 
-// FileSeekTo is the expression that takes a file's player to sec seconds
-// in, playing or not as it was.
 func FileSeekTo(sec float64) string {
 	return `(function () { var el = document.querySelector("audio, video"); if (el) el.currentTime = ` +
 		strconv.FormatFloat(max(sec, 0), 'f', 3, 64) + `; })()`
 }
 
-// FileSpeed is the expression that plays a file's player at speed, from now
-// on and once it has loaded.
 func FileSpeed(speed float64) string {
 	s := strconv.FormatFloat(speed, 'f', 2, 64)
 	return `(function () { var el = document.querySelector("audio, video"); if (el) { el.defaultPlaybackRate = ` +
 		s + `; el.playbackRate = ` + s + `; } })()`
 }
 
-// VideoSeekJS defines leafletSeek(el, provider, t), which plays the player
-// in el, a site's frame or a video, from t seconds in, and leafletPause(el,
-// provider), which pauses it, as far as the site lets a page around its
-// player say so: YouTube's and Vimeo's take a message, a video file is the
-// page's own. Each reports whether it could.
 const VideoSeekJS = `function leafletSeek(el, provider, t) {
   if (el.tagName === "VIDEO" || el.tagName === "AUDIO") {
     el.currentTime = t;
@@ -448,16 +361,10 @@ function leafletPause(el, provider) {
 }
 `
 
-// SeeksInPlace tells whether a video's player, as VideoPage frames it,
-// goes to another time without loading again: the others' sites take no
-// word from the page around them.
 func SeeksInPlace(v doc.Video) bool {
 	return v.Provider == "youtube" || v.Provider == "vimeo" || v.Provider == "file"
 }
 
-// VideoSeek is the expression that plays a video's page, as VideoPage
-// made it, from sec seconds in, or "" for one whose player must load
-// again there: VideoPage of the video at that time.
 func VideoSeek(v doc.Video, sec int) string {
 	if !SeeksInPlace(v) {
 		return ""
@@ -466,8 +373,6 @@ func VideoSeek(v doc.Video, sec int) string {
 		strconv.Quote(v.Provider) + ", " + strconv.Itoa(max(sec, 0)) + ");\n})()"
 }
 
-// VideoPause is the expression that pauses a video's page, as VideoPage
-// made it, or "" for one whose site's player can't be told to.
 func VideoPause(v doc.Video) string {
 	if !SeeksInPlace(v) {
 		return ""
@@ -476,24 +381,8 @@ func VideoPause(v doc.Video) string {
 		strconv.Quote(v.Provider) + ");\n})()"
 }
 
-// Interactive embeds run their HTML in a sandboxed frame of a page of
-// their own, off the network.
-
-// EmbedCSP is the policy of an embed's frame: inline scripts and styles,
-// images, fonts and media from data and blob URLs, and nothing from the
-// network. default-src does not cover WebRTC, and neither WebKit nor
-// Chromium keeps to the webrtc directive: NoRTC is what takes it away.
 const EmbedCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; webrtc 'block'"
 
-// NoRTC takes WebRTC away from the window it runs in, which would reach
-// the network around the policy: what the desktop's web views of embeds,
-// math and diagrams run first in every frame, those an embed makes itself
-// among them (mygo.PageOptions.PreloadAllFrames), and EmbedNoRTC's script.
-// A frame the window makes and reaches through its element, as
-// contentWindow or contentDocument, loses WebRTC too before it is handed
-// out, for where no web view runs this in it, as in a visitor's browser:
-// there one reached otherwise, as frames[0], or loaded from srcdoc, keeps
-// it.
 const NoRTC = `(function () {
   function guard(w) {
     ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel",
@@ -520,12 +409,8 @@ const NoRTC = `(function () {
   guard(window);
 })();`
 
-// EmbedNoRTC runs NoRTC first in an embed's frame, before the embed's own
-// script, for a web view that does not run it in every frame itself.
 const EmbedNoRTC = "<script>" + NoRTC + "</script>"
 
-// EmbedWheel runs in an embed's frame: wheel movement the embed cannot
-// use itself, as most embeds do not scroll, goes to the page around it.
 const EmbedWheel = `<script>(function () {
   function scrolls(el, dy) {
     for (; el && el.nodeType === 1; el = el.parentElement) {
@@ -546,9 +431,6 @@ const EmbedWheel = `<script>(function () {
   }, {passive: true});
 })();</script>`
 
-// EmbedFit runs in an embed's frame: it tells the page how tall the
-// embed's content is at the frame's width, so a block too short for it,
-// as a page narrows and its layout stacks, grows to show it all.
 const EmbedFit = `<script>(function () {
   var last = "";
   function fit() {
@@ -568,18 +450,6 @@ const EmbedFit = `<script>(function () {
   addEventListener("resize", fit);
 })();</script>`
 
-// EmbedPage wraps an embed's HTML in a sandboxed frame: frames never call
-// Go, and the policy keeps it off the network. A srcdoc frame inherits the
-// wrapper's policy, so the wrapper has the frame's. The wrapper's own
-// script only passes the frame's leftover wheel movement and its content's
-// size, whether it is zoomed in and its asking to leave full screen to the
-// page, for the embed id. Without wheel, for a web view that gives the
-// page all of the wheel, neither passes it.
-//
-// Its background is the page's. In the dark theme the frame's root gets
-// data-theme="dark" and a dark color scheme, so an embed that styles
-// nothing follows the page, and one that does can match it with
-// :root[data-theme="dark"].
 func EmbedPage(id, src, bg string, dark, wheel bool) string {
 	scheme := "light"
 	if dark {
@@ -587,12 +457,8 @@ func EmbedPage(id, src, bg string, dark, wheel bool) string {
 	}
 	script := `<script>`
 	if wheel {
-		// Without a wheel listener of its own, WebKit scrolls the wrapper
-		// without telling a frame that could scroll, so it never forwards.
 		script += `addEventListener("wheel", function () {}, {passive: true});`
 	}
-	// The viewport has a phone's web view lay the page out at its own
-	// width, not 980 points wide and shrunk to it.
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
 		`<meta http-equiv="Content-Security-Policy" content="` + EmbedCSP + `; frame-src about:">` +
 		`<meta name="color-scheme" content="` + scheme + `">` +
@@ -610,13 +476,6 @@ func EmbedPage(id, src, bg string, dark, wheel bool) string {
 		`});</script></body></html>`
 }
 
-// EmbedFrame is the document of an embed's frame: its policy, theme and
-// scripts first, then the embed's HTML. They go at the very start rather
-// than after the HTML's "<head>", which may be in a comment or a string;
-// the browser still puts them in the head, and the HTML's own <html> and
-// <head> after them only add to those. A doctype the HTML starts with
-// moves ahead of them, so it keeps the HTML's rendering mode. wheel adds
-// EmbedWheel.
 func EmbedFrame(src, scheme string, wheel bool) string {
 	head := `<meta http-equiv="Content-Security-Policy" content="` + EmbedCSP + `">` + EmbedNoRTC +
 		`<meta name="color-scheme" content="` + scheme + `">` +
@@ -627,8 +486,6 @@ func EmbedFrame(src, scheme string, wheel bool) string {
 	return LeadWith(head+EmbedFit, src)
 }
 
-// LeadWith puts head at the very start of the HTML src, after a doctype
-// it starts with.
 func LeadWith(head, src string) string {
 	rest := strings.TrimLeft(src, " \t\r\n\f")
 	if len(rest) >= 9 && strings.EqualFold(rest[:9], "<!doctype") {

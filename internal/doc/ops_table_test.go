@@ -2,9 +2,6 @@ package doc
 
 import "testing"
 
-// An insert put in a table, or next to one of its cells, goes after the
-// table: a table holds only its cells. One in a cell stays there, and a
-// cell put back next to another stays in its table.
 func TestInsertAnchoredInATable(t *testing.T) {
 	table, err := TableNode([][]string{{"a", "b"}}, "t1")
 	if err != nil {

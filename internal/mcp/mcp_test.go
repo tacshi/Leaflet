@@ -28,7 +28,6 @@ func newStore(t *testing.T) *store.Store {
 	return st
 }
 
-// session sends lines to a server and returns its answers by ID.
 func session(t *testing.T, s *Server, lines ...string) map[float64]map[string]any {
 	t.Helper()
 	var out bytes.Buffer
@@ -52,7 +51,6 @@ func call(id int, name string, args map[string]any) string {
 	return string(raw)
 }
 
-// result is a tool call's answer, decoded, and whether it was an error.
 func result(t *testing.T, answer map[string]any) (map[string]any, bool) {
 	t.Helper()
 	r, ok := answer["result"].(map[string]any)
@@ -105,8 +103,6 @@ func TestHandshake(t *testing.T) {
 	if required[0] != "page_id" {
 		t.Errorf("insert_blocks requires %v", required)
 	}
-	// What a tool writes goes on with sync, to whoever else has the page, and
-	// what it changes rather than adds to says so.
 	for name, want := range map[string][3]any{
 		"read_page": {true, nil, false}, "insert_blocks": {false, false, true}, "delete_blocks": {false, true, true},
 		"move_page": {false, true, true}, "rename_page": {false, true, true}, "move_block": {false, true, true},
@@ -122,16 +118,12 @@ func TestHandshake(t *testing.T) {
 	if got[0]["error"].(map[string]any)["code"].(float64) != -32700 {
 		t.Errorf("not json %v", got[0])
 	}
-	// An unknown tool is the client's mistake, as the spec has it: a
-	// protocol error, not a tool's.
 	got = session(t, s, call(4, "no_such_tool", map[string]any{}))
 	if e, _ := got[4]["error"].(map[string]any); e == nil || e["code"].(float64) != -32602 || !strings.Contains(e["message"].(string), "no_such_tool") {
 		t.Errorf("unknown tool %v", got[4])
 	}
 }
 
-// Pages are full of & < > (embeds, code): the agent reads them as they
-// are, not as \u0026 and \u003c.
 func TestResultsKeepHTMLCharacters(t *testing.T) {
 	st := newStore(t)
 	s := NewServer(st, "0.1.0")
@@ -205,15 +197,11 @@ func TestCreateAndEditPage(t *testing.T) {
 	if !strings.Contains(text, "About Cognex") || !strings.Contains(text, "Founded 1981") {
 		t.Errorf("content %q", text)
 	}
-	// Edits close together keep one snapshot, from before the first.
 	history, _ := st.History(id)
 	if len(history) != 1 || history[0].Label != "Before Claude Code" || strings.Contains(history[0].Content, "Founded") {
 		t.Errorf("history %+v", history)
 	}
 
-	// So do a client's edits as it starts again, as the command line does
-	// for each, though it remembers none of the last one's; another
-	// client's keep one of their own.
 	edit := func(agent string) {
 		s := NewServer(st, "0.1.0")
 		s.SetAgent(agent)
@@ -229,10 +217,6 @@ func TestCreateAndEditPage(t *testing.T) {
 	}
 }
 
-// What the user typed since a client's edit is kept before its next edit,
-// from the same client or the next it starts: it read the page with it
-// there, so it is no conflict, and the client's last snapshot holds
-// autosave back for as long as it skips its own.
 func TestSnapshotKeepsWhatTheUserTyped(t *testing.T) {
 	for _, again := range []bool{false, true} {
 		st := newStore(t)
@@ -271,7 +255,6 @@ func TestSnapshotKeepsWhatTheUserTyped(t *testing.T) {
 		if !slices.ContainsFunc(history, func(h store.HistoryEntry) bool { return strings.Contains(h.Content, "Typed in the app.") }) {
 			t.Errorf("started again %v: the user's text is in none of %d snapshots", again, len(history))
 		}
-		// With the page as it left it, its next edit keeps none more.
 		s = NewServer(st, "0.1.0")
 		s.SetAgent("Claude Code")
 		if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "More."}); out["error"] != nil {
@@ -283,10 +266,6 @@ func TestSnapshotKeepsWhatTheUserTyped(t *testing.T) {
 	}
 }
 
-// An AI app does not take a page the user alone has inside one others
-// have, which would make it, and its subpages, theirs to read, whatever a
-// page told it. Between pages others have it may, and so may the user's
-// own command.
 func TestMoveIntoAPageOthersHave(t *testing.T) {
 	st := newStore(t)
 	newPage := func(title string) string {
@@ -323,10 +302,6 @@ func TestMoveIntoAPageOthersHave(t *testing.T) {
 	}
 }
 
-// Until sync has read who the user's pages are shared with, any of them
-// counts as had by others, which says nothing of the page moved: an AI app
-// moves none of the user's own inside another until then. Those of someone
-// else's space others have for certain, and may move among themselves.
 func TestMoveBeforeMembersAreKnown(t *testing.T) {
 	st := newStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -374,7 +349,6 @@ func TestMoveBeforeMembersAreKnown(t *testing.T) {
 	}
 }
 
-// links are the pages page id links to as subpages.
 func links(st *store.Store, id string) []string {
 	var out []string
 	for _, n := range st.Content(id).Children {
@@ -437,7 +411,6 @@ func TestFolders(t *testing.T) {
 		t.Errorf("pages' folders %v", inFolder)
 	}
 
-	// Into a page and out to a folder, the links follow the page.
 	got = session(t, s,
 		call(11, "move_page", map[string]any{"page_id": plan, "parent_id": notes}),
 		call(12, "move_page", map[string]any{"page_id": notes, "parent_id": plan}))
@@ -468,9 +441,6 @@ func TestFolders(t *testing.T) {
 	}
 }
 
-// A page stays in its space, as the server has it, and out of templates.
-// The server keeps its own store on the app's database, from before the
-// app signed in: its pages go into the space the app has now.
 func TestFollowsTheAppToAnotherAccount(t *testing.T) {
 	dir := t.TempDir()
 	app, err := store.Open(dir)
@@ -489,7 +459,6 @@ func TestFollowsTheAppToAnotherAccount(t *testing.T) {
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
-	// What sync does on sign-in: adopt the server's space.
 	local := app.Session().SpaceID
 	if err := app.PutSpace("remote-a", "My space", "A"); err != nil {
 		t.Fatal(err)
@@ -577,8 +546,6 @@ func TestSharedPageToView(t *testing.T) {
 	}
 }
 
-// A page shared with the user is read-only until its members say they
-// may edit it, as in the app.
 func TestSharedPageBeforeItsMembers(t *testing.T) {
 	st := newStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else"})
@@ -600,7 +567,6 @@ func TestAgentName(t *testing.T) {
 	}
 }
 
-// Templates stay out of what agents outside the app find.
 func TestSearchLeavesOutTemplates(t *testing.T) {
 	st := newStore(t)
 	if _, err := st.CreatePage(store.NewPageOptions{Title: "PRD: Sync"}); err != nil {
@@ -618,8 +584,6 @@ func TestSearchLeavesOutTemplates(t *testing.T) {
 	}
 }
 
-// A page whose stored content cannot be read is left as it is, rather
-// than edited as an empty page and saved over.
 func TestUnreadablePageIsLeftAlone(t *testing.T) {
 	st := newStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Broken"})
@@ -644,8 +608,6 @@ func TestUnreadablePageIsLeftAlone(t *testing.T) {
 	}
 }
 
-// set_page_tags replaces a page's tags, which list_pages, read_page and a
-// #tag search show.
 func TestPageTags(t *testing.T) {
 	st := newStore(t)
 	p, _ := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -679,8 +641,6 @@ func toStrings(v any) []string {
 	return out
 }
 
-// An edit whose history snapshot cannot be kept is not saved either, so
-// trying it again does not make it twice.
 func TestEditNotSavedWithoutItsSnapshot(t *testing.T) {
 	st := newStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{})
@@ -710,8 +670,6 @@ func TestEditNotSavedWithoutItsSnapshot(t *testing.T) {
 	}
 }
 
-// An edit the app saves under keeps one snapshot, however many times it
-// runs again on what the app saved.
 func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 	st := newStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{})
@@ -746,9 +704,6 @@ func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 	}
 }
 
-// A block the user changed in the app after the client read the page,
-// which the client then replaces or deletes, is kept in a snapshot first,
-// to restore; one the client wrote itself, or read as it is, keeps none.
 func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 	for _, op := range []string{"replace_block", "delete_blocks"} {
 		st := newStore(t)
@@ -766,7 +721,6 @@ func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 		if op == "delete_blocks" {
 			args = map[string]any{"page_id": p.ID, "ids": []any{"b1"}}
 		}
-		// Its own edit first, which it knows of.
 		if out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "first"}}); out["error"] != nil {
 			t.Fatal(out)
 		}
@@ -783,7 +737,6 @@ func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 		if n := conflicts(); n != 0 {
 			t.Fatalf("%s: %d conflict snapshots after its own edit", op, n)
 		}
-		// The user types in the app.
 		c := st.Content(p.ID)
 		c.Find("b1").SetDelta(doc.Delta{{Text: "the user's fix"}})
 		if _, _, err := st.SaveContent(p.ID, c); err != nil {
@@ -799,9 +752,6 @@ func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 	}
 }
 
-// A page of a few long embeds is read in parts each within what MCP
-// clients take from a tool, together all of it, and an embed too long to
-// read says how long it is instead.
 func TestLongPageComesInParts(t *testing.T) {
 	st := newStore(t)
 	var blocks []*doc.Node
@@ -864,9 +814,6 @@ func TestLongPageComesInParts(t *testing.T) {
 	}
 }
 
-// A request without its method or of another JSON-RPC version is an
-// invalid request, and a notification's method sent with an ID still gets
-// an answer, as JSON-RPC asks.
 func TestInvalidRequestsAndNotificationWithAnID(t *testing.T) {
 	got := session(t, NewServer(newStore(t), "0.1.0"),
 		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`,
@@ -883,10 +830,6 @@ func TestInvalidRequestsAndNotificationWithAnID(t *testing.T) {
 	}
 }
 
-// A batch, as protocol 2025-03-26 has them, is answered by a batch of the
-// answers to its requests, its notifications getting none, and what in it
-// is no request getting an error; a batch of notifications alone gets no
-// answer, and an empty one is an invalid request.
 func TestBatch(t *testing.T) {
 	var out bytes.Buffer
 	in := strings.Join([]string{
@@ -920,8 +863,6 @@ func TestBatch(t *testing.T) {
 	}
 }
 
-// Templates are out of reach by ID too: not read, edited or made a
-// page's parent, which would make the page a template.
 func TestTemplatesOutOfReach(t *testing.T) {
 	st := newStore(t)
 	template, err := st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true})
@@ -943,10 +884,6 @@ func TestTemplatesOutOfReach(t *testing.T) {
 	}
 }
 
-// read_page makes whole, as agents read them, only the blocks of the part
-// it gives, their transcripts read for them alone: a long page read in
-// parts reads each once, not every part all. A link card reads as the
-// page has it, its title too.
 func TestReadPartReadsItsOwnBlocks(t *testing.T) {
 	var blocks []*doc.Node
 	for i := range 30 {
@@ -977,8 +914,6 @@ func TestReadPartReadsItsOwnBlocks(t *testing.T) {
 	}
 }
 
-// The server keeps as the client read them only the pages it read last,
-// so a client that reads page after page does not have it keep them all.
 func TestReadsKeptAreTheLatest(t *testing.T) {
 	st := newStore(t)
 	s := NewServer(st, "test")
@@ -996,15 +931,12 @@ func TestReadsKeptAreTheLatest(t *testing.T) {
 	if len(s.pages.read) != keptReads || len(s.pages.order) != keptReads || s.pages.read[ids[0]] != nil || s.pages.read[ids[len(ids)-1]] == nil {
 		t.Errorf("kept %d reads, %d in order", len(s.pages.read), len(s.pages.order))
 	}
-	// Reading one again makes it the latest.
 	s.pages.call("read_page", map[string]any{"page_id": ids[4]})
 	if s.pages.order[len(s.pages.order)-1] != ids[4] || len(s.pages.order) != keptReads {
 		t.Errorf("order %v", s.pages.order)
 	}
 }
 
-// current_page gives what the app's window shows, and without it the page
-// opened last, with no selection.
 func TestCurrentPage(t *testing.T) {
 	st := newStore(t)
 	s := NewServer(st, "1.0.0")
@@ -1043,7 +975,6 @@ func TestCurrentPage(t *testing.T) {
 		t.Fatalf("app open: %v", got)
 	}
 
-	// A template stays out of reach, its selection with it.
 	tpl, err := st.CreatePage(store.NewPageOptions{Title: "Weekly", Template: true})
 	if err != nil {
 		t.Fatal(err)

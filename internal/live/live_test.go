@@ -10,8 +10,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// textEditor is an editor with no view, as the iOS app's is to the core.
-// onDoc, when set, runs as the content is next asked for, once.
 type textEditor struct {
 	c        *doc.Content
 	readOnly bool
@@ -37,7 +35,6 @@ func (e *textEditor) ApplyOps(ops []doc.Op) error {
 	return nil
 }
 
-// typeIn sets the text of block p1, as typing it would.
 func (e *textEditor) typeIn(text string) { e.c.Find("p1").SetDelta(doc.FromMarkdown(text)) }
 func para(id, text string) *doc.Node {
 	n := &doc.Node{ID: id, Type: "paragraph"}
@@ -45,8 +42,6 @@ func para(id, text string) *doc.Node {
 	return n
 }
 
-// What is typed is saved shortly after, through Post; an edit stored from
-// outside meanwhile merges into it, and both are kept.
 func TestTypedAndOutsideEditsAreBothKept(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -83,7 +78,6 @@ func TestTypedAndOutsideEditsAreBothKept(t *testing.T) {
 	if !strings.Contains(text, "one, typed") || !strings.Contains(text, "two, by the agent") || p.Dirty() || saved != 1 {
 		t.Errorf("stored %q, dirty %v, saved %d times", text, p.Dirty(), saved)
 	}
-	// Closed, a save still waiting does not run.
 	ed.typeIn("one, after closing")
 	p.Edited()
 	p.Close()
@@ -93,9 +87,6 @@ func TestTypedAndOutsideEditsAreBothKept(t *testing.T) {
 	}
 }
 
-// Dirty hears edits come to wait and stop waiting, whoever saves them: a
-// save called directly, as a version named or an export runs one, stops
-// the timer, and must still say so.
 func TestDirtyHearsEverySave(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -127,7 +118,6 @@ func TestDirtyHearsEverySave(t *testing.T) {
 	}
 }
 
-// openStore is a store in memory with one page of blocks.
 func openStore(t *testing.T, blocks ...*doc.Node) (*store.Store, store.Page) {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())
@@ -145,7 +135,6 @@ func openStore(t *testing.T, blocks ...*doc.Node) (*store.Store, store.Page) {
 	return st, pg
 }
 
-// storeRow puts content in the page's row as it is, read or not.
 func storeRow(t *testing.T, st *store.Store, pageID, content string) {
 	t.Helper()
 	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, content, pageID); err != nil {
@@ -155,8 +144,6 @@ func storeRow(t *testing.T, st *store.Store, pageID, content string) {
 
 const damaged = `{"document": {"children": [`
 
-// Content that can't be read opens as an empty page that is never saved
-// over it, and opens as it is once a sync brings content that can.
 func TestUnreadableContentOpensOnceReadable(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	storeRow(t, st, pg.ID, damaged)
@@ -180,8 +167,6 @@ func TestUnreadableContentOpensOnceReadable(t *testing.T) {
 	}
 }
 
-// Content that can't be read coming in leaves the page as it shows, read
-// only and never saved over, its edits not yet saved kept in history.
 func TestUnreadableContentComingIn(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -205,8 +190,6 @@ func TestUnreadableContentComingIn(t *testing.T) {
 	}
 }
 
-// Stored tells a save that stored the edits from one that found nothing
-// it could save over: content gone unreadable meanwhile.
 func TestStoredOnlyWhenTheEditsAre(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -231,8 +214,6 @@ func TestStoredOnlyWhenTheEditsAre(t *testing.T) {
 	}
 }
 
-// A block typed in and stored from outside both merges to one side, the
-// other kept as a conflict, and the merge waits to be saved.
 func TestEditsMergedKeepTheSideThatLost(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -252,8 +233,6 @@ func TestEditsMergedKeepTheSideThatLost(t *testing.T) {
 	}
 }
 
-// A save that finds the page stored over since it merged tries again,
-// merging that in, rather than writing over it.
 func TestSaveTriesAgainOverAStoreInBetween(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"), para("p2", "two"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -261,7 +240,6 @@ func TestSaveTriesAgainOverAStoreInBetween(t *testing.T) {
 	p.Attach(ed)
 	ed.typeIn("one, typed")
 	p.Changed()
-	// The page is stored from outside just as the save reads what to save.
 	ed.onDoc = func() {
 		outside := st.Content(pg.ID)
 		outside.Find("p2").SetDelta(doc.FromMarkdown("two, from outside"))
@@ -277,8 +255,6 @@ func TestSaveTriesAgainOverAStoreInBetween(t *testing.T) {
 	}
 }
 
-// A change from outside the editor shows and is stored at once, with what
-// was typed before it; a page the user can't change takes none.
 func TestChangeIsShownAndStored(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -299,7 +275,6 @@ func TestChangeIsShownAndStored(t *testing.T) {
 	}
 }
 
-// An agent run's ops go into the open page, all of them.
 func TestRunsOpsReachTheOpenPage(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -313,9 +288,6 @@ func TestRunsOpsReachTheOpenPage(t *testing.T) {
 	}
 }
 
-// A page whose content goes from this device, as when its share is
-// withdrawn, waits to be saved no more, and says the edits not saved are
-// lost: nothing is left to save over. Its content back, it opens again.
 func TestARemovedPageWaitsNoMore(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	var told []string
@@ -333,7 +305,6 @@ func TestARemovedPageWaitsNoMore(t *testing.T) {
 	if _, err := st.ContentRow(pg.ID); err == nil {
 		t.Error("the content came back")
 	}
-	// Back, as a page shared again, it opens as it is.
 	if _, _, err := st.SaveContent(pg.ID, doc.FromBlocks([]*doc.Node{para("p1", "one, shared again")})); err != nil {
 		t.Fatal(err)
 	}
@@ -343,9 +314,6 @@ func TestARemovedPageWaitsNoMore(t *testing.T) {
 	}
 }
 
-// A removed page whose content comes back just as it was, as a share
-// withdrawn and given again with nothing written between, opens again
-// too: it is typed in and saved as before.
 func TestARemovedPageOpensAgainOnTheSameContent(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"))
 	p, content := Open(st, pg.ID, Options{Post: func(func()) {}})
@@ -380,8 +348,6 @@ func TestARemovedPageOpensAgainOnTheSameContent(t *testing.T) {
 	}
 }
 
-// racingEditor stores the page from outside each time its content is
-// asked for, while race is set, so every save finds it stored over.
 type racingEditor struct {
 	textEditor
 	st   *store.Store
@@ -402,8 +368,6 @@ func (e *racingEditor) Doc() *doc.Content {
 	return e.c
 }
 
-// A save stored over on every try saves again shortly after, rather than
-// leaving the edits for an edit to come.
 func TestSaveLosingEveryTryComesBack(t *testing.T) {
 	st, pg := openStore(t, para("p1", "one"), para("p2", "two"))
 	posted := make(chan func(), 10)
@@ -427,10 +391,6 @@ func TestSaveLosingEveryTryComesBack(t *testing.T) {
 	}
 }
 
-// The page tells an edit stored since it last saved by the write stored,
-// even one another process wrote straight to the database, and merges it
-// as it saves; saves in a row, with nothing stored between, go on over
-// what the page saved.
 func TestEditsStoredBetweenSavesAreMerged(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {

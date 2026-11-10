@@ -13,7 +13,6 @@ import (
 	"leaflet/locales"
 )
 
-// watchingPlatform is the app, keeping what WatchICloud was told.
 type watchingPlatform struct {
 	fakePlatform
 	wmu     sync.Mutex
@@ -124,8 +123,6 @@ func TestSetICloudStaysOffWithoutTheFolder(t *testing.T) {
 	}
 }
 
-// Picking another folder waits for the pass under way, which can take
-// minutes, but the rest of the core does not wait with it.
 func TestSetICloudDuringAPassLeavesTheCoreFree(t *testing.T) {
 	c, _ := openWatching(t)
 	root := filepath.Join(t.TempDir(), "Leaflet")

@@ -8,7 +8,6 @@ import (
 	"leaflet/locales"
 )
 
-// A version says its name, or why it was kept.
 func TestHistoryLabel(t *testing.T) {
 	for h, want := range map[store.HistoryEntry]string{
 		{Reason: "manual", Label: "Sent to legal"}: "Sent to legal",
@@ -23,7 +22,6 @@ func TestHistoryLabel(t *testing.T) {
 	}
 }
 
-// versions are the versions kept of page id for reason, newest first.
 func versions(t *testing.T, f *pagesFixture, id, reason string) []store.HistoryEntry {
 	t.Helper()
 	all, err := f.st.History(id)
@@ -39,8 +37,6 @@ func versions(t *testing.T, f *pagesFixture, id, reason string) []store.HistoryE
 	return out
 }
 
-// A version named keeps the page with the edits typed in it, under the
-// name trimmed; a name of spaces keeps none.
 func TestNameVersion(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "PRD", "", block("p1", "Goals"))
@@ -59,9 +55,6 @@ func TestNameVersion(t *testing.T) {
 	}
 }
 
-// Restoring a version keeps the page as it was first, returned for Undo
-// to put back; a version of no blocks restores as one to type in, the
-// page open or not.
 func TestRestoreVersion(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		f := newPagesFixture(t)
@@ -94,8 +87,6 @@ func TestRestoreVersion(t *testing.T) {
 	}
 }
 
-// A version gone, or one that can't be read, puts nothing back, nor does
-// a page the user can't change.
 func TestRestoreVersionRefused(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "PRD", "", block("p1", "Goals"))
@@ -126,9 +117,6 @@ func TestRestoreVersionRefused(t *testing.T) {
 	}
 }
 
-// A page whose edits could not be saved keeps no version named, which
-// would be of the page as it was before them, and has none put back over
-// them: no version would have them.
 func TestHistoryWithEditsNotSaved(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "PRD", "", block("p1", "Goals"))
@@ -154,8 +142,6 @@ func TestHistoryWithEditsNotSaved(t *testing.T) {
 	}
 }
 
-// A version put back that could not be saved is said so: the page open
-// shows it, still to be saved.
 func TestRestoreVersionNotSaved(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "PRD", "", block("p1", "Goals"))

@@ -13,29 +13,17 @@ import (
 	"leaflet/locales"
 )
 
-// reminder is a notification to schedule for a to-do, as Reminders gives
-// it. iOS shows it whether or not the app runs, so what it says is settled
-// as it is scheduled.
 type reminder struct {
-	// ID names it, as the desktop's reminders are named.
-	ID      string `json:"id"`
-	PageID  string `json:"page_id"`
-	BlockID string `json:"block_id"`
-	// Title says when it is due; Subtitle is the to-do's page.
+	ID       string `json:"id"`
+	PageID   string `json:"page_id"`
+	BlockID  string `json:"block_id"`
 	Title    string `json:"title"`
 	Subtitle string `json:"subtitle"`
 	Body     string `json:"body"`
-	// At is when it shows, in milliseconds, or 0 for now: one whose time
-	// went by while nothing could schedule it.
-	At int64 `json:"at"`
-	// Due is the date it reminds of, for RemindedOf.
-	Due string `json:"due"`
+	At       int64  `json:"at"`
+	Due      string `json:"due"`
 }
 
-// Reminders returns the to-dos to remind the user of, as a JSON array of
-// reminder, at now in milliseconds: those due now, as the desktop reminds
-// of them, then the coming ones, the soonest first, up to limit. The app
-// schedules them all again each time, as what is due changes.
 func (c *Core) Reminders(now int64, limit int) (_ string, err error) {
 	defer catch(&err)
 	out := []reminder{}
@@ -89,7 +77,6 @@ func (c *Core) Reminders(now int64, limit int) (_ string, err error) {
 	return encode(out)
 }
 
-// reminderOf is to-do t's reminder, as it reads shown at at.
 func reminderOf(t store.PageTodo, at time.Time, when int64) reminder {
 	body, page := t.Text, t.PageTitle
 	if strings.TrimSpace(body) == "" {
@@ -105,9 +92,6 @@ func reminderOf(t store.PageTodo, at time.Time, when int64) reminder {
 	}
 }
 
-// RemindedOf keeps that these reminders, a JSON array of them as Reminders
-// gives them, were scheduled: each to-do is reminded of once for each of
-// its due dates and times, as its time goes by.
 func (c *Core) RemindedOf(reminders string) (err error) {
 	defer catch(&err)
 	var list []reminder

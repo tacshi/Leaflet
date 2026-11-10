@@ -12,90 +12,41 @@ import (
 	"leaflet/locales"
 )
 
-// HTMLOptions are what a page written as HTML gets from the app around it.
 type HTMLOptions struct {
-	// Lang is the page's language, for the html element, and that of what
-	// stands for a block the page can't show, as an embed not served; ""
-	// leaves the element's out, and says those in the catalogs' own.
-	Lang string
-	// Head is HTML of the app's own for the head: styles and meta tags.
-	Head string
-	// Image returns where a picture kept on this device is served, or ""
-	// to leave it out; a picture on the web keeps its own link.
-	Image func(n *Node) string
-	// Script returns where a script is served: "math" draws formulas,
-	// "diagram" draws diagrams and "comments" lets visitors comment. ""
-	// leaves it out, and the block shows its source instead.
-	Script func(name string) string
-	// Embed returns where an embed's HTML is served, to frame in a
-	// sandbox; "" or nil shows only its title.
-	Embed func(n *Node) string
-	// Tail is HTML of the app's own after the page: the comments.
-	Tail string
-	// PageTitle names a subpage; it may be nil.
-	PageTitle func(id string) string
-	// Code writes code of a language as HTML, colored; nil writes it
-	// plain.
-	Code func(code, language string) string
-	// CalloutIcon is the icon, as HTML, of a callout's tone; it may be
-	// nil.
-	CalloutIcon func(tone string) string
-	// Icon is the app's icon of a name, as HTML; it may be nil.
-	Icon func(name string) string
-	// Chart draws a chart's plot and legend as HTML, as the app does;
-	// nil, or "", writes its numbers as a table.
-	Chart func(n *Node) string
-	// Due names a to-do's due date, or "" for none; it may be nil.
-	Due func(n *Node) string
-	// File returns where a file block's file is served to download, ""
-	// for nowhere, its name and what it is: its type and size. It may be
-	// nil.
-	File func(n *Node) (href, name, detail string)
-	// Recording returns what a recording block shows; nil shows only its
-	// title.
-	Recording func(n *Node) RecordingView
-	// Print writes the page to be printed, as Export › PDF does: in light
-	// colors alone, every fold open, each video as a link to it, and its
-	// pictures loaded with the page, which paper can't scroll to.
-	Print bool
-	// Region is where the page is printed, a code such as TW, whose way
-	// of writing Chinese a printed page's fonts take.
-	Region string
-	// Video gives a video what its link lacks and its player needs, as a
-	// Bilibili part's cid (web.VideoPart); nil plays the link as it is.
-	Video func(v Video) Video
-	// ScriptSource returns a script's own source, written in the page in
-	// place of Script's link, for a page loaded from a string, which has
-	// nowhere to load scripts from; "" leaves it to Script. The sources
-	// are the app's own, with no "</script" in them.
+	Lang         string
+	Head         string
+	Image        func(n *Node) string
+	Script       func(name string) string
+	Embed        func(n *Node) string
+	Tail         string
+	PageTitle    func(id string) string
+	Code         func(code, language string) string
+	CalloutIcon  func(tone string) string
+	Icon         func(name string) string
+	Chart        func(n *Node) string
+	Due          func(n *Node) string
+	File         func(n *Node) (href, name, detail string)
+	Recording    func(n *Node) RecordingView
+	Print        bool
+	Region       string
+	Video        func(v Video) Video
 	ScriptSource func(name string) string
 }
 
-// RecordingView is what a recording block shows on a web page: its title,
-// how long it is, where its audio is served, "" for nowhere, and its
-// transcript.
 type RecordingView struct {
 	Title, Length, Audio string
 	Lines                []TranscriptLine
 }
 
-// TranscriptLine is a line of a recording's transcript: where it starts,
-// in seconds and as written, who says it, and what.
 type TranscriptLine struct {
 	Start               float64
 	Time, Speaker, Text string
 }
 
-// PageHTML writes a whole page as a web page that stands alone: its own
-// styles, for light and dark, and no script but the ones opts serves.
-// Every block carries its ID, as data-block, for the comments script.
 func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	var body strings.Builder
 	math, diagram, embed, recording := false, false, false, false
-	// The page's videos, by block, which its notes and the links to their
-	// moments play.
 	videos := map[string]Video{}
-	// The page's recordings, by block, which links to their moments play.
 	media := map[string]bool{}
 	files := map[string]servedFile{}
 	c.Walk(func(n, _ *Node) {
@@ -105,7 +56,6 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		if n.Type == "recording" {
 			recording, media[n.ID] = true, true
 		}
-		// Asked once each: what serves a file counts it as it is asked.
 		if n.Type == "file" && opts.File != nil {
 			var f servedFile
 			f.href, f.name, f.detail = opts.File(n)
@@ -155,14 +105,11 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		css = printCSS + printFontCSS(opts.Lang, opts.Region, c.PlainText())
 	}
 	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + css + `</style>` + opts.Head)
-	// A script written in the page goes after it, where the blocks it
-	// draws are already read.
 	var inline strings.Builder
 	for _, name := range []string{"math", "diagram", "embed", "recording", "video", "comments"} {
 		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
 			continue
 		}
-		// Diagrams are drawn by a module: Pele is one.
 		kind := " defer"
 		if name == "diagram" {
 			kind = ` type="module"`
@@ -188,14 +135,8 @@ type htmlWriter struct {
 	files         map[string]servedFile
 }
 
-// servedFile is what HTMLOptions.File says of a file block.
 type servedFile struct{ href, name, detail string }
 
-// text writes rich text as the page shows it: a link to a moment of one of
-// its videos goes to the video's site at that time, which the page's video
-// script plays in place instead, and to a moment of a recording or a file
-// goes to its block, which the page's recording script plays from then. On
-// paper one of those, with no address of its own, is its words alone.
 func (w htmlWriter) text(d Delta) string {
 	return d.html(func(href string) (string, string) {
 		at, ok := LinkMoment(href)
@@ -213,14 +154,10 @@ func (w htmlWriter) text(d Delta) string {
 	})
 }
 
-// momentData are the attributes of a link to a moment of video v, at
-// seconds in, for the page's video script: the time, and the player
-// there, for a player that must load again to go to it.
 func momentData(v Video, at int) string {
 	return ` data-t="` + strconv.Itoa(at) + `" data-src="` + html.EscapeString(v.At(at).PlayerURL(true)) + `"`
 }
 
-// icon is the app's icon of a name, as HTML, or "".
 func (w htmlWriter) icon(name string) string {
 	if w.opts.Icon == nil {
 		return ""
@@ -234,7 +171,6 @@ func (w htmlWriter) write(s ...string) {
 	}
 }
 
-// attrs are a block's id and data-block, and a class when there is one.
 func (w htmlWriter) attrs(n *Node, class string) string {
 	id := html.EscapeString(n.ID)
 	s := ` id="b-` + id + `" data-block="` + id + `"`
@@ -244,8 +180,6 @@ func (w htmlWriter) attrs(n *Node, class string) string {
 	return s
 }
 
-// listTag is the element a list block's items go in, or "" for a block
-// that is no list item.
 func listTag(typ string) string {
 	switch typ {
 	case "bulleted_list":
@@ -261,9 +195,6 @@ func listTag(typ string) string {
 func (w htmlWriter) blocks(nodes []*Node) {
 	for i := 0; i < len(nodes); {
 		if h := nodes[i]; h.Type == "heading" && h.Bool("collapsed") && !w.opts.Print {
-			// A folded heading folds its section away, as in the app: the
-			// blocks after it up to the next heading of its level or
-			// higher. The visitor opens it; on paper it is open.
 			end := i + 1
 			for end < len(nodes) && (nodes[end].Type != "heading" || nodes[end].Int("level", 1) > h.Int("level", 1)) {
 				end++
@@ -277,8 +208,6 @@ func (w htmlWriter) blocks(nodes []*Node) {
 			continue
 		}
 		if w.opts.Print && nodes[i].Type == "heading" && i+1 < len(nodes) && whole[nodes[i+1].Type] {
-			// On paper a heading goes to the next page with a block that
-			// does, which doesn't break across two.
 			w.write(`<div class="keep">`)
 			w.block(nodes[i])
 			w.block(nodes[i+1])
@@ -293,7 +222,6 @@ func (w htmlWriter) blocks(nodes []*Node) {
 			i++
 			continue
 		}
-		// A run of items of one kind is one list.
 		w.write("<" + tag + ">\n")
 		for ; i < len(nodes) && nodes[i].Type == typ; i++ {
 			w.item(nodes[i])
@@ -302,7 +230,6 @@ func (w htmlWriter) blocks(nodes []*Node) {
 	}
 }
 
-// whole are the blocks a printed page keeps on one page, by type.
 var whole = map[string]bool{"code": true, "quote": true, "callout": true, "image": true, "chart": true, "video": true, "link_preview": true,
 	"file": true, "subpage": true, "embed": true, "math_equation": true, "diagram": true}
 
@@ -388,8 +315,6 @@ func (w htmlWriter) block(n *Node) {
 	case "table":
 		w.write("<div", w.attrs(n, "table"), "><table>\n")
 		grid := tableCells(n)
-		// A column of short labels (a step, a time) keeps each on one line,
-		// rather than wrapping so a column of sentences can be wider.
 		short := map[int]bool{}
 		if len(grid) > 0 {
 			for c := range grid[0] {
@@ -464,8 +389,6 @@ func (w htmlWriter) block(n *Node) {
 			w.write("<p", w.attrs(n, "muted"), "><em>", html.EscapeString(title), "</em></p>\n")
 			break
 		}
-		// A card as in the app: the title, over the embed in a sandbox of
-		// its own, which the embed script grows to fit its content.
 		height := min(max(n.Int("height", 320), 120), 1200)
 		w.write("<figure", w.attrs(n, "embed"), "><figcaption>", html.EscapeString(title), `</figcaption><iframe sandbox="allow-scripts" src="`,
 			html.EscapeString(src), `" title="`, html.EscapeString(title), `" data-height="`, strconv.Itoa(height), `" style="height:`, strconv.Itoa(height),
@@ -477,21 +400,15 @@ func (w htmlWriter) block(n *Node) {
 			break
 		}
 		if w.opts.Print {
-			// Paper plays nothing: the video is a card linking to it, its
-			// notes' times to its site at each.
 			w.videoCard(n, v)
 			w.notes(n, w.videoMoment(v))
 			break
 		}
-		// It plays in place, as in the app, but only once the visitor
-		// asks: the page's player does not start as it loads.
 		src := v.PlayerURL(false)
 		w.write("<figure", w.attrs(n, "video"), ` data-provider="`, html.EscapeString(v.Provider), `">`)
 		if v.Provider == "file" {
 			w.write(`<video controls preload="metadata" src="`, html.EscapeString(src), `"></video>`)
 		} else {
-			// The sites' players need to know the page they are on, and may
-			// start playing at a time the visitor clicks in the notes.
 			w.write(`<div class="frame"><iframe src="`, html.EscapeString(src), `" title="`, html.EscapeString(cardTitle(n)),
 				`" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`)
 		}
@@ -507,7 +424,6 @@ func (w htmlWriter) block(n *Node) {
 	case "recording":
 		w.recording(n)
 	case "subpage":
-		// Only this page is shared: its subpages are names, not links.
 		name := n.Str("page_id")
 		if w.opts.PageTitle != nil {
 			name = w.opts.PageTitle(name)
@@ -534,8 +450,6 @@ func (w htmlWriter) block(n *Node) {
 	}
 }
 
-// card writes a link card as the app shows it: its title, description
-// and site, beside its picture, all a link.
 func (w htmlWriter) card(n *Node) {
 	link := n.Str("url")
 	title := cardTitle(n)
@@ -558,8 +472,6 @@ func (w htmlWriter) card(n *Node) {
 	w.write("</a>\n")
 }
 
-// videoCard writes a video as a link card to its page, with its picture
-// where it has one, for a page that is printed.
 func (w htmlWriter) videoCard(n *Node, v Video) {
 	link := v.WatchURL()
 	site := ""
@@ -578,8 +490,6 @@ func (w htmlWriter) videoCard(n *Node, v Video) {
 	w.write("</a>\n")
 }
 
-// videoMoment writes a time in video v's notes: a link to the video's site
-// there, which the page's video script plays in place instead.
 func (w htmlWriter) videoMoment(v Video) func(class, text string, at int) string {
 	return func(class, text string, at int) string {
 		data := ""
@@ -590,16 +500,11 @@ func (w htmlWriter) videoMoment(v Video) func(class, text string, at int) string
 	}
 }
 
-// notes writes a video's notes as its block shows them, a line's time
-// beside it, and folded when long, but on paper. A time links to the
-// video's site there, which the page's video script plays in place
-// instead.
 func (w htmlWriter) notes(n *Node, moment func(class, text string, at int) string) {
 	lines := NoteLines(ShownNotes(n))
 	if len(lines) == 0 {
 		return
 	}
-	// The times' column is as wide as the longest of them, in figures.
 	widest := 0
 	for _, l := range lines {
 		if l.At >= 0 {
@@ -632,8 +537,6 @@ func (w htmlWriter) notes(n *Node, moment func(class, text string, at int) strin
 	w.write("</div>")
 }
 
-// lazy is a picture's loading attribute: lazy, but on paper, which can't
-// scroll to it.
 func (w htmlWriter) lazy() string {
 	if w.opts.Print {
 		return ""
@@ -641,8 +544,6 @@ func (w htmlWriter) lazy() string {
 	return ` loading="lazy"`
 }
 
-// file writes a file's card: its name and what it is, a link that
-// downloads it where it is served.
 func (w htmlWriter) file(n *Node) {
 	id := n.ID
 	notes := n.Str("notes") != ""
@@ -669,8 +570,6 @@ func (w htmlWriter) file(n *Node) {
 	w.fileCard(n, w.attrs(n, "card file"))
 }
 
-// fileInfo is a file block's name, where its file is served, "" for
-// nowhere, and what it is.
 func (w htmlWriter) fileInfo(n *Node) (name, href, detail string) {
 	name = cardTitle(n)
 	if f, ok := w.files[n.ID]; ok {
@@ -682,15 +581,11 @@ func (w htmlWriter) fileInfo(n *Node) (name, href, detail string) {
 	return name, href, detail
 }
 
-// playable reports whether a file block is audio or a video, which a web
-// page plays.
 func playable(n *Node) bool {
 	kind := FilePreviewKind(n.Str("name"), n.Str("mime"))
 	return kind == FileAudio || kind == FileVideo
 }
 
-// fileCard writes a file block's card, with attrs, or as a part of its block
-// without an ID of its own for "".
 func (w htmlWriter) fileCard(n *Node, attrs string) {
 	name, href, detail := w.fileInfo(n)
 	if attrs == "" {
@@ -711,8 +606,6 @@ func (w htmlWriter) fileCard(n *Node, attrs string) {
 	w.write("</span></", tag, ">\n")
 }
 
-// recording writes a recording as the app shows it: its title and length,
-// a player, and its transcript, whose lines play from where they start.
 func (w htmlWriter) recording(n *Node) {
 	v := RecordingView{Title: n.Str("title")}
 	if w.opts.Recording != nil {
@@ -728,8 +621,6 @@ func (w htmlWriter) recording(n *Node) {
 	}
 	if len(v.Lines) > 0 {
 		w.write(`<div class="transcript">`)
-		// A long transcript shows its first lines until it is opened, as
-		// the app's block does; on paper it is whole.
 		folds := FoldsTranscript(len(v.Lines)) && !w.opts.Print
 		for i, l := range v.Lines {
 			if folds && i == FoldedLines {
@@ -754,20 +645,12 @@ func (w htmlWriter) recording(n *Node) {
 	w.write("</figure>\n")
 }
 
-// FoldedLines are the lines a long transcript shows until it is opened,
-// in a recording block and on a web page.
 const FoldedLines = 6
 
-// FoldsTranscript says a transcript of n lines shows only its first
-// FoldedLines until it is opened: one of up to two more shows whole.
 func FoldsTranscript(n int) bool { return n > FoldedLines+2 }
 
-// shortCell is the most characters a cell holds for its column to count as
-// short labels that stay on one line.
 const shortCell = 20
 
-// tableCells are a stored table's cells, row by row, as rich text: those
-// TableCells finds, as every reader of the table shows it.
 func tableCells(n *Node) [][]Delta {
 	cells := TableCells(n)
 	grid := make([][]Delta, len(cells))
@@ -788,19 +671,13 @@ func tableCells(n *Node) [][]Delta {
 	return grid
 }
 
-// HTML writes rich text as inline HTML. A link keeps only a web or mail
-// address, and a mention is its name.
 func (d Delta) HTML() string { return d.html(nil) }
 
-// html is HTML with links as link has them, when it gives one: where each
-// goes and attributes of the page's own for it.
 func (d Delta) html(link func(href string) (to, attrs string)) string {
 	var b strings.Builder
 	for _, r := range d {
 		text := strings.ReplaceAll(html.EscapeString(r.Text), "\n", "<br>")
 		a := r.Attrs
-		// A person or an agent shows as @ and their name; a page, as its
-		// title.
 		if a.Mention != nil && a.Mention.Kind != "page" {
 			text = "@" + html.EscapeString(a.Mention.Name)
 		}
@@ -812,7 +689,6 @@ func (d Delta) html(link func(href string) (to, attrs string)) string {
 		href, attrs := SafeHref(a.Href), ""
 		if link != nil {
 			if to, more := link(a.Href); to != "" {
-				// A link within the page leaves it for nowhere.
 				if !strings.HasPrefix(to, "#") {
 					to = SafeHref(to)
 				}
@@ -852,8 +728,6 @@ func (d Delta) html(link func(href string) (to, attrs string)) string {
 	return b.String()
 }
 
-// SafeHref returns a link a visitor may follow: http, https or mailto,
-// else "".
 func SafeHref(s string) string {
 	s = strings.TrimSpace(s)
 	u, err := url.Parse(s)
@@ -867,15 +741,8 @@ func SafeHref(s string) string {
 	return ""
 }
 
-// pageCSS is a page's look, light and dark.
 const pageCSS = pageVarsCSS + pageDarkCSS + pageRulesCSS + peleDarkCSS
 
-// printCSS is a printed page's look: light alone, filling the paper's
-// width, with nothing cut off at its edge or broken across two pages that
-// fits on one. A heading keeps room below it, which takes it to the next
-// page with what it heads, as WebKit keeps no heading with what follows;
-// a recording is in blocks, which WebKit breaks across pages, as it does
-// no flex box.
 const printCSS = pageVarsCSS + pageRulesCSS + `:root{color-scheme:light}
 body{font-size:15px}
 main{max-width:none;padding:0}
@@ -889,18 +756,8 @@ figure.recording,.transcript{display:block}
 .transcript p+p{margin-top:8px}
 `
 
-// cjkRange is where Chinese and Japanese are in Unicode: radicals,
-// punctuation, kana, ideographs and full-width forms.
 const cjkRange = "U+2E80-2FDF,U+3000-30FF,U+3190-31FF,U+3200-33FF,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FE30-FE4F,U+FF00-FFEF,U+20000-2FA1F"
 
-// printFontCSS sets a printed page's Chinese and Japanese in fonts the
-// system finds by name: Hiragino Sans for a page in Japanese, as its kana
-// or else the app's language lang says; PingFang TC or HK where region
-// writes Chinese as Taiwan or Hong Kong does; else PingFang SC. For
-// -apple-system, WebKit takes a hidden font, and the PDFs of Apple's
-// systems name radicals for many of its ideographs, as ⼈ for 人, which
-// only a font found by name tells back, so the page copies and searches
-// as it reads. Elsewhere, without those fonts, it changes nothing.
 func printFontCSS(lang, region, text string) string {
 	regular, bold := "PingFangSC-Regular", "PingFangSC-Semibold"
 	switch {

@@ -1,21 +1,3 @@
-# Composes Leaflet's app icon: a sheet of lined paper on Apple's squircle
-# tile, on the macOS grid, with a leaf lying on it. To change it, edit
-# these scripts in this directory, then:
-#
-#   python3 squircle.py > squircle.d && python3 leaf.py && python3 compose.py
-#   rsvg-convert -w 1024 -h 1024 icon.svg -o ../../resources/icon.png
-#
-# A public page's favicon is the tile alone, without the grid's margin:
-#
-#   sed 's|viewBox="0 0 1024 1024"|viewBox="100 100 824 824"|' icon.svg | \
-#     rsvg-convert -w 64 -h 64 -o ../../internal/app/favicon.png
-#
-# The iPhone and iPad icon fills the square, which iOS rounds itself, and
-# has no alpha; it has a dark variant too:
-#
-#   for v in "" -dark; do rsvg-convert -w 1024 -h 1024 ios-icon$v.svg |
-#     magick - -background white -alpha remove -alpha off \
-#     ../../ios/Leaflet/Resources/Assets.xcassets/AppIcon.appiconset/icon$v.png; done
 import json, sys
 leaf = json.load(open("leaf.json"))
 squircle = open("squircle.d").read().strip()
@@ -33,7 +15,6 @@ def icon(ios=False, dark=False):
     glow = "#FFF6B0"
     veins = "".join(f'<path d="{d}"/>' for d in leaf["veins"])
     view = "100 100 824 824" if ios else "0 0 1024 1024"
-    # iOS draws its own shadow and edge.
     under = "" if ios else f'<path d="{sq}" transform="translate(0 12)" fill="#000" opacity=".28" filter="url(#tileShadow)"/>\n'
     edge = "" if ios else f'\n<path d="{sq}" fill="none" stroke="url(#rim)" stroke-width="4"/>'
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}">

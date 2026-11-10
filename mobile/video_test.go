@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// The iOS app draws a video's notes, plays it from their times and follows
-// links to its moments as the desktop does.
 func TestVideoNotesAndMoments(t *testing.T) {
 	var lines []noteLine
 	if err := json.Unmarshal([]byte(VideoNotes("A talk.\n1:23 Caches, see 4:56\n")), &lines); err != nil {

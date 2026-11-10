@@ -14,31 +14,15 @@ import (
 	"leaflet/internal/remote"
 )
 
-// pageTopic is the Realtime channel the saves of a page's content are
-// told on (protocol §6).
 func pageTopic(pageID string) string { return "page:" + pageID }
 
-// listenRetry is how long listen first waits to connect to Realtime again
-// after it could not, doubling each time up to listenRetryMax, and how
-// soon it joins again a page's channel Realtime closed or refused for the
-// moment. Tests shorten it.
 var listenRetry = 5 * time.Second
 
 const (
-	listenRetryMax = 5 * time.Minute
-	// unauthorizedRetry is how long a page's channel Realtime refused the
-	// person, as one whose project's database does not say who may hear
-	// it, waits to be joined again; the page is checked every few seconds
-	// meanwhile.
+	listenRetryMax    = 5 * time.Minute
 	unauthorizedRetry = 5 * time.Minute
 )
 
-// listen keeps the open pages someone sees (Watched) joined to their
-// channels on the project's Realtime while the loop runs, whose context
-// is loop, looking again every interval: a save of one on the server has
-// the loop check it at once (checkHeard), and the checks every few
-// seconds leave it out (watchOpen). Pages it could not join, and all of
-// them while it can't connect, those checks keep to.
 func (s *Service) listen(loop context.Context, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
@@ -64,8 +48,6 @@ func (s *Service) listen(loop context.Context, interval time.Duration) {
 	}
 }
 
-// listened are the open pages to listen for saves of: those someone sees,
-// while sync goes through the server and can.
 func (s *Service) listened() []string {
 	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() {
 		return nil
@@ -73,12 +55,6 @@ func (s *Service) listened() []string {
 	return s.watched()
 }
 
-// listenOn is one connection to Realtime, kept while there are pages to
-// listen for, as the session it was made for: it joins their channels as
-// they come and leaves them as they go, and has a page checked once its
-// channel is joined, for a save made before. It reports whether it joined
-// one, and why the connection ended: nil for nothing left to listen for,
-// another session, or the loop's end.
 func (s *Service) listenOn(loop context.Context, tick *time.Ticker) (joinedAny bool, err error) {
 	defer guard.RecoverAs(&err)
 	session := s.be.Sessions()
@@ -91,8 +67,6 @@ func (s *Service) listenOn(loop context.Context, tick *time.Ticker) (joinedAny b
 	defer rt.Close()
 	defer s.unlive(rt)
 	joined := map[string]bool{}
-	// again is when a page whose channel was refused, or closed by the
-	// server, is joined again.
 	again := map[string]time.Time{}
 	for {
 		want := s.listened()
@@ -123,7 +97,7 @@ func (s *Service) listenOn(loop context.Context, tick *time.Ticker) (joinedAny b
 			}
 			joined[id], joinedAny = true, true
 			s.markLive(id, rt, true)
-			s.hearPage(id) // what was saved before the channel heard it
+			s.hearPage(id)
 		}
 		select {
 		case <-loop.Done():
@@ -147,9 +121,6 @@ func (s *Service) listenOn(loop context.Context, tick *time.Ticker) (joinedAny b
 	}
 }
 
-// refusedFor is how long a page whose channel Realtime refused waits to be
-// joined again: one the person may not hear a while, one refused for the
-// moment, as by a project's Realtime still waking (MissingPartition), soon.
 func refusedFor(e *remote.RealtimeError) time.Duration {
 	if strings.HasPrefix(e.Reason, "Unauthorized") {
 		return unauthorizedRetry
@@ -157,8 +128,6 @@ func refusedFor(e *remote.RealtimeError) time.Duration {
 	return listenRetry
 }
 
-// heardSave has page id checked for the save Realtime told of, unless this
-// device has merged that revision already, as one it saved itself.
 func (s *Service) heardSave(id string, payload json.RawMessage) {
 	var saved struct {
 		Revision int64 `json:"revision"`
@@ -171,7 +140,6 @@ func (s *Service) heardSave(id string, payload json.RawMessage) {
 	s.hearPage(id)
 }
 
-// hearPage has the loop check page id at once (checkHeard).
 func (s *Service) hearPage(id string) {
 	s.mu.Lock()
 	s.heard[id] = true
@@ -182,7 +150,6 @@ func (s *Service) hearPage(id string) {
 	}
 }
 
-// takeHeard are the pages heard of, in order, which it forgets.
 func (s *Service) takeHeard() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,8 +158,6 @@ func (s *Service) takeHeard() []string {
 	return heard
 }
 
-// markLive marks page id as told of by rt's channel, or no longer, unless
-// another connection's channel tells of it.
 func (s *Service) markLive(id string, rt *remote.Realtime, on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -204,7 +169,6 @@ func (s *Service) markLive(id string, rt *remote.Realtime, on bool) {
 	}
 }
 
-// unlive unmarks the pages rt's channels told of, as it closes.
 func (s *Service) unlive(rt *remote.Realtime) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

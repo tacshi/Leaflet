@@ -16,8 +16,6 @@ import (
 	"leaflet/locales"
 )
 
-// A named version shows in the page's history, marked, and Changes since
-// shows what was edited after it.
 func TestNamedVersionAndChanges(t *testing.T) {
 	a := templatesApp(t)
 	para := &doc.Node{ID: "p1", Type: "paragraph"}
@@ -33,7 +31,6 @@ func TestNamedVersionAndChanges(t *testing.T) {
 	if len(h) != 1 || h[0].Reason != "manual" || core.HistoryLabel(h[0]) != "Sent to legal" {
 		t.Fatalf("history %+v", h)
 	}
-	// Edit the page after it.
 	c := a.st.Content(p.ID)
 	c.Find("p1").SetDelta(doc.Delta{{Text: "Ship v2 to all beta users"}})
 	if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
@@ -52,7 +49,6 @@ func TestNamedVersionAndChanges(t *testing.T) {
 	if !tt.HasText("+1") || !tt.HasText("−1") {
 		t.Errorf("no counts in %v", tt.Texts())
 	}
-	// Side by side shows the two versions in columns.
 	if err := tt.Click("Side by side"); err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +58,6 @@ func TestNamedVersionAndChanges(t *testing.T) {
 	}
 }
 
-// A version that cannot be read says so, and offers no Restore: shown as an
-// empty page, restoring it emptied the page.
 func TestUnreadableVersionIsNotRestored(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD"})
@@ -85,8 +79,6 @@ func TestUnreadableVersionIsNotRestored(t *testing.T) {
 	}
 }
 
-// A version restored, its page open or not, offers Undo in the toast,
-// which puts the page back as it was.
 func TestRestoredVersionUndoes(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -119,8 +111,6 @@ func TestRestoredVersionUndoes(t *testing.T) {
 	}
 }
 
-// In the narrowest window, History fits with a margin, its close button
-// too, and the page keeps its room beside a wide sidebar and panel.
 func TestNarrowestWindow(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -153,7 +143,6 @@ func TestNarrowestWindow(t *testing.T) {
 	}
 }
 
-// Versions go under their days, by the calendar here.
 func TestHistoryDays(t *testing.T) {
 	at := func(day, hour int) time.Time { return time.Date(2026, 3, day, hour, 0, 0, 0, time.Local) }
 	got := historyDays([]store.HistoryEntry{{CreatedAt: at(10, 23)}, {CreatedAt: at(10, 1)}, {CreatedAt: at(9, 23)}})
@@ -162,8 +151,6 @@ func TestHistoryDays(t *testing.T) {
 	}
 }
 
-// A day's heading stays at the top of the list while its versions scroll
-// under it, as the list is cut to the dialog's height.
 func TestHistoryDayStaysInView(t *testing.T) {
 	a := templatesApp(t)
 	para := &doc.Node{ID: "p1", Type: "paragraph"}
@@ -195,8 +182,6 @@ func TestHistoryDayStaysInView(t *testing.T) {
 	}
 	tt.Scroll(first.X+20, first.Y+20, 0, 200)
 	tt.Frame()
-	// Find cuts what it finds to the list, so that a heading scrolled away
-	// would still be at its top, cut to nothing.
 	if after, ok := tt.Find(label); !ok || after.Y != before.Y || after.H != before.H {
 		t.Errorf("heading %v, then %v (shown %v)", before, after, ok)
 	}

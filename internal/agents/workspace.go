@@ -15,37 +15,16 @@ import (
 	"leaflet/locales"
 )
 
-// The workspace agent: a chat of the user's own, not of a page, whose
-// agent finds, reads, makes and files the user's pages, and changes no
-// page's blocks, which the agent on the page does (docs/protocol.md §2),
-// mirroring supabase/functions/_shared/workspace.ts.
-
-// WorkspaceID is the workspace agent's session, as a page's ID is its
-// agent's.
 const WorkspaceID = "workspace"
 
-// WorkspacePage is a page as the workspace agent sees it.
 type WorkspacePage struct {
 	ID, Title, ParentID, FolderID string
 	Tags                          []string
-	// Shared is a page someone else reads or writes: shared with others,
-	// with a guest's comment or a public link, or whose title they read,
-	// as it is inside such a page, or its card or a mention of it is on
-	// one. The agent changes nothing of it, nor puts a page in it: what
-	// someone else wrote there could have it copy the user's other pages
-	// in, or write them where others read it.
-	Shared bool
-	// People is a page shared with other people, who write in it too: the
-	// agent reads none of it either, as what they wrote could steer what
-	// it does to the user's other pages.
-	People bool
-	// Untitled is a page of no title, whose Title is the app's word for
-	// one: renamed, it had "", for Undo to give back.
-	Untitled bool
+	Shared                        bool
+	People                        bool
+	Untitled                      bool
 }
 
-// title is the page's title as it keeps it: "" for one untitled, which
-// its ops name so, as the app says it in the user's language.
 func (p WorkspacePage) title() string {
 	if p.Untitled {
 		return ""
@@ -53,32 +32,20 @@ func (p WorkspacePage) title() string {
 	return p.Title
 }
 
-// Workspace is what the workspace agent's tools need: the user's pages,
-// those of their own space but templates, and the changes to them. A page
-// of another space, a template or one deleted is none of them.
 type Workspace struct {
-	// Reading lets the agent read the pages, as AgentsReadOtherPages
-	// does: without it, it reads none, but makes and files them.
-	Reading  bool
-	Pages    func() ([]WorkspacePage, error)
-	Page     func(id string) (WorkspacePage, bool)
-	ReadPage func(id string) (map[string]any, error)
-	Search   func(query string) ([]map[string]any, error)
-	Folders  func() []map[string]any
-	// CreatePage makes a page, in folderID at the top level or inside
-	// parentID, linked at its end, and returns it as made.
-	CreatePage func(title string, nodes []*doc.Node, parentID, folderID string) (doc.NewPage, error)
-	// MovePage moves a page, returning where it was and where it went:
-	// the same place, and the page as it was, where it is already.
-	MovePage   func(id, parentID, folderID string) (from, to doc.PagePlace, err error)
-	RenamePage func(id, title string) error
-	// SetTags sets a page's tags, returning them as the page keeps them.
+	Reading      bool
+	Pages        func() ([]WorkspacePage, error)
+	Page         func(id string) (WorkspacePage, bool)
+	ReadPage     func(id string) (map[string]any, error)
+	Search       func(query string) ([]map[string]any, error)
+	Folders      func() []map[string]any
+	CreatePage   func(title string, nodes []*doc.Node, parentID, folderID string) (doc.NewPage, error)
+	MovePage     func(id, parentID, folderID string) (from, to doc.PagePlace, err error)
+	RenamePage   func(id, title string) error
 	SetTags      func(id string, tags []string) ([]string, error)
 	CreateFolder func(name string) (doc.NewFolder, error)
 }
 
-// WorkspaceToolDefinitions are the workspace agent's tools, offered to a
-// model: with reading, those that read the user's pages too.
 func WorkspaceToolDefinitions(reading bool) []map[string]any {
 	pageID := map[string]any{"type": "string", "description": "The page's ID, from list_pages or search_pages, or the open page's."}
 	var out []map[string]any
@@ -103,7 +70,6 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 		tool("create_folder", "Create a folder for top-level pages, last among the user's folders.", map[string]any{"name": map[string]any{"type": "string"}}, "name"))
 }
 
-// workspace runs a workspace agent's tool.
 func (x *Executor) workspace(name string, args map[string]any) (map[string]any, error) {
 	w := x.Ctx.Workspace
 	switch name {
@@ -114,7 +80,6 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 	}
 	switch name {
 	case "list_pages":
-		// The titles it lists are read too.
 		x.armed, x.readPages = true, true
 		all, err := w.Pages()
 		if err != nil {
@@ -127,7 +92,6 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		}
 		pages = pages[:listed(len(pages), jsonCost(folders), func(i int) int { return jsonCost(pages[i]) })]
 		out := map[string]any{"pages": pages, "folders": folders}
-		// More would be more than a model reads at once: it finds the rest.
 		if more := len(all) - len(pages); more > 0 {
 			out["more_pages"] = more
 		}
@@ -142,9 +106,6 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		if err != nil {
 			return nil, terr("The search failed: %v", err)
 		}
-		// What people wrote in a page shared with them is not read: it
-		// is found, but none of its text shown; nor of one the run does
-		// not know, as one made since it began.
 		for _, r := range results {
 			id, _ := r["page_id"].(string)
 			if p, ok := w.Page(id); !ok || p.People {
@@ -167,10 +128,6 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		}
 		return out, nil
 	case "list_folders":
-		// Only the user names their folders: as on a page, listing them
-		// reads nothing someone else wrote, and spends the run's one read
-		// of the web that may go to any page, whose link could spell them
-		// out (saw).
 		x.saw()
 		return map[string]any{"folders": w.Folders()}, nil
 	case "create_page":
@@ -191,7 +148,6 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 	return nil, terr("Unknown tool %q.", name)
 }
 
-// pageView is a page as list_pages lists it.
 func pageView(p WorkspacePage) map[string]any {
 	v := map[string]any{"id": p.ID, "title": p.Title}
 	if len(p.Tags) > 0 {
@@ -212,7 +168,6 @@ func pageView(p WorkspacePage) map[string]any {
 	return v
 }
 
-// workspacePage is the page args names at key, one of the user's.
 func (x *Executor) workspacePage(args map[string]any, key string) (WorkspacePage, error) {
 	id, err := str(args, key)
 	if err != nil {
@@ -225,7 +180,6 @@ func (x *Executor) workspacePage(args map[string]any, key string) (WorkspacePage
 	return p, nil
 }
 
-// changeable is p, refused when someone else reads or writes it.
 func changeable(p WorkspacePage) error {
 	if p.Shared {
 		return terr("“%s” is shared with others: the agent here leaves it as it is, and puts nothing in it. To change it, ask the agent on that page.", p.Title)
@@ -233,8 +187,6 @@ func changeable(p WorkspacePage) error {
 	return nil
 }
 
-// place is where args puts a page: inside a page of the user's that no one
-// else shares, or at the top level, in a folder or none.
 func (x *Executor) place(args map[string]any) (parent WorkspacePage, folder string, err error) {
 	parentID, err := optionalString(args, "parent_id")
 	if err != nil {
@@ -324,8 +276,6 @@ func (x *Executor) workspaceRename(args map[string]any) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Without the spaces around it, and no longer than the store keeps
-	// one, as a new page's.
 	title = store.ClampTitle(strings.TrimSpace(title))
 	if err := x.checkURLs(nil, title); err != nil {
 		return nil, err
@@ -401,22 +351,12 @@ func (x *Executor) workspaceFolder(args map[string]any) (map[string]any, error) 
 	return map[string]any{"folder_id": f.ID}, nil
 }
 
-// workspaceTools are the tools of a workspace run on this device, over
-// the store: the user's own space, its templates left out. What changes a
-// page as the app has it, as a subpage's card in its parent, runs on the
-// main thread through the host's Pages.
 func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.Settings, online bool) ToolContext {
 	st := h.st
 	space := st.Session().SpaceID
 	mine := func(p store.Page) bool { return p.SpaceID == space && !p.Template && p.DeletedAt.IsZero() }
-	// A page with a public link another device serves, as the server says
-	// as the run starts, is read by others too.
 	elsewhere := h.publicElsewhereIn(ctx, space, online)
 	read := func(p store.Page, private func(store.Page) bool) bool { return !private(p) || elsewhere(p.ID) }
-	// Those whose titles someone else reads, as their cards or mentions of
-	// them are on a page they read: read once a run, of all the pages they
-	// read, and only for a page no one reads itself. Unread, every page is
-	// taken for one.
 	shown := sync.OnceValue(func() func(id string) bool {
 		pages, err := st.Pages()
 		if err != nil {
@@ -429,10 +369,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				others[p.ID] = true
 			}
 		}
-		// Their subpages, whose cards they may have, the cards they have,
-		// and the pages they mention, each of which shows its title now as
-		// the page opens (doc.Content.RefreshPageMentions), and keeps it
-		// with the page's next edit.
 		on := map[string]bool{}
 		for _, p := range pages {
 			if others[p.ParentID] {
@@ -469,8 +405,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 		}
 		return view(p, h.private, func(p store.Page) bool { return sharedWithOthers(st, p) }), true
 	}
-	// A recording's transcript only on the page whose block names it, as
-	// on a page (PageTools).
 	reader := ToolContext{Transcript: func(pageID, id string) string {
 		rec, err := st.Recording(id)
 		if err != nil || rec.PageID != pageID {
@@ -500,8 +434,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if err != nil {
 				return nil, err
 			}
-			// Content this device cannot read, as a newer app's, is not
-			// read as an empty page.
 			c, err := stored(st, id)
 			if err != nil {
 				return nil, err
@@ -519,8 +451,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			return map[string]any{"page": info, "blocks": reader.viewsOf(id, c), "subpages": subpages}, nil
 		},
 		Search: func(query string) ([]map[string]any, error) {
-			// Among the user's own pages alone, so only theirs count toward
-			// the most it finds, as the server's search keeps to them.
 			hits, err := st.SearchPages(ctx, query, 20, mine)
 			if err != nil {
 				return nil, err
@@ -529,9 +459,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			out := []map[string]any{}
 			for _, hit := range hits {
 				r := map[string]any{"page_id": hit.PageID, "title": hit.Title}
-				// The words around a match in the page's text, cut from its
-				// own: what its sites wrote of its blocks, which read_page
-				// leaves out, is the web's writing.
 				if hit.Snippet != "" {
 					if s := ownSnippet(st, hit.PageID, words); s != "" {
 						r["snippet"] = s
@@ -558,10 +485,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if parentID == "" {
 				return made, nil
 			}
-			// As a page made from the sidebar, it shows in the page it is
-			// inside. A card that could not go in leaves the page made, as
-			// a page moved is (core.Pages.MovePage): the run keeps it, to
-			// undo.
 			if err := h.onMain(ctx, func() error { return h.pages().LinkSubpage(parentID, p.ID, "") }); err != nil {
 				log.Printf("agent subpage card: %v", err)
 			}
@@ -576,15 +499,11 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				return from, to, err
 			}
 			from = doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID, SortKey: p.SortKey}
-			// Where it is already it stays, as it is among the pages there,
-			// as the server leaves it: inside the page, or at the top level
-			// in the folder.
 			if parentID == p.ParentID && (parentID != "" || folderID == p.FolderID) {
 				return from, from, nil
 			}
 			err = h.onMain(ctx, func() error {
 				left, err := h.pages().MovePageAt(id, parentID, nil, func() error { return st.MovePage(id, parentID, folderID, "") })
-				// Where its card was, for Undo to put it back there.
 				from.Card = left
 				return err
 			})
@@ -609,10 +528,6 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 	return ToolContext{Content: doc.Empty(), PageID: WorkspaceID, AgentName: agent, Workspace: w}
 }
 
-// ownSnippet is the words around a match of words in page id's own text
-// (ownText), as the store's search cuts them from all its text: from 40
-// characters before the match, as many as words has and 80 more; "" when
-// its own text has none, the match being in what its sites wrote.
 func ownSnippet(st *store.Store, id, words string) string {
 	c := st.Content(id)
 	if c == nil {
@@ -630,12 +545,7 @@ func ownSnippet(st *store.Store, id, words string) string {
 	return string(runes[min(from, len(runes)):min(from+utf8.RuneCountInString(words)+80, len(runes))])
 }
 
-// onMain runs fn on the main thread, where pages change as the app has
-// them, and waits for it, or for ctx to end. Given up on before its turn
-// came, fn never runs: the run that asked for it no longer keeps what it
-// does, to undo. Once it runs, it is waited for.
 func (h *Hub) onMain(ctx context.Context, fn func() error) error {
-	// 0 waits its turn, 1 runs, 2 was given up on.
 	var state atomic.Int32
 	done := make(chan error, 1)
 	h.host.Update(WorkspaceID, func() {
@@ -654,8 +564,6 @@ func (h *Hub) onMain(ctx context.Context, fn func() error) error {
 	}
 }
 
-// ChatWorkspace sends a message to the workspace agent. openPageID is the
-// page open as the user sends it, which the agent is told of, "" for none.
 func (h *Hub) ChatWorkspace(text, openPageID string) {
 	s := h.Session(WorkspaceID)
 	t := strings.TrimSpace(text)
@@ -670,8 +578,6 @@ func (h *Hub) ChatWorkspace(text, openPageID string) {
 	h.saveChat(s)
 }
 
-// openPage is page id as a workspace run's agent is told of it: nil for
-// none, or one not the user's own.
 func (h *Hub) openPage(id string) *OpenPage {
 	p, err := h.st.Page(id)
 	if id == "" || err != nil || p.SpaceID != h.st.Session().SpaceID || p.Template || !p.DeletedAt.IsZero() {

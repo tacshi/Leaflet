@@ -109,9 +109,6 @@ func TestShortcuts(t *testing.T) {
 	if got := InlineShortcut("*a* b*", "[[0,3]]"); got != "" {
 		t.Errorf("a pair in a mention made %s", got)
 	}
-	// The menus open as the desktop's: after a space or Chinese, in full
-	// width too, "、" only at a block's start or after a space, and not
-	// inside a word.
 	for _, c := range []struct{ typed, before, want string }{
 		{"/", "", "/"}, {"/", " ", "/"}, {"/", "字", "/"}, {"/", "a", ""},
 		{"＠", "字", "@"}, {"／", "", "/"}, {"、", "", "/"}, {"、", " ", "/"}, {"、", "字", ""},
@@ -126,9 +123,6 @@ func TestShortcuts(t *testing.T) {
 	}
 }
 
-// Text pasted reads as the desktop's editor reads it: lines as Markdown
-// blocks, a link on an empty line as its video or picture, one line that
-// is a link as that link, and other text as it is.
 func TestPasteText(t *testing.T) {
 	read := func(text string, empty bool) pasted {
 		t.Helper()
@@ -159,8 +153,6 @@ func TestPasteText(t *testing.T) {
 	}
 }
 
-// Enter after a fence makes a code block in its language, or a diagram,
-// or math; after other text, nothing.
 func TestFenceEnter(t *testing.T) {
 	read := func(line string) fence {
 		t.Helper()

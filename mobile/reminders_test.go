@@ -10,8 +10,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// todoPage makes a page of the to-dos given, each with the due date due
-// names it by.
 func todoPage(t *testing.T, c *Core, title string, due map[string]time.Time) store.Page {
 	t.Helper()
 	var blocks []*doc.Node
@@ -42,8 +40,6 @@ func reminders(t *testing.T, c *Core, now time.Time, limit int) []reminder {
 	return out
 }
 
-// What is due shows at once, what is to come at its time, the soonest
-// first; and what is too old to be news, nothing.
 func TestRemindersDueThenComing(t *testing.T) {
 	c, _ := open(t)
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
@@ -72,8 +68,6 @@ func TestRemindersDueThenComing(t *testing.T) {
 	}
 }
 
-// One scheduled is not scheduled again once its time has gone by, and one
-// to come stays among those to schedule; a new date reminds again.
 func TestRemindedOnceForEachDate(t *testing.T) {
 	c, _ := open(t)
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
@@ -102,7 +96,6 @@ func TestRemindedOnceForEachDate(t *testing.T) {
 	}
 }
 
-// iOS keeps a limited number scheduled: the soonest are those kept.
 func TestRemindersStopAtTheLimit(t *testing.T) {
 	c, _ := open(t)
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
@@ -115,7 +108,6 @@ func TestRemindersStopAtTheLimit(t *testing.T) {
 	}
 }
 
-// Another's to-do is theirs to be reminded of.
 func TestRemindersLeaveOthersToDos(t *testing.T) {
 	c, _ := open(t)
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)

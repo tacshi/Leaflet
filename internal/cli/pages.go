@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// listing is list_pages' answer: the user's pages and folders.
 type listing struct {
 	Pages   []listedPage   `json:"pages"`
 	Folders []listedFolder `json:"folders"`
@@ -27,7 +26,6 @@ type listedFolder struct {
 	Name string `json:"name"`
 }
 
-// listing is the user's pages and folders, read once a run.
 func (r *runner) listing() (*listing, error) {
 	if r.list != nil {
 		return r.list, nil
@@ -44,32 +42,18 @@ func (r *runner) listing() (*listing, error) {
 	return l, nil
 }
 
-// idLen is how much of an ID the lists show: enough to name a page by
-// (minPrefix and more), as git shows a commit's.
 const idLen = 8
 
-// minPrefix is the shortest start of an ID that names a page or folder.
 const minPrefix = 4
 
 func shortID(id string) string { return id[:min(idLen, len(id))] }
 
-// shown is s as a line for people to read holds it: each control
-// character, a line break or an escape among them, is a space. A title, a
-// name or a comment is whatever its writer made it, a guest of a shared
-// page too, and a terminal would obey what it holds: move the cursor,
-// change its colors, or start a line that reads as a row of its own. What
-// --json prints, and a page's own text, stay as they are.
 func shown(s string) string { return strings.Map(plainRune(false), s) }
 
-// shownLines is s as shown has it, its line breaks and tabs kept: text of
-// several lines, printed as such.
 func shownLines(s string) string {
 	return strings.Map(plainRune(true), strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
-// plainRune maps the control characters, ASCII's and those from U+0080 to
-// U+009F, which some terminals take as escapes too, to spaces, but for
-// the line breaks and tabs where lines are kept.
 func plainRune(lines bool) func(rune) rune {
 	return func(c rune) rune {
 		switch {
@@ -82,9 +66,6 @@ func plainRune(lines bool) func(rune) rune {
 	}
 }
 
-// page is the page ref names: its ID; else its title, as given, then in
-// any case; else the start of its ID. Several pages of a title, or of an
-// ID's start, are listed for one to be chosen by ID.
 func (r *runner) page(ref string) (listedPage, error) {
 	l, err := r.listing()
 	if err != nil {
@@ -97,8 +78,6 @@ func (r *runner) page(ref string) (listedPage, error) {
 	return p, nil
 }
 
-// folder is the folder ref names: its ID, its name, or the start of its
-// ID, as page has a page.
 func (r *runner) folder(ref string) (listedFolder, error) {
 	l, err := r.listing()
 	if err != nil {
@@ -111,9 +90,6 @@ func (r *runner) folder(ref string) (listedFolder, error) {
 	return f, nil
 }
 
-// find is the one of items that ref names, as page has it: key gives an
-// item's ID and name, and where says where one is, to tell apart those
-// of one name.
 func find[T any](items []T, ref string, key func(T) (id, name string), kind, named string, where func(T) string) (T, error) {
 	var none T
 	for _, it := range items {
@@ -160,8 +136,6 @@ func find[T any](items []T, ref string, key func(T) (id, name string), kind, nam
 	return none, fmt.Errorf("no %s %q", kind, ref)
 }
 
-// where says where page p is, in l: inside a page, in a folder, or at the
-// top level.
 func (r *runner) where(l *listing, p listedPage) string {
 	for _, q := range l.Pages {
 		if q.ID == p.ParentID && p.ParentID != "" {
@@ -179,8 +153,6 @@ func (r *runner) where(l *listing, p listedPage) string {
 	return "at the top level"
 }
 
-// completePage completes a page's title as the first argument: a shell's
-// completion asks the command line itself (cobra's __complete).
 func (r *runner) completePage(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -188,8 +160,6 @@ func (r *runner) completePage(cmd *cobra.Command, args []string, toComplete stri
 	return r.completeInto(cmd, args, toComplete)
 }
 
-// completeInto completes a page's title, for --in, whatever comes before
-// it.
 func (r *runner) completeInto(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	l, err := r.completing()
 	if err != nil {
@@ -204,7 +174,6 @@ func (r *runner) completeInto(_ *cobra.Command, _ []string, toComplete string) (
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeFolder completes a folder's name.
 func (r *runner) completeFolder(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	l, err := r.completing()
 	if err != nil {
@@ -219,7 +188,6 @@ func (r *runner) completeFolder(_ *cobra.Command, _ []string, toComplete string)
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completing is the listing a completion offers from.
 func (r *runner) completing() (*listing, error) {
 	if err := r.open(); err != nil {
 		return nil, err

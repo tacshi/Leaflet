@@ -11,10 +11,8 @@ import (
 	"leaflet/locales"
 )
 
-// textEditor is an editor with no view, as the iOS app's is to the core.
 type textEditor struct {
-	c *doc.Content
-	// replaced counts the changes from outside it shows.
+	c        *doc.Content
 	replaced int
 }
 
@@ -33,8 +31,6 @@ func (e *textEditor) ApplyOps(ops []doc.Op) error {
 	return nil
 }
 
-// pagesFixture is Pages over a store of its own, with the pages openPage
-// opened open in it, and what it told the user.
 type pagesFixture struct {
 	Pages
 	st   *store.Store
@@ -61,7 +57,6 @@ func newPagesFixture(t *testing.T) *pagesFixture {
 	return f
 }
 
-// page makes a page of blocks, under parent ("" for none).
 func (f *pagesFixture) page(t *testing.T, title, parent string, blocks ...*doc.Node) store.Page {
 	t.Helper()
 	o := store.NewPageOptions{Title: title, ParentID: parent}
@@ -75,7 +70,6 @@ func (f *pagesFixture) page(t *testing.T, title, parent string, blocks ...*doc.N
 	return p
 }
 
-// openPage opens page id as the app does, returning its editor.
 func (f *pagesFixture) openPage(id string) *textEditor {
 	lp, c := live.Open(f.st, id, live.Options{Post: func(func()) {}})
 	ed := &textEditor{c: c}
@@ -84,7 +78,6 @@ func (f *pagesFixture) openPage(id string) *textEditor {
 	return ed
 }
 
-// cards are the pages page id has cards for, as it is open or stored.
 func (f *pagesFixture) cards(id string) []string {
 	c := f.content(id)
 	if c == nil {
@@ -105,9 +98,6 @@ func block(id, text string) *doc.Node {
 	return n
 }
 
-// A page not open is changed over what is stored: content stored while
-// the change is made, as by sync, gets the change made again over it,
-// keeping both.
 func TestEditPageStoredGoesOverWhatItRead(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", block("q1", "one"))
@@ -130,8 +120,6 @@ func TestEditPageStoredGoesOverWhatItRead(t *testing.T) {
 	}
 }
 
-// A page open is changed through its editor, which shows the change, and
-// is stored with what was typed in it.
 func TestEditPageOpenGoesThroughTheEditor(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", block("p1", "one"))
@@ -147,14 +135,11 @@ func TestEditPageOpenGoesThroughTheEditor(t *testing.T) {
 	if got := f.st.Content(p.ID).PlainText(); got != "one, typed\ntwo" {
 		t.Errorf("stored %q", got)
 	}
-	// An edit that changes nothing gives the editor nothing.
 	if err := f.EditPage(p.ID, func(*doc.Content) bool { return false }); err != nil || ed.replaced != 1 {
 		t.Errorf("%v, %d changes", err, ed.replaced)
 	}
 }
 
-// A page the user can't change is left as it is, and content that can't
-// be read is not saved over, open or not, but said to be unreadable.
 func TestEditPageLeavesWhatItCannotChange(t *testing.T) {
 	f := newPagesFixture(t)
 	viewed := f.page(t, "Theirs", "", block("p1", "one"))
@@ -192,9 +177,6 @@ func fileBlock(id, notes string) *doc.Node {
 	return n
 }
 
-// A transcript goes in a closed page's file over what is stored, and in an
-// open page's as one step of its own, which the app is told of, with the
-// engine that made it.
 func TestSetFileNotes(t *testing.T) {
 	f := newPagesFixture(t)
 	closed := f.page(t, "Closed", "", fileBlock("a", ""))
@@ -222,7 +204,6 @@ func TestSetFileNotes(t *testing.T) {
 	}
 }
 
-// Notes written while a file transcribed stay, the transcript after them.
 func TestSetFileNotesKeepsNewWriting(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", fileBlock("a", "written since"))
@@ -234,8 +215,6 @@ func TestSetFileNotesKeepsNewWriting(t *testing.T) {
 	}
 }
 
-// A block gone by the time a transcript is done takes nothing, and says so,
-// open or not, as does one that holds another file by then.
 func TestSetFileNotesBlockGone(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", block("p1", "one"), fileBlock("a", ""))
@@ -258,8 +237,6 @@ func TestSetFileNotesBlockGone(t *testing.T) {
 	}
 }
 
-// fail makes the store fail to save any page's content, as a full disk
-// would. It may run as a transcript is made, off the test's goroutine.
 func (f *pagesFixture) fail(t *testing.T) {
 	t.Helper()
 	for _, q := range []string{
@@ -272,7 +249,6 @@ func (f *pagesFixture) fail(t *testing.T) {
 	}
 }
 
-// A transcript that could not be stored is not said to be, open or not.
 func TestSetFileNotesNotSaved(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		f := newPagesFixture(t)
@@ -290,9 +266,6 @@ func TestSetFileNotesNotSaved(t *testing.T) {
 	}
 }
 
-// A transcript after notes written meanwhile is cut to the room they
-// leave, and says so; with no room for any of it, the notes stay as they
-// are, and that is said instead.
 func TestSetFileNotesFitsAfterNewWriting(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		f := newPagesFixture(t)
@@ -316,8 +289,6 @@ func TestSetFileNotesFitsAfterNewWriting(t *testing.T) {
 	}
 }
 
-// An open page whose change could not be saved says so: what goes on from
-// its stored content would go on without the change.
 func TestEditPageOpenNotSaved(t *testing.T) {
 	f := newPagesFixture(t)
 	p := f.page(t, "Notes", "", block("p1", "one"))

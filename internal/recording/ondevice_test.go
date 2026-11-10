@@ -6,10 +6,6 @@ import (
 	"leaflet/locales"
 )
 
-// A device's engine answers with its transcript, tidied, or with a code
-// that the app says why by, in the user's language, on the Mac and on iOS
-// alike: a language it can't transcribe by its name, the device's own
-// when it asked for that, and a transcription that stopped going on.
 func TestOnDeviceAnswers(t *testing.T) {
 	segs, err := OnDeviceTranscript(`{"done":true,"segments":[{"start_ms":0,"end_ms":900,"text":"Hello"},{"start_ms":900,"end_ms":1000,"text":"."}]}`, "en")
 	if err != nil || len(segs) != 1 || segs[0].Text != "Hello." {

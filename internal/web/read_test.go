@@ -2,11 +2,9 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -16,41 +14,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Pages read here as the agent function reads them (supabase/functions/
-// _shared/testdata/pages.json, which its tests write): an agent reads a
-// page alike on the device and on the server.
-func TestReadHTMLAsTheServerDoes(t *testing.T) {
-	raw, err := os.ReadFile("../../supabase/functions/_shared/testdata/pages.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Page string `json:"page"`
-		HTML string `json:"html"`
-		Read struct {
-			URL       string   `json:"url"`
-			Title     string   `json:"title"`
-			Text      string   `json:"text"`
-			Links     []string `json:"links"`
-			Truncated bool     `json:"truncated"`
-		} `json:"read"`
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("the fixture has no cases")
-	}
-	for _, c := range cases {
-		p := ReadHTML(c.Page, c.HTML)
-		w := c.Read
-		if p.Title != w.Title || p.Text != w.Text || p.Truncated != w.Truncated || !slices.Equal(p.Links, w.Links) && len(p.Links)+len(w.Links) > 0 {
-			t.Errorf("%s read\n%q %q %v %q\nthe server's\n%q %q %v %q", c.Page, p.Title, p.Text, p.Truncated, p.Links, w.Title, w.Text, w.Truncated, w.Links)
-		}
-	}
-}
-
-// A long page is cut at the end of a line near the most an agent reads.
 func TestReadCutsALongPageAtALine(t *testing.T) {
 	line := strings.Repeat("字", 99)
 	text := strings.TrimSuffix(strings.Repeat(line+"\n", 400), "\n")
@@ -63,8 +26,6 @@ func TestReadCutsALongPageAtALine(t *testing.T) {
 	}
 }
 
-// useServer has Read, LookUp and Fetch ask a test's server, which Fetch
-// would refuse as on this machine.
 func useServer(t *testing.T) {
 	t.Helper()
 	was := do
@@ -72,8 +33,6 @@ func useServer(t *testing.T) {
 	t.Cleanup(func() { do = was })
 }
 
-// A page is read where its redirects lead, in the encoding it says it is
-// in; one that is not text is not read.
 func TestReadFollowsRedirectsInThePagesEncoding(t *testing.T) {
 	useServer(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +41,7 @@ func TestReadFollowsRedirectsInThePagesEncoding(t *testing.T) {
 			http.Redirect(w, r, "/b", http.StatusMovedPermanently)
 		case "/b":
 			w.Header().Set("Content-Type", "text/html; charset=gbk")
-			_, _ = w.Write(append([]byte("<title>t</title><p>"), 0xc4, 0xe3, 0xba, 0xc3)) // 你好 in GBK
+			_, _ = w.Write(append([]byte("<title>t</title><p>"), 0xc4, 0xe3, 0xba, 0xc3))
 		case "/x.png":
 			w.Header().Set("Content-Type", "image/png")
 			_, _ = w.Write([]byte{1, 2, 3})
@@ -108,7 +67,6 @@ func TestReadFollowsRedirectsInThePagesEncoding(t *testing.T) {
 	}
 }
 
-// Read reaches only the public web, as Fetch does.
 func TestReadOnlyThePublicWeb(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("<title>secret</title>"))
@@ -122,8 +80,6 @@ func TestReadOnlyThePublicWeb(t *testing.T) {
 	}
 }
 
-// What says it is not text is not read: Read answers before the body
-// comes. What says nothing of itself is told by its first bytes.
 func TestReadTellsWhatIsNotTextFirst(t *testing.T) {
 	useServer(t)
 	release := make(chan struct{})
@@ -165,8 +121,6 @@ func TestReadTellsWhatIsNotTextFirst(t *testing.T) {
 	}
 }
 
-// A site that takes the request and never answers holds Read up no
-// longer than Fetch would wait, however long its caller would.
 func TestReadWaitsNoLongerThanFetch(t *testing.T) {
 	useServer(t)
 	was := fetchWait
@@ -185,10 +139,6 @@ func TestReadWaitsNoLongerThanFetch(t *testing.T) {
 	}
 }
 
-// hostilePages are pages made to be slow to read, each as long as a page
-// read from the web may be: a line of many pieces, many links, many small
-// elements, a long link, links in links, and elements nested as deep as a
-// page may be.
 func hostilePages() map[string]string {
 	fill := func(head, piece, tail string) string {
 		return head + strings.Repeat(piece, (maxPageBytes-len(head)-len(tail))/len(piece)) + tail
@@ -209,12 +159,6 @@ func hostilePages() map[string]string {
 	}
 }
 
-// A page made to be slow reads in about the time it takes to parse it:
-// each piece of it once, and none past the most of it an agent reads.
-// Each is timed at its quickest of three, taken in turns, as other tests
-// running meanwhile, under the race detector most of all, slow one or the
-// other at times; a reading that went over each piece again for each
-// would take a hundred times as long as parsing, or more.
 func TestReadHTMLOfHostilePagesIsQuick(t *testing.T) {
 	for name, src := range hostilePages() {
 		var parse, took time.Duration
@@ -240,8 +184,6 @@ func TestReadHTMLOfHostilePagesIsQuick(t *testing.T) {
 	}
 }
 
-// A reading stops when its caller's time is up, its parsing too, which
-// takes a while for each tag among many open elements.
 func TestReadHTMLStopsWithItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

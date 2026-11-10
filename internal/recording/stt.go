@@ -26,33 +26,19 @@ import (
 	"leaflet/locales"
 )
 
-// IsLocalEndpoint reports whether an endpoint is on this machine or
-// network, so audio can go to it straight from the device.
 func IsLocalEndpoint(baseURL string) bool { return endpoint.IsLocal(baseURL) }
 
-// TestEndpoint tries an OpenAI-compatible endpoint with a second of
-// silence, as Settings does on the desktop and the phone.
 func TestEndpoint(ctx context.Context, baseURL, model, apiKey string) error {
 	wav := WavFromPCM(make([]byte, 2*SampleRate))
 	_, err := TranscribeEndpoint(ctx, baseURL, model, bytes.NewReader(wav), int64(len(wav)), apiKey, "auto")
 	return err
 }
 
-// TranscribeEndpoint transcribes size bytes of WAV audio from wav with an
-// OpenAI-style /audio/transcriptions endpoint (OpenAI, DashScope, a
-// self-hosted server). The audio goes into the request as it is read: a
-// long recording is never all in memory, as it would be twice over in a
-// form built first.
 func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, apiKey, language string) ([]store.Segment, error) {
 	return transcribeEndpoint(ctx, baseURL, model, wav, size, "recording.wav", transcribeWait(size), apiKey, language)
 }
 
-// transcribeEndpoint is TranscribeEndpoint of audio named name, whose
-// extension says what it is to the server, waiting for wait at the most.
 func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, name string, wait time.Duration, apiKey, language string) ([]store.Segment, error) {
-	// The form's fields and the file's header, then the audio, then the
-	// form's end: its length is known before the audio is read, for the
-	// servers that take no body of unknown length.
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
 	if err := w.WriteField("model", model); err != nil {
@@ -124,37 +110,21 @@ func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 	return segs, nil
 }
 
-// transcribeWait is how long an endpoint gets to transcribe size bytes of
-// the app's WAV (2 bytes a sample): five minutes, and twice the audio's
-// length more, as a server on a CPU can take longer than the audio lasts.
 func transcribeWait(size int64) time.Duration {
 	return 5*time.Minute + 2*time.Duration(size/(2*SampleRate))*time.Second
 }
 
-// fileWait is how long an endpoint gets to transcribe an audio file of
-// size bytes: as transcribeWait, but of audio that may be compressed, whose
-// length its size doesn't say. It takes the least bit rate speech has,
-// which makes a wait long for most, up to a most any file has.
 func fileWait(size int64) time.Duration {
 	const leastBytesASecond = 4000
 	return min(5*time.Minute+2*time.Duration(size/leastBytesASecond)*time.Second, 6*time.Hour)
 }
 
-// sonioxAPI is Soniox's REST API; tests point it at their own server.
 var sonioxAPI = "https://api.soniox.com/v1"
 
-// sonioxPoll is how long TranscribeSoniox waits between asking Soniox
-// whether it is done. Tests shorten it.
 var sonioxPoll = 2 * time.Second
 
-// sonioxAsyncModel is the model saved audio is transcribed with when the
-// one chosen is a real-time one, which Soniox's files don't take.
 const sonioxAsyncModel = "stt-async-v3"
 
-// TranscribeSoniox transcribes size bytes of audio from audio, named name,
-// whose extension says what it is, with Soniox's files and transcriptions
-// and the key on this device: it goes up as it is read, never all in
-// memory. What went to Soniox is removed from it once it is done.
 func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, size int64, name string, hints []string, speakers bool) ([]store.Segment, error) {
 	if !strings.HasPrefix(model, "stt-async") {
 		model = sonioxAsyncModel
@@ -175,8 +145,6 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 		_ = call(ctx, "DELETE", path, nil, nil)
 	}
 
-	// The form's head, then the audio, then its end, of a length known
-	// before the audio is read.
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
 	if _, err := w.CreateFormFile("file", name); err != nil {
@@ -248,8 +216,6 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	return TokensToSegments(transcript.Tokens), nil
 }
 
-// sonioxDo sends req to Soniox with key, and reads its answer into out,
-// unless out is nil.
 func sonioxDo(req *http.Request, key string, out any) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	res, err := http.DefaultClient.Do(req)
@@ -268,7 +234,6 @@ func sonioxDo(req *http.Request, key string, out any) error {
 	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(out)
 }
 
-// TestSonioxKey checks a Soniox API key against Soniox's API.
 func TestSonioxKey(ctx context.Context, key string) error {
 	if strings.TrimSpace(key) == "" {
 		return errors.New(locales.RecErrPasteKey())
@@ -292,8 +257,6 @@ func TestSonioxKey(ctx context.Context, key string) error {
 	return nil
 }
 
-// LocalSonioxKey is the Soniox key kept in this device's keychain, for
-// a build without a Leaflet server; "" when there is none.
 func LocalSonioxKey() string {
 	k, err := keychain.Get("stt.soniox.key")
 	if err != nil {
@@ -302,28 +265,47 @@ func LocalSonioxKey() string {
 	return string(k)
 }
 
-// EndpointKey is the key kept in this device's keychain for a speech
-// endpoint on this machine or network; "" when there is none.
-func EndpointKey() string {
-	k, err := keychain.Get("stt.endpoint.key")
-	if err != nil {
-		return ""
-	}
-	return string(k)
+type KeptKey struct {
+	Key     string
+	Address string
 }
 
-// SetEndpointKey keeps the endpoint's key in the keychain, or removes it.
-func SetEndpointKey(key string) error {
+func (k KeptKey) For(baseURL string) string {
+	if k.Address == "" {
+		if IsLocalEndpoint(strings.TrimSpace(baseURL)) {
+			return k.Key
+		}
+		return ""
+	}
+	if endpoint.SameOrigin(k.Address, baseURL) {
+		return k.Key
+	}
+	return ""
+}
+
+func LoadEndpointKey() KeptKey {
+	raw, err := keychain.Get("stt.endpoint.key")
+	if err != nil {
+		return KeptKey{}
+	}
+	if address, key, ok := strings.Cut(string(raw), "\n"); ok {
+		return KeptKey{Key: key, Address: address}
+	}
+	return KeptKey{Key: string(raw)}
+}
+
+func EndpointKey(baseURL string) string { return LoadEndpointKey().For(baseURL) }
+
+func SetEndpointKey(baseURL, key string) error {
 	if key == "" {
 		if err := keychain.Delete("stt.endpoint.key"); !errors.Is(err, keychain.ErrNotFound) {
 			return err
 		}
 		return nil
 	}
-	return keychain.Set("stt.endpoint.key", []byte(key))
+	return keychain.Set("stt.endpoint.key", []byte(endpoint.NormalizeBaseURL(baseURL)+"\n"+key))
 }
 
-// SetLocalSonioxKey keeps a Soniox key in the keychain, or removes it.
 func SetLocalSonioxKey(key string) error {
 	if key == "" {
 		if err := keychain.Delete("stt.soniox.key"); !errors.Is(err, keychain.ErrNotFound) {
@@ -334,10 +316,8 @@ func SetLocalSonioxKey(key string) error {
 	return keychain.Set("stt.soniox.key", []byte(key))
 }
 
-// SonioxEndpoint is Soniox's real-time API.
 const SonioxEndpoint = "wss://stt-rt.soniox.com/transcribe-websocket"
 
-// Token is a word or piece of one from Soniox.
 type Token struct {
 	Text    string `json:"text"`
 	StartMs int    `json:"start_ms"`
@@ -346,39 +326,24 @@ type Token struct {
 	Speaker any    `json:"speaker"`
 }
 
-// Soniox streams audio to Soniox's real-time API, with the key kept on
-// this device or else a short-lived one the server mints from the user's
-// key, which then never reaches the device.
 type Soniox struct {
 	conn    *websocket.Conn
 	mu      sync.Mutex
 	final   []Token
 	pending []Token
 	err     error
-	// lost is why the stream ended before Finish or Close asked it to.
-	lost error
-	done chan struct{}
-	// sent is when audio or a keepalive last went, in Unix milliseconds;
-	// ending is set once Finish or Close ends the stream.
-	sent   atomic.Int64
-	ending atomic.Bool
-	// wmu orders the writes, so no audio follows the end of it that
-	// Finish sends.
-	wmu sync.Mutex
-	// queue is the audio write sends, in order, so a slow connection does
-	// not hold up the recording; qmu guards closing it, once Finish or
-	// Close ends it, and written closes when write is done.
+	lost    error
+	done    chan struct{}
+	sent    atomic.Int64
+	ending  atomic.Bool
+	wmu     sync.Mutex
 	queue   chan []byte
 	qmu     sync.Mutex
 	qclosed bool
 	written chan struct{}
-	// onText runs with the live text, final words and the current draft;
-	// SetOnText sets it, guarded by mu, as read runs from the start.
-	onText func(string)
+	onText  func(string)
 }
 
-// SetOnText has fn run with the live text, final words and the current
-// draft, as it comes, starting with what came before it was set.
 func (s *Soniox) SetOnText(fn func(string)) {
 	s.mu.Lock()
 	s.onText = fn
@@ -389,12 +354,8 @@ func (s *Soniox) SetOnText(fn func(string)) {
 	}
 }
 
-// keepAliveAfter is how long the stream goes without audio, as while a
-// recording is paused, before a keepalive goes: Soniox ends a stream that
-// hears nothing for 20 s. Tests shorten it.
 var keepAliveAfter = 8 * time.Second
 
-// DialSoniox connects and sends the stream's configuration.
 func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speakers bool) (*Soniox, error) {
 	conn, _, err := websocket.Dial(ctx, SonioxEndpoint, nil)
 	if err != nil {
@@ -412,35 +373,24 @@ func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speak
 	return newSoniox(conn), nil
 }
 
-// maxQueued is the most audio waiting to go to a slow stream: 30 s of the
-// capture page's 50 ms chunks.
 const maxQueued = 600
 
-// errBehind is a stream that could not keep up with the audio.
 var errBehind = errors.New("the connection could not keep up")
 
-// errNoEnd is a stream whose last words never came once it was finished.
 var errNoEnd = errors.New("the last words never came")
 
-// finishWait is how long Finish waits for the audio queued to go, and then
-// for the last words. Tests shorten it.
 var finishWait = 15 * time.Second
 
-// newSoniox reads, writes and keeps alive a stream that has its
-// configuration.
 func newSoniox(conn *websocket.Conn) *Soniox {
 	s := &Soniox{conn: conn, done: make(chan struct{}), queue: make(chan []byte, maxQueued), written: make(chan struct{})}
 	s.sent.Store(time.Now().UnixMilli())
 	guard.Go(s.read)
 	guard.Go(s.write)
-	// Read here, so a test that changes it races no stream of another.
 	after := keepAliveAfter
 	guard.Go(func() { s.keepAlive(after) })
 	return s
 }
 
-// write sends the queued audio until the queue closes; once the stream is
-// ending it sends no more.
 func (s *Soniox) write() {
 	defer close(s.written)
 	for pcm := range s.queue {
@@ -461,7 +411,6 @@ func (s *Soniox) write() {
 	}
 }
 
-// endQueue closes the queue, once.
 func (s *Soniox) endQueue() {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
@@ -471,7 +420,6 @@ func (s *Soniox) endQueue() {
 	}
 }
 
-// keepAlive keeps a stream that gets no audio open, until it ends.
 func (s *Soniox) keepAlive(after time.Duration) {
 	tick := time.NewTicker(min(time.Second, after/2))
 	defer tick.Stop()
@@ -498,7 +446,6 @@ func (s *Soniox) keepAlive(after time.Duration) {
 	}
 }
 
-// lose records why the stream ended early, unless it was asked to end.
 func (s *Soniox) lose(err error) {
 	if s.ending.Load() {
 		return
@@ -510,8 +457,6 @@ func (s *Soniox) lose(err error) {
 	s.mu.Unlock()
 }
 
-// Lost is why the stream ended before it was finished, nil if it did not:
-// what was said after that is in the audio, not the transcript.
 func (s *Soniox) Lost() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -574,8 +519,6 @@ func (s *Soniox) textLocked() string {
 	return b.String()
 }
 
-// Send queues PCM16 audio to stream, without waiting for it to go; once
-// the stream is ending it sends nothing.
 func (s *Soniox) Send(pcm []byte) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
@@ -589,22 +532,13 @@ func (s *Soniox) Send(pcm []byte) {
 	}
 }
 
-// Close drops the stream, for a recording that needs it no more, at once:
-// it runs on the main thread, and the close handshake would wait seconds
-// on a slow network. The stream's reading, writing and keepalives end as
-// its connection does.
 func (s *Soniox) Close() {
 	s.ending.Store(true)
 	s.endQueue()
 	_ = s.conn.CloseNow()
 }
 
-// Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
-	// The audio queued goes first, as long as the connection takes it.
-	// What it could not take is in the recording's audio, not the
-	// transcript: the stream counts as lost, and the recording, its words
-	// kept, is to transcribe again.
 	s.endQueue()
 	select {
 	case <-s.written:
@@ -614,15 +548,12 @@ func (s *Soniox) Finish() ([]store.Segment, error) {
 	s.wmu.Lock()
 	s.ending.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// An empty text frame ends the stream. An empty binary one is only an
-	// empty piece of audio, after which Soniox goes on waiting for more.
 	_ = s.conn.Write(ctx, websocket.MessageText, []byte{})
 	cancel()
 	s.wmu.Unlock()
 	select {
 	case <-s.done:
 	case <-time.After(finishWait):
-		// Ending, it takes no loss by lose: this one is its own.
 		s.mu.Lock()
 		if s.lost == nil {
 			s.lost = errNoEnd
@@ -632,8 +563,6 @@ func (s *Soniox) Finish() ([]store.Segment, error) {
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Words still waiting to be final when the stream ended, as when it
-	// timed out, showed live: they stay rather than vanish.
 	segs := TokensToSegments(append(s.final, s.pending...))
 	if s.err != nil && len(segs) == 0 {
 		return nil, s.err
@@ -641,15 +570,10 @@ func (s *Soniox) Finish() ([]store.Segment, error) {
 	return segs, nil
 }
 
-// isPunct reports whether text has only punctuation and spaces.
 func isPunct(text string) bool {
 	return strings.TrimFunc(text, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) }) == ""
 }
 
-// Tidy joins lines of only punctuation to the line before, as transcripts
-// made before TokensToSegments did so have them, and a line that carries
-// on a sentence, starting in lower case after one that did not end it, as
-// a pause mid-sentence splits it.
 func Tidy(segs []store.Segment) []store.Segment {
 	var out []store.Segment
 	for _, s := range segs {
@@ -671,8 +595,6 @@ func Tidy(segs []store.Segment) []store.Segment {
 	return out
 }
 
-// carriesOn tells whether next continues the sentence prev leaves open:
-// prev ends without a sentence's end and next starts in lower case.
 func carriesOn(prev, next string) bool {
 	prev, next = strings.TrimSpace(prev), strings.TrimSpace(next)
 	last, _ := utf8.DecodeLastRuneInString(prev)
@@ -680,11 +602,8 @@ func carriesOn(prev, next string) bool {
 	return prev != "" && !strings.ContainsRune(".!?…。！？\"”'’)", last) && unicode.IsLower(first)
 }
 
-// sentenceEnds end a sentence.
 var sentenceEnds = []string{".", "?", "!", "。", "？", "！"}
 
-// sentenceEnd is what ends the sentence a token, a word or punctuation,
-// ends, "" for a token that ends none.
 func sentenceEnd(text string) string {
 	text = strings.TrimSpace(text)
 	for _, p := range sentenceEnds {
@@ -695,28 +614,16 @@ func sentenceEnd(text string) string {
 	return ""
 }
 
-// startsWord tells whether a token starts a word of its own rather than
-// carrying on the one before, as the 5 of 3.5 does and the com of
-// example.com: it starts with a space, or in a script written without them.
 func startsWord(text string) bool {
 	r, _ := utf8.DecodeRuneInString(text)
 	return unicode.IsSpace(r) || unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana)
 }
 
-// TokensToSegments groups Soniox tokens into transcript segments: a new
-// one on a new speaker, after a pause of more than a second, or at a
-// sentence end after four seconds, whether the word ends the sentence or
-// punctuation of its own does.
 func TokensToSegments(tokens []Token) []store.Segment {
 	var segs []store.Segment
 	var text strings.Builder
 	start, end := -1, 0
 	speaker := ""
-	// ended is what ended the line's sentence, four seconds in, "" until
-	// then: the next word starts a line, once the quotes and brackets
-	// closing it are in. After a full stop, which numbers and addresses
-	// have inside them, only a word of its own does: 2024年 after 。 starts
-	// a line, and the 5 of 3.5 none.
 	ended := ""
 	flush := func() {
 		if t := strings.TrimSpace(text.String()); t != "" {
@@ -731,10 +638,7 @@ func TokensToSegments(tokens []Token) []store.Segment {
 		if e < s {
 			e = s
 		}
-		// As the server writes it, a number too.
 		who := doc.JSONText(t.Speaker)
-		// Punctuation that comes late ends the words before it rather
-		// than starting a line of its own.
 		if isPunct(t.Text) {
 			if text.Len() > 0 {
 				text.WriteString(t.Text)

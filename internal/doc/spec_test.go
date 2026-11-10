@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// A chart's value of NaN or infinity, as an agent can write "NaN" or the
-// chart editor read "inf", is no value: JSON has none, and the page
-// holding it could not be saved.
 func TestChartValuesAreFinite(t *testing.T) {
 	for _, v := range []any{"NaN", "inf", "-Inf", math.NaN(), math.Inf(1)} {
 		n, err := SpecToNode(map[string]any{"type": "chart", "chart": map[string]any{
@@ -24,8 +21,6 @@ func TestChartValuesAreFinite(t *testing.T) {
 	}
 }
 
-// Nested items as deep or as many as an agent likes are refused, not
-// recursed into without end.
 func TestSpecNestingIsBounded(t *testing.T) {
 	deep := map[string]any{"type": "bulleted_list", "text": "x"}
 	for range 100 {
@@ -41,7 +36,6 @@ func TestSpecNestingIsBounded(t *testing.T) {
 	if _, err := SpecToNode(map[string]any{"type": "bulleted_list", "text": "x", "children": many}, "", "Agent"); err == nil {
 		t.Error("3000 items")
 	}
-	// A table's cells count, so a table can't be as big as an agent likes.
 	var rows []any
 	for range 100 {
 		row := make([]any, 100)
@@ -82,9 +76,6 @@ func TestSetTableRows(t *testing.T) {
 	}
 }
 
-// An embed's HTML is held to 200 KB as stored, in UTF-8's bytes, as on
-// the server: HTML of Chinese text a third as long as the limit in
-// characters is over it.
 func TestEmbedSizeInBytes(t *testing.T) {
 	embed := func(html string) error {
 		_, err := SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"html": html}}, "", "")
@@ -95,5 +86,48 @@ func TestEmbedSizeInBytes(t *testing.T) {
 	}
 	if err := embed(strings.Repeat("字", maxEmbedHTML/3+1)); err == nil {
 		t.Errorf("HTML of %d characters, %d bytes, taken", maxEmbedHTML/3+1, 3*(maxEmbedHTML/3+1))
+	}
+}
+
+func TestACallsBlocksCountTogether(t *testing.T) {
+	list := func(n int) map[string]any {
+		var kids []any
+		for range n {
+			kids = append(kids, map[string]any{"type": "bulleted_list", "text": "x"})
+		}
+		return map[string]any{"type": "bulleted_list", "text": "x", "children": kids}
+	}
+	if _, err := SpecsToNodes([]any{list(maxSpecNodes / 2), list(maxSpecNodes / 2)}, ""); err == nil {
+		t.Error("a call made more blocks than a call makes")
+	}
+	var rows []any
+	for range 21 {
+		rows = append(rows, []any{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"})
+	}
+	var many []any
+	for range 300 {
+		many = append(many, map[string]any{"text": "x"})
+	}
+	if _, err := SpecsToNodes(append(many, map[string]any{"type": "table", "rows": rows}), ""); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestCallNodesNestAsDeepAsSpecs(t *testing.T) {
+	nested := func(depth int) []*Node {
+		n := &Node{ID: "x", Type: "bulleted_list"}
+		top := n
+		for range depth - 1 {
+			k := &Node{ID: "x", Type: "bulleted_list"}
+			n.Children = []*Node{k}
+			n = k
+		}
+		return []*Node{top}
+	}
+	if err := CallNodes(nested(maxSpecDepth)); err != nil {
+		t.Error(err)
+	}
+	if err := CallNodes(nested(maxSpecDepth + 1)); err == nil {
+		t.Errorf("blocks %d deep taken", maxSpecDepth+1)
 	}
 }

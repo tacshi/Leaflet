@@ -110,6 +110,10 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
   LM Studio、llama.cpp、vLLM などのローカルサーバー。
+- エージェントは、サインインしていてもいなくても、あなたのデバイスから
+  動きます。プロバイダはデバイスごとに保存され、クラウドのプロバイダの API
+  キーはそのデバイスのキーチェーンに入ります。使うデバイスごとにプロバイダを
+  追加してください。
 - Claude Code、Codex、Cursor などアプリ外のエージェントも
   [`leaflet mcp`](#アプリ外のエージェント-mcp) を通じてページを扱えます。
 - [`leaflet` コマンド](#コマンドライン)で、ターミナルやスクリプトからページの
@@ -123,8 +127,10 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   メモの時刻からそこを再生できます。話者は名前の変更、行ごとの修正、非表示ができます。スクロールしても小さなプレーヤーが表示され、読み上げ中の行が強調され、再生速度の変更と 15 秒のスキップができ、システムのメディアコントロールやメディアキーでも操作できます。
 - 添付ファイルをアプリ内で表示：画像、PDF、テキストとコード、Markdown、表。iPhone と
   iPad では、そのほかのファイルも Quick Look で表示できます。
-- Soniox、または自分のネットワーク内のものを含む任意の OpenAI 互換
-  `/audio/transcriptions` エンドポイントによるリアルタイム文字起こし。
+- Soniox、または任意の OpenAI 互換 `/audio/transcriptions` エンドポイント
+  （自分のネットワーク内でもクラウドでも）によるリアルタイム文字起こし。
+  どちらもあなたのデバイスから直接呼び出し、キーはそのデバイスのキーチェーン
+  に保存されます。
 - MOSS による話者付きの文字起こし（MOSI の API キーはデバイスに保存）：録音
   を止めたあとと、音声ファイルで使えます。
 - システム自身の音声認識による、デバイス上での文字起こし（オフライン、キー
@@ -163,10 +169,10 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   （署名と公証にも Xcode が必要です）。Windows インストーラには NSIS が
   必要です。
 - iCloud 同期には iCloud Drive をオンにしておく必要があります。
-- サーバー経由の同期とクラウドモデルには [Supabase](https://supabase.com)
+- サーバー経由の同期には [Supabase](https://supabase.com)
   のアカウントが必要です：**Supabase で続ける** がその中のプロジェクトを見つけるか作成し、
   [`supabase/`](supabase/README.md) の内容で設定します。アカウントがなければ、
-  Leaflet はデバイス上だけで動作します。
+  Leaflet はデバイス上だけで動作します。エージェントと文字起こしも同じです。
 
 ## インストール
 
@@ -188,8 +194,8 @@ go tool mygo dev
 ```
 
 サーバーがない場合、Leaflet はこのデバイスだけで動作します。ページ、編集、
-コメント、公開リンク、ローカルモデル、ネットワーク内の文字起こしサーバーは
-すべて使え、サインイン、同期、クラウドモデル、クラウドの文字起こしは非表示になるか、
+コメント、公開リンク、エージェント、文字起こしは、このデバイスに追加した
+プロバイダとキーですべて使え、サインインと同期は非表示になるか、
 その場で理由が説明されます。
 
 どのビルドでも Supabase でサインインできます。OAuth アプリのクライアント ID は組み込まれ、
@@ -370,10 +376,12 @@ make check                                   # gofmt、golangci-lint、govulnche
 make ios-check                               # swift-format、SwiftLint、osv-scanner、mobsfscan
 make clean                                   # build/ と go build が残すバイナリを削除
 scripts/check-migrations.sh                  # すべてのマイグレーションを順に Supabase の Postgres に適用（Docker）
-cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
+cd supabase/functions && deno test --frozen  # account Edge Function
 ```
 
-エディタのテストは `ui.NewTester` でビューをヘッドレスに動かします。
+エディタのテストは `ui.NewTester` でビューをヘッドレスに動かします。ゴールデンテストは、
+コードが出すべき結果を各パッケージの `testdata/golden` から読みます。意図して結果を
+変えたあとは、`go test ./internal/doc -update`（パッケージごと）で新しい値を書き込みます。
 
 アプリのテキストは [`locales/`](locales) にある MyGo のカタログで、言語ごとに
 1 ファイル（`en.json`、`zh-Hans.json`、`ja.json`）です。`go tool mygo dev`
@@ -407,7 +415,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |
 | `internal/supabaseapi` | 本人の Supabase アカウントでサインインする Supabase Management API |
-| `internal/provision` | 本人の Leaflet プロジェクトの検索、作成、設定：マイグレーションと Edge Functions |
+| `internal/provision` | 本人の Leaflet プロジェクトの検索、作成、設定：マイグレーションと Edge Function |
 | `internal/oauth` | ブラウザでのサインインのうちこのデバイス側の部分：ループバックのリダイレクトと PKCE |
 | `internal/icloud` | iCloud Drive の Leaflet フォルダ：まるごと書き込むファイルと、iCloud へのダウンロードの依頼 |
 | `internal/keychain` | システムのキーチェーンにあるアプリのシークレット。1 回の起動で読むのは多くても 1 度 |
@@ -419,7 +427,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/theme` | 色、フォント、アイコン |
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |
 | `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開、マイグレーションの検査 |
-| `supabase` | マイグレーション（テーブル、行レベルセキュリティ、RPC、Vault）と Edge Functions |
+| `supabase` | マイグレーション（テーブル、行レベルセキュリティ、RPC、Vault）と `account` Edge Function |
 | `worker` | Cloudflare 上のサインイン用 Worker：OAuth のリダイレクトページと、クライアントシークレットを持つトークン交換 |
 | `docs` | プロトコル、ユーザーストーリー、アイコンのソース |
 | `ios` | iPhone と iPad のアプリ：SwiftUI と UIKit、その XcodeGen プロジェクトとビルドスクリプト |

@@ -1,8 +1,3 @@
-// Package mediaserver serves a device's files to the app's own web views,
-// which play them: a web view takes media from an address it can ask for
-// parts of, and plays that from a loopback server on every platform. It
-// listens on this machine alone, and what it serves goes by a token no
-// other program can guess, for as long as the app has it registered.
 package mediaserver
 
 import (
@@ -16,8 +11,6 @@ import (
 	"time"
 )
 
-// Server serves registered files. Its zero value is ready: it starts
-// listening with the first Register.
 type Server struct {
 	mu    sync.Mutex
 	addr  string
@@ -32,10 +25,6 @@ type item struct {
 	coverType         string
 }
 
-// Item is what Register serves: a file at Path, of the type Type, which
-// comes from the app and never from the file, and, for a player, its Page,
-// with the content security policy Policy, and Cover, an image of the type
-// CoverType, for its page to show the system what plays.
 type Item struct {
 	Path, Type string
 	Page       string
@@ -44,8 +33,6 @@ type Item struct {
 	CoverType  string
 }
 
-// Register serves it, and returns the address of its page, or of its file
-// where it has no page. Revoke ends it.
 func (s *Server) Register(it Item) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,8 +55,6 @@ func (s *Server) Register(it Item) (string, error) {
 	return base, nil
 }
 
-// Revoke stops serving what Register gave address for. What already reads
-// it reads on.
 func (s *Server) Revoke(address string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,7 +63,6 @@ func (s *Server) Revoke(address string) {
 	}
 }
 
-// token is the token of an address Register gave.
 func (s *Server) token(address string) (string, bool) {
 	rest, ok := strings.CutPrefix(address, "http://"+s.addr+"/")
 	if !ok {
@@ -88,7 +72,6 @@ func (s *Server) token(address string) (string, bool) {
 	return t, true
 }
 
-// listen starts the server, once. Call it with mu held.
 func (s *Server) listen() error {
 	if s.srv != nil {
 		return nil
@@ -98,13 +81,11 @@ func (s *Server) listen() error {
 		return err
 	}
 	s.addr = ln.Addr().String()
-	// No timeout on writing: a long film is read for as long as it plays.
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
 
-// Close stops the server.
 func (s *Server) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,9 +96,6 @@ func (s *Server) Close() {
 	s.items = nil
 }
 
-// ServeHTTP serves a token's page and file, to the address it listens on
-// alone: a web page elsewhere can't reach it by a name of its own that
-// leads here.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	host := s.addr
@@ -144,7 +122,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write([]byte(it.page))
 	case "media":
-		f, err := os.Open(it.path) // #nosec G304 -- a path the app registered.
+		f, err := os.Open(it.path) // #nosec G304
 		if err != nil {
 			http.NotFound(w, r)
 			return

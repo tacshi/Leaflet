@@ -4,10 +4,6 @@ import UIKit
 
 @testable import Leaflet
 
-/// LongPageTests check that the editor does on each change only what the
-/// change reaches, and that it comes out as doing it all again would: the
-/// numbers of a list, the index of the paragraphs, the folds, a change
-/// from outside and the page sent.
 @MainActor
 @Suite(.serialized)
 struct LongPageTests {
@@ -32,8 +28,6 @@ struct LongPageTests {
         return DocNode(id: id, type: type, data: d, children: children)
     }
 
-    /// numbers are the numbers the list's items show, and those they would
-    /// be given counted again from the page's start.
     private func numbers(_ c: EditorController) -> (shown: [Int?], counted: [Int?]) {
         let s = c.text.storage
         var shown: [Int?] = []
@@ -48,9 +42,6 @@ struct LongPageTests {
         return (shown, counted)
     }
 
-    /// A key typed in a long list leaves the numbers as they are, and a
-    /// new item numbers those after it again, as do an item turned into
-    /// another kind and one nested.
     @Test func aLongListKeepsItsNumbers() throws {
         var items = (0..<300).map { block("n\($0)", "numbered_list", "Item \($0)") }
         items[20].children = [block("in", "numbered_list", "Nested")]
@@ -64,28 +55,23 @@ struct LongPageTests {
         #expect(n.shown == n.counted)
         #expect(n.shown[10] == 11)
 
-        // A new item after the tenth: those after it go up by one.
         c.type("\nNew")
         n = numbers(c)
         #expect(n.shown == n.counted)
         #expect(n.shown.last == 301)
 
-        // The fifth no longer numbered: those after it count from one.
         let fifth = try #require(c.text.blocks().first { $0.info.id == "n4" })
         c.setBlock(fifth.info.with(type: "bulleted_list"), at: fifth.range.location)
         n = numbers(c)
         #expect(n.shown == n.counted)
         #expect(n.shown[5] == 1)
 
-        // An item nested in the one before it.
         let sixth = try #require(c.text.blocks().first { $0.info.id == "n5" })
         c.setBlock(sixth.info.with(depth: 1), at: sixth.range.location)
         n = numbers(c)
         #expect(n.shown == n.counted)
     }
 
-    /// The paragraphs' index, found again only where the text changed,
-    /// is the one finding them all again gives, after every kind of edit.
     @Test func theIndexFollowsEachEdit() {
         let kinds = ["paragraph", "bulleted_list", "numbered_list", "heading", "toggle_list"]
         let c = editor(
@@ -121,8 +107,6 @@ struct LongPageTests {
         }
     }
 
-    /// A key typed leaves what is folded as it was, without asking the
-    /// core again; a toggle opened is found at once.
     @Test func foldsAreFoundAgainAsWhatTheyGoByChanges() throws {
         let c = editor(
             [
@@ -144,10 +128,6 @@ struct LongPageTests {
         #expect(c.layout.folded.isEmpty)
     }
 
-    /// A change from outside to one block of a long page puts that block
-    /// in alone, and a block added goes in with the one before it: the
-    /// others keep their paragraphs, and the page sent after has the
-    /// change.
     @Test func aChangeFromOutsidePutsInOnlyWhatChanged() throws {
         var blocks = (0..<200).map { block("p\($0)", "paragraph", "Paragraph \($0)") }
         let c = editor(blocks)
@@ -165,7 +145,6 @@ struct LongPageTests {
         c.send()
         #expect(sent?.blocks == blocks)
 
-        // Typed in since, a block is sent as the text has it.
         let typed = try #require(c.text.blocks().first { $0.info.id == "p3" })
         c.textView.selectedRange = NSRange(location: NSMaxRange(typed.range), length: 0)
         c.type("!")
@@ -176,7 +155,6 @@ struct LongPageTests {
             sent == DocumentMapper.content(c.text.storage, trailing: c.text.trailing, meta: nil))
     }
 
-    /// A list of many blocks comes back from the text whole, in order.
     @Test func aWideListComesBackWhole() {
         let kids = (0..<2000).map { block("c\($0)", "paragraph", "Child \($0)") }
         let list = block("list", "bulleted_list", "List", children: kids)

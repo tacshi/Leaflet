@@ -8,13 +8,8 @@ import (
 	"leaflet/internal/store"
 )
 
-// Recordings' transcripts as agents read them.
-
-// maxTranscript bounds the transcript an agent reads of one recording.
 const maxTranscript = 40000
 
-// TranscriptText is a transcript as lines of "[m:ss] text", with a line of
-// only punctuation joined to the one before.
 func TranscriptText(segs []store.Segment) string {
 	var lines []string
 	for _, s := range segs {

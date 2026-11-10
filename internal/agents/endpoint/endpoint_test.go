@@ -2,9 +2,6 @@ package endpoint
 
 import "testing"
 
-// A key saved for an address may go to one at the same origin alone: not
-// to another server, a name that starts like it, or the same one without
-// TLS.
 func TestSameOrigin(t *testing.T) {
 	saved := "https://api.openai.com/v1"
 	for other, same := range map[string]bool{

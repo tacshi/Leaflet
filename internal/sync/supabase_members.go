@@ -12,16 +12,10 @@ import (
 	"leaflet/internal/store"
 )
 
-// LoadMembers stores who a page is shared with, as the server has them,
-// each with their role on it, which a page above it may give. A page shared
-// with the user that they can no longer see, its share withdrawn, goes
-// from this device with the pages under it (store.RemoveSharedPages).
 func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	res, err := s.be.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
 	re := (*remote.Error)(nil)
 	forbidden := errors.As(err, &re) && re.Status == http.StatusForbidden
-	// They count as loaded (pullMembers) only once they are handled: one
-	// that failed is tried again on the next pass.
 	loaded := func(err error) error {
 		if err == nil {
 			s.mu.Lock()
@@ -31,15 +25,11 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 		return err
 	}
 	if forbidden {
-		// Withdrawn, the page is handled once it is gone or keeps no
-		// roles: the pulls go on past it.
 		return loaded(s.withdrawn(ctx, pageID))
 	}
 	if err != nil {
 		return err
 	}
-	// An answer that is no list says nothing of who has the page: as none,
-	// the page would look shared with no one.
 	list, ok := res.([]any)
 	if !ok {
 		return errors.New("the server's list of a page's members could not be read")
@@ -47,7 +37,6 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	var members []store.Member
 	for _, r := range list {
 		m, _ := r.(map[string]any)
-		// A server from before invites says nothing: every share was one.
 		accepted, ok := m["accepted"].(bool)
 		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
 			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
@@ -55,10 +44,6 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	return loaded(s.st.SetMembers(pageID, members))
 }
 
-// withdrawn handles members refused for a page: one the server no longer
-// shows the user at all goes from this device; any other keeps no roles,
-// nor do the pages under it, as those kept would still let them be
-// edited here. It returns why it could not.
 func (s *Service) withdrawn(ctx context.Context, pageID string) error {
 	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.Eq("id", pageID)}})
 	if err != nil {
@@ -74,7 +59,6 @@ func (s *Service) withdrawn(ctx context.Context, pageID string) error {
 	return s.forgetMembers(pageID)
 }
 
-// forgetMembers drops the members kept of a page and of the pages under it.
 func (s *Service) forgetMembers(pageID string) error {
 	pages, err := s.st.AllPages()
 	if err != nil {
@@ -94,15 +78,8 @@ func (s *Service) forgetMembers(pageID string) error {
 	return nil
 }
 
-// membersEvery is how often pullMembers loads members it has again, so a
-// share withdrawn or changed to view only stops letting the user edit.
 const membersEvery = 10 * time.Minute
 
-// pullMembers loads the members of each tree of pages shared with the user
-// that has none here, as for a share accepted before sync loaded them, and
-// again every membersEvery: an agent outside the app (leaflet mcp) edits
-// only what they allow. A tree's top page here has them for the pages
-// inside it.
 func (s *Service) pullMembers(ctx context.Context) {
 	pages, err := s.st.AllPages()
 	if err != nil {
@@ -131,23 +108,11 @@ func (s *Service) pullMembers(ctx context.Context) {
 	}
 }
 
-// OwnMembersKey keeps when sync last read who the user's own pages are
-// shared with (pullOwnMembers). Until it has, as on a device that never
-// synced since signing in, an agent takes each of them for shared
-// (agents.sharedWithOthers), so it does not read the user's other pages
-// on one where what someone else wrote could ask it to copy them there.
 const OwnMembersKey = "sync.own_members_at"
 
-// pullOwnMembers keeps who the user's own pages are shared with current:
-// the server lists the shares they accepted of the pages the user owns,
-// and a page whose members here leave out someone it lists loads them
-// again, or takes the share's people as they are when they do not load.
-// Every membersEvery, an own page whose members here name others no share
-// of it or of a page it is inside does loads them again, so a share
-// withdrawn goes.
 func (s *Service) pullOwnMembers(ctx context.Context) error {
 	uid := s.be.UserID()
-	shared := map[string]map[string]string{} // page → user → role
+	shared := map[string]map[string]string{}
 	var from cursor
 	for {
 		filters := []string{"user_id=neq." + uid, remote.NotNull("accepted_at")}
@@ -175,7 +140,7 @@ func (s *Service) pullOwnMembers(ctx context.Context) error {
 	for id, users := range shared {
 		p, err := s.st.Page(id)
 		if err != nil || p.SpaceID != own {
-			continue // not here yet, or not the user's
+			continue
 		}
 		if s.hasMembers(id, users) {
 			continue
@@ -196,8 +161,6 @@ func (s *Service) pullOwnMembers(ctx context.Context) error {
 	if err := s.dropOwnMembers(ctx, shared); err != nil {
 		return err
 	}
-	// Kept again every membersEvery, not each pass: each write is a commit
-	// to the disk, and tells the app that key_values changed.
 	if at, ok := s.st.Value(OwnMembersKey); ok {
 		if t, err := time.Parse(time.RFC3339Nano, at); err == nil && time.Since(t) < membersEvery {
 			return nil
@@ -206,8 +169,6 @@ func (s *Service) pullOwnMembers(ctx context.Context) error {
 	return s.st.SetValue(OwnMembersKey, time.Now().UTC().Format(time.RFC3339Nano))
 }
 
-// hasMembers reports whether the members kept of a page name each of
-// users.
 func (s *Service) hasMembers(pageID string, users map[string]string) bool {
 	kept := map[string]bool{}
 	for _, m := range s.st.MembersOrNil(pageID) {
@@ -221,13 +182,8 @@ func (s *Service) hasMembers(pageID string, users map[string]string) bool {
 	return true
 }
 
-// ownSwept is the key of membersAt for the last sweep of dropOwnMembers.
 const ownSwept = "own pages"
 
-// dropOwnMembers loads again, every membersEvery, the members of the
-// user's own pages that name others while no share the server lists
-// (shared) is of the page or a page it is inside. Members that do not
-// load stay, and the page counts as shared meanwhile.
 func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[string]string) error {
 	s.mu.Lock()
 	at, swept := s.membersAt[ownSwept]
@@ -248,7 +204,6 @@ func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[stri
 		if p.SpaceID != own || !slices.ContainsFunc(tree.Members(p.ID), func(m store.Member) bool { return m.UserID != uid }) {
 			continue
 		}
-		// A share of the page or of one it is inside, by its parents.
 		under, seen := false, map[string]bool{}
 		for id := p.ID; id != "" && !seen[id] && !under; {
 			seen[id], under = true, shared[id] != nil
@@ -266,11 +221,6 @@ func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[stri
 	return nil
 }
 
-// reloadMembersUnder loads again the members kept of the pages inside a
-// tree's top page, as the app keeps them for a page opened: the nearest
-// page with the user among them says what they may do, so a share
-// changed to view only must not stay editable below the top. Members that
-// do not load are dropped, leaving it to the pages above.
 func (s *Service) reloadMembersUnder(ctx context.Context, topID string, pages []store.Page) {
 	tree, err := s.st.TreeOf(pages)
 	if err != nil {

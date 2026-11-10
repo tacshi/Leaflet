@@ -16,8 +16,6 @@ import (
 	syncsvc "leaflet/internal/sync"
 )
 
-// A file uploaded from another device downloads from Storage the first
-// time it is needed here, and stays.
 func TestFileFromAnotherDeviceDownloads(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -60,13 +58,11 @@ func TestFileFromAnotherDeviceDownloads(t *testing.T) {
 	}
 	f, _ = a.fileByID(id)
 	path := a.localFile(f, func(bool) { t.Error("downloaded twice") })
-	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" { // #nosec G304 -- the file the test just downloaded.
+	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" { // #nosec G304
 		t.Errorf("%s has %q, %v", path, data, err)
 	}
 }
 
-// A picture whose download failed shows as failed, not loading, and is
-// downloaded again once imageRetry has passed.
 func TestPictureDownloadFails(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -100,7 +96,7 @@ func TestPictureDownloadFails(t *testing.T) {
 	}
 	select {
 	case fn := <-posted:
-		fn() // the download's end, on the main thread
+		fn()
 	case <-time.After(5 * time.Second):
 		t.Fatal("the download never ended")
 	}
@@ -118,8 +114,6 @@ func TestPictureDownloadFails(t *testing.T) {
 	}
 }
 
-// Files are copied in before what adds them to a page runs on the main
-// thread, each in its turn.
 func TestAddFilesOffTheMainThread(t *testing.T) {
 	a := templatesApp(t)
 	var posted []func()
@@ -146,8 +140,6 @@ func TestAddFilesOffTheMainThread(t *testing.T) {
 	}
 }
 
-// While the app starts, before its window is there, what other goroutines
-// hand the main thread waits for the window.
 func TestUpdatesWaitForTheWindow(t *testing.T) {
 	a := templatesApp(t)
 	a.starting = true
@@ -158,8 +150,6 @@ func TestUpdatesWaitForTheWindow(t *testing.T) {
 	}
 }
 
-// A file opened again while it downloads shows once the download is done,
-// and one whose download fails says so, not loading for good.
 func TestPreviewWaitsForTheDownloadUnderway(t *testing.T) {
 	for _, fails := range []bool{false, true} {
 		st, err := store.OpenMemory(t.TempDir())

@@ -25,10 +25,6 @@ import (
 	"leaflet/locales"
 )
 
-// The app keeps the one core it was given, with its hooks: what the core
-// has under way, as the project brought up to date while sync waits for
-// it, is that core's, which another made over the same parts would not
-// know. A part a test changes has a core made over it.
 func TestTheAppKeepsOneCore(t *testing.T) {
 	a := templatesApp(t)
 	made := &core.Core{Store: a.st, Remote: a.backend, Sync: a.sync, Hub: a.hub, Rec: a.rec}
@@ -46,8 +42,6 @@ func TestTheAppKeepsOneCore(t *testing.T) {
 	}
 }
 
-// Work started in a provider dialog, a test or a save, finds nowhere to go
-// once that dialog is closed, or another one opened in its place.
 func TestProviderResultsStayWithTheirDialog(t *testing.T) {
 	a := &App{}
 	a.openForm(providerForm{open: true, name: "A"})
@@ -65,8 +59,6 @@ func TestProviderResultsStayWithTheirDialog(t *testing.T) {
 	}
 }
 
-// Models listed for one provider dialog don't land in another opened
-// since, at the same address.
 func TestModelsStayWithTheirDialog(t *testing.T) {
 	var n atomic.Int32
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -101,8 +93,6 @@ func TestModelsStayWithTheirDialog(t *testing.T) {
 	}
 }
 
-// Models listed for one address don't land in the list once the address
-// has changed, and a changed address lists its own.
 func TestModelsFollowTheAddress(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"data":[{"id":"llama"}]}`)
@@ -129,7 +119,6 @@ func TestModelsFollowTheAddress(t *testing.T) {
 		t.Errorf("the old address's models %v, fetching %v", a.form.models, a.form.fetching)
 	}
 
-	// Typing an address lists its models once it settles.
 	a.form.baseURL = ""
 	tt := ui.NewTester(func(c *ui.Context) { a.providerDialog(c) }, 900, 700)
 	tt.Frame()
@@ -143,13 +132,10 @@ func TestModelsFollowTheAddress(t *testing.T) {
 	}
 }
 
-// Switch account does nothing while a ChatGPT sign-in is under way: a
-// second would wait in the browser beside the first.
 func TestSwitchAccountWaitsForTheSignIn(t *testing.T) {
 	a := templatesApp(t)
 	a.openForm(providerForm{open: true, preset: "chatgpt", chatgpt: agents.NewChatGPT(agents.ChatGPTAccount{Email: "sam@example.com"}), signingIn: true})
 	gen := a.form.gen
-	// The app has no hub: a sign-in started would stop the test there.
 	tt := ui.NewTester(func(c *ui.Context) { a.chatgptRow(c) }, 600, 200)
 	tt.Frame()
 	if err := tt.Click(locales.SettingsSwitchAccount()); err != nil {
@@ -161,8 +147,6 @@ func TestSwitchAccountWaitsForTheSignIn(t *testing.T) {
 	}
 }
 
-// A ChatGPT sign-in under way stops as its dialog closes, or another
-// opens in its place: its page in the browser would sign in to nothing.
 func TestChatGPTSignInStopsWithItsDialog(t *testing.T) {
 	a := templatesApp(t)
 	stopped := 0
@@ -186,8 +170,6 @@ func TestChatGPTSignInStopsWithItsDialog(t *testing.T) {
 	}
 }
 
-// iCloud sync turns on or off one turn at a time: one taken while the
-// last still goes is not, so the switch and the syncing agree.
 func TestICloudSwitchWaitsForItsLastTurn(t *testing.T) {
 	a := templatesApp(t)
 	a.sync.ICloud = icloud.Folder{Root: filepath.Join(t.TempDir(), "Leaflet"), Temp: t.TempDir()}
@@ -219,7 +201,6 @@ func TestICloudSwitchWaitsForItsLastTurn(t *testing.T) {
 	}
 }
 
-// failingServer is a server that refuses everything, as one that is down.
 func failingServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -230,9 +211,9 @@ func failingServer(t *testing.T) *httptest.Server {
 	return hs
 }
 
-// A provider kept on the server is removed here only once the server has
-// deleted it, and asked about first; otherwise the dialog says why not.
-func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
+func TestRemoveProviderAsksFirst(t *testing.T) {
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest(failingServer(t).URL, a.st, "u1")
 	a.session.SignedIn = true
@@ -243,9 +224,6 @@ func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	// The answers come on the main thread, between frames: the key kept
-	// here, read as the dialog opens, the models it lists then, and the
-	// removal's.
 	posts := make(chan func(), 1)
 	a.post = func(fn func()) { posts <- fn }
 	answer := func(what string) {
@@ -262,10 +240,7 @@ func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
 		a.providerDialog(c)
 		a.removeAlert(c)
 	}, 900, 800)
-	// Its models' failure shows before Remove is clicked, not as it is,
-	// moving it from under the click.
 	answer("the key")
-	answer("the models")
 	tt.Frame()
 	if err := tt.Click(locales.CommonRemove()); err != nil {
 		t.Fatal(err)
@@ -281,16 +256,11 @@ func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
 	a.removeProvider(p.ID)
 	answer("the removal")
 	tt.Frame()
-	if _, err := a.st.Provider(p.ID); err != nil {
-		t.Error("removed here though the server kept it")
-	}
-	if !a.form.open || !strings.Contains(a.form.errorText, "down for maintenance") || !tt.HasText("down for maintenance") {
-		t.Errorf("open %v, error %q, shows %v", a.form.open, a.form.errorText, tt.Texts())
+	if _, err := a.st.Provider(p.ID); err == nil {
+		t.Errorf("still here: %q", a.form.errorText)
 	}
 }
 
-// Settings close for the sign-in page they open, which would be behind
-// them.
 func TestSignInClosesSettings(t *testing.T) {
 	a := templatesApp(t)
 	a.openSettings("account")
@@ -300,9 +270,6 @@ func TestSignInClosesSettings(t *testing.T) {
 	}
 }
 
-// The name field shows the account's name until the user types in it:
-// signing in shows the account's, and does not save the name shown before
-// over it.
 func TestNameFieldFollowsTheAccount(t *testing.T) {
 	a := templatesApp(t)
 	tt := ui.NewTester(func(c *ui.Context) { a.accountSettings(c) }, 800, 900)
@@ -320,7 +287,6 @@ func TestNameFieldFollowsTheAccount(t *testing.T) {
 		t.Errorf("field %q, account's name %q", a.account.name, a.st.Session().DisplayName)
 	}
 
-	// A name typed saves once the field is left.
 	a.account.name, a.account.nameEdited = "Sam Lee", true
 	tt.Frame()
 	if got := a.st.Session().DisplayName; got != "Sam Lee" || a.account.nameEdited {
@@ -328,7 +294,6 @@ func TestNameFieldFollowsTheAccount(t *testing.T) {
 	}
 }
 
-// Devices that could not load say so, and load again on Retry.
 func TestDevicesThatFailToLoad(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest(failingServer(t).URL, a.st, "u1")
@@ -345,7 +310,6 @@ func TestDevicesThatFailToLoad(t *testing.T) {
 	if tt.HasText(locales.SettingsDevicesLoading()) || !tt.HasText(locales.SettingsDevicesFailed(a.account.devicesErr)) {
 		t.Fatalf("devices show %v", tt.Texts())
 	}
-	// The load runs off the main thread and posts its result to it.
 	posts := make(chan func(), 1)
 	a.post = func(fn func()) { posts <- fn }
 	if err := tt.Click(locales.CommonRetry()); err != nil {
@@ -366,15 +330,12 @@ func TestDevicesThatFailToLoad(t *testing.T) {
 	}
 }
 
-// There is no default agent to pick in Settings: each page's chat picks
-// its own, and the one last picked, kept by its provider alone, is the one
-// a page not picked for yet asks, with the model set on its provider.
 func TestNoDefaultAgent(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	for _, p := range []store.Provider{
-		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true},
-		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true},
+		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"},
+		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen"},
 	} {
 		if err := a.st.PutProvider(p); err != nil {
 			t.Fatal(err)
@@ -389,8 +350,6 @@ func TestNoDefaultAgent(t *testing.T) {
 	if !tt.HasText(locales.SettingsReadOtherPages()) || !tt.HasText("Studio · qwen") {
 		t.Errorf("the providers and how agents run, in %v", tt.Texts())
 	}
-	// One picked before names a model, which the provider's own model now
-	// overrides.
 	a.settings.DefaultModel = store.ModelChoice{ProviderID: "studio", Model: "old"}.Encode()
 	o, err := a.hub.Resolve(nil)
 	if err != nil {
@@ -401,8 +360,6 @@ func TestNoDefaultAgent(t *testing.T) {
 	}
 }
 
-// Offline, agents run on a provider on this machine, even with settings
-// saved while a switch turned that off.
 func TestOfflineRunsALocalProvider(t *testing.T) {
 	a := templatesApp(t)
 	if err := a.st.SetValue("settings", `{"local_when_offline": false, "agents_read_other_pages": false}`); err != nil {
@@ -419,9 +376,8 @@ func TestOfflineRunsALocalProvider(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// A ChatGPT plan runs from this device but needs the network.
-	put(store.Provider{ID: "plan", Preset: "chatgpt", Name: "ChatGPT", AuthKind: "account", DefaultModel: "gpt-6.1-sol", IsLocal: true})
-	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
+	put(store.Provider{ID: "plan", Preset: "chatgpt", Name: "ChatGPT", AuthKind: "account", DefaultModel: "gpt-6.1-sol"})
+	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"})
 	a.reloadAll()
 	a.settings.DefaultModel = store.ModelChoice{ProviderID: "plan"}.Encode()
 	o, err := a.hub.Resolve(nil)
@@ -433,7 +389,6 @@ func TestOfflineRunsALocalProvider(t *testing.T) {
 	}
 }
 
-// A name being typed saves as Settings closes, before the field is left.
 func TestNameSavesAsSettingsCloses(t *testing.T) {
 	a := templatesApp(t)
 	a.settingsOpen = true
@@ -444,7 +399,6 @@ func TestNameSavesAsSettingsCloses(t *testing.T) {
 		a.keepName()
 	}, 800, 900)
 	tt.Frame()
-	// The field is at the right of its row.
 	r, ok := tt.Find(locales.SettingsName())
 	if !ok {
 		t.Fatal("no name row")
@@ -464,7 +418,6 @@ func TestNameSavesAsSettingsCloses(t *testing.T) {
 	}
 }
 
-// keys is a keychain in memory, for tests that keep a provider's key.
 type keys map[string][]byte
 
 func (k keys) Get(name string) ([]byte, error) {
@@ -485,25 +438,18 @@ func (k keys) Delete(name string) error {
 	return nil
 }
 
-// Signed out, a cloud provider is kept on this device with its key, and
-// saves; one kept on the server waits for the account.
 func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	keychain.Use(keys{})
-	// The package's own store comes back for the tests after this one.
 	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
 	a := templatesApp(t)
 	if a.session.SignedIn {
 		t.Fatal("the test app is signed in")
 	}
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	// The models listed as it is edited come from no server out there,
-	// and are not waited for.
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	t.Cleanup(hs.Close)
-	// What the keychain has, and how a save went, come on the main
-	// thread, between frames.
 	posted := make(chan func(), 8)
 	a.post = func(fn func()) { posted <- fn }
 	until := func(busy *bool, what string) {
@@ -537,7 +483,7 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ps) != 1 || !ps[0].IsLocal || ps[0].Preset != "deepseek" {
+	if len(ps) != 1 || ps[0].Preset != "deepseek" {
 		t.Fatalf("saved %+v", ps)
 	}
 	if a.form.open {
@@ -547,9 +493,7 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 		t.Errorf("key %q", got)
 	}
 
-	// Edited signed out, it saves again.
 	a.editProvider(&ps[0])
-	// Until its key has been read, it does not save, which would drop it.
 	tt.Frame()
 	if err := tt.Click(locales.CommonSave()); err != nil {
 		t.Fatal(err)
@@ -572,7 +516,6 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 		t.Errorf("edited to %+v, %v", p, err)
 	}
 
-	// One on the server is not saved signed out.
 	server := store.Provider{ID: "00000000-0000-0000-0000-0000000000cd", Preset: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1",
 		AuthKind: "api_key", DefaultModel: "gpt-6-astra"}
 	if err := a.st.PutProvider(server); err != nil {
@@ -585,16 +528,13 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	if err := tt.Click(locales.CommonSave()); err != nil {
 		t.Fatal(err)
 	}
+	until(&a.form.saving, "the save")
 	tt.Frame()
-	if a.form.saving || !a.form.open {
-		t.Errorf("a server's provider saved signed out: saving %v, open %v", a.form.saving, a.form.open)
+	if p, err := a.st.Provider(server.ID); err != nil || p.DefaultModel != "gpt-6-luna" || agents.LocalKey(server.ID) != "" {
+		t.Errorf("changed to %+v, %v, key %q", p, err, agents.LocalKey(server.ID))
 	}
 }
 
-// The key kept for a provider goes only to the address it was saved for:
-// typing another takes it out of the dialog, so the models listed as the
-// typing pauses, a test and a save send none there. Back at its address it
-// comes back, and a key typed goes where the dialog says.
 func TestKeptKeyStaysWithItsAddress(t *testing.T) {
 	keychain.Use(keys{})
 	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
@@ -618,7 +558,7 @@ func TestKeptKeyStaysWithItsAddress(t *testing.T) {
 	other, atOther := server()
 	posted := make(chan func(), 8)
 	a.post = func(fn func()) { posted <- fn }
-	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000ce", Preset: "custom", Name: "Mine", BaseURL: saved.URL, AuthKind: "api_key", DefaultModel: "m", IsLocal: true}
+	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000ce", Preset: "custom", Name: "Mine", BaseURL: saved.URL, AuthKind: "api_key", DefaultModel: "m"}
 	if err := a.st.PutProvider(p); err != nil {
 		t.Fatal(err)
 	}
@@ -664,8 +604,6 @@ func TestKeptKeyStaysWithItsAddress(t *testing.T) {
 		t.Errorf("another address heard %q", got)
 	default:
 	}
-	// The dialog shows it gone, so saving what it shows is no key lost
-	// unsaid.
 	if !a.providerForm().KeyTyped {
 		t.Error("the key the dialog took out counts as not seen")
 	}
@@ -694,9 +632,6 @@ func TestKeptKeyStaysWithItsAddress(t *testing.T) {
 	}
 }
 
-// Sync errors are in words for the user, as a pass hands them on: the
-// session ended, the pass ran out of time, or the server refused it; and
-// iCloud sync failing to turn on says what failed.
 func TestSyncMessages(t *testing.T) {
 	a := templatesApp(t)
 	done := make(chan struct{})
@@ -727,7 +662,6 @@ func TestSyncMessages(t *testing.T) {
 		{fmt.Errorf("push: %w", late), locales.SettingsSyncTimedOut()},
 		{fmt.Errorf("push: %w", refused), locales.SettingsSyncRefused(http.StatusForbidden, "new row violates row-level security policy")},
 	} {
-		// Each is one a pass hands on, not one of the network it waits out.
 		if c.err == nil || remote.IsNetwork(c.err) {
 			t.Fatalf("not an error a pass hands on: %v", c.err)
 		}
@@ -747,8 +681,6 @@ func TestSyncMessages(t *testing.T) {
 	}
 }
 
-// A provider removed on another device takes the default with it: the
-// app reads the default as none, as the store does.
 func TestDefaultGoesWithItsProvider(t *testing.T) {
 	a := templatesApp(t)
 	if err := a.st.PutProvider(store.Provider{ID: "p1", Preset: "openai", Name: "OpenAI", AuthKind: "api_key"}); err != nil {
@@ -765,9 +697,6 @@ func TestDefaultGoesWithItsProvider(t *testing.T) {
 	}
 }
 
-// The devices shown are the account's signed in now, as one signed out
-// elsewhere and another signed in, though there are none; and they load
-// again as the section opens.
 func TestDevicesFollowTheAccount(t *testing.T) {
 	a := templatesApp(t)
 	var rows atomic.Value
@@ -812,8 +741,6 @@ func TestDevicesFollowTheAccount(t *testing.T) {
 	}
 }
 
-// Deleting the account takes DELETE typed, then its button or Return,
-// and waits while the server deletes it.
 func TestDeleteAccountAsksForDELETE(t *testing.T) {
 	a := templatesApp(t)
 	var calls atomic.Int32
@@ -855,9 +782,6 @@ func TestDeleteAccountAsksForDELETE(t *testing.T) {
 	}
 }
 
-// A conflict whose version kept is this device's, the newer, offers the
-// other device's, and puts it back; one whose kept version is the other
-// device's offers this one's instead.
 func TestConflictOffersTheVersionNotKept(t *testing.T) {
 	a := templatesApp(t)
 	para := func(text string) *doc.Node {
@@ -895,7 +819,6 @@ func TestConflictOffersTheVersionNotKept(t *testing.T) {
 		t.Errorf("conflicts %+v", a.conflicts)
 	}
 
-	// Another conflict of the block: the one handled is not met again.
 	if err := a.st.AddConflict(p.ID, doc.Conflict{BlockID: "b1", Local: para("Mine again"), Remote: para("Theirs again"),
 		LocalEditedAt: now - 1000, RemoteEditedAt: now}); err != nil {
 		t.Fatal(err)
@@ -910,9 +833,6 @@ func TestConflictOffersTheVersionNotKept(t *testing.T) {
 	}
 }
 
-// A key typed and cleared while the kept one is still being read stays
-// cleared: the kept key read late does not fill the field, nor go to the
-// address typed meanwhile.
 func TestKeptKeyReadLateLeavesATypedKey(t *testing.T) {
 	keychain.Use(keys{})
 	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
@@ -932,7 +852,7 @@ func TestKeptKeyReadLateLeavesATypedKey(t *testing.T) {
 	posted := make(chan func(), 8)
 	a.post = func(fn func()) { posted <- fn }
 	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000cf", Preset: "custom", Name: "Mine", BaseURL: "https://saved.example/v1",
-		AuthKind: "api_key", DefaultModel: "m", IsLocal: true}
+		AuthKind: "api_key", DefaultModel: "m"}
 	if err := a.st.PutProvider(p); err != nil {
 		t.Fatal(err)
 	}
@@ -940,7 +860,6 @@ func TestKeptKeyReadLateLeavesATypedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.editProvider(&p)
-	// Typed and cleared, and another address typed, before the key comes.
 	a.form.apiKey, a.form.keyTyped, a.form.baseURL = "", true, other.URL
 	for a.form.reading {
 		select {

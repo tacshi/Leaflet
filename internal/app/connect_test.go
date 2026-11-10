@@ -25,7 +25,6 @@ func testEnv(t *testing.T) agentEnv {
 }
 
 func TestCodexEntry(t *testing.T) {
-	// As Codex's own tool writes it, among other servers.
 	own := `model = "o3"
 
 [mcp_servers.other]
@@ -57,7 +56,6 @@ model = "o4-mini"
 	if strings.Contains(got, "leaflet") || codexEntry(got) != nil {
 		t.Errorf("kept leaflet:\n%s", got)
 	}
-	// As agentSetup writes it.
 	_, snippet := agentSetup("codex", testExe, testDir)
 	if e := codexEntry(snippet); e == nil || e.Command != testExe || e.Env["LEAFLET_DATA_DIR"] != testDir {
 		t.Errorf("snippet: %+v", e)
@@ -81,18 +79,17 @@ func TestConnectCodexWithoutCLI(t *testing.T) {
 	}
 	s := agentStatus{}
 	s.entry, _ = readEntry("codex", env)
-	raw, _ := os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+	raw, _ := os.ReadFile(path) // #nosec G304
 	if !s.current(testExe, testDir) || strings.Count(string(raw), "[mcp_servers.leaflet") != 1 || !strings.HasPrefix(string(raw), "model = \"o3\"\n\n[mcp_servers.leaflet]") {
 		t.Errorf("connected:\n%s", raw)
 	}
-	// Windows has no such permissions.
 	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", fi.Mode().Perm())
 	}
 	if err := disconnectAgent("codex", "", env); err != nil {
 		t.Fatal(err)
 	}
-	if raw, _ := os.ReadFile(path); string(raw) != "model = \"o3\"\n" { // #nosec G304 -- a file in the test's own temporary folder.
+	if raw, _ := os.ReadFile(path); string(raw) != "model = \"o3\"\n" { // #nosec G304
 		t.Errorf("disconnected:\n%q", raw)
 	}
 }
@@ -114,7 +111,7 @@ func TestConnectClaudeDesktop(t *testing.T) {
 		GlobalShortcut string                     `json:"globalShortcut"`
 		MCPServers     map[string]json.RawMessage `json:"mcpServers"`
 	}
-	raw, _ := os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+	raw, _ := os.ReadFile(path) // #nosec G304
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +125,6 @@ func TestConnectClaudeDesktop(t *testing.T) {
 	if e, _ := readEntry("claude-desktop", env); e != nil {
 		t.Errorf("still there: %+v", e)
 	}
-	// A file that is not JSON is left alone.
 	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +200,6 @@ func TestClientOf(t *testing.T) {
 
 func TestFindCLI(t *testing.T) {
 	env := testEnv(t)
-	// The tools as each system names them.
 	tool, onPath := filepath.Join("claude.app", "Contents", "MacOS", "claude"), "claude"
 	if runtime.GOOS == "windows" {
 		tool, onPath = "claude.exe", "claude.cmd"
@@ -214,7 +209,7 @@ func TestFindCLI(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, nil, 0o700); err != nil { // #nosec G306 -- a stand-in for an app's tool, which must run.
+		if err := os.WriteFile(p, nil, 0o700); err != nil { // #nosec G306
 			t.Fatal(err)
 		}
 	}
@@ -226,7 +221,7 @@ func TestFindCLI(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, onPath), nil, 0o700); err != nil { // #nosec G306 -- a stand-in for an app's tool, which must run.
+	if err := os.WriteFile(filepath.Join(bin, onPath), nil, 0o700); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	if got := findCLI("claude", env); got != filepath.Join(bin, onPath) {
@@ -243,7 +238,6 @@ func TestHasAppOnWindows(t *testing.T) {
 	if hasApp(codex, env.home) || hasApp(cursor, env.home) {
 		t.Fatal("found apps in an empty home")
 	}
-	// The Microsoft Store's Codex, and Cursor's installer's.
 	for _, d := range []string{`Packages\OpenAI.Codex_2p2nqsd0c76g0`, `Programs\cursor`} {
 		if err := os.MkdirAll(filepath.Join(env.home, "AppData", "Local", d), 0o700); err != nil {
 			t.Fatal(err)
@@ -266,9 +260,7 @@ func TestAgentOrder(t *testing.T) {
 
 func TestConnectOpenCodeWithoutCLI(t *testing.T) {
 	for name, before := range map[string]string{
-		// Its second version's settings, as `opencode mcp add` writes them.
-		"v2": `{"$schema": "https://opencode.ai/config.json", "mcp": {"servers": {"rea": {"type": "local", "command": ["npx", "rea"]}}}}`,
-		// Its first's, with servers right under mcp.
+		"v2":   `{"$schema": "https://opencode.ai/config.json", "mcp": {"servers": {"rea": {"type": "local", "command": ["npx", "rea"]}}}}`,
 		"v1":   `{"mcp": {"rea": {"type": "local", "command": ["npx", "rea"], "enabled": true}}}`,
 		"none": ``,
 	} {
@@ -284,7 +276,7 @@ func TestConnectOpenCodeWithoutCLI(t *testing.T) {
 		if err := connectAgent("opencode", "", env, testExe, testDir); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		raw, _ := os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		raw, _ := os.ReadFile(path) // #nosec G304
 		keys := []string{"mcp", "servers"}
 		if name == "v1" {
 			keys = []string{"mcp"}
@@ -305,7 +297,7 @@ func TestConnectOpenCodeWithoutCLI(t *testing.T) {
 		if err := disconnectAgent("opencode", "", env); err != nil {
 			t.Fatal(err)
 		}
-		raw, _ = os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		raw, _ = os.ReadFile(path) // #nosec G304
 		if got, _ := readEntry("opencode", env); got != nil || (name != "none" && !strings.Contains(string(raw), `"rea"`)) {
 			t.Errorf("%s: disconnected:\n%s", name, raw)
 		}
@@ -365,21 +357,20 @@ func TestEditServersKeepsTheFile(t *testing.T) {
 		if err := editServers(path, c.keys, map[string]string{"command": "/x"}); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		got, _ := os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		got, _ := os.ReadFile(path) // #nosec G304
 		if string(got) != c.want {
 			t.Errorf("%s: set:\n%s\nwant\n%s", c.name, got, c.want)
 		}
-		// Set again: replaced where it is.
 		if err := editServers(path, c.keys, map[string]string{"command": "/x"}); err != nil {
 			t.Fatal(err)
 		}
-		if again, _ := os.ReadFile(path); string(again) != c.want { // #nosec G304 -- a file in the test's own temporary folder.
+		if again, _ := os.ReadFile(path); string(again) != c.want { // #nosec G304
 			t.Errorf("%s: set again:\n%s", c.name, again)
 		}
 		if err := editServers(path, c.keys, nil); err != nil {
 			t.Fatal(err)
 		}
-		got, _ = os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		got, _ = os.ReadFile(path) // #nosec G304
 		if servers, err := nested(got, c.keys); err != nil || servers["leaflet"] != nil {
 			t.Errorf("%s: removed: %v\n%s", c.name, err, got)
 		}
@@ -406,9 +397,6 @@ func TestChatGPTSharesCodex(t *testing.T) {
 	}
 }
 
-// Codex's settings spell a server's tables in many ways TOML takes as
-// one; Leaflet must see, replace and remove each, and never break the
-// file.
 func TestCodexSpellings(t *testing.T) {
 	for name, text := range map[string]string{
 		"quoted":    "[mcp_servers.\"leaflet\"]\ncommand = \"/old\"\nargs = [\"mcp\"]\n\n[mcp_servers.\"leaflet\".env]\nLEAFLET_DATA_DIR = \"/old\"\n",
@@ -434,7 +422,7 @@ func TestCodexSpellings(t *testing.T) {
 			t.Errorf("%s: connect: %v", name, err)
 			continue
 		}
-		raw, _ := os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		raw, _ := os.ReadFile(path) // #nosec G304
 		if got := codexEntry(string(raw)); !(agentStatus{entry: got}).current(testExe, testDir) {
 			t.Errorf("%s: connected to %+v:\n%s", name, got, raw)
 		}
@@ -446,15 +434,13 @@ func TestCodexSpellings(t *testing.T) {
 		if err := disconnectAgent("codex", "", env); err != nil {
 			t.Fatalf("%s: disconnect: %v", name, err)
 		}
-		raw, _ = os.ReadFile(path) // #nosec G304 -- a file in the test's own temporary folder.
+		raw, _ = os.ReadFile(path) // #nosec G304
 		if codexEntry(string(raw)) != nil || !strings.Contains(string(raw), "is text, not a table") {
 			t.Errorf("%s: disconnected:\n%s", name, raw)
 		}
 	}
 }
 
-// An entry that would not start Leaflet's server is not current, so the
-// row offers Update, which writes it whole again.
 func TestBrokenEntryIsNotCurrent(t *testing.T) {
 	for name, text := range map[string]string{
 		"no mcp":   "[mcp_servers.leaflet]\ncommand = \"" + testExe + "\"\nenv = { LEAFLET_DATA_DIR = \"" + testDir + "\" }\n",
@@ -498,14 +484,13 @@ func TestBrokenEntryIsNotCurrent(t *testing.T) {
 	}
 }
 
-// Settings kept elsewhere through a link stay linked when they change.
 func TestWriteAtomicFollowsLinks(t *testing.T) {
 	dir := t.TempDir()
 	real, link := filepath.Join(dir, "dotfiles", "config.toml"), filepath.Join(dir, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(real), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(real, []byte("old"), 0o640); err != nil { // #nosec G306 -- a mode the write must keep.
+	if err := os.WriteFile(real, []byte("old"), 0o640); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join("dotfiles", "config.toml"), link); err != nil {
@@ -521,15 +506,12 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 		t.Fatalf("the link is gone: %v", err)
 	}
 	fi, err := os.Stat(real)
-	b, _ := os.ReadFile(real) // #nosec G304 -- a file in the test's own temporary folder.
-	// Windows has no such permissions.
+	b, _ := os.ReadFile(real) // #nosec G304
 	if err != nil || string(b) != "new" || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o640 {
 		t.Errorf("linked file %q, mode %v", b, fi.Mode())
 	}
 }
 
-// Claude Code's tool adds no server it has, so Update removes the old one
-// first; when adding the new one fails, the old one comes back as it was.
 func TestConnectClaudeCodeKeepsTheOldEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake tool is a shell script")
@@ -546,16 +528,15 @@ func TestConnectClaudeCodeKeepsTheOldEntry(t *testing.T) {
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls")
 	cli := filepath.Join(dir, "claude")
-	// It logs each call, and fails to add.
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\n[ \"$2\" = add ] && { echo 'add failed' >&2; exit 1; }\nexit 0\n"
-	if err := os.WriteFile(cli, []byte(script), 0o700); err != nil { // #nosec G306 -- the test's own fake tool, which must run.
+	if err := os.WriteFile(cli, []byte(script), 0o700); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	err := connectAgent("claude", cli, env, testExe, testDir)
 	if err == nil || !strings.Contains(err.Error(), "add failed") {
 		t.Errorf("error %v", err)
 	}
-	raw, _ := os.ReadFile(calls) // #nosec G304 -- a file in the test's own temporary folder.
+	raw, _ := os.ReadFile(calls) // #nosec G304
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	if len(lines) != 3 || !strings.HasPrefix(lines[0], "mcp remove") || !strings.HasPrefix(lines[1], "mcp add ") ||
 		lines[2] != "mcp add-json -s user leaflet "+old {
@@ -563,9 +544,6 @@ func TestConnectClaudeCodeKeepsTheOldEntry(t *testing.T) {
 	}
 }
 
-// The login shell's PATH comes though its startup files leave a job in
-// the background holding its output, and a shell that never answers is
-// given up on.
 func TestShellPathDoesNotWaitForever(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake shells are shell scripts")
@@ -573,7 +551,7 @@ func TestShellPathDoesNotWaitForever(t *testing.T) {
 	dir := t.TempDir()
 	shell := func(name, script string) string {
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil { // #nosec G306 -- the test's own fake shell, which must run.
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil { // #nosec G306
 			t.Fatal(err)
 		}
 		return path

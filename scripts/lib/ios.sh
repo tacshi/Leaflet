@@ -1,12 +1,4 @@
-# Shared by the iOS app's scripts, install-ios.sh and publish_testflight.sh;
-# source it. Its functions use the log and die the script defines.
 
-# The iOS app is signed by the team TEAM names: DEVELOPMENT_TEAM, or the
-# team of the Developer ID the desktop's release builds sign with
-# (scripts/lib/release.sh), "Developer ID Application: Name (TEAMID)":
-# DEVELOPER_ID_APPLICATION, or the keychain's one Developer ID identity.
-# Without either, the team Local.xcconfig, which git ignores, sets for this
-# Mac, which leaves TEAM empty.
 TEAM=""
 check_team() {
   local identity="${DEVELOPER_ID_APPLICATION:-}" found

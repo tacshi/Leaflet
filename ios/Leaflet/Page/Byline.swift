@@ -1,24 +1,17 @@
 import LeafletCore
 import SwiftUI
 
-/// Byline is the line under a page's title, as the desktop's: who created
-/// it, when it was edited or that it is saving, whether it is shared, with
-/// the user or with how many, its tags, and a button to change them.
 struct Byline: View {
     let page: PageRow
-    /// saving says the page's edits wait to be saved.
     var saving = false
-    /// sharedWith counts who the page is shared with.
     var sharedWith = 0
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var editingTags = false
 
     var body: some View {
-        // The time ("just now", "5 minutes ago") moves on as the page stays open.
         TimelineView(.everyMinute) { context in
             FlowRow {
-                // The page keeps who created it, not who edited it last.
                 Text(L.pageBylineCreated(name: creator))
                 dot
                 Text(
@@ -61,8 +54,6 @@ struct Byline: View {
 
     private var dot: some View { Text("·").foregroundStyle(palette.chartMuted) }
 
-    /// creator is who the byline names: the user, for their own pages, as
-    /// the desktop names them.
     private var creator: String {
         let me = app.status
         if page.createdBy == nil || page.createdBy == me?.userID, let name = me?.displayName,
@@ -75,22 +66,14 @@ struct Byline: View {
 
     private var shared: Bool { !app.library.own(page) }
 
-    /// humanTime says when, as the core says it for the desktop too
-    /// (MobileWhen): just now, minutes ago, today or yesterday at a time,
-    /// or the date; nothing for no time.
     static func humanTime(_ t: Date, now: Date = .now) -> String {
         func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
         return MobileWhen(L.language, ms(t), ms(now))
     }
 }
 
-/// FlowRow lays its views out in a row that wraps, as the desktop's byline
-/// does when it is long.
 struct FlowRow: Layout {
     var spacing: CGFloat = 6
-    /// slack is how far past its width a line may run before it wraps:
-    /// the width it is placed in is rounded to the screen's pixels, and a
-    /// line that just fit when measured would wrap by a fraction of one.
     private static let slack: CGFloat = 1
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -110,9 +93,6 @@ struct FlowRow: Layout {
             line = max(line, s.height)
             widest = max(widest, x - spacing)
         }
-        // The width offered, when there is one: what it holds may grow (a
-        // byline's "just now" becoming "1 minute ago") without its host
-        // measuring it again, and it then wraps in the width it had.
         return CGSize(width: width.isFinite ? width : widest, height: y + line)
     }
 
@@ -136,10 +116,6 @@ struct FlowRow: Layout {
     }
 }
 
-/// TagEditor changes a page's tags, as the desktop's token field does: each
-/// tag a chip to remove, a field to add one by typing it and Return, and
-/// the user's other tags offered to add with a tap. Each change is saved as
-/// it is made.
 struct TagEditor: View {
     let page: PageRow
     @Environment(AppModel.self) private var app
@@ -201,21 +177,15 @@ struct TagEditor: View {
             tags = page.tags
             typing = true
         }
-        // A tag typed and not yet added goes on as the editor closes:
-        // closing it is no reason to lose it.
         .onDisappear(perform: addDraft)
     }
 
-    /// addDraft adds what is typed; tags typed or pasted with commas
-    /// between them go in each on its own.
     private func addDraft() {
         let parts = draft.split(separator: ",")
         draft = ""
         for part in parts { add(String(part)) }
     }
 
-    /// suggestions are the user's other tags, those starting with what is
-    /// typed first, then those containing it.
     private var suggestions: [String] {
         let have = Set(tags.map { $0.lowercased() })
         let q = draft.trimmingCharacters(in: .whitespaces).lowercased()
@@ -226,8 +196,6 @@ struct TagEditor: View {
     }
 
     private func add(_ text: String) {
-        // As the core keeps tags: without a leading "#", spaces closed up,
-        // once whatever their case.
         let tag = text.trimmingCharacters(in: .whitespaces)
             .drop { $0 == "#" }
             .split(separator: " ").joined(separator: " ")
@@ -238,8 +206,6 @@ struct TagEditor: View {
         save(tags + [tag])
     }
 
-    /// save keeps the tags as next has them; failing, they go back to
-    /// what they were, and a toast says why.
     private func save(_ next: [String]) {
         let before = tags
         tags = next

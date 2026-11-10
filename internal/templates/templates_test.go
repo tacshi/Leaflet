@@ -38,7 +38,6 @@ func template(t *testing.T, st *store.Store, o store.NewPageOptions) store.Page 
 	return p
 }
 
-// choices reads the choices as the apps do.
 func choices(t *testing.T, st *store.Store) ([]Choice, []store.Page) {
 	t.Helper()
 	all, err := st.Templates()
@@ -56,9 +55,6 @@ func keys(choices []Choice) []string {
 	return out
 }
 
-// The user's templates come first, by title, without their subpages; then
-// the starters, but those deleted here and those the user has a template
-// of the same title for.
 func TestChoices(t *testing.T) {
 	st := openStore(t)
 	zine := template(t, st, store.NewPageOptions{Title: "zine"})
@@ -76,7 +72,6 @@ func TestChoices(t *testing.T) {
 		t.Errorf("journal %+v", c)
 	}
 
-	// Brought back, the starter is a choice again.
 	if err := SetStarterDeleted(st, "todo", false); err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +81,6 @@ func TestChoices(t *testing.T) {
 	}
 }
 
-// A starter made the user's own is a template of its blocks in its place,
-// and stays gone once that template is deleted.
 func TestOwn(t *testing.T) {
 	st := openStore(t)
 	all, _ := choices(t, st)
@@ -115,8 +108,6 @@ func TestOwn(t *testing.T) {
 	}
 }
 
-// A template's hint is its first line of text; with none, how many
-// subpages it has; with neither, that it is empty.
 func TestHint(t *testing.T) {
 	st := openStore(t)
 	prd := template(t, st, store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{paragraph(""), paragraph("Problem"), paragraph("Goals")})})
@@ -141,8 +132,6 @@ func TestHint(t *testing.T) {
 	}
 }
 
-// The / menu offers every template but the page's own, which doesn't go
-// into itself.
 func TestItems(t *testing.T) {
 	st := openStore(t)
 	kit := template(t, st, store.NewPageOptions{Title: "Kit"})
@@ -159,9 +148,6 @@ func TestItems(t *testing.T) {
 	}
 }
 
-// New pages start from the template their parent page or their folder
-// names, while the user has it; setting one makes a starter the user's
-// own first, and says so.
 func TestDefault(t *testing.T) {
 	st := openStore(t)
 	parent, _ := st.CreatePage(store.NewPageOptions{Title: "Diary"})
@@ -199,7 +185,6 @@ func TestDefault(t *testing.T) {
 		t.Error("a default once cleared")
 	}
 
-	// A template deleted leaves new pages blank.
 	if _, err := st.DeletePage(got.Page.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -209,8 +194,6 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-// A starter gives its blocks; the user's template a copy of its own, with
-// copies of its subpages under the page.
 func TestBlocks(t *testing.T) {
 	st := openStore(t)
 	kit := template(t, st, store.NewPageOptions{Title: "Kit", Content: doc.FromBlocks([]*doc.Node{paragraph("Checklist")})})
@@ -232,8 +215,6 @@ func TestBlocks(t *testing.T) {
 	}
 }
 
-// An untitled page takes the template's name; one with a title keeps it,
-// as a page does from a template of no name.
 func TestRetitles(t *testing.T) {
 	named := Choice{Page: &store.Page{Title: "PRD"}}
 	if !named.Retitles(" ") || named.Retitles("Mine") {

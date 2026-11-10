@@ -1,11 +1,5 @@
 import Foundation
 
-// The values the core gives the app and takes from it, as JSON. They
-// mirror the types of the mobile package, and docs/protocol.md §1 for a
-// page's content; keys are spelled out, since a block's data keys must
-// stay as they are.
-
-/// PageRow is a page as the library lists it.
 struct PageRow: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var spaceID: String
@@ -19,9 +13,7 @@ struct PageRow: Codable, Hashable, Identifiable, Sendable {
     var template: Bool
     var tags: [String]
     var canEdit: Bool
-    /// createdBy is the user who made the page, or nil.
     var createdBy: String?
-    /// defaultTemplateID is the template pages made under it start from.
     var defaultTemplateID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -40,13 +32,11 @@ struct PageRow: Codable, Hashable, Identifiable, Sendable {
     var updated: Date { Date(timeIntervalSince1970: TimeInterval(updatedAt) / 1000) }
 }
 
-/// FolderRow is a folder as the library lists it.
 struct FolderRow: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var parentID: String?
     var name: String
     var sortKey: String
-    /// defaultTemplateID is the template pages made in it start from.
     var defaultTemplateID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -57,8 +47,6 @@ struct FolderRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// FileRow is a file of the sidebar, uploaded to a folder, or at the top
-/// level with none.
 struct FileRow: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var folderID: String?
@@ -71,15 +59,11 @@ struct FileRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// TemplateRow is a template to start a page from: the user's own, or one
-/// that comes with Leaflet, named by its key.
 struct TemplateRow: Codable, Hashable, Identifiable, Sendable {
     var key: String
     var title: String
     var hint: String
-    /// icon is a Lucide icon's name, as the desktop shows it.
     var icon: String
-    /// pageID is the template's page, for the user's own.
     var pageID: String?
 
     var id: String { key }
@@ -89,28 +73,21 @@ struct TemplateRow: Codable, Hashable, Identifiable, Sendable {
         case pageID = "page_id"
     }
 
-    /// symbol is the SF Symbol for the template's icon.
     var symbol: String { Lucide.symbol(icon) }
 }
 
-/// PageVersion is a kept version of a page, newest first.
 struct PageVersion: Codable, Hashable, Identifiable, Sendable {
     var id: String
-    /// when and label say when it was kept, and its name or why.
     var when: String
     var label: String
     var markdown: String
 }
 
-/// ExportedPage is a page as Markdown, and the file name to save it as.
 struct ExportedPage: Codable, Sendable {
     var name: String
     var markdown: String
 }
 
-/// ExportedPDF is a page to print as a PDF: the file of its web page, as
-/// the desktop prints it, the file name to save it as, and the paper's
-/// size in inches.
 struct ExportedPDF: Codable, Sendable {
     var name: String
     var path: String
@@ -118,9 +95,6 @@ struct ExportedPDF: Codable, Sendable {
     var height: Double
 }
 
-/// Conflict is a block two devices changed at once, as sync merged it:
-/// kept is the start of its text as kept, other the side's that was not,
-/// or deleted names the side that deleted it, "here" or "there".
 struct Conflict: Codable, Hashable, Sendable, Identifiable {
     var id: String
     var pageID: String
@@ -128,8 +102,6 @@ struct Conflict: Codable, Hashable, Sendable, Identifiable {
     var kept: String
     var other: String
     var deleted: String?
-    /// keptHere says the version kept is this device's: the other device's
-    /// is the one to put back.
     var keptHere: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -139,9 +111,6 @@ struct Conflict: Codable, Hashable, Sendable, Identifiable {
         case keptHere = "kept_here"
     }
 
-    /// Resolution is how a conflict is settled: as merged, with this
-    /// device's version or the other device's put back, or with the block
-    /// deleted again.
     enum Resolution: String, Sendable {
         case keep
         case thisDevice = "this_device"
@@ -150,7 +119,6 @@ struct Conflict: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// Member is someone a page is shared with.
 struct Member: Codable, Hashable, Sendable {
     var userID: String
     var displayName: String
@@ -165,25 +133,18 @@ struct Member: Codable, Hashable, Sendable {
     }
 }
 
-/// TagRow is a tag, how many pages have it, and their IDs, by title.
 struct TagRow: Codable, Hashable, Sendable {
     var tag: String
     var count: Int
     var pages: [String] = []
 }
 
-/// LibrarySnapshot is what the sidebar shows: pages, templates among them,
-/// the folders of the user's space in order, and tags, as the core
-/// arranges them for the desktop's sidebar too. Pages of another space are
-/// shared with the user.
 struct LibrarySnapshot: Decodable, Sendable {
     let spaceID: String
     let pages: [PageRow]
     let folders: [FolderRow]
     let tags: [TagRow]
     let files: [FileRow]
-    /// tree is the library as the sidebar arranges it, its pages looked up
-    /// once as it is read.
     let tree: LibraryTree
 
     enum CodingKeys: String, CodingKey {
@@ -192,9 +153,6 @@ struct LibrarySnapshot: Decodable, Sendable {
         case inFolder = "in_folder"
     }
 
-    /// The tree comes as the IDs of the pages: the user's at the top level
-    /// in no folder, those of each folder, those under each page, and those
-    /// shared with the user whose parent the user has not, each in order.
     init(
         spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow],
         files: [FileRow] = [], top: [String] = [], inFolder: [String: [String]] = [:],
@@ -227,18 +185,13 @@ struct LibrarySnapshot: Decodable, Sendable {
     static let empty = LibrarySnapshot(spaceID: "", pages: [], folders: [], tags: [])
 }
 
-/// NewPage is a page to create.
 struct NewPage: Codable, Sendable {
     var parentID: String = ""
     var folderID: String = ""
     var afterID: String = ""
     var title: String = ""
     var tags: [String] = []
-    /// link puts a card for the page at the end of its parent, as a
-    /// subpage made from the library gets.
     var link = false
-    /// start fills the page from the template its parent or folder names
-    /// for new pages.
     var start = false
 
     enum CodingKeys: String, CodingKey {
@@ -249,7 +202,6 @@ struct NewPage: Codable, Sendable {
     }
 }
 
-/// SearchHit is one search result.
 struct SearchHit: Codable, Hashable, Sendable {
     var kind: String
     var title: String
@@ -264,7 +216,6 @@ struct SearchHit: Codable, Hashable, Sendable {
     }
 }
 
-/// Todo is an open to-do of a page, with a due date or an owner.
 struct Todo: Codable, Hashable, Sendable {
     var pageID: String
     var pageTitle: String
@@ -286,11 +237,7 @@ struct Todo: Codable, Hashable, Sendable {
     }
 }
 
-/// TodoGroup is a section of the To-dos tab, as the core sorts them, as
-/// the desktop's: its to-dos, each by date.
 struct TodoGroup: Codable, Hashable, Sendable {
-    /// section is "overdue", "today", "upcoming" or "no_date"; title its
-    /// name.
     var section: String
     var title: String
     var todos: [Todo]
@@ -298,7 +245,6 @@ struct TodoGroup: Codable, Hashable, Sendable {
     var overdue: Bool { section == "overdue" }
 }
 
-/// CoreStatus is who uses the app and how sync stands.
 struct CoreStatus: Codable, Sendable {
     var userID: String
     var displayName: String
@@ -320,11 +266,8 @@ struct CoreStatus: Codable, Sendable {
     }
 }
 
-/// OpenedPage is a page open for the editor.
 struct OpenedPage: Codable, Sendable {
     var id: String
-    /// editor is the number the core gave the editor that opened it, for
-    /// its edits and its closing to name it.
     var editor: Int64
     var content: DocContent
     var rev: Int64
@@ -337,14 +280,11 @@ struct OpenedPage: Codable, Sendable {
     }
 }
 
-/// DocContent is a page's content: the tree of blocks, and the meta that
-/// merges it per block (docs/protocol.md §1).
 struct DocContent: Codable, Hashable, Sendable {
     var document: DocNode
     var meta: JSONValue?
 }
 
-/// DocNode is one block: a type, its data, and the blocks nested in it.
 struct DocNode: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var type: String

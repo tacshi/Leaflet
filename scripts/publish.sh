@@ -80,7 +80,6 @@ for arg in "$@"; do
 done
 [[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch] [--allow-partial] [--allow-unsigned]"
 check_version "$VERSION"
-# Both, unless one is asked for.
 if ! $MAC && ! $WIN; then
 	MAC=true
 	WIN=true
@@ -98,7 +97,6 @@ if $WIN; then PLATFORM_ARGS+=(--win); fi
 TAG="v$VERSION"
 REPO="$(config_value updates.github)"
 STAGE_DIR="$ROOT_DIR/build/release"
-# A dry run drafts its notes in a folder of its own, not in build/release.
 if $DRY_RUN; then
 	WORK_DIR="$(mktemp -d)"
 	trap 'rm -rf "$WORK_DIR"' EXIT
@@ -107,15 +105,12 @@ else
 fi
 
 PROBLEMS=0
-# problem stops a run; a dry run reports it and goes on, to find them all.
 problem() {
 	$DRY_RUN || die "$*"
 	printf 'problem: %s\n' "$*" >&2
 	PROBLEMS=$((PROBLEMS + 1))
 }
 
-# check runs a check of lib/release.sh, which dies when it fails, and has
-# its failure be a problem.
 check() {
 	if ! $DRY_RUN; then
 		"$@" >/dev/null
@@ -125,7 +120,6 @@ check() {
 	err="$({ "$@" >/dev/null; } 2>&1)" || problem "${err#"$(basename "$0"): "}"
 }
 
-# run runs a step of the release, which a dry run only shows.
 run() {
 	if $DRY_RUN; then
 		local arg
@@ -137,8 +131,6 @@ run() {
 	fi
 }
 
-# check_manifests stops a release without the update manifest of every
-# platform, $1 naming what it will hold, a line each.
 check_manifests() {
 	local missing
 	missing="$(missing_manifests "$1" | paste -sd ' ' - | sed 's/ /, /g')"
@@ -150,15 +142,11 @@ check_manifests() {
 	fi
 }
 
-# ------------------------------------------------------------------- checks
-
 BRANCH="$(git branch --show-current)"
-# The commit the release is built from, and tagged.
 COMMIT="$(git rev-parse HEAD)"
 SHORT="$(git rev-parse --short HEAD)"
 info "Leaflet $VERSION for ${PLATFORM_ARGS[*]#--} from ${BRANCH:-a detached HEAD} at $SHORT, as $TAG of $REPO"
 
-# What the build needs, checked before the notes are reviewed.
 if $MAC; then
 	check check_speech
 	check signing_identity
@@ -205,7 +193,6 @@ if ! $NO_UPLOAD; then
 			fi
 		fi
 	fi
-	# The release is marked the latest, which an older version must not be.
 	LATEST=""
 	while read -r tag; do
 		if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && { [[ -z "$LATEST" ]] || version_after "${tag#v}" "${LATEST#v}"; }; then
@@ -222,11 +209,6 @@ if ! $NO_UPLOAD; then
 	check check_draft_commit "$VERSION" "$COMMIT"
 fi
 
-# ------------------------------------------------------------------- notes
-
-# These notes are PUBLISHED, to the release page of a public repository, and
-# shown by the update prompt of every installed copy, so drafts from commit
-# subjects are always reviewed before an upload.
 NOTES_FILE="$WORK_DIR/notes.md"
 $DRY_RUN || rm -rf "$STAGE_DIR"
 mkdir -p "$WORK_DIR"
@@ -249,7 +231,6 @@ else
 		LOG_ARGS=("$PREV_TAG..HEAD")
 		info "notes:    drafted from $PREV_TAG..HEAD (CHANGELOG.md has no $VERSION section)"
 	else
-		# The first release: capped, so the whole history doesn't become notes.
 		LOG_ARGS=(-n 30 HEAD)
 		info "notes:    drafted from the last 30 commits (no previous tag, and CHANGELOG.md has no $VERSION section)"
 	fi
@@ -278,13 +259,8 @@ $KEEP_DRAFT" ;;
 		done
 	fi
 fi
-# MyGo fails a build whose changelog has no notes for its version.
 has_notes || problem "the notes for $VERSION are empty; write them in CHANGELOG.md under \"## $VERSION\""
 
-# ------------------------------------------------------------------- build
-
-# MyGo, and build-release.sh's draft release, take the "## <version>"
-# section of a changelog as the notes.
 printf '## %s\n\n%s\n' "$VERSION" "$(cat "$NOTES_FILE")" >"$WORK_DIR/CHANGELOG.md"
 BUILD_ARGS=("$VERSION" "${PLATFORM_ARGS[@]}" -o "$STAGE_DIR/out" --changelog "$STAGE_DIR/CHANGELOG.md")
 $NO_UPLOAD || BUILD_ARGS+=(--upload)
@@ -293,18 +269,11 @@ if $ALLOW_UNSIGNED; then BUILD_ARGS+=(--allow-unsigned); fi
 $DRY_RUN || info "building Leaflet $VERSION at $SHORT"
 run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"
 
-# ------------------------------------------------------------------- publish
-
-# The assets are on the draft before the release is published, so installed
-# copies never read a manifest whose archive is missing.
 if ! $NO_UPLOAD; then
-	# The build took minutes: what it built must still be what is checked
-	# out, or the tag would name another commit than the one built.
 	if ! $DRY_RUN && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
 		die "the checkout changed while Leaflet $VERSION was built from $SHORT, so which commit the draft release $TAG holds a build of is not known; delete the draft and run again"
 	fi
 	if $DRY_RUN; then
-		# What a draft from an earlier run has, and what this one would add.
 		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null || true)"
 		if $MAC; then ASSETS+=$'\n'"$(update_manifests | grep darwin)"; fi
 		if $WIN; then ASSETS+=$'\n'"$(update_manifests | grep windows)"; fi

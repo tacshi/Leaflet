@@ -21,41 +21,26 @@ import (
 	"leaflet/supabase"
 )
 
-// fakeProject is a Management API with projects whose migrations and
-// secrets the test sets, recording what Setup does.
 type fakeProject struct {
-	mu       sync.Mutex
-	applied  map[string][]supabaseapi.Migration
-	secrets  []supabaseapi.Secret
-	queries  []string
-	deployed []string
-	status   []string
-	created  string
-	restored []string
-	members  string
-	// broken is a project whose migrations can't be listed.
-	broken string
-	// refused refuses every query.
-	refused bool
-	// meanwhile are the versions another device applies while this one
-	// waits for its lock.
-	meanwhile []string
-	// signUps are the project's Auth settings, and signUpPatches how
-	// often they were changed; authRefused refuses both, as a sign-in
-	// without the Auth scope is, and authDown fails them, as the API
-	// failing for now does.
+	mu            sync.Mutex
+	applied       map[string][]supabaseapi.Migration
+	secrets       []supabaseapi.Secret
+	queries       []string
+	deployed      []string
+	status        []string
+	created       string
+	restored      []string
+	members       string
+	broken        string
+	refused       bool
+	meanwhile     []string
 	signUps       supabaseapi.SignUps
 	signUpPatches int
 	authRefused   bool
 	authDown      bool
-	// realtimeWaits is a project whose Realtime has not made its messages
-	// yet, and heard how often Setup had the policy for them made.
 	realtimeWaits bool
 	heard         int
-	// deployDown fails every deploy; retiredAfter is how many functions
-	// were deployed each time Setup dropped what older ones called.
-	deployDown   bool
-	retiredAfter []int
+	deployDown    bool
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -121,15 +106,9 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				w.WriteHeader(http.StatusCreated)
 				return
 			}
-			if body.Query == retired {
-				f.retiredAfter = append(f.retiredAfter, len(f.deployed))
-				w.WriteHeader(http.StatusCreated)
-				return
-			}
 			f.queries = append(f.queries, body.Query)
 			for _, v := range f.meanwhile {
 				if strings.Contains(body.Query, "where version = '"+v+"') then raise exception") {
-					// As Postgres answers the check that raises.
 					http.Error(w, `{"message":"Failed to run sql query: ERROR:  P0001: leaflet_migration_applied\n"}`, http.StatusBadRequest)
 					return
 				}
@@ -142,7 +121,6 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "GET":
 			_ = json.NewEncoder(w).Encode(f.signUps)
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "PATCH":
-			// Only the fields sent change, as the API's PATCH does.
 			var set map[string]bool
 			_ = json.NewDecoder(r.Body).Decode(&set)
 			if v, ok := set["disable_signup"]; ok {
@@ -160,7 +138,6 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			_ = json.NewDecoder(r.Body).Decode(&names)
 			f.secrets = slices.DeleteFunc(f.secrets, func(s supabaseapi.Secret) bool { return slices.Contains(names, s.Name) })
 		case strings.HasSuffix(path, "/secrets"):
-			// Listed with a digest the app can't count on.
 			var set []supabaseapi.Secret
 			_ = json.NewDecoder(r.Body).Decode(&set)
 			for _, s := range set {
@@ -184,8 +161,6 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 	return supabaseapi.Resume("r")
 }
 
-// Find tells the Leaflet projects from those Leaflet made and did not
-// finish, or that are paused, and leaves out what holds something else.
 func TestFindTellsProjectsApart(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{
 		"old":   {{Version: FirstMigration, Name: "init"}},
@@ -216,7 +191,6 @@ func TestFindTellsProjectsApart(t *testing.T) {
 		t.Errorf("orgs %v", found.Orgs)
 	}
 
-	// A development build sees its own projects only.
 	ProjectName = DevProjectName
 	t.Cleanup(func() { ProjectName = "Leaflet" })
 	if found, err = Find(context.Background(), api); err != nil {
@@ -227,7 +201,6 @@ func TestFindTellsProjectsApart(t *testing.T) {
 	}
 }
 
-// A new project takes a name the organization has free.
 func TestCreateNamesItFree(t *testing.T) {
 	old := pollEvery
 	pollEvery = time.Millisecond
@@ -242,7 +215,6 @@ func TestCreateNamesItFree(t *testing.T) {
 	}
 }
 
-// A paused project restarts before it is set up.
 func TestReadyRestoresPaused(t *testing.T) {
 	f := &fakeProject{}
 	api := f.serve(t)
@@ -301,8 +273,6 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 		t.Errorf("secrets %v", names)
 	}
 
-	// Up to date, from another device: nothing more, by the project's
-	// secret.
 	f.applied["p"] = nil
 	for _, m := range all {
 		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
@@ -313,10 +283,6 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 	}
 }
 
-// An older build never deploys over newer functions, and a newer one
-// replaces older ones, the one from before the secret named its version
-// too. Functions of the same version stay, whatever their hash, so two
-// builds never take turns; only a development build deploys over them.
 func TestSetupNeverDowngrades(t *testing.T) {
 	all, err := Migrations()
 	if err != nil {
@@ -365,9 +331,6 @@ func TestSetupNeverDowngrades(t *testing.T) {
 	}
 }
 
-// functionsHashes are FunctionsHash at each FunctionsVersion. Changing
-// supabase/functions raises FunctionsVersion by one and adds its hash
-// here; a released version's hash never changes.
 var functionsHashes = map[int]string{
 	1:  "6c7a63f55f1a88ba9ced2e8085b35cf1e781c73438e276ef73709cefef78836b",
 	2:  "2b34649fda4f2565e5de75e6772d25454ba74c8435a6a898f925ddd792acabf1",
@@ -387,12 +350,9 @@ var functionsHashes = map[int]string{
 	16: "4a931655fbd8ad611cd32114faffdc45fa478c870a006a8660e08b8b4d65d150",
 	17: "6c5ee661b43c5e2fba84dcf1e8c4ffa2210c037dbfc97ad6873e6b57f03ce0e4",
 	18: "bc9982d99067af9a8616cb61ebf6c856f9671890753d8eba8ee9cff68a8da3f0",
+	19: "8e0fc74e251d22b92a210ce1e93e4012985fd24ab850ca4c1810d6e0d679f8c4",
 }
 
-// The functions a project gets import their packages at exact versions:
-// their lock does not go with them, and "@2" would be whatever 2.x is the
-// newest as each project deploys, untested, and differ between projects of
-// one FunctionsVersion.
 func TestFunctionsImportExactVersions(t *testing.T) {
 	spec := regexp.MustCompile(`"((?:jsr|npm):@?[^"@]+@[^"]*)"`)
 	exact := regexp.MustCompile(`@\d+\.\d+\.\d+$`)
@@ -416,9 +376,6 @@ func TestFunctionsImportExactVersions(t *testing.T) {
 	}
 }
 
-// FunctionsVersion goes up with every change to the functions: a build
-// with other functions at the same version would neither deploy them nor
-// have them deployed.
 func TestFunctionsVersion(t *testing.T) {
 	hash, err := FunctionsHash()
 	if err != nil {
@@ -434,9 +391,6 @@ func TestFunctionsVersion(t *testing.T) {
 	}
 }
 
-// A project named as Leaflet's whose migrations can't be listed fails
-// Find, rather than being left out, which would offer to make another;
-// another of the account's is left out.
 func TestFindFailsOnAProjectItCantCheck(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"new": {{Version: FirstMigration}}}, broken: "old"}
 	api := f.serve(t)
@@ -449,7 +403,6 @@ func TestFindFailsOnAProjectItCantCheck(t *testing.T) {
 	}
 }
 
-// A project that was pausing is restored once it has paused.
 func TestReadyRestoresOncePaused(t *testing.T) {
 	old := pollEvery
 	pollEvery = time.Millisecond
@@ -462,19 +415,16 @@ func TestReadyRestoresOncePaused(t *testing.T) {
 	}
 }
 
-// A function goes up with its entrypoint first, the rest of its folder and
-// the shared modules, and none of their tests.
 func TestFunctionsLeaveTestsOut(t *testing.T) {
-	files, err := functionFiles("agent")
+	files, err := functionFiles("account")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if files[0].Path != "supabase/functions/agent/index.ts" {
+	if files[0].Path != "supabase/functions/account/index.ts" {
 		t.Errorf("entrypoint %s", files[0].Path)
 	}
-	// What index.ts imports from its own folder goes with it.
-	if !slices.ContainsFunc(files, func(f supabaseapi.File) bool { return f.Path == "supabase/functions/agent/handler.ts" }) {
-		t.Error("the agent's handler stays behind")
+	if !slices.ContainsFunc(files, func(f supabaseapi.File) bool { return f.Path == "supabase/functions/account/handler.ts" }) {
+		t.Error("the account's handler stays behind")
 	}
 	for _, f := range files {
 		if strings.HasSuffix(f.Path, "_test.ts") || !strings.HasPrefix(f.Path, "supabase/functions/") {
@@ -516,7 +466,6 @@ func TestRegionGroup(t *testing.T) {
 	}
 }
 
-// A development build's projects go by their own name.
 func TestDevProjectName(t *testing.T) {
 	old := ProjectName
 	ProjectName = "Leaflet-dev"
@@ -528,8 +477,6 @@ func TestDevProjectName(t *testing.T) {
 	}
 }
 
-// The person signed in is the organization's one member; with more, it
-// can't be told which.
 func TestOwnerFromMembers(t *testing.T) {
 	for members, want := range map[string]string{
 		`[{"user_name":"me","email":"me@example.com","role_name":"Developer"}]`:                                                                   "me@example.com",
@@ -546,8 +493,6 @@ func TestOwnerFromMembers(t *testing.T) {
 	}
 }
 
-// A setup that fails says so in the app's language, the API's error still
-// in it, to errors.As too.
 func TestSetupFailsInTheAppsLanguage(t *testing.T) {
 	i18n.SetLocaleFunc(func() string { return "ja" })
 	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
@@ -559,10 +504,6 @@ func TestSetupFailsInTheAppsLanguage(t *testing.T) {
 	}
 }
 
-// Two devices setting a project up at once take turns, migration by
-// migration: each takes the lock first, then checks the version is not
-// recorded, before any of the migration. One the other device applied
-// while this one waited is done, and the rest go on.
 func TestSetupSkipsWhatAnotherDeviceApplied(t *testing.T) {
 	all, err := Migrations()
 	if err != nil || len(all) < 3 {
@@ -591,16 +532,12 @@ func TestSetupSkipsWhatAnotherDeviceApplied(t *testing.T) {
 		t.Errorf("progress %v", steps)
 	}
 
-	// Any other failure still stops it.
 	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, refused: true}
 	if err := Setup(context.Background(), f.serve(t), "p", nil); err == nil {
 		t.Error("a refused migration counted as applied")
 	}
 }
 
-// Setup keeps the project's Auth to the owner's account: sign-ups off and
-// addresses confirmed, changed only when they differ. A sign-in that may
-// not touch Auth leaves them, and the setup goes on.
 func TestSetupClosesSignUps(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, signUps: supabaseapi.SignUps{AutoConfirm: true}}
 	api := f.serve(t)
@@ -620,9 +557,6 @@ func TestSetupClosesSignUps(t *testing.T) {
 	}
 }
 
-// A project whose Realtime has not made its messages yet does the rest of
-// the setup, and says so, for it to run again; once they are there, Setup
-// has the policy made, with nothing else to apply.
 func TestSetupWaitsForRealtime(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, realtimeWaits: true}
 	api := f.serve(t)
@@ -646,8 +580,6 @@ func TestSetupWaitsForRealtime(t *testing.T) {
 	}
 }
 
-// A policy that could not be made, as with the API failing, is ErrRealtimeWaits
-// too, and only that: the rest of the setup is done.
 func TestSetupGoesOnPastARefusedPolicy(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}}
 	api := f.serve(t)
@@ -664,8 +596,6 @@ func TestSetupGoesOnPastARefusedPolicy(t *testing.T) {
 	}
 }
 
-// Sign-ups that could not be closed for now, as with the API failing, do
-// the rest of the setup, and say so, for it to run again.
 func TestSetupSaysSignUpsLeftOpen(t *testing.T) {
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authDown: true}
 	api := f.serve(t)
@@ -680,32 +610,23 @@ func TestSetupSaysSignUpsLeftOpen(t *testing.T) {
 	}
 }
 
-// What only older functions call stays while they are the project's: a
-// deploy that fails leaves it, as the migrations before it did, and the
-// next Setup drops it once every function is deployed. With functions as
-// new as these, there is nothing to deploy, and nothing is dropped.
-func TestSetupRetiresOnceDeployed(t *testing.T) {
+func TestSetupDeploysAndLeavesTheDatabase(t *testing.T) {
 	all, err := Migrations()
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, deployDown: true}
-	api := f.serve(t)
-	if err := Setup(context.Background(), api, "p", nil); err == nil || len(f.queries) != len(all) || len(f.retiredAfter) != 0 {
-		t.Errorf("with deploys failing: %v, %d queries, dropped after %v", err, len(f.queries), f.retiredAfter)
-	}
-	f.mu.Lock()
-	f.deployDown = false
-	f.applied["p"] = nil
 	for _, m := range all {
 		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
 	}
-	f.mu.Unlock()
-	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.retiredAfter, []int{len(Functions)}) {
-		t.Errorf("deployed: %v, dropped after %v", err, f.retiredAfter)
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); err == nil || len(f.secrets) != 0 {
+		t.Errorf("with deploys failing: %v, secrets %v", err, f.secrets)
 	}
-	f.deployed = nil
-	if err := Setup(context.Background(), api, "p", nil); err != nil || len(f.deployed) != 0 || len(f.retiredAfter) != 1 {
-		t.Errorf("up to date: %v, deployed %v, dropped after %v", err, f.deployed, f.retiredAfter)
+	f.mu.Lock()
+	f.deployDown = false
+	f.mu.Unlock()
+	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.deployed, Functions) || len(f.queries) != 0 {
+		t.Errorf("deployed %v: %v, queries %q", f.deployed, err, f.queries)
 	}
 }

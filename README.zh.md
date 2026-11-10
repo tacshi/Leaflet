@@ -98,6 +98,9 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
 - 支持任何兼容 OpenAI 的服务商：内置 OpenAI、Claude、xAI、OpenRouter、
   DeepSeek 和 GLM 预设，支持 ChatGPT Plus 或 Pro 登录、自定义端点，以及
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
+- 智能体从你的设备上运行，无论是否登录。每台设备保存自己的服务商，云端
+  服务商的 API 密钥保存在该设备的钥匙串中：在哪台设备上使用，就在哪台设备上
+  添加服务商。
 - 应用外的智能体，例如 Claude Code、Codex 和 Cursor，可以通过
   [`leaflet mcp`](#应用外的智能体-mcp) 处理页面。
 - [`leaflet` 命令](#命令行)可以在终端和脚本中查找、阅读、新建和整理页面，并向
@@ -112,7 +115,8 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
 - 在应用内查看附件：图片、PDF、文本和代码、Markdown、表格。在 iPhone 和 iPad 上，其他
   文件可用“快速查看”打开。
 - 使用 Soniox 或任何兼容 OpenAI 的 `/audio/transcriptions` 端点进行实时
-  转写，包括你自己网络中的端点。
+  转写，端点可以在你自己的网络中，也可以在云端：都由你的设备直接调用，密钥
+  保存在该设备的钥匙串中。
 - 通过 MOSS 转写并区分说话人，MOSI API 密钥保存在设备上：录音结束后转写，
   也可以转写音频文件。
 - 用系统自带的语音识别在设备上转写，离线可用，无需密钥：适用于 macOS 26
@@ -144,9 +148,10 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
   构建：在 Xcode 无法构建它的环境中，调试构建会跳过它继续进行，发布构建则
   必须有它（签名和公证也需要 Xcode）。Windows 安装程序需要 NSIS。
 - iCloud 同步需要打开 iCloud 云盘。
-- 通过服务器同步和云端模型需要一个 [Supabase](https://supabase.com)
+- 通过服务器同步需要一个 [Supabase](https://supabase.com)
   账户：**使用 Supabase 继续** 会在其中找到或创建一个项目，并按
-  [`supabase/`](supabase/README.md) 完成设置。没有账户时，Leaflet 仅在你的设备上运行。
+  [`supabase/`](supabase/README.md) 完成设置。没有账户时，Leaflet 仅在你的设备上运行，
+  智能体和转写也是如此。
 
 ## 安装
 
@@ -165,8 +170,8 @@ cd Leaflet
 go tool mygo dev
 ```
 
-没有服务器时，Leaflet 只在本机运行：页面、编辑、评论、公开链接、本地模型
-以及你网络中的转写服务都可以使用；登录、同步、云端模型和云端转写会被隐藏，
+没有服务器时，Leaflet 只在本机运行：页面、编辑、评论、公开链接、智能体
+和转写都可以使用，用的是在这台设备上添加的服务商和密钥；登录和同步会被隐藏，
 或在原处说明原因。
 
 每个版本都可以使用 Supabase 登录：OAuth 应用的客户端 ID 已内置，其密钥保存在
@@ -334,10 +339,12 @@ make check                                   # gofmt、golangci-lint、govulnche
 make ios-check                               # swift-format、SwiftLint、osv-scanner 和 mobsfscan
 make clean                                   # 删除 build/ 和 go build 留下的二进制文件
 scripts/check-migrations.sh                  # 按顺序把所有迁移应用到 Supabase 的 Postgres（Docker）
-cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
+cd supabase/functions && deno test --frozen  # account Edge Function
 ```
 
-编辑器的测试通过 `ui.NewTester` 以无界面方式运行其视图。
+编辑器的测试通过 `ui.NewTester` 以无界面方式运行其视图。黄金测试从各自包的
+`testdata/golden` 读取代码应当产生的结果；有意改变这些结果之后，用
+`go test ./internal/doc -update`（每次一个包）把新值写回去。
 
 应用的文本是 [`locales/`](locales) 中的 MyGo 目录文件，每种语言一个
 （`en.json`、`zh-Hans.json`、`ja.json`），`go tool mygo dev` 和
@@ -370,7 +377,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
 | `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |
 | `internal/supabaseapi` | Supabase 管理 API，使用用户自己的账户登录 |
-| `internal/provision` | 查找、创建并设置用户的 Leaflet 项目：迁移和 Edge Functions |
+| `internal/provision` | 查找、创建并设置用户的 Leaflet 项目：迁移和 Edge Function |
 | `internal/oauth` | 浏览器登录在本机上的部分：回环重定向和 PKCE |
 | `internal/icloud` | iCloud 云盘中的 Leaflet 文件夹：完整写入的文件，以及请 iCloud 下载它们 |
 | `internal/keychain` | 保存在系统钥匙串中的应用密钥，每次运行最多读取一次 |
@@ -382,7 +389,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/theme` | 颜色、字体和图标 |
 | `locales` | 各语言的应用文本，以及由其生成的 Go 代码 |
 | `scripts` | 调试与发布构建、发布到 GitHub Releases，以及迁移的检查 |
-| `supabase` | 迁移（表、行级安全、RPC、Vault）和 Edge Functions |
+| `supabase` | 迁移（表、行级安全、RPC、Vault）和 `account` Edge Function |
 | `worker` | Cloudflare 上的登录 Worker：OAuth 重定向页面，以及持有客户端密钥的令牌交换 |
 | `docs` | 协议、用户故事和图标源文件 |
 | `ios` | iPhone 和 iPad 应用：SwiftUI 和 UIKit、它的 XcodeGen 项目和构建脚本 |

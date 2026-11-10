@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Markdown reads as the blocks a paste of it makes: a fence's lines are
-// code, though one starts with "#", and one left open runs to the end.
 func TestMarkdownBlocks(t *testing.T) {
 	raw, err := MarkdownBlocks("## Plan\n\n- one\n- two\n\n```python\n# not a heading\nprint(1)\n```\n\n```go\nfunc f() {")
 	if err != nil {

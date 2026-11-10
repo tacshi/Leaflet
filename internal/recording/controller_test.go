@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,8 +25,6 @@ import (
 	"leaflet/locales"
 )
 
-// Audio recorded while the stream connects reaches it first, in order; a
-// stream that connects for a recording gone since is closed, not used.
 func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 	heard := make(chan []byte, 10)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -79,7 +75,6 @@ func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 		}
 	}
 
-	// The next recording started before this stream connected.
 	r.session, r.stream, r.connecting = "s2", nil, true
 	late := dial()
 	r.attachSoniox("s1", late)
@@ -88,8 +83,6 @@ func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 	}
 }
 
-// Pause before the microphone starts changes nothing: there is no time
-// running yet.
 func TestPauseWhileStarting(t *testing.T) {
 	r := &Controller{}
 	r.TogglePause()
@@ -98,9 +91,6 @@ func TestPauseWhileStarting(t *testing.T) {
 	}
 }
 
-// A stream that hears no audio, as while a recording is paused, is kept
-// open with keepalives; one that ends before it is finished says why, and
-// one ended on purpose does not.
 func TestSonioxKeepsAliveAndTellsALostStream(t *testing.T) {
 	was := keepAliveAfter
 	keepAliveAfter = 50 * time.Millisecond
@@ -156,11 +146,8 @@ func TestSonioxKeepsAliveAndTellsALostStream(t *testing.T) {
 	}
 }
 
-// A microphone that answers after the recording stopped while starting
-// brings back no recording; one that answers in time starts it.
 func TestStartedAfterStopIsIgnored(t *testing.T) {
 	r := &Controller{update: func(fn func()) { fn() }, session: "s1"}
-	// Stop clears the state and keeps the session until the page is gone.
 	r.State = State{}
 	r.started("s1", 0)
 	if r.State.Active || r.Active() {
@@ -177,7 +164,6 @@ func TestStartedAfterStopIsIgnored(t *testing.T) {
 	}
 }
 
-// No audio goes after the end of it that Finish sends.
 func TestSonioxSendsNothingAfterFinish(t *testing.T) {
 	heard := make(chan []byte, 10)
 	release := make(chan struct{})
@@ -199,7 +185,6 @@ func TestSonioxSendsNothingAfterFinish(t *testing.T) {
 				return
 			}
 			heard <- data
-			// As Soniox does, only an empty text frame ends the stream.
 			if kind == websocket.MessageText && len(data) == 0 && !ended {
 				ended = true
 				<-release
@@ -233,9 +218,6 @@ func TestSonioxSendsNothingAfterFinish(t *testing.T) {
 	}
 }
 
-// Sending audio does not wait for the network: a write that stalls, as
-// over a slow connection, holds up neither the chunks nor the WAV file
-// they go to; what was queued goes after, in order.
 func TestSonioxSendDoesNotWaitForTheNetwork(t *testing.T) {
 	heard := make(chan []byte, 10)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -258,7 +240,6 @@ func TestSonioxSendDoesNotWaitForTheNetwork(t *testing.T) {
 	}
 	s := newSoniox(conn)
 	defer s.Close()
-	// A write under way holds the writes up.
 	s.wmu.Lock()
 	sent := make(chan struct{})
 	go func() {
@@ -284,8 +265,6 @@ func TestSonioxSendDoesNotWaitForTheNetwork(t *testing.T) {
 	}
 }
 
-// A microphone that fails late, for a recording stopped since, leaves the
-// next recording starting; one that fails for this one ends it.
 func TestFailedForAnotherRecordingIsIgnored(t *testing.T) {
 	r := &Controller{update: func(fn func()) { fn() }, session: "s2", State: State{Starting: true}}
 	r.failed("s1", "denied")
@@ -298,14 +277,11 @@ func TestFailedForAnotherRecordingIsIgnored(t *testing.T) {
 	}
 }
 
-// fakeMic is a microphone whose Stop hands on the audio it still holds,
-// once let go.
 type fakeMic struct {
 	sink    Sink
 	held    []byte
 	letGo   chan struct{}
 	stopped chan struct{}
-	// toggles are its Pauses and Resumes, in order.
 	mu      sync.Mutex
 	toggles []string
 }
@@ -326,7 +302,6 @@ func (m *fakeMic) Stop() {
 }
 func (m *fakeMic) Close() { close(m.stopped) }
 
-// fakeCapture starts fakeMics, the latest last.
 type fakeCapture struct{ mics []*fakeMic }
 
 func (c *fakeCapture) Start(_ int, sink Sink) (Mic, error) {
@@ -356,8 +331,6 @@ func newTestController(t *testing.T) (*Controller, *store.Store, *fakeCapture) {
 	return r, st, c
 }
 
-// The audio a microphone still holds as its recording stops goes to that
-// recording, though the next one has started before it came.
 func TestLastAudioGoesToItsRecording(t *testing.T) {
 	r, _, c := newTestController(t)
 	dir := t.TempDir()
@@ -381,17 +354,12 @@ func TestLastAudioGoesToItsRecording(t *testing.T) {
 	if err := r.capture(second, store.SttSettings{}, false, State{}); err != nil {
 		t.Fatal(err)
 	}
-	// Windows removes no file still open, so neither is when the folder
-	// goes. The second recording, its microphone never started, ends with
-	// its file closed at once.
 	t.Cleanup(r.Stop)
 	close(mic.letGo)
 	<-mic.stopped
 	c.mics[1].sink.Chunk([]byte{3, 3})
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		// The header counts the audio once Close writes it, under late,
-		// just before it closes the file: read under late, it is closed.
 		r.late.Lock()
 		got, _ := ReadWav(first.Path)
 		r.late.Unlock()
@@ -410,12 +378,8 @@ func TestLastAudioGoesToItsRecording(t *testing.T) {
 	}
 }
 
-// Audio a microphone hands on from a thread of its own while its
-// recording stops, as the desktop's web microphone does, goes in before
-// the file closes, or not at all: the header counts every byte of it.
 func TestLateAudioWhileStoppingGoesInWhole(t *testing.T) {
 	r, st, c := newTestController(t)
-	// The audio and the stop meet at a different moment each time.
 	for range 20 {
 		lateAudioWhileStopping(t, r, st, c)
 	}
@@ -464,8 +428,6 @@ func lateAudioWhileStopping(t *testing.T, r *Controller, st *store.Store, c *fak
 	}
 }
 
-// A recording stopped is transcribing from then on: a Retranscribe
-// before its transcription starts refuses, rather than run beside it.
 func TestStoppedRecordingIsTranscribingAtOnce(t *testing.T) {
 	r, st, c := newTestController(t)
 	stt := store.SttSettings{Provider: "openai-compatible", BaseURL: "http://127.0.0.1:1/v1"}
@@ -496,8 +458,6 @@ func TestStoppedRecordingIsTranscribingAtOnce(t *testing.T) {
 	}
 }
 
-// A recording transcribed again before the app gave the recorder its
-// microphone says so, rather than end on no main thread.
 func TestRetranscribeBeforeAttach(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -517,7 +477,6 @@ func TestRetranscribeBeforeAttach(t *testing.T) {
 	}
 }
 
-// fakeEngine transcribes every file as "hello".
 type fakeEngine struct{}
 
 func (fakeEngine) Stream(string, func(string)) (Stream, error) { return nil, errors.New("no stream") }
@@ -525,9 +484,6 @@ func (fakeEngine) File(string, string) ([]store.Segment, error) {
 	return []store.Segment{{Text: "hello"}}, nil
 }
 
-// While the host looks for the device's engine, it counts as usable, and
-// a transcription waits for it; the transcriptions read it from their own
-// goroutines while the main thread gives it.
 func TestEngineFoundLate(t *testing.T) {
 	r := &Controller{}
 	stt := store.SttSettings{Provider: OnDevice}
@@ -547,8 +503,6 @@ func TestEngineFoundLate(t *testing.T) {
 	}
 }
 
-// The live text that comes as a stream starts reaches what is set to
-// take it, however soon it comes.
 func TestSonioxTextBeforeItIsTaken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		c, err := websocket.Accept(w, req, nil)
@@ -577,9 +531,6 @@ func TestSonioxTextBeforeItIsTaken(t *testing.T) {
 	}
 }
 
-// A recording stopped before its microphone started recorded nothing: it
-// fails as one whose microphone could not start, and nothing transcribes
-// it.
 func TestStopWhileStarting(t *testing.T) {
 	r, st, c := newTestController(t)
 	stt := store.SttSettings{Provider: "openai-compatible", BaseURL: "http://127.0.0.1:1/v1"}
@@ -598,7 +549,6 @@ func TestStopWhileStarting(t *testing.T) {
 	}
 }
 
-// A recording lasts as long as the audio it saved, not the time it ran.
 func TestDurationIsTheAudios(t *testing.T) {
 	r, st, c := newTestController(t)
 	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
@@ -627,8 +577,6 @@ func TestDurationIsTheAudios(t *testing.T) {
 	}
 }
 
-// Pause and Resume reach the microphone off the main thread, and it ends
-// as the last asked for, however fast they come.
 func TestTogglesEndWithTheLast(t *testing.T) {
 	r, _, c := newTestController(t)
 	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
@@ -660,8 +608,6 @@ func TestTogglesEndWithTheLast(t *testing.T) {
 	<-mic.stopped
 }
 
-// A microphone that stalls pauses its recording, saying why; another
-// recording's says nothing.
 func TestStalledPauses(t *testing.T) {
 	r, _, c := newTestController(t)
 	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
@@ -682,8 +628,6 @@ func TestStalledPauses(t *testing.T) {
 	<-mic.stopped
 }
 
-// A recording a stall paused goes on once its microphone is back, as a
-// call ends; one the user paused meanwhile stays paused.
 func TestRecoveredResumesWhatTheStallPaused(t *testing.T) {
 	r, _, c := newTestController(t)
 	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
@@ -700,8 +644,8 @@ func TestRecoveredResumesWhatTheStallPaused(t *testing.T) {
 		t.Errorf("not resumed: %+v", r.State)
 	}
 	mic.sink.Stalled("taken")
-	r.TogglePause() // the user resumes it
-	r.TogglePause() // and pauses it again
+	r.TogglePause()
+	r.TogglePause()
 	mic.sink.Recovered()
 	if !r.State.Paused {
 		t.Errorf("the user's pause went: %+v", r.State)
@@ -711,8 +655,6 @@ func TestRecoveredResumesWhatTheStallPaused(t *testing.T) {
 	<-mic.stopped
 }
 
-// lostStream is a live stream that ended before Finish, having heard part
-// of the recording.
 type lostStream struct{}
 
 func (lostStream) Send([]byte) {}
@@ -722,9 +664,6 @@ func (lostStream) Finish() ([]store.Segment, error) {
 func (lostStream) Close()      {}
 func (lostStream) Lost() error { return errors.New("dropped") }
 
-// A stream lost before Finish keeps the words it heard: the recording is
-// ready, and its error warns they may end too soon, to transcribe again
-// from its audio.
 func TestLostBeforeFinish(t *testing.T) {
 	r, st, _ := newTestController(t)
 	rec, err := st.CreateRecording("p1", "b1", "soniox", "", "", "auto")
@@ -738,9 +677,6 @@ func TestLostBeforeFinish(t *testing.T) {
 	}
 }
 
-// A stream lost before it heard a word leaves the recording failed, and
-// its own reasons are said in the app's language; the block's notice of
-// either closes for good.
 func TestLostWithoutWordsFails(t *testing.T) {
 	r, st, _ := newTestController(t)
 	rec, err := st.CreateRecording("p1", "b1", "soniox", "", "", "auto")
@@ -763,17 +699,11 @@ func TestLostWithoutWordsFails(t *testing.T) {
 	}
 }
 
-// silentLost is a live stream whose last words never came, having heard
-// none before.
 type silentLost struct{ lostStream }
 
 func (silentLost) Finish() ([]store.Segment, error) { return nil, nil }
 func (silentLost) Lost() error                      { return errNoEnd }
 
-// A short recording, its words final before it stops, ends whole: Finish
-// ends the stream as Soniox asks, with an empty text frame, and does not
-// wait out its time for words that are not coming. An empty binary frame
-// is only an empty piece of audio to Soniox, which then answers nothing.
 func TestSonioxFinishEndsTheStreamAsSonioxAsks(t *testing.T) {
 	was := finishWait
 	finishWait = 2 * time.Second
@@ -822,10 +752,6 @@ func TestSonioxFinishEndsTheStreamAsSonioxAsks(t *testing.T) {
 	}
 }
 
-// Audio still queued when Finish stops waiting for a slow connection, or
-// last words that never come, leave the stream lost: the recording keeps
-// its words and fails, to transcribe again from its audio, rather than
-// counting as whole.
 func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
 	was := finishWait
 	finishWait = 100 * time.Millisecond
@@ -852,7 +778,6 @@ func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
 		}
 		s := newSoniox(conn)
 		if answers {
-			// A slow connection: the write under way holds the queue up.
 			s.wmu.Lock()
 			for range 5 {
 				s.Send([]byte{1, 2})
@@ -868,56 +793,143 @@ func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
 	}
 }
 
-// A long recording, which the transcriber goes on with past a call's
-// deadline, is asked for again until it is done; another failure, or
-// asking for too long, ends it.
-func TestTranscribeWaitsForALongRecording(t *testing.T) {
-	defer func(every, long time.Duration) { stillEvery, stillFor = every, long }(stillEvery, stillFor)
-	stillEvery = time.Millisecond
-	var calls atomic.Int32
-	still := int32(2)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		switch n := calls.Add(1); {
-		case n <= still:
-			w.WriteHeader(http.StatusGatewayTimeout)
-			_, _ = w.Write([]byte(`{"error":"still working","code":"still_transcribing"}`))
-		case still < 0:
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":"failed"}`))
-		default:
-			_, _ = w.Write([]byte(`{"segments":[{"start_ms":0,"end_ms":1000,"text":"at last"}]}`))
-		}
+type toServer struct{ url string }
+
+func (s toServer) RoundTrip(req *http.Request) (*http.Response, error) {
+	to := req.Clone(req.Context())
+	to.URL.Scheme, to.URL.Host = "http", strings.TrimPrefix(s.url, "http://")
+	to.Host = req.URL.Host
+	return http.DefaultTransport.(*http.Transport).RoundTrip(to)
+}
+
+func TestCloudEndpointTranscribesFromTheDevice(t *testing.T) {
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	type asked struct{ host, path, auth, model string }
+	got := make(chan asked, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		got <- asked{req.Host, req.URL.Path, req.Header.Get("Authorization"), req.FormValue("model")}
+		_, _ = io.WriteString(w, `{"segments":[{"start":0,"end":1.5,"text":" Hello. "}]}`)
 	}))
 	defer srv.Close()
-	st, err := store.Open(t.TempDir())
-	if err != nil {
+	client := http.DefaultClient.Transport
+	http.DefaultClient.Transport = toServer{srv.URL}
+	defer func() { http.DefaultClient.Transport = client }()
+
+	r, _, _ := newTestController(t)
+	stt := store.SttSettings{Provider: Endpoint, BaseURL: "https://api.example.com/v1", Model: "whisper-1"}
+	if IsLocalEndpoint(stt.BaseURL) {
+		t.Fatal("the address is on this network")
+	}
+	if err := SetEndpointKey(stt.BaseURL, "ek-cloud"); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
-	r := &Controller{st: st, be: remote.SignedInForTest(srv.URL, st, "u1")}
-	rec := store.Recording{ID: "r1", AudioPath: "u1/r1.wav"}
-	stt := store.SttSettings{Provider: "soniox"}
-
-	segs, err := r.transcribe(rec, "", nil, stt)
-	if err != nil || len(segs) != 1 || segs[0].Text != "at last" || calls.Load() != 3 {
-		t.Errorf("after %d calls: %+v %v", calls.Load(), segs, err)
+	if err := r.Usable(stt, true); err != nil {
+		t.Errorf("not usable, signed out: %v", err)
 	}
-
-	calls.Store(0)
-	still = -1
-	if _, err := r.transcribe(rec, "", nil, stt); err == nil || calls.Load() != 1 {
-		t.Errorf("a failure was asked again: %d calls, %v", calls.Load(), err)
+	if err := r.Usable(stt, false); err == nil || err.Error() != locales.RecErrNeedsConnection() {
+		t.Errorf("offline: %v", err)
 	}
-
-	calls.Store(0)
-	still, stillFor = 1<<30, 5*time.Millisecond
-	if _, err := r.transcribe(rec, "", nil, stt); !remote.IsStillTranscribing(err) {
-		t.Errorf("asked for too long: %v", err)
+	path := filepath.Join(t.TempDir(), "r1.wav")
+	if err := os.WriteFile(path, WavFromPCM(make([]byte, 3200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := r.transcribe(store.Recording{ID: "r1"}, path, nil, stt)
+	if err != nil || len(segs) != 1 || segs[0].Text != "Hello." || segs[0].EndMs != 1500 {
+		t.Fatalf("segments %+v, %v", segs, err)
+	}
+	if a := <-got; a != (asked{"api.example.com", "/v1/audio/transcriptions", "Bearer ek-cloud", "whisper-1"}) {
+		t.Errorf("asked %+v", a)
+	}
+	stt.BaseURL = "https://elsewhere.example.com/v1"
+	if _, err := r.transcribe(store.Recording{ID: "r1"}, path, nil, stt); err != nil {
+		t.Fatal(err)
+	}
+	if a := <-got; a.host != "elsewhere.example.com" || a.auth != "" {
+		t.Errorf("another origin was asked as %+v", a)
 	}
 }
 
-// fileRecorder is a Controller that runs what goes to the main thread at
-// once, on a store of its own, with one audio file in it, and the file.
+func TestEndpointKeyStaysWithItsOrigin(t *testing.T) {
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	if err := SetEndpointKey(" https://api.example.com/v1/ ", "ek"); err != nil {
+		t.Fatal(err)
+	}
+	for url, want := range map[string]string{
+		"https://api.example.com/v1":       "ek",
+		"https://API.example.com/other/v2": "ek",
+		"https://api.example.com:8443/v1":  "",
+		"http://api.example.com/v1":        "",
+		"https://example.com/v1":           "",
+		"http://localhost:8000/v1":         "",
+		"":                                 "",
+	} {
+		if got := EndpointKey(url); got != want {
+			t.Errorf("%q gets %q, want %q", url, got, want)
+		}
+	}
+	if err := SetEndpointKey("http://localhost:8000/v1", "local"); err != nil {
+		t.Fatal(err)
+	}
+	if EndpointKey("https://api.example.com/v1") != "" || EndpointKey("http://localhost:8000") != "local" {
+		t.Errorf("a key typed for another address did not take the place of the one kept: %+v", LoadEndpointKey())
+	}
+	keychain.Use(memKeys{"stt.endpoint.key": []byte("old")})
+	if got := EndpointKey("http://192.168.1.20:8000/v1"); got != "old" {
+		t.Errorf("on this network: %q", got)
+	}
+	if got := EndpointKey("https://api.example.com/v1"); got != "" {
+		t.Errorf("a key kept without its address went to the cloud: %q", got)
+	}
+	if err := SetEndpointKey("https://api.example.com/v1", ""); err != nil || LoadEndpointKey() != (KeptKey{}) {
+		t.Errorf("removed: %v, kept %+v", err, LoadEndpointKey())
+	}
+}
+
+func TestUsable(t *testing.T) {
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	r := NewController(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
+	soniox := store.SttSettings{Provider: "soniox"}
+	if err := r.Usable(soniox, true); err == nil || err.Error() != locales.RecErrSetUpSoniox() {
+		t.Errorf("Soniox with no key here, signed in: %v", err)
+	}
+	if SetUp("soniox", soniox, KeysOf(LocalSonioxKey() != "", false, false)) {
+		t.Error("Soniox is set up with no key here")
+	}
+	if err := SetLocalSonioxKey("sk"); err != nil {
+		t.Fatal(err)
+	}
+	local := store.SttSettings{Provider: Endpoint, BaseURL: "http://192.168.1.20:8000/v1"}
+	for _, c := range []struct {
+		name   string
+		stt    store.SttSettings
+		online bool
+		want   string
+	}{
+		{"Soniox", soniox, true, ""},
+		{"Soniox offline", soniox, false, locales.RecErrNeedsConnection()},
+		{"MOSS with no key", store.SttSettings{Provider: Moss}, true, locales.RecErrSetUpMoss()},
+		{"an endpoint with no address", store.SttSettings{Provider: Endpoint, BaseURL: " "}, true, locales.RecErrSetUpEndpoint()},
+		{"an endpoint on this network, offline", local, false, ""},
+		{"the device's engine where there is none", store.SttSettings{Provider: OnDevice}, true, locales.RecErrOnDevice()},
+	} {
+		var got string
+		if err := r.Usable(c.stt, c.online); err != nil {
+			got = err.Error()
+		}
+		if got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func fileRecorder(t *testing.T, url, name string) (*Controller, store.File) {
 	t.Helper()
 	st, err := store.Open(t.TempDir())
@@ -941,7 +953,6 @@ func fileRecorder(t *testing.T, url, name string) (*Controller, store.File) {
 	return r, f
 }
 
-// waitTranscript waits for what TranscribeFile gives done.
 func waitTranscript(t *testing.T, got chan []store.Segment) []store.Segment {
 	t.Helper()
 	select {
@@ -953,8 +964,6 @@ func waitTranscript(t *testing.T, got chan []store.Segment) []store.Segment {
 	}
 }
 
-// An audio file transcribes on the device, its own file, and only one
-// transcription of it runs at a time.
 func TestTranscribeFileOnDevice(t *testing.T) {
 	r, f := fileRecorder(t, "http://127.0.0.1:1", "call.m4a")
 	r.SetEngine(fakeEngine{})
@@ -988,8 +997,6 @@ func TestTranscribeFileOnDevice(t *testing.T) {
 	}
 }
 
-// What the device can't read, or that is no audio, is refused at once; a
-// file still going up can't go to the server.
 func TestTranscribeFileRefused(t *testing.T) {
 	r, f := fileRecorder(t, "http://127.0.0.1:1", "call.ogg")
 	r.SetEngine(fakeEngine{})
@@ -1001,85 +1008,14 @@ func TestTranscribeFileRefused(t *testing.T) {
 	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: OnDevice}, false, nothing); err == nil || err.Error() != locales.RecErrFileKind() {
 		t.Errorf("no audio: %v", err)
 	}
+	keychain.Use(memKeys{})
+	t.Cleanup(func() { keychain.Use(nil) })
 	r, f = fileRecorder(t, "http://127.0.0.1:1", "call.m4a")
-	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: "soniox"}, true, nothing); err == nil || err.Error() != locales.RecErrFileUploading() {
-		t.Errorf("not up yet: %v", err)
+	if err := r.TranscribeFile(f, "b", store.SttSettings{Provider: "soniox"}, true, nothing); err == nil || err.Error() != locales.RecErrSetUpSoniox() {
+		t.Errorf("Soniox with no key here: %v", err)
 	}
 }
 
-// On the server a file goes by its ID, asked for again while it goes on,
-// and word that the app has it goes after.
-func TestTranscribeFileOnServer(t *testing.T) {
-	defer func(every time.Duration) { stillEvery = every }(stillEvery)
-	stillEvery = time.Millisecond
-	var calls atomic.Int32
-	bodies := make(chan map[string]any, 4)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(req.Body).Decode(&body)
-		bodies <- body
-		if calls.Add(1) == 1 {
-			w.WriteHeader(http.StatusGatewayTimeout)
-			_, _ = w.Write([]byte(`{"error":"still working","code":"still_transcribing"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"segments":[{"start_ms":5000,"end_ms":6000,"text":"Hello."}]}`))
-	}))
-	defer srv.Close()
-	r, f := fileRecorder(t, srv.URL, "call.m4a")
-	queued, err := r.st.Queued()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range queued {
-		if err := r.st.Dequeue(e); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got := make(chan []store.Segment, 1)
-	stt := store.SttSettings{Provider: "soniox", Language: "en"}
-	err = r.TranscribeFile(f, "b", stt, true, func(segs []store.Segment, err error) {
-		if err != nil {
-			t.Error(err)
-		}
-		got <- segs
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if segs := waitTranscript(t, got); len(segs) != 1 || segs[0].StartMs != 5000 {
-		t.Errorf("segments %+v", segs)
-	}
-	if first := <-bodies; first["action"] != "transcribe" || first["file_id"] != f.ID || first["language"] != "en" {
-		t.Errorf("asked %v", first)
-	}
-	<-bodies
-	r.FileTranscribed(f, stt)
-	select {
-	case ack := <-bodies:
-		if ack["action"] != "transcribed" || ack["file_id"] != f.ID {
-			t.Errorf("told %v", ack)
-		}
-	case <-time.After(5 * time.Second):
-		t.Error("the server was not told")
-	}
-}
-
-// Functions older than the app say so in words for the user, not theirs.
-func TestTranscribeFileOnAnOlderServer(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"recording_id is required"}`))
-	}))
-	defer srv.Close()
-	r, f := fileRecorder(t, srv.URL, "call.m4a")
-	if _, err := r.transcribeFile(context.Background(), f, store.SttSettings{Provider: "soniox"}); err == nil || err.Error() != locales.RecErrServerOld() {
-		t.Errorf("told %v", err)
-	}
-}
-
-// Signed out, with a Soniox key on this device, an audio file goes to
-// Soniox from here: there is no server to ask.
 func TestTranscribeFileWithSonioxHere(t *testing.T) {
 	keychain.Use(memKeys{})
 	t.Cleanup(func() { keychain.Use(nil) })
@@ -1125,14 +1061,8 @@ func TestTranscribeFileWithSonioxHere(t *testing.T) {
 	if segs := waitTranscript(t, got); len(segs) != 1 || segs[0].Text != "Hello." {
 		t.Errorf("segments %+v", segs)
 	}
-	// Soniox has nothing left of it to be told about.
-	r.FileTranscribed(f, stt)
 }
 
-// Audio this device uploaded goes from it as Keep the audio says: at once
-// where it is kept only until uploaded, after 30 days where it is kept
-// that long, and never while its recording still waits for its transcript
-// or the audio was brought back since.
 func TestSweepAudioFollowsKeepTheAudio(t *testing.T) {
 	r, st, _ := newTestController(t)
 	now := time.Now()

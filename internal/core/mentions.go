@@ -10,12 +10,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// Mentions of agents in comments, the same on the desktop and the phone:
-// an @ and an agent's name, or @agent, as a whole word outside code, where
-// the comment shows it marked and the agent answers in the thread.
-
-// Mentioned is which of names md mentions where MarkMentions marks them,
-// in lower case.
 func Mentioned(md string, names []string) map[string]bool {
 	out := map[string]bool{}
 	MarkMentions(md, names, func(m string) string {
@@ -25,10 +19,6 @@ func Mentioned(md string, names []string) map[string]bool {
 	return out
 }
 
-// CommentAgent is the agent a comment mentions, to answer in its thread:
-// one it names, the first as hub.Options lists them, or else the default
-// for @agent, as Hub.Resolve picks it. mentioned is false when the comment
-// mentions none, and the error says why the default can't run.
 func CommentAgent(hub *agents.Hub, body string) (agent store.ModelChoice, mentioned bool, err error) {
 	options := hub.Options()
 	names := []string{"agent"}
@@ -51,28 +41,16 @@ func CommentAgent(hub *agents.Hub, body string) (agent store.ModelChoice, mentio
 	return o.Choice(), true, nil
 }
 
-// MarkMentions is md with each mention of one of names as mark has it:
-// an @ and the name, a whole word, outside code, where it stays as
-// written: fenced code blocks, indented ones, and code spans. The longest
-// of names that fits is the one mentioned.
 func MarkMentions(md string, names []string, mark func(mention string) string) string {
 	names = slices.Clone(names)
 	slices.SortFunc(names, func(x, y string) int { return len(y) - len(x) })
 	var b, para strings.Builder
-	// A paragraph's lines are marked together, for a code span may go
-	// over more than one of them.
 	flush := func() {
 		b.WriteString(markInline(para.String(), names, mark))
 		para.Reset()
 	}
 	fence := ""
-	// inPara is set while a paragraph goes on: an indented line then
-	// goes on with it, not starting a code block.
 	inPara := false
-	// item is the column the text of the open list item starts at, or -1
-	// outside one: a line indented that far goes on with the item, and is
-	// read from there, so what is indented under an item is its text, not
-	// code, unless it is indented as code from there.
 	item := -1
 	for _, line := range strings.SplitAfter(md, "\n") {
 		text := strings.TrimRight(line, "\r\n")
@@ -89,8 +67,6 @@ func MarkMentions(md string, names []string, mark func(mention string) string) s
 			}
 			continue
 		}
-		// A line left of the item's text that neither goes on with its
-		// paragraph nor starts an item ends the list.
 		if item >= 0 && n < item && !blank && !inPara && itemText(text) < 0 {
 			item = -1
 		}
@@ -120,8 +96,6 @@ func MarkMentions(md string, names []string, mark func(mention string) string) s
 	return b.String()
 }
 
-// indent is how many columns of spaces and tabs line starts with, a tab
-// going to the next column of four.
 func indent(line string) int {
 	n := 0
 	for _, ch := range []byte(line) {
@@ -137,7 +111,6 @@ func indent(line string) int {
 	return n
 }
 
-// dropIndent is line without the first cols columns of its indent.
 func dropIndent(line string, cols int) string {
 	n := 0
 	for n < cols && line != "" && (line[0] == ' ' || line[0] == '\t') {
@@ -151,8 +124,6 @@ func dropIndent(line string, cols int) string {
 	return line
 }
 
-// itemText is the column a list item's text starts at, where line starts
-// one, as - or 1. and a space, or -1.
 func itemText(line string) int {
 	rest := trimIndent(line)
 	at := len(line) - len(rest)
@@ -174,17 +145,12 @@ func itemText(line string) int {
 	if rest[n] != ' ' && rest[n] != '\t' {
 		return -1
 	}
-	// The text starts after the marker's spaces, up to four; more are a
-	// space and code indented in the item.
 	if w := indent(rest[n:]); w <= 4 {
 		return at + n + w
 	}
 	return at + n + 1
 }
 
-// markInline marks the mentions in a paragraph, outside its code spans; a
-// backslash keeps the character after it, a backtick too, from starting
-// one.
 func markInline(s string, names []string, mark func(string) string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -195,8 +161,6 @@ func markInline(s string, names []string, mark func(string) string) string {
 			i++
 			continue
 		case ch == '`':
-			// A span opens with a run of backticks and closes with a run
-			// as long; one that never closes is backticks as written.
 			n := backticks(s[i:])
 			end := i + n
 			if j := closingRun(s[end:], n); j >= 0 {
@@ -217,7 +181,6 @@ func markInline(s string, names []string, mark func(string) string) string {
 	return b.String()
 }
 
-// backticks is how many backticks s starts with.
 func backticks(s string) int {
 	n := 0
 	for n < len(s) && s[n] == '`' {
@@ -226,7 +189,6 @@ func backticks(s string) int {
 	return n
 }
 
-// closingRun is where in s a run of exactly n backticks starts, or -1.
 func closingRun(s string, n int) int {
 	for j := 0; j < len(s); {
 		if m := backticks(s[j:]); m > 0 {
@@ -241,9 +203,6 @@ func closingRun(s string, n int) int {
 	return -1
 }
 
-// opensFence is the fence a line opens a fenced code block with, as ```
-// or ~~~, or "". Backticks with a backtick after them on the line open
-// none: they are a code span, as ```x``` is.
 func opensFence(line string) string {
 	line = trimIndent(line)
 	for _, ch := range []byte{'`', '~'} {
@@ -258,8 +217,6 @@ func opensFence(line string) string {
 	return ""
 }
 
-// closesFence reports whether a line closes the code block fence opened:
-// a run of its character at least as long, alone on the line.
 func closesFence(line, fence string) bool {
 	line = trimIndent(line)
 	n := 0
@@ -269,7 +226,6 @@ func closesFence(line, fence string) bool {
 	return n >= len(fence) && strings.TrimSpace(line[n:]) == ""
 }
 
-// trimIndent drops the up to three spaces a fence may be indented by.
 func trimIndent(line string) string {
 	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
 		line = line[1:]
@@ -277,8 +233,6 @@ func trimIndent(line string) string {
 	return line
 }
 
-// mentionLen is how long the name of names that rest starts with is, a
-// whole word, or 0.
 func mentionLen(rest string, names []string) int {
 	for _, name := range names {
 		n := len(name)

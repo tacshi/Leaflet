@@ -18,21 +18,12 @@ import (
 	"leaflet/locales"
 )
 
-// Link cards and file cards.
-
-// webAnswers are what pages on the web said, by what was asked of them:
-// asked once each, an answer is kept while the app runs, and a question
-// that failed, as offline, is asked again once imageRetry has passed, as
-// a picture is. On the main thread only.
 type webAnswers[T any] struct {
 	answers map[string]T
 	asking  map[string]bool
 	failed  map[string]time.Time
 }
 
-// get returns the answer for key, or the zero value without one. Then it
-// asks ask, off the main thread, unless it is asking already or asked in
-// vain a moment ago; got has the answer, on the main thread.
 func (w *webAnswers[T]) get(a *App, key string, ask func() (T, error), got func(T)) T {
 	var zero T
 	if v, ok := w.answers[key]; ok {
@@ -51,7 +42,6 @@ func (w *webAnswers[T]) get(a *App, key string, ask func() (T, error), got func(
 		delete(w.asking, key)
 		if err != nil {
 			w.failed[key] = time.Now()
-			// What shows it asks again once the wait is over.
 			a.later(imageRetry, func() {})
 			return
 		}
@@ -62,18 +52,12 @@ func (w *webAnswers[T]) get(a *App, key string, ask func() (T, error), got func(
 	return zero
 }
 
-// settled reports whether the question for key has had its answer, or
-// failed the last it was asked.
 func (w *webAnswers[T]) settled(key string) bool {
 	_, answered := w.answers[key]
 	_, failed := w.failed[key]
 	return answered || failed
 }
 
-// linkInfoOf asks a page for its info the first time a card shows it, and
-// keeps it in the page's link cards that lack it, for search, exports and
-// other devices, though the page has closed by then. Until the page
-// answers, the info is empty.
 func (a *App) linkInfoOf(link string) web.LinkInfo {
 	pageID := ""
 	if a.page != nil {
@@ -88,8 +72,6 @@ func (a *App) linkInfoOf(link string) web.LinkInfo {
 	}, func(info web.LinkInfo) { a.keepLinkInfo(pageID, link, info) })
 }
 
-// keepLinkInfo puts a link's info in page pageID's cards of it that lack
-// it: through its editor while it is open, else in what is stored.
 func (a *App) keepLinkInfo(pageID, link string, info web.LinkInfo) {
 	if info.Title == "" || !a.canEdit(pageID) {
 		return
@@ -117,7 +99,6 @@ func (a *App) keepLinkInfo(pageID, link string, info web.LinkInfo) {
 	}
 }
 
-// cardButton is the box of a link or file card, which opens what it stands for.
 func cardButton(c *ui.Context, key, label string) ui.Element {
 	pal := theme.Of(c)
 	b := ui.ButtonBase(c.Key(key)).FillWidth().Radius(8).Border(1, pal.Divider).Background(pal.Surface).
@@ -143,7 +124,6 @@ func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
 	if title == "" {
 		title = link
 	}
-	// Short without a description or picture to make room for.
 	height := float32(64)
 	if info.Description != "" || info.Image != "" {
 		height = 96
@@ -172,17 +152,12 @@ func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
 	}
 }
 
-// humanSize is a file's size as people read it.
 func humanSize(n int64) string { return webpage.FileSize(n) }
 
-// audioFile reports whether n is an audio file's block.
 func audioFile(n *doc.Node) bool {
 	return n.Type == "file" && doc.FilePreviewKind(n.Str("name"), n.Str("mime")) == doc.FileAudio
 }
 
-// audioBlock draws an audio file as a recording is drawn: its name, its
-// controls, where it has got to once it plays, and its transcript, all in
-// one card. Its web view plays it, out of sight.
 func (a *App) audioBlock(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)
 	id := n.ID
@@ -206,7 +181,6 @@ func (a *App) audioBlock(c *ui.Context, n *doc.Node) {
 					status = locales.RecTranscribing()
 				case found:
 					status = fileDetail(file.Name, file.SizeBytes)
-					// What made the transcript, while the notes have one.
 					if engine := recording.EngineName(n.Str(doc.TranscribedBy)); engine != "" && strings.TrimSpace(n.Str("notes")) != "" {
 						status = locales.CardTranscribedBy(status, engine)
 					}
@@ -245,8 +219,6 @@ func (a *App) audioBlock(c *ui.Context, n *doc.Node) {
 	})
 }
 
-// fileBlock draws a file: its card, its player once it plays, as a video
-// plays in the page, and its notes. An audio file has a block of its own.
 func (a *App) fileBlock(c *ui.Context, n *doc.Node, width float32) {
 	if audioFile(n) {
 		a.audioBlock(c, n)
@@ -260,7 +232,6 @@ func (a *App) fileBlock(c *ui.Context, n *doc.Node, width float32) {
 	})
 }
 
-// fileHead draws a file's card and player.
 func (a *App) fileHead(c *ui.Context, n *doc.Node, width float32, hovered bool) {
 	pal := theme.Of(c)
 	file, found := store.File{}, false
@@ -271,7 +242,6 @@ func (a *App) fileHead(c *ui.Context, n *doc.Node, width float32, hovered bool) 
 		}
 	}
 	if !found {
-		// Not on this device yet, or gone: the card says so.
 		name := n.Str("name")
 		if name == "" {
 			name = locales.CardFile()
@@ -287,7 +257,6 @@ func (a *App) fileHead(c *ui.Context, n *doc.Node, width float32, hovered bool) 
 	if media && !failed {
 		icon, label = "play", locales.CardPlayFile(file.Name)
 	}
-	// A video's picture takes the card's place.
 	if wv == nil || kind != doc.FileVideo {
 		ui.Row(c.Key("file-head")).FillWidth().Children(func() {
 			b := cardButton(c, "file:"+n.ID, label)
@@ -321,9 +290,6 @@ func (a *App) fileHead(c *ui.Context, n *doc.Node, width float32, hovered bool) 
 	}
 }
 
-// fileMenu adds a file block's own items to a menu of it: to open it in
-// another app, its notes, and what an audio or video file's transcript can
-// do, as a recording's menu has.
 func (a *App) fileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) {
 	file, found := a.fileByID(n.Str("file_id"))
 	if m.Item(locales.CardOpenExternally()).Disabled(!found).Chosen() {
@@ -368,8 +334,6 @@ func (a *App) fileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) {
 	})
 }
 
-// setSpeakersHidden shows file block id's notes with or without the
-// speakers' names, as one step to undo.
 func (a *App) setSpeakersHidden(id string, hidden bool) {
 	if !a.canChangePage() {
 		return
@@ -385,8 +349,6 @@ func (a *App) setSpeakersHidden(id string, hidden bool) {
 	})
 }
 
-// transcriptMenu adds what a file's transcript can do to a menu of it, with
-// its speakers as they show.
 func (a *App) transcriptMenu(c *ui.Context, m *ui.Menu, n *doc.Node, name string) {
 	notes, names, hidden := n.Str("notes"), doc.SpeakerNamesOf(n), n.Bool(doc.SpeakersHidden)
 	if m.Item(locales.RecCopyTranscript()).Chosen() {
@@ -398,7 +360,6 @@ func (a *App) transcriptMenu(c *ui.Context, m *ui.Menu, n *doc.Node, name string
 		nodes := doc.NotesBlocks(notes, names, hidden)
 		a.page.editor.Edit(func(content *doc.Content) { _ = content.Insert(doc.Position{After: n.ID}, nodes...) })
 	}
-	// The agent reads the notes with the block.
 	if m.Item(locales.RecSummarize()).Disabled(!edit || !a.hub.Available()).Chosen() {
 		a.openPageAgent()
 		a.hub.Chat(a.page.id, locales.RecSummarizePrompt(name), []string{n.ID})
@@ -408,8 +369,6 @@ func (a *App) transcriptMenu(c *ui.Context, m *ui.Menu, n *doc.Node, name string
 	}
 }
 
-// speakerMenu adds to the menu of a line of a file's notes the ways to say
-// who said it, as a transcriber may have it wrong, and to name them.
 func (a *App) speakerMenu(m *ui.Menu, n *doc.Node, l doc.NoteLine) {
 	speakers := doc.NoteSpeakers(n.Str("notes"), doc.SpeakerNamesOf(n))
 	if len(speakers) == 0 || !a.canChangePage() {
@@ -434,8 +393,6 @@ func (a *App) speakerMenu(m *ui.Menu, n *doc.Node, l doc.NoteLine) {
 	m.Separator()
 }
 
-// editSpeakers changes file block id's notes and its speakers' names with
-// edit, as one step to undo.
 func (a *App) editSpeakers(id string, edit func(notes string, names []string) (string, []string)) {
 	if !a.canChangePage() {
 		return
@@ -449,14 +406,10 @@ func (a *App) editSpeakers(id string, edit func(notes string, names []string) (s
 	})
 }
 
-// openSpeaker opens the dialog that names a speaker of a file block: from,
-// all their lines, or for "" a new one for line number line.
 func (d *dialogs) openSpeaker(block, from string, line int) {
 	d.speakerOpen, d.speakerBlock, d.speakerFrom, d.speakerLine, d.speakerName = true, block, from, line, from
 }
 
-// speakerDialog names a speaker of a file's notes; a name left empty
-// changes nothing.
 func (a *App) speakerDialog(c *ui.Context) {
 	d := &a.dialogs
 	title := locales.CardNewSpeaker()
@@ -493,8 +446,6 @@ func (a *App) speakerDialog(c *ui.Context) {
 	})
 }
 
-// transcribeFile transcribes audio file block id of the open page into its
-// notes, with provider, or the one marked for the page when it is "".
 func (a *App) transcribeFile(id, provider string) {
 	if a.page == nil {
 		return
@@ -504,8 +455,6 @@ func (a *App) transcribeFile(id, provider string) {
 	}
 }
 
-// replaceNotesAlert asks before a transcript takes the place of the notes
-// a file has.
 func (a *App) replaceNotesAlert(c *ui.Context) {
 	if a.fileToTranscribe == "" {
 		return
@@ -536,7 +485,6 @@ func (a *App) fileCard(c *ui.Context, b ui.Element, icon, name string, size int6
 	})
 }
 
-// fileDetail is what a file's card says of it: its kind and its size.
 func fileDetail(name string, size int64) string {
 	kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(name), "."))
 	if kind == "" {

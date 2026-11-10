@@ -1,7 +1,3 @@
-// Package menu is what the editor's / and @ menus offer, and how what is
-// typed after the "/" or "@" filters it, for the desktop and the iOS app
-// alike: the / menu's blocks and templates, and the @ menu's agents, pages
-// and people. Each app draws the menu and does what an item says.
 package menu
 
 import (
@@ -18,26 +14,17 @@ import (
 	"leaflet/locales"
 )
 
-// Item is a choice of the / or @ menu.
 type Item struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Hint  string `json:"hint"`
-	// Icon is a Lucide icon's name.
-	Icon string `json:"icon"`
-	// Group heads a run of items, as "Agents".
-	Group string `json:"group"`
-	// Keywords find the item besides its label: English, to find a block
-	// by its English name in any language.
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Hint     string `json:"hint"`
+	Icon     string `json:"icon"`
+	Group    string `json:"group"`
 	Keywords string `json:"keywords,omitempty"`
 }
 
-// Pages is how many pages the @ menu offers at once: the first that match.
 const Pages = 8
 
-// Slash is the / menu: its blocks, said in the app's language, then the
-// templates, to put one's blocks at the caret. A template is found by
-// "template", in the app's language too.
 func Slash(templates []Item) []Item {
 	basic, blocks := locales.HostGroupBasic(), locales.HostGroupBlocks()
 	out := []Item{
@@ -73,31 +60,21 @@ func Slash(templates []Item) []Item {
 	return out
 }
 
-// Agent is an agent the @ menu offers to ask at the caret.
 type Agent struct {
 	ProviderID string
 	Name       string
 	Model      string
 }
 
-// Mentions is what the @ menu offers in a page.
 type Mentions struct {
-	// PageID is the page the menu is in, which it doesn't offer.
-	PageID string
-	Agents []Agent
-	// Pages are the user's pages, and Folders their folders, which say
-	// where a page is.
+	PageID  string
+	Agents  []Agent
 	Pages   []store.Page
 	Folders []store.Folder
-	// Members are who the page is shared with, and UserID the user, whom
-	// the menu leaves out.
 	Members []store.Member
 	UserID  string
 }
 
-// Mention is the @ menu: the agents, or a way to add one while there is
-// none; the pages, most recently edited first; and the people the page is
-// shared with.
 func Mention(m Mentions) []Item {
 	var out []Item
 	for _, a := range m.Agents {
@@ -116,8 +93,6 @@ func Mention(m Mentions) []Item {
 		out = append(out, Item{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: place(p), Icon: "file-text", Group: locales.HostGroupPages()})
 	}
 	for _, mb := range m.Members {
-		// Someone invited who has not accepted is no account yet: their
-		// ID is the invite's.
 		if mb.UserID == m.UserID || !mb.Accepted && mb.Role != "owner" {
 			continue
 		}
@@ -126,8 +101,6 @@ func Mention(m Mentions) []Item {
 	return out
 }
 
-// places says where a page is: in its parent page, else its folder, else
-// nothing at the top of the space.
 func (m Mentions) places() func(store.Page) string {
 	titles := map[string]string{}
 	for _, p := range m.Pages {
@@ -145,34 +118,17 @@ func (m Mentions) places() func(store.Page) string {
 	}
 }
 
-// Filter keeps the items what is typed after the "/" or "@" finds: those
-// whose label has it, in any case, or whose keywords do. The best come
-// first, for Enter to take: a label that starts with it, then one with a
-// word that does, then keywords one of which does, then those that have
-// it anywhere ("/h" a heading before Text, for "paragraph"). The groups
-// stay whole, the one with the best first, and in each the items keep
-// their order among those as good. Full-width letters and digits, as an
-// input method for Chinese or Japanese types them, find what their ASCII
-// does. Pages are kept to the best Pages that match, and the way to add
-// an agent shows only before anything is typed.
 func Filter(items []Item, query string) []Item { return (&Folded{items: items}).Filter(query) }
 
-// Folded is items to filter by one query after another, as the @ menu's
-// pages are while it is open: their labels, as Filter compares them, are
-// folded once, the first time a query needs them, not for each query.
 type Folded struct {
 	items  []Item
 	labels []string
 }
 
-// Fold is items, to filter as Filter does.
 func Fold(items []Item) *Folded { return &Folded{items: items} }
 
-// fold is s as Filter compares it: full-width letters and digits as
-// their ASCII, in lower case.
 func fold(s string) string { return strings.ToLower(width.Fold.String(s)) }
 
-// Filter is Filter of the items, by query.
 func (f *Folded) Filter(query string) []Item {
 	items := f.items
 	q := fold(strings.TrimSpace(query))
@@ -182,11 +138,10 @@ func (f *Folded) Filter(query string) []Item {
 			f.labels[i] = fold(it.Label)
 		}
 	}
-	// A hit is an item by its place in items.
 	type hit struct{ i, rank, group, top int }
 	var hits []hit
-	groups := map[string]int{} // a group's first place
-	best := map[string]int{}   // its best rank
+	groups := map[string]int{}
+	best := map[string]int{}
 	for i, it := range items {
 		if it.Key == "connect" && q != "" {
 			continue
@@ -233,14 +188,10 @@ func (f *Folded) Filter(query string) []Item {
 	return out
 }
 
-// rank is how well an item matches q, folded, its label folded as label:
-// 0 best, -1 not at all.
 func rank(it Item, label, q string) int {
 	if q == "" {
 		return 0
 	}
-	// words reports whether a word of s, a run of letters and digits,
-	// starts with q.
 	words := func(s string) bool {
 		start := -1
 		for i, r := range s {
@@ -272,9 +223,6 @@ func rank(it Item, label, q string) int {
 	return -1
 }
 
-// Turn is the kind of text block a / menu key makes of the block at the
-// caret, with a heading's level, or ok false for a key that does
-// something else.
 func Turn(key string) (typ string, level int, ok bool) {
 	switch key {
 	case "paragraph", "bulleted_list", "numbered_list", "todo_list", "quote", "code", "callout", "toggle_list":
@@ -285,9 +233,6 @@ func Turn(key string) (typ string, level int, ok bool) {
 	return "", 0, false
 }
 
-// Block is the block a / menu key puts at the caret, ready to show: a
-// divider, a table, a chart that author made, or an empty formula or
-// diagram, which opens to be written. ok is false for other keys.
 func Block(key, author string) (n *doc.Node, ok bool) {
 	switch key {
 	case "divider":
@@ -310,12 +255,6 @@ func Block(key, author string) (n *doc.Node, ok bool) {
 	return nil, false
 }
 
-// LinkBlock is the block of kind "image", "video" or "link_preview" the /
-// menu puts at the caret for link, the link checked as the kind needs: a
-// web link, a video's of a site Leaflet plays. What is wrong with it, the
-// error says in the app's language. A video's share link the caller has
-// followed first (web.VideoLink): one still a share link leads nowhere
-// that could be told.
 func LinkBlock(kind, link string) (*doc.Node, error) {
 	link = strings.TrimSpace(link)
 	if kind == "video" {
@@ -336,10 +275,8 @@ func LinkBlock(kind, link string) (*doc.Node, error) {
 	return doc.LinkNode(link)
 }
 
-// EmbedStart is the page a new embed starts from, to change.
 const EmbedStart = "<!doctype html>\n<html><body style=\"font-family: system-ui; padding: 16px\">\n  <button onclick=\"this.textContent = Number(this.textContent) + 1\">0</button>\n</body></html>"
 
-// EmbedBlock is an embed of html, as tall as height, that author made.
 func EmbedBlock(title, html string, height int, author string) (*doc.Node, error) {
 	return doc.SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"title": title, "html": html, "height": float64(height)}}, "", author)
 }

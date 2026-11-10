@@ -1,22 +1,16 @@
 import SwiftUI
 
-/// NewComment is a comment being started on a block, from the editor's
-/// selection.
 struct NewComment: Equatable {
     var blockID: String
     var quote: String
 }
 
-/// CommentsPanel is the page's comment threads, as the desktop's Comments
-/// tab: a new comment on the text chosen, threads with their replies,
-/// Resolve and Reopen, and @agent to have an agent answer.
 struct CommentsPanel: View {
     let model: PageModel
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
     @State private var showResolved = false
-    /// sending says the new comment is on its way to the core.
     @State private var sending = false
 
     private var open: [CommentThread] { model.threads.filter { !$0.root.resolved } }
@@ -74,8 +68,6 @@ struct CommentsPanel: View {
                     sending = true
                     Task {
                         defer { sending = false }
-                        // The comment stays, to send again, until the core
-                        // has it.
                         do {
                             try await app.client?.addComment(
                                 model.id, blockID: new.blockID, body: body, quote: new.quote)
@@ -101,8 +93,6 @@ struct CommentsPanel: View {
     }
 }
 
-/// ThreadCard is a thread: what it is on, its comments, a reply, and
-/// Resolve or Reopen.
 struct ThreadCard: View {
     let thread: CommentThread
     let model: PageModel
@@ -110,7 +100,6 @@ struct ThreadCard: View {
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
 
-    /// reply is the reply being written, which the page keeps.
     private var reply: String {
         get { model.replies[thread.root.id] ?? "" }
         nonmutating set { model.replies[thread.root.id] = newValue.isEmpty ? nil : newValue }
@@ -157,7 +146,6 @@ struct ThreadCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 0.5))
     }
 
-    /// resolveButton resolves the thread, or reopens it.
     private var resolveButton: some View {
         Button(thread.root.resolved ? L.panelReopen : L.panelResolve) {
             let reopen = thread.root.resolved
@@ -187,8 +175,6 @@ struct ThreadCard: View {
                 try await app.client?.addComment(
                     model.id, blockID: thread.root.blockID, body: body, parentID: thread.root.id)
             } catch {
-                // The reply comes back, to send again, unless another was
-                // begun meanwhile.
                 if reply.isEmpty { reply = body }
                 app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
             }
@@ -197,7 +183,6 @@ struct ThreadCard: View {
     }
 }
 
-/// CommentRow is one comment: who wrote it and when, and what.
 struct CommentRow: View {
     let comment: CommentThread.Comment
     let model: PageModel
@@ -214,16 +199,12 @@ struct CommentRow: View {
                 if let note = Self.note(comment) {
                     Text(note).font(.caption).foregroundStyle(palette.textMuted).lineLimit(1)
                 }
-                // As the byline says when, in the app's language, moving on
-                // as the panel stays open.
                 TimelineView(.everyMinute) { context in
                     Text(Byline.humanTime(comment.created, now: context.date))
                         .font(.caption).foregroundStyle(palette.textMuted)
                 }
             }
             if comment.deleted == true {
-                // A first comment deleted stays for its replies, as the
-                // desktop shows it.
                 Text(L.panelCommentDeleted).font(.subheadline).foregroundStyle(palette.textMuted)
             } else {
                 Text(Self.text(comment.body))
@@ -238,17 +219,10 @@ struct CommentRow: View {
         }
     }
 
-    /// note says how a comment came, after its author, as the desktop's
-    /// comments do: who had an agent write it, or by the page's public
-    /// link, through which a guest names themself, any name.
     static func note(_ comment: CommentThread.Comment) -> String? {
         comment.authorKind == "guest" ? L.panelViaPublicLink : comment.askedBy
     }
 
-    /// text is a comment's text, its inline Markdown read, with only the
-    /// links the page itself opens (EditorStyle.linkTarget): a web, mail
-    /// or page link. Whoever comments, a guest by a public link too, could
-    /// otherwise link a file, or another app to do as the link says.
     static func text(_ body: String) -> AttributedString {
         var out =
             (try? AttributedString(
@@ -261,7 +235,6 @@ struct CommentRow: View {
         return out
     }
 
-    /// deleteButton deletes the comment.
     private var deleteButton: some View {
         Button(L.panelDeleteComment, systemImage: "trash", role: .destructive) {
             Task {

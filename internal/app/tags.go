@@ -12,14 +12,8 @@ import (
 	"leaflet/locales"
 )
 
-// The Tags tab is MyGo's Outline of the pages' tags, each opening to its
-// pages. Its items are keys: "tag:" and a tag, "tagged:" a page's ID, |
-// and the tag it is under, for a page is under each of its tags.
-
-// tagCounts are the tags of the pages, by name.
 func (a *App) tagCounts() []store.TagCount { return a.library().Tags }
 
-// tagNames are the tags of the pages, by name, as suggestions.
 func (a *App) tagNames() []string {
 	var out []string
 	for _, t := range a.tagCounts() {
@@ -28,7 +22,6 @@ func (a *App) tagNames() []string {
 	return out
 }
 
-// showTag shows a tag's pages in the Tags tab.
 func (a *App) showTag(tag string) {
 	for _, t := range a.tagCounts() {
 		if strings.EqualFold(t.Name, tag) {
@@ -38,8 +31,6 @@ func (a *App) showTag(tag string) {
 	a.showSidebar(tabTags)
 }
 
-// tagsTree builds the Tags tab: the tags, each with how many pages have
-// it, opening to its pages; choosing a page opens it.
 func (a *App) tagsTree(c *ui.Context) {
 	pal := theme.Of(c)
 	tags := a.tagCounts()
@@ -91,7 +82,6 @@ func (a *App) tagsTree(c *ui.Context) {
 		if id, ok := taggedPage(key); ok {
 			a.openPage(id)
 		} else if !pressed && !submitted {
-			// A click or Enter opens or closes a tag; the arrows only go by.
 		} else if s.Open.Has(key) {
 			s.Open.Remove(key)
 		} else {
@@ -100,23 +90,17 @@ func (a *App) tagsTree(c *ui.Context) {
 	}
 }
 
-// taggedPage is the page of a "tagged:" item of the Tags tab.
 func taggedPage(key string) (string, bool) {
 	rest, ok := strings.CutPrefix(key, "tagged:")
 	id, _, _ := strings.Cut(rest, "|")
 	return id, ok
 }
 
-// tagItem builds an item of the Tags tab after its arrow: a tag's name
-// and count, with its menu, or a page's icon and title.
 func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 	pal := theme.Of(c)
 	row := ui.Row(c.Key("item:" + key)).Grow(1).Height(26).Gap(6).AlignItems(ui.Center)
 	hovered := row.Hovered()
 	if tag, ok := strings.CutPrefix(key, "tag:"); ok {
-		// A band of the tag's color stands it apart from the pages: over
-		// the whole of the Outline's row, back past its arrow, which shows
-		// through. Painted, it takes none of the arrow's clicks.
 		t := c.Theme()
 		band := tagColor(tag).Alpha(0.1)
 		lead, pad := t.Space(2)+t.Space(4)+t.Space(1), t.Space(1)
@@ -124,8 +108,6 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 			p.Fill(ui.Rect{X: r.X - lead, Y: r.Y - pad + 1, W: r.W + lead + t.Space(2), H: r.H + 2*pad - 2}, band, t.Radius)
 		})
 		row.Children(func() {
-			// The name in the tag's color, on its band: a chip there too
-			// would be a second band.
 			ui.Text(c, tag).FontSize(13.5).FontWeight(600).TextColor(tagColor(tag).Mix(pal.Text, 0.35)).SingleLine()
 			ui.Spacer(c)
 			tools(c, func() {
@@ -155,7 +137,6 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 	row.PopoverMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 }
 
-// tagMenu is a tag's actions: renaming it, and taking it off every page.
 func (a *App) tagMenu(m *ui.Menu, tag string) {
 	if m.Item(locales.TagRenameEllipsis()).Chosen() {
 		a.dialogs.openRenameTag(tag)
@@ -166,8 +147,6 @@ func (a *App) tagMenu(m *ui.Menu, tag string) {
 	}
 }
 
-// deleteTag takes a tag off every page the user may change, and offers
-// to put back each one's tags, templates' too, as they were.
 func (a *App) deleteTag(tag string) {
 	before, err := a.st.DeleteTag(tag)
 	if err != nil {
@@ -183,8 +162,6 @@ func (a *App) deleteTag(tag string) {
 		}
 	})
 }
-
-// Rename tag ------------------------------------------------------------
 
 func (d *dialogs) openRenameTag(tag string) {
 	d.tagOpen, d.tagOld, d.tagName, d.tagSelect = true, tag, tag, true

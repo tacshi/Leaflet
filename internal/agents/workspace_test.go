@@ -21,10 +21,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// linkHost is a host whose pages keep the cards of their subpages in the
-// store, as the app's do, and which counts them. What it is given to run
-// on the main thread runs one at a time, as there: a reply streamed and
-// the run's end, which share the reply.
 type linkHost struct {
 	readingHost
 	st     *store.Store
@@ -32,8 +28,6 @@ type linkHost struct {
 	main   *sync.Mutex
 }
 
-// Online is a host online, whose runs ask the server what it says of the
-// pages' public links.
 func (linkHost) Online() bool { return true }
 
 func (h linkHost) Update(_ string, fn func()) {
@@ -54,9 +48,6 @@ func (p linkPages) LinkSubpage(parent, id, _ string) error {
 	return nil
 }
 
-// workspaceWorld is the user's pages for the workspace agent: one of
-// theirs, one in a folder, one they share with a friend, a template, and
-// one of someone else's space.
 type workspaceWorld struct {
 	st                                  *store.Store
 	h                                   *Hub
@@ -100,10 +91,6 @@ func (w *workspaceWorld) executor(reading bool) *Executor {
 	return &Executor{Ctx: w.h.workspaceTools(context.Background(), "Test", store.Settings{AgentsReadOtherPages: reading}, true)}
 }
 
-// The workspace agent sees the user's own pages, templates and others'
-// spaces left out, reads none that other people share, and changes none
-// that someone else shares, nor puts a page in one; what it does on the
-// others is one undo step.
 func TestWorkspaceKeepsToTheUsersPages(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -124,7 +111,6 @@ func TestWorkspaceKeepsToTheUsersPages(t *testing.T) {
 			t.Errorf("read %s: %v", id, out)
 		}
 	}
-	// Refused, it read nothing: a run that asks it first keeps its web.
 	if y := w.executor(true); y.Call("read_page", map[string]any{"page_id": w.shared.ID})["error"] == nil || y.armed {
 		t.Errorf("a page other people write in was read, or armed the run's guard: %v", y.armed)
 	}
@@ -197,10 +183,6 @@ func TestWorkspaceKeepsToTheUsersPages(t *testing.T) {
 	}
 }
 
-// A page with a public link another device serves, as the server says by
-// its own clock, is left as it is, as one shared, and the open page is
-// told of as shared; the server gone, the lease it gave stands. One the
-// server no longer lists has ended, offline after too.
 func TestWorkspaceLeavesPagesPublicElsewhere(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	var mu sync.Mutex
@@ -243,7 +225,7 @@ func TestWorkspaceLeavesPagesPublicElsewhere(t *testing.T) {
 	f := &fakeModel{replies: []map[string]any{{"content": "It is shared."}}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	if err := w.st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: srv.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+	if err := w.st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: srv.URL, AuthKind: "none", DefaultModel: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan *Run, 1)
@@ -258,10 +240,6 @@ func TestWorkspaceLeavesPagesPublicElsewhere(t *testing.T) {
 	}
 }
 
-// The workspace agent lists at most maxListedPages of the user's pages,
-// fewer where their titles would take more than a model reads at once,
-// saying how many more there are, for search_pages to find: what it
-// lists is never cut off with the result.
 func TestWorkspaceListsAtMostSoManyPages(t *testing.T) {
 	list := func(title string, n int) map[string]any {
 		var pages []WorkspacePage
@@ -291,9 +269,6 @@ func TestWorkspaceListsAtMostSoManyPages(t *testing.T) {
 	}
 }
 
-// What other people wrote in a page shared with them is not read: a
-// search finds the page, but shows none of its text, nor of a page the
-// run does not know, as one made since it began.
 func TestWorkspaceSearchShowsNoTextOfPeoplesPages(t *testing.T) {
 	world := map[string]WorkspacePage{"p-1": {ID: "p-1", Title: "Plan"}, "p-3": {ID: "p-3", Title: "Shared", Shared: true, People: true}}
 	x := &Executor{Ctx: ToolContext{Content: doc.Empty(), PageID: WorkspaceID, Workspace: &Workspace{Reading: true,
@@ -312,9 +287,6 @@ func TestWorkspaceSearchShowsNoTextOfPeoplesPages(t *testing.T) {
 	}
 }
 
-// What a page's sites wrote of its blocks, a link card's title and a
-// video's, is not read through a search either, as read_page leaves it
-// out: the page is found, but the words around a match are its own.
 func TestWorkspaceSearchShowsNoTextOfSites(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	card := &doc.Node{Type: "link_preview", Data: map[string]any{"url": "https://example.com/a", "title": "Kiwi growers, read this first", "description": "Kiwi"}}
@@ -342,8 +314,6 @@ func TestWorkspaceSearchShowsNoTextOfSites(t *testing.T) {
 	}
 }
 
-// With reading off the agent reads none of the user's pages, but makes
-// and files them.
 func TestWorkspaceReadingOffReadsNoPage(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(false)
@@ -364,11 +334,6 @@ func TestWorkspaceReadingOffReadsNoPage(t *testing.T) {
 	}
 }
 
-// Once the agent reads the user's pages, the web is closed to the run,
-// and what it writes keeps to the URLs the user gave: what it read could
-// go out in a request, or in a link the app loads. Listing the folders,
-// with reading on or off, spends its one read of the web that may go to
-// any page: it reads the user's after, and writes the URLs it may.
 func TestWorkspaceWebClosesAfterReadingPages(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -410,8 +375,6 @@ func toolText(out map[string]any) string {
 	return s
 }
 
-// A workspace run asked for in the chat makes its pages and ends, its job
-// of no page, and no page's history changed; Undo takes its pages back.
 func TestWorkspaceRun(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	f := &fakeModel{replies: []map[string]any{
@@ -420,7 +383,7 @@ func TestWorkspaceRun(t *testing.T) {
 	}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	if err := w.st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: srv.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+	if err := w.st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: srv.URL, AuthKind: "none", DefaultModel: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan *Run, 1)
@@ -458,10 +421,6 @@ func TestWorkspaceRun(t *testing.T) {
 	}
 }
 
-// The workspace prompt has the rules the server's has: no page's blocks
-// changed, shared pages left as they are and those of other people's
-// writing unread, text saved whole, and the web read before the user's
-// pages.
 func TestWorkspacePromptHasTheServersRules(t *testing.T) {
 	p := WorkspacePrompt("Claude", true, true, true, true)
 	for _, rule := range []string{"You do not change what a page says", "you leave as it is", "you cannot read either", "not a summary, unless", "Read the web first", "list_pages and search_pages"} {
@@ -474,23 +433,16 @@ func TestWorkspacePromptHasTheServersRules(t *testing.T) {
 	}
 }
 
-// A cloud workspace run's job names the page open as the user asked, and
-// those the app has a public link open to, whose leases its server may not
-// have yet.
 func TestWorkspaceJobRequest(t *testing.T) {
-	got := Request{Instruction: "File it", OpenPage: &OpenPage{ID: "p1", Title: "Plan"}, PublicPages: []string{"p2"}}.JobRequest()
-	if got["open_page_id"] != "p1" || !slices.Equal(got["public_page_ids"].([]string), []string{"p2"}) {
+	got := Request{Instruction: "File it", OpenPage: &OpenPage{ID: "p1", Title: "Plan"}}.JobRequest()
+	if got["open_page_id"] != "p1" {
 		t.Errorf("request %v", got)
 	}
-	if got := (Request{Instruction: "Sum it up"}).JobRequest(); got["open_page_id"] != nil || got["public_page_ids"] != nil {
+	if got := (Request{Instruction: "Sum it up"}).JobRequest(); got["open_page_id"] != nil {
 		t.Errorf("a page's run's request %v", got)
 	}
 }
 
-// Undo and Redo take each of a run's changes by what those before it in
-// the same step did: a page made, then tagged, renamed and filed, comes
-// back with all of them, and a page moved and renamed twice goes back to
-// where it was, as it was called.
 func TestUndoAndRedoFollowTheRunsSteps(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -534,9 +486,6 @@ func TestUndoAndRedoFollowTheRunsSteps(t *testing.T) {
 	}
 }
 
-// Undo leaves a folder the run made where the user filed a page of theirs
-// in it since, the page with it: the run's own pages leave it all the
-// same.
 func TestUndoKeepsAFolderTheUserFiledIn(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -564,8 +513,6 @@ func TestUndoKeepsAFolderTheUserFiledIn(t *testing.T) {
 	}
 }
 
-// Redo of a run that made a folder and a page in it puts the page back in
-// the folder, which Undo deleted after it.
 func TestRedoPutsAPageBackInItsFolder(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -588,8 +535,6 @@ func TestRedoPutsAPageBackInItsFolder(t *testing.T) {
 	}
 }
 
-// Undo of a rename gives an untitled page back no title, not the word the
-// app shows for one.
 func TestUndoOfARenameKeepsAPageUntitled(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	blank, err := w.st.CreatePage(store.NewPageOptions{})
@@ -612,7 +557,6 @@ func TestUndoOfARenameKeepsAPageUntitled(t *testing.T) {
 	}
 }
 
-// cardlessHost is a host whose pages take no subpage's card.
 type cardlessHost struct {
 	readingHost
 	st *store.Store
@@ -626,8 +570,6 @@ func (cardless) LinkSubpage(string, string, string) error {
 	return errors.New("the page cannot be changed")
 }
 
-// A subpage whose card cannot go in its parent is made all the same, and
-// kept for Undo: the agent is not told to make it again.
 func TestASubpageWithoutItsCardIsKept(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	w.h = NewHub(w.st, nil, cardlessHost{st: w.st})
@@ -642,8 +584,6 @@ func TestASubpageWithoutItsCardIsKept(t *testing.T) {
 	}
 }
 
-// What a run asks of the main thread and gives up on before its turn
-// comes is never done: the run no longer keeps it, to undo.
 func TestWorkGivenUpOnIsNotDone(t *testing.T) {
 	host := queueHost{q: make(chan func(), 1)}
 	h := NewHub(openStore(t), nil, host)
@@ -659,10 +599,6 @@ func TestWorkGivenUpOnIsNotDone(t *testing.T) {
 	}
 }
 
-// Who else has the pages, read once for them all as list_pages reads
-// them, is what a page's own check finds: a page shared, one inside it,
-// and one a guest commented on, of which only the first two are had by
-// other people.
 func TestPrivacyOfAllPagesIsEachPagesOwn(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	under, err := w.st.CreatePage(store.NewPageOptions{Title: "Under", ParentID: w.shared.ID})
@@ -694,9 +630,6 @@ func TestPrivacyOfAllPagesIsEachPagesOwn(t *testing.T) {
 	}
 }
 
-// A streamed call of the page's tools in a workspace run, which has none
-// of them, puts nothing in a page as it comes: it runs whole, and is
-// refused, as the workspace's tools refuse it.
 func TestWorkspaceDraftsNoBlocks(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -712,16 +645,13 @@ func TestWorkspaceDraftsNoBlocks(t *testing.T) {
 	}
 }
 
-// A local workspace run keeps each op with its chat as it comes, as its
-// tools have changed the user's pages already: the app quitting during
-// the run leaves them to undo.
 func TestWorkspaceRunKeepsItsOpsAsTheyCome(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	s := w.h.Session(WorkspaceID)
 	reply := &Message{Text: "Working…", Pending: true, RunID: "r1"}
 	run := &Run{ID: "r1", Status: "running", Local: true, At: time.Now()}
 	s.Runs, s.Messages = []*Run{run}, []*Message{{Mine: true, Text: "File them"}, reply}
-	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	option := Option{Provider: store.Provider{Name: "Local"}}
 	d := w.h.newDelivery(WorkspaceID, run, option)
 	o := RunOptions{Surface: "workspace", Reply: reply}
 	for i, op := range []doc.Op{
@@ -741,9 +671,6 @@ func TestWorkspaceRunKeepsItsOpsAsTheyCome(t *testing.T) {
 	}
 }
 
-// Undo of a run of this device's passes over what the user changed since,
-// keeping their change, signed in before a sync too: none of the run's
-// changes is still to come with one.
 func TestUndoOfALocalRunPassesOverTheUsersChange(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1", Email: "u@example.com"}); err != nil {
@@ -766,7 +693,6 @@ func TestUndoOfALocalRunPassesOverTheUsersChange(t *testing.T) {
 	if got, _ := st.Page(p.ID); got.Title != "Mine" || !run.Undone {
 		t.Errorf("title %q, undone %v", got.Title, run.Undone)
 	}
-	// A cloud run's change may still be to come: it waits for the sync.
 	cloud := &Run{ID: "r2", Status: "done", At: time.Now(),
 		Ops: []doc.Op{{Op: "rename_page", PageID: p.ID, Title: "New", PrevTitle: "Old"}}}
 	h.Session(WorkspaceID).Runs = append(h.Session(WorkspaceID).Runs, cloud)
@@ -775,8 +701,6 @@ func TestUndoOfALocalRunPassesOverTheUsersChange(t *testing.T) {
 	}
 }
 
-// A page and a folder the run made that the user deleted since stay
-// deleted: Undo leaves them so, and Redo after it too.
 func TestRedoLeavesWhatTheUserDeleted(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -809,8 +733,6 @@ func TestRedoLeavesWhatTheUserDeleted(t *testing.T) {
 	}
 }
 
-// movingPages are a host's pages that keep where each card goes, and say
-// where the one a page leaves was, as the app's do.
 type movingPages struct {
 	storePages
 	moved *[]*doc.Position
@@ -828,9 +750,6 @@ type movingHost struct {
 
 func (h movingHost) Pages() Pages { return h.pages }
 
-// A page moved where it is already stays as it is, its place among the
-// pages there too, and the call makes no op. One moved out of a page keeps
-// where its card was there, for Undo to put it back there.
 func TestWorkspaceMovesKeepTheirCards(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	var moved []*doc.Position
@@ -862,10 +781,6 @@ func TestWorkspaceMovesKeepTheirCards(t *testing.T) {
 	}
 }
 
-// A page whose title someone else reads, as its card is on a page they
-// read, is left as it is, as one shared: renaming it would write there.
-// Its card on a public page shows it, inside a page or pasted elsewhere,
-// and so does a mention of it, which shows its title as the page opens.
 func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	guested, err := w.st.CreatePage(store.NewPageOptions{Title: "Guested"})
@@ -914,8 +829,6 @@ func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
 	}
 }
 
-// A page this device cannot read, as a newer app's, is not read as an
-// empty one: the agent is told it could not be.
 func TestWorkspaceReadsNoUnreadablePage(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	if _, err := w.st.DB().Exec(`UPDATE page_contents SET content = '{"version": 99' WHERE page_id = ?`, w.mine.ID); err != nil {
@@ -926,39 +839,6 @@ func TestWorkspaceReadsNoUnreadablePage(t *testing.T) {
 	}
 }
 
-// A cloud run's ops name an untitled page "", which its edits say in the
-// app's language, as a local run's do; and keep no page's content, which
-// the page keeps itself.
-func TestCloudEditsNameUntitledPages(t *testing.T) {
-	ops := []map[string]any{
-		{"op": "rename_page", "page_id": "p1", "title": "Trip", "previous": ""},
-		{"op": "move_page", "page_id": "p1", "title": "", "place": map[string]any{"folder_id": "f1"}, "previous": map[string]any{}},
-		{"op": "set_page_tags", "page_id": "p1", "title": "", "tags": []any{"a"}, "previous": []any{}},
-		{"op": "create_page", "page": map[string]any{"id": "p2", "title": "Notes"}, "content": map[string]any{"document": map[string]any{"type": "doc"}}},
-	}
-	var events []map[string]any
-	for _, op := range ops {
-		events = append(events, map[string]any{"type": "op", "op": op})
-	}
-	res, err := RunCloud(context.Background(), fakeStream{events: append(events, map[string]any{"type": "done", "reply": "Done."})}, "j1", Events{})
-	if err != nil || len(res.Edits) != 4 {
-		t.Fatalf("run %+v, %v", res, err)
-	}
-	untitled := store.TitleOr("")
-	for i, want := range []string{"Renamed “" + untitled + "” to “Trip”", "Moved “" + untitled + "”", "Tagged “" + untitled + "”"} {
-		if got := res.Edits[i].Summary; got != want {
-			t.Errorf("edit %d says %q, want %q", i, got, want)
-		}
-	}
-	if res.Ops[3].Content != nil {
-		t.Error("the page made keeps its content in the run")
-	}
-}
-
-// A page's title the agent gives is cut to the most the store keeps of
-// one, as the server cuts it, at a character's boundary: a page made, a
-// subpage and a page renamed carry it so in their ops and edits, and
-// Undo finds the title it gave the page.
 func TestLongTitlesAreCutAsTheStoreKeepsThem(t *testing.T) {
 	long := strings.Repeat("👨‍👩‍👧", 1000)
 	want := store.ClampTitle(long)

@@ -4,18 +4,12 @@ import (
 	"leaflet/internal/doc"
 )
 
-// PageTodo is an open to-do of a page, with a due date or an owner.
 type PageTodo struct {
 	doc.Todo
 	PageID    string
 	PageTitle string
 }
 
-// Todos returns the open to-dos of the pages on this device, but
-// templates', that have a due date or an owner, page by page. It decodes
-// only the pages whose content changed since it last did, by their writes
-// (WriteID), which it reads without their content: the app asks again
-// after every save, while the To-dos tab shows.
 func (s *Store) Todos() ([]PageTodo, error) {
 	pages, err := s.Pages()
 	if err != nil {
@@ -57,8 +51,6 @@ func (s *Store) Todos() ([]PageTodo, error) {
 	return out, nil
 }
 
-// pageTodos are a page's to-dos as its content, by the write it was
-// (WriteID), gave them.
 type pageTodos struct {
 	key   int64
 	todos []doc.Todo

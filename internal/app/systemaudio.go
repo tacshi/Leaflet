@@ -7,26 +7,14 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// A recording where the system shows media: Now Playing on a Mac, the media
-// controls on Windows. Those, and the media keys, drive it. It counts on by
-// itself while audio plays, so it only hears of what it can't work out. A
-// file plays in a web view, which tells the system itself (nameFile): told
-// here too, it would show twice.
-
-// leafletCover is the app's icon, beside what plays where it has no cover.
-//
 //go:embed cover.png
 var leafletCover []byte
 
 const (
-	// systemPoll is how often the audio playing is checked on.
 	systemPoll = 500 * time.Millisecond
-	// systemLost is how far the audio can be from where the system thinks
-	// before it is told again.
 	systemLost = 1500 * time.Millisecond
 )
 
-// systemAudio is what the system was last told.
 type systemAudio struct {
 	block, title string
 	length, pos  time.Duration
@@ -35,9 +23,6 @@ type systemAudio struct {
 	at           time.Time
 }
 
-// watchSystemAudio has the audio checked on soon: from then on while it
-// plays, as a change of its own says nothing. Paused, nothing runs, for the
-// window not to draw for nothing.
 func (a *App) watchSystemAudio() {
 	if a.win == nil || a.systemWatch {
 		return
@@ -53,8 +38,6 @@ func (a *App) watchSystemAudio() {
 	})
 }
 
-// syncSystemAudio tells the system what plays, if that changed, and reports
-// whether it plays.
 func (a *App) syncSystemAudio() (playing bool) {
 	audio, ok := a.heardAudio()
 	if !ok {
@@ -94,8 +77,6 @@ func (a *App) syncSystemAudio() (playing bool) {
 	return audio.playing
 }
 
-// systemDrift is how far pos is from where the system, told s, thinks the
-// audio is.
 func systemDrift(s systemAudio, pos time.Duration) time.Duration {
 	thinks := s.pos
 	if s.playing {
@@ -104,8 +85,6 @@ func systemDrift(s systemAudio, pos time.Duration) time.Duration {
 	return max(thinks-pos, pos-thinks)
 }
 
-// mediaCommand does what the system's media controls or the media keys ask.
-// They have no skip of their own: next and previous are it.
 func (a *App) mediaCommand(cmd mygo.MediaCommand, pos time.Duration) {
 	audio, ok := a.heardAudio()
 	if !ok {

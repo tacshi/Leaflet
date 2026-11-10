@@ -5,16 +5,10 @@ import (
 	"strings"
 )
 
-// A callout is a text block set off in a tinted box with an icon; its
-// tone, data.tone, picks the tint: info, tip, warning or danger. In
-// Markdown it is one of GitHub's alerts, as "> [!TIP]".
-
-// CalloutTones are the tones a callout may take, the first the default.
 var CalloutTones = []string{"info", "tip", "warning", "danger"}
 
 var calloutAlerts = map[string]string{"info": "NOTE", "tip": "TIP", "warning": "WARNING", "danger": "CAUTION"}
 
-// CalloutTone reads a tone, or "info" for one not known.
 func CalloutTone(tone string) string {
 	tone = strings.ToLower(strings.TrimSpace(tone))
 	if _, ok := calloutAlerts[tone]; ok {
@@ -25,23 +19,15 @@ func CalloutTone(tone string) string {
 
 var calloutIcons = map[string]string{"info": "info", "tip": "lightbulb", "warning": "triangle-alert", "danger": "octagon-alert"}
 
-// CalloutIcon is the name of a tone's Lucide icon, as the editor and web
-// pages show it.
 func CalloutIcon(tone string) string { return calloutIcons[CalloutTone(tone)] }
 
-// NextTone is the tone a callout takes after tone, as a click on its icon
-// cycles them: the first after the last, and the second after one not
-// known, which reads as the first.
 func NextTone(tone string) string {
 	i := slices.Index(CalloutTones, CalloutTone(tone))
 	return CalloutTones[(i+1)%len(CalloutTones)]
 }
 
-// CalloutAlert is the GitHub alert line that opens a callout of a tone.
 func CalloutAlert(tone string) string { return "> [!" + calloutAlerts[CalloutTone(tone)] + "]" }
 
-// AlertTone reads a GitHub alert line, as "> [!WARNING]", as the tone of
-// the callout it opens, and reports whether it is one.
 func AlertTone(line string) (string, bool) {
 	rest, ok := strings.CutPrefix(strings.TrimSpace(line), ">")
 	if !ok {
@@ -60,8 +46,6 @@ func AlertTone(line string) (string, bool) {
 	return "", false
 }
 
-// CalloutMarkdown writes a callout as a GitHub alert, each line of its
-// text escaped where it would start another block inside the quote.
 func CalloutMarkdown(n *Node) string {
 	lines := markdownLines(n.Delta().ReadableMarkdown())
 	for i, l := range lines {

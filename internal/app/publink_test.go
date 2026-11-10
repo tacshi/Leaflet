@@ -60,8 +60,6 @@ func TestSplitEmails(t *testing.T) {
 	}
 }
 
-// pubTest is an app sharing one page through a link whose server runs
-// without a tunnel.
 func pubTest(t *testing.T) (*App, *pubLink, http.Handler, store.Page) {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())
@@ -88,7 +86,6 @@ func pubTest(t *testing.T) (*App, *pubLink, http.Handler, store.Page) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The picture is the page's own.
 	if err := st.PutFile(store.File{ID: "dawn", PageID: pg.ID, Name: "dawn.png", LocalPath: pic, MimeType: "image/png"}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,8 +119,6 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	if w := get(h, "/tok/f/1.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
 		t.Errorf("picture: %d %v", w.Code, w.Header())
 	}
-	// What is refused has no words, which would be the app's language,
-	// not the visitor's.
 	for _, path := range []string{"/", "/tak/", "/tokx/", "/tok/f/2.png", "/tok/f/../../etc/hosts", "/tok/other"} {
 		if w := get(h, path); w.Code != http.StatusNotFound || w.Body.Len() != 0 {
 			t.Errorf("%s: %d %q, want 404", path, w.Code, w.Body)
@@ -143,7 +138,6 @@ func TestPubServesOnlyThePage(t *testing.T) {
 		t.Errorf("favicon: %d %v", w.Code, w.Header())
 	}
 
-	// An embed runs in its own sandbox, off the network, never in the page.
 	if page := get(h, "/tok/").Body.String(); strings.Contains(page, "play()") || !strings.Contains(page, `<iframe sandbox="allow-scripts" src="/tok/e/e1"`) {
 		t.Errorf("embed in the page: %s", page)
 	}
@@ -160,10 +154,6 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	}
 }
 
-// The shared page's scripts and icon, which never change while the app
-// runs, are served under names of what they are, for visitors' browsers
-// to keep; the page and its files are never kept, and the names the page
-// had before are no more.
 func TestPubKeepsWhatNeverChanges(t *testing.T) {
 	_, _, h, _ := pubTest(t)
 	page := get(h, "/tok/")
@@ -233,7 +223,6 @@ func postComment(h http.Handler, origin, body string) *httptest.ResponseRecorder
 	return w
 }
 
-// A visitor's comment takes no colors, which could hide its words.
 func TestPubCommentBodyHasNoColors(t *testing.T) {
 	got := pubCommentBody(store.Comment{Body: `<span style="color:#ffffff;background:#ffffff">hidden</span>`})
 	if got != "hidden" {
@@ -289,8 +278,6 @@ func TestPubComments(t *testing.T) {
 		t.Errorf("visitors should see this link's threads only:\n%s", page)
 	}
 
-	// cloudflared may hand the request on under another Host: the
-	// tunnel's own hostname is the page's origin all the same.
 	p.host = "quiet-river.trycloudflare.com"
 	r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(`{"block":"p1","name":"Cy","body":"Via the tunnel"}`))
 	r.Host = "127.0.0.1:50331"
@@ -305,8 +292,6 @@ func TestPubComments(t *testing.T) {
 		t.Errorf("reply: %d", w.Code)
 	}
 
-	// A thread the owner resolved takes no more replies, and the refusal
-	// counts against no one's limit.
 	done, err := a.st.AddComment(pg.ID, "p1", "Fixed?", "", "", "guest", "Ann")
 	if err != nil {
 		t.Fatal(err)
@@ -319,9 +304,6 @@ func TestPubComments(t *testing.T) {
 		t.Errorf("reply to a resolved thread: %d", w.Code)
 	}
 
-	// cloudflared tells the page no visitor's email, on a link kept to
-	// emails too: a header that names one is the visitor's own, and names
-	// no one.
 	byEmail := func() string {
 		r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(`{"block":"p1","name":"Dee","body":"Signed?"}`))
 		r.Host = "quiet-river.trycloudflare.com"
@@ -368,7 +350,6 @@ func TestPubComments(t *testing.T) {
 		}
 	}
 
-	// Four posted; the visitor may post one more this minute.
 	for i := range 1 {
 		if w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"more"}`); w.Code != http.StatusNoContent {
 			t.Fatalf("post %d: %d", i, w.Code)
@@ -385,8 +366,6 @@ func TestPubComments(t *testing.T) {
 	}
 }
 
-// A fake cloudflared prints its address and waits: the link goes live,
-// and stopping it ends the process.
 func TestPubTunnelLifecycle(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake cloudflared is a shell script")
@@ -395,7 +374,7 @@ func TestPubTunnelLifecycle(t *testing.T) {
 	a.stopPub()
 	tool := filepath.Join(t.TempDir(), "cloudflared")
 	script := "#!/bin/sh\necho 'INF |  https://quiet-river.trycloudflare.com  |' >&2\nexec sleep 30\n"
-	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306 -- a test's script, run by the test.
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	posts := make(chan func(), 16)
@@ -416,7 +395,6 @@ func TestPubTunnelLifecycle(t *testing.T) {
 	if !strings.HasPrefix(p.url, "https://quiet-river.trycloudflare.com/") || !strings.HasSuffix(p.url, "/"+p.token+"/") {
 		t.Errorf("url %q", p.url)
 	}
-	// Other emails take a new link, which keeps the visitors' threads.
 	p.threads["t1"] = true
 	proc := p.cmd.Process
 	a.startPub(pg.ID, []string{"ann@example.com"}, false)
@@ -424,7 +402,6 @@ func TestPubTunnelLifecycle(t *testing.T) {
 		t.Error("the new link lost the visitors' threads")
 	}
 	a.stopPub()
-	// The link's own wait reaps the process once it is killed.
 	for start := time.Now(); proc.Signal(syscall.Signal(0)) == nil; time.Sleep(20 * time.Millisecond) {
 		if time.Since(start) > 5*time.Second {
 			t.Fatal("cloudflared still runs after the link stopped")
@@ -435,8 +412,6 @@ func TestPubTunnelLifecycle(t *testing.T) {
 	}
 }
 
-// A page shared through a public link keeps agents to itself, from the
-// moment the link starts until it stops.
 func TestPublicLinkKeepsAgentsToThePage(t *testing.T) {
 	a := &App{}
 	a.setPub(&pubLink{page: "p1", state: "starting"})
@@ -449,10 +424,6 @@ func TestPublicLinkKeepsAgentsToThePage(t *testing.T) {
 	}
 }
 
-// An agent at work on a page whose link starts stops, keeping what it did:
-// it may read the user's other pages into the page, which visitors would
-// read. One asked for once the page has a link, which keeps to the page,
-// goes on as a new link for the page starts.
 func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
 	asked, done := make(chan struct{}, 1), make(chan struct{})
 	hs := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -460,7 +431,6 @@ func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
 		case asked <- struct{}{}:
 		default:
 		}
-		// A model that takes its time, till the test is over.
 		select {
 		case <-r.Context().Done():
 		case <-done:
@@ -487,9 +457,8 @@ func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
 	}
 	a.online = true
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	// An ID of its own, which has no key in the keychain.
 	if err := a.st.PutProvider(store.Provider{ID: "test-pub-" + t.Name(), Preset: "ollama", Name: "Ollama", BaseURL: hs.URL,
-		AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -520,7 +489,6 @@ func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
 	}
 
 	run := ask()
-	// No cloudflared: the link fails as it starts, and stays, failed.
 	a.startPub(p.ID, nil, false)
 	if !run.Stopped {
 		t.Fatal("the run on the page goes on as its link starts")
@@ -540,9 +508,6 @@ func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
 	a.stopPub()
 }
 
-// A public link's lease goes the way the pages go to the other devices:
-// none kept on this device alone, in iCloud Drive while iCloud sync is on,
-// and on the server signed in, each ended as the way changes.
 func TestPublicLinkLeasesTheWayPagesSync(t *testing.T) {
 	a, p, _, pg := pubTest(t)
 	var leases []string
@@ -564,8 +529,6 @@ func TestPublicLinkLeasesTheWayPagesSync(t *testing.T) {
 	if !slices.Equal(leases, []string{"icloud " + pg.ID}) || p.leaseWay != "icloud" {
 		t.Errorf("with iCloud sync on, leases %q, way %q", leases, p.leaseWay)
 	}
-	// Signed in, iCloud sync goes off, and the lease goes to the server,
-	// which this one has none of.
 	a.sync.SetICloud(false)
 	hub(remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1"))
 	a.session.SignedIn = true
@@ -580,10 +543,6 @@ func TestPublicLinkLeasesTheWayPagesSync(t *testing.T) {
 	}
 }
 
-// A page a public link serves has its content come down as it changes
-// elsewhere, as an open page's does, until the link stops; open, it
-// keeps it after. Visitors see it, so it is checked every few seconds
-// whether or not the window shows, which here there is none of.
 func TestPublicLinkKeepsItsPagePulled(t *testing.T) {
 	a, p, _, pg := pubTest(t)
 	if !a.pulled(pg.ID) || a.pulled("other") {
@@ -609,8 +568,6 @@ func TestPublicLinkKeepsItsPagePulled(t *testing.T) {
 	}
 }
 
-// The page tells the diagram script its full-window button's words and
-// icons, whether or not visitors may comment.
 func TestPubHeadDiagramWords(t *testing.T) {
 	head := pubHead("/tok/", false)
 	for _, name := range []string{"full", "full-icon", "exit", "exit-icon", "fit", "fit-icon", "out", "out-icon", "in", "in-icon"} {
@@ -623,9 +580,6 @@ func TestPubHeadDiagramWords(t *testing.T) {
 	}
 }
 
-// A shared page shows each block as the editor does: charts drawn, due
-// dates, link cards with their pictures, files to download, recordings
-// to play with their transcripts, and folded headings folded.
 func TestPubBlocksAsInTheEditor(t *testing.T) {
 	a, p, h, pg := pubTest(t)
 	dir := a.st.Dir
@@ -727,10 +681,6 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 	}
 }
 
-// A block naming another page's file, picture or recording, as an editor
-// of the page could write, serves none of them, nor the recording's
-// transcript, and does not say the file is missing; a file's address
-// keeps to letters and digits whatever its name ends in.
 func TestPubServesOnlyThePagesFiles(t *testing.T) {
 	a, p, h, pg := pubTest(t)
 	dir := a.st.Dir
@@ -783,7 +733,6 @@ func TestPubServesOnlyThePagesFiles(t *testing.T) {
 	}
 }
 
-// A recording of the page that finishes shows its transcript to visitors.
 func TestPubFollowsRecordings(t *testing.T) {
 	a, p, h, pg := pubTest(t)
 	r, err := a.st.CreateRecording(pg.ID, "rec", "local", "model", "", "")
@@ -812,8 +761,6 @@ func TestPubFollowsRecordings(t *testing.T) {
 	}
 }
 
-// A comment the app took too long to take is not stored after the
-// visitor was told so, nor counted against them.
 func TestPubCommentTimedOut(t *testing.T) {
 	a, p, h, pg := pubTest(t)
 	wait := pubAnswerWait
@@ -835,8 +782,6 @@ func TestPubCommentTimedOut(t *testing.T) {
 	}
 }
 
-// A link whose cloudflared stops renders the page no more as it changes,
-// and says so in a toast unless the Share dialog shows it.
 func TestPubFailedLinkStops(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake cloudflared is a shell script")
@@ -845,7 +790,7 @@ func TestPubFailedLinkStops(t *testing.T) {
 	a.stopPub()
 	tool := filepath.Join(t.TempDir(), "cloudflared")
 	script := "#!/bin/sh\necho 'INF |  https://quiet-river.trycloudflare.com  |' >&2\nsleep 0.3\necho 'ERR lost the connection' >&2\nexit 1\n"
-	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306 -- a test's script, run by the test.
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	posts := make(chan func(), 16)
@@ -877,7 +822,6 @@ func TestPubFailedLinkStops(t *testing.T) {
 		t.Error("a failed link renders again")
 	}
 
-	// The Share dialog says so itself.
 	a.toasts = nil
 	a.dialogs.shareOpen, a.dialogs.sharePage = true, pg.ID
 	a.pubFailed(p, "again")
@@ -886,7 +830,6 @@ func TestPubFailedLinkStops(t *testing.T) {
 	}
 }
 
-// A picture is read as a visitor asks for it, never kept with the page.
 func TestPubReadsPicturesAsAsked(t *testing.T) {
 	a, p, h, _ := pubTest(t)
 	pic := filepath.Join(a.st.Dir, "files", "dawn.png")

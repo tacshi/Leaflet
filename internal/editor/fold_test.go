@@ -11,11 +11,8 @@ import (
 	"leaflet/internal/doc"
 )
 
-// foldPage is "# A", a paragraph and a list item with a child under it,
-// "## B" with a paragraph, then "# C".
 func foldPage(t *testing.T) (*Editor, *ui.Tester, *fakeHost, map[string]*doc.Node) {
 	t.Helper()
-	// Room on the left for the headings' buttons, as the app's page has.
 	host := &fakeHost{}
 	e := New(doc.Empty(), host)
 	e.SetWidth(440)
@@ -46,7 +43,7 @@ func foldPage(t *testing.T) (*Editor, *ui.Tester, *fakeHost, map[string]*doc.Nod
 func TestFoldHeadingHidesItsSection(t *testing.T) {
 	e, tt, _, b := foldPage(t)
 	e.PlaceCaret(b["b1"].ID, 1)
-	if err := tt.Click("Fold section"); err != nil { // the first heading's
+	if err := tt.Click("Fold section"); err != nil {
 		t.Fatal(err)
 	}
 	if !b["A"].Bool("collapsed") {
@@ -61,17 +58,14 @@ func TestFoldHeadingHidesItsSection(t *testing.T) {
 	if !tt.HasText("C") || tt.HasText("b1") {
 		t.Errorf("shown %v", tt.Texts())
 	}
-	// Down from A goes past its section.
 	tt.Key(0, ui.KeyDown)
 	if e.Caret().ID != b["C"].ID {
 		t.Errorf("down went to %v", e.Caret())
 	}
-	// Revealing a block in it unfolds A.
 	e.Reveal(b["kid"].ID)
 	if b["A"].Bool("collapsed") || len(texts(e)) != 7 {
 		t.Errorf("after reveal %v", texts(e))
 	}
-	// Enter at the end of a folded heading starts its section, which shows.
 	e.ToggleFold(b["A"].ID)
 	e.PlaceCaret(b["A"].ID, -1)
 	tt.Key(0, ui.KeyEnter)
@@ -100,13 +94,9 @@ func TestFoldedSectionGoesWithItsHeading(t *testing.T) {
 	}
 }
 
-// A selection ending at the end of a folded heading takes its section too,
-// as one past it does: deleting it leaves nothing of the section, copying
-// it copies it, and Select All, which ends at the last block shown, does
-// both.
 func TestSelectionToAFoldedHeadingsEndTakesItsSection(t *testing.T) {
 	e, tt, _, b := foldPage(t)
-	e.ToggleFold(b["C"].ID) // nothing under it
+	e.ToggleFold(b["C"].ID)
 	e.ToggleFold(b["B"].ID)
 	e.Select(Pos{b["a1"].ID, 0}, Pos{b["B"].ID, 1})
 	if blocks := e.copyBlocks(); len(blocks) != 4 || blocks[3].Delta().Plain() != "b1" {
@@ -128,7 +118,6 @@ func TestSelectionToAFoldedHeadingsEndTakesItsSection(t *testing.T) {
 		t.Errorf("after deleting to B's end %v", top)
 	}
 
-	// Select All, twice, ends at the end of the last heading shown.
 	e, tt, _, b = foldPage(t)
 	e.ToggleFold(b["B"].ID)
 	e.Edit(func(c *doc.Content) { c.Remove(b["C"].ID) })
@@ -146,8 +135,6 @@ func TestSelectionToAFoldedHeadingsEndTakesItsSection(t *testing.T) {
 	}
 }
 
-// A selection from inside a folded heading leaves the heading, and so its
-// section: Backspace over it does as Delete at the heading's end does.
 func TestSelectionFromInsideAFoldedHeadingKeepsItsSection(t *testing.T) {
 	for _, key := range []ui.Key{ui.KeyBackspace, ui.KeyDelete} {
 		e, tt, _, b := foldPage(t)
@@ -158,7 +145,6 @@ func TestSelectionFromInsideAFoldedHeadingKeepsItsSection(t *testing.T) {
 			if a, z := e.Range(); a != (Pos{b["A"].ID, 1}) || z != (Pos{b["C"].ID, 0}) {
 				t.Fatalf("selected %v to %v", a, z)
 			}
-			// Copying it takes no section either.
 			if blocks := e.copyBlocks(); len(blocks) != 2 {
 				t.Errorf("copied %d blocks", len(blocks))
 			}
@@ -177,8 +163,6 @@ func TestSelectionFromInsideAFoldedHeadingKeepsItsSection(t *testing.T) {
 	}
 }
 
-// Nothing goes out of sight into a folded section as the heading that
-// ended it goes, or becomes another kind of block: the section unfolds.
 func TestNothingFoldsAwayAsAHeadingGoes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -214,7 +198,6 @@ func TestNothingFoldsAwayAsAHeadingGoes(t *testing.T) {
 		if got[0] != tc.want[0] {
 			t.Errorf("%s: first %v", tc.name, got)
 		}
-		// Undo folds it again, as it was.
 		e.Undo()
 		if !foldedHeading(e.node(b["A"].ID)) || len(texts(e)) != 3 {
 			t.Errorf("%s: undo left A unfolded", tc.name)
@@ -222,9 +205,6 @@ func TestNothingFoldsAwayAsAHeadingGoes(t *testing.T) {
 	}
 }
 
-// Nothing goes in out of sight either: blocks put before the heading that
-// ends a folded section, or after a folded heading, would join the
-// section, which unfolds.
 func TestNothingFoldsAwayAsBlocksGoIn(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -274,7 +254,6 @@ func TestBlockLinks(t *testing.T) {
 	if _, ok := tt.Find("Copied"); !ok {
 		t.Error("the button does not say it copied")
 	}
-	// A link to a block opens the page there.
 	b["a1"].SetDelta(doc.Delta{{Text: "see B", Attrs: doc.Attrs{Href: doc.BlockLink("prd", "b9")}}})
 	e.invalidate(b["a1"].ID)
 	tt.Frame()
@@ -283,8 +262,7 @@ func TestBlockLinks(t *testing.T) {
 	if len(host.opened) != 1 || host.opened[0] != "prd#b9" {
 		t.Errorf("opened %v", host.opened)
 	}
-	// A link to a moment of a video plays it from there.
-	tt.Advance(time.Second) // not a double click
+	tt.Advance(time.Second)
 	b["a1"].SetDelta(doc.Delta{{Text: "see 1:23", Attrs: doc.Attrs{Href: doc.MomentLink("prd", "v9", 83)}}})
 	e.invalidate(b["a1"].ID)
 	tt.Frame()
@@ -293,7 +271,6 @@ func TestBlockLinks(t *testing.T) {
 	if len(host.opened) != 2 || host.opened[1] != "prd#v9@83" {
 		t.Errorf("opened %v", host.opened)
 	}
-	// Right-click a block for a link to it.
 	r = boxOf(e, b["b1"].ID)
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
 	if err := chooseDrawn(tt, "Copy link to block"); err != nil {
@@ -310,8 +287,6 @@ func para(id, text string) *doc.Node {
 	return n
 }
 
-// A change from outside can fold away the block the caret is in; the caret
-// then goes to the block that folds it, and editing there is safe.
 func TestCaretLeavesWhatAChangeFolds(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -358,17 +333,13 @@ func TestCaretLeavesWhatAChangeFolds(t *testing.T) {
 	}
 }
 
-// Undo steps last over content that comes in from outside: going back one
-// takes back what it changed, and the change from outside stays. A block
-// the step deleted comes back, one it made goes, and redo goes forward
-// again over the change.
 func TestReplaceKeepsUndo(t *testing.T) {
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), para("B", "b"), para("X", "x")}), &fakeHost{})
 	e.Select(Pos{"A", 1}, Pos{"A", 1})
 	e.InsertText("1")
 	e.Select(Pos{"X", 0}, Pos{"X", 1})
 	e.Backspace(false)
-	e.Backspace(false) // X joins B
+	e.Backspace(false)
 	e.Enter()
 	e.InsertText("new")
 	outside := func(fn func(c *doc.Content)) {
@@ -384,15 +355,15 @@ func TestReplaceKeepsUndo(t *testing.T) {
 		t.Fatal("undo steps went")
 	}
 	got := func() string { return strings.Join(texts(e), " | ") }
-	e.Undo() // the typing
-	e.Undo() // the Enter
+	e.Undo()
+	e.Undo()
 	if want := "paragraph:a1 | paragraph:B from outside | paragraph:from outside"; got() != want {
 		t.Errorf("after undoing the new line %q, want %q", got(), want)
 	}
 	outside(func(c *doc.Content) { c.Find("Q").SetDelta(doc.Delta{{Text: "again"}}) })
-	e.Undo() // X joining B, which brings X back after B, as Q is
-	e.Undo() // emptying X
-	e.Undo() // the 1
+	e.Undo()
+	e.Undo()
+	e.Undo()
 	if want := "paragraph:a | paragraph:B from outside | paragraph:again | paragraph:x"; got() != want {
 		t.Errorf("after undoing all %q, want %q", got(), want)
 	}
@@ -405,21 +376,16 @@ func TestReplaceKeepsUndo(t *testing.T) {
 	}
 }
 
-// Going back past a change from outside that took every block the step
-// did not make leaves the page an empty paragraph for the caret, as every
-// edit does: with none, typing went nowhere, and the keys to the page's
-// first and last blocks found no block.
 func TestUndoPastAChangeFromOutsideKeepsABlock(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello")
 	tt.Key(0, ui.KeyEnter)
 	tt.Type("world")
-	// Another device takes the first line out.
 	next := e.Content.Copy()
 	next.Remove(next.Children[0].ID)
 	e.Replace(next)
-	e.Undo() // the typing of "world"
-	e.Undo() // the new line, which was all the first line left
+	e.Undo()
+	e.Undo()
 	tt.Frame()
 	if len(e.Content.Children) != 1 || e.node(e.focus.ID) == nil || e.anchor != e.focus {
 		t.Fatalf("after undo the page is %v, the caret at %+v", texts(e), e.focus)
@@ -433,13 +399,6 @@ func TestUndoPastAChangeFromOutsideKeepsABlock(t *testing.T) {
 	}
 }
 
-// A change from outside to the composition's block takes its text out of
-// the change only where the change can hold it, having been made from the
-// page with the composition in it: content saved with it, or an agent's op
-// written from a read of the page while it was there. An agent's op from a
-// read before it began, saved or not since, has the same text at its
-// place, as its rewrite of the line goes on with it, as its own, which
-// stays.
 func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello ")
@@ -452,9 +411,6 @@ func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 		t.Errorf("composing over an agent's rewrite of the line %v", got)
 	}
 
-	// Saved as it goes, the composition went out with the page; the
-	// agent's op, written from a read during an earlier one, still holds
-	// none of it.
 	e.Edit(func(c *doc.Content) { c.Find(id).SetDelta(doc.Delta{{Text: "hello "}}) })
 	e.PlaceCaret(id, -1)
 	tt.Compose("wo", 2)
@@ -465,7 +421,6 @@ func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 		t.Errorf("composing over an agent's rewrite of the line, saved since %v", got)
 	}
 
-	// Read while it was in the page, the agent's op holds it, and it goes.
 	e.PlaceCaret(id, -1)
 	tt.Compose("ni", 2)
 	read, _ := e.Composition()
@@ -476,8 +431,6 @@ func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 		t.Errorf("composing on over an op that held the composition %v", got)
 	}
 
-	// Saved with the page, the composition comes back in another device's
-	// change to the line, and goes, as the input method composes it on.
 	e.PlaceCaret(id, -1)
 	tt.Compose("ni", 2)
 	_ = e.Doc()
@@ -490,7 +443,6 @@ func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 		t.Errorf("composing on over a change that held the composition %v", got)
 	}
 
-	// Never gone out with the page, it is in no content from outside.
 	e.PlaceCaret(id, -1)
 	tt.Compose("!", 1)
 	next = e.Content.Copy()
@@ -502,10 +454,6 @@ func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
 	}
 }
 
-// A change from outside to other blocks keeps a composition: MyGo never
-// tells the input method it ended, so it composes on, and its next update
-// replaces it as before. A change to its block gives it up and takes its
-// text out, leaving none behind.
 func TestChangesFromOutsideKeepComposition(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("a")
@@ -524,8 +472,6 @@ func TestChangesFromOutsideKeepComposition(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, want) {
 		t.Fatalf("composing on over changes elsewhere %v, want %v", got, want)
 	}
-	// The composition and what it became are a step of their own, and the
-	// changes' steps never hold what it was as it went.
 	e.Undo()
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "paragraph:agent", "paragraph:more"}) {
 		t.Errorf("after undoing the composition %v", got)
@@ -536,7 +482,6 @@ func TestChangesFromOutsideKeepComposition(t *testing.T) {
 		t.Errorf("after undoing the changes %v", got)
 	}
 
-	// A change to the composition's block gives it up.
 	id := e.Content.Children[0].ID
 	e.PlaceCaret(id, -1)
 	tt.Compose("ni", 2)
@@ -553,7 +498,6 @@ func TestChangesFromOutsideKeepComposition(t *testing.T) {
 	}
 }
 
-// foldedToggle is a folded toggle with a child hidden in it.
 func foldedToggle(id, text, kid string) *doc.Node {
 	n := &doc.Node{ID: id, Type: "toggle_list", Children: []*doc.Node{para(id+"K", kid)}}
 	n.SetDelta(doc.Delta{{Text: text}})
@@ -561,7 +505,6 @@ func foldedToggle(id, text, kid string) *doc.Node {
 	return n
 }
 
-// count counts the blocks of a page with a text.
 func count(c *doc.Content, text string) int {
 	k := 0
 	c.Walk(func(n, _ *doc.Node) {
@@ -572,9 +515,6 @@ func count(c *doc.Content, text string) int {
 	return k
 }
 
-// Cutting and pasting back a folded toggle first or last in the
-// selection leaves one of its hidden children: cutting keeps them in the
-// page, so copying leaves them out.
 func TestCutPasteFoldedToggleKeepsOneOfItsChildren(t *testing.T) {
 	freshClipboard(t)
 	for _, tc := range []struct {
@@ -602,8 +542,6 @@ func TestCutPasteFoldedToggleKeepsOneOfItsChildren(t *testing.T) {
 	}
 }
 
-// Shift-Tab on a folded toggle nested in a list item unfolds it, as the
-// siblings after it become its children, which would be hidden in it.
 func TestOutdentFoldedToggleShowsSiblings(t *testing.T) {
 	item := func(id, text string, kids ...*doc.Node) *doc.Node {
 		n := &doc.Node{ID: id, Type: "bulleted_list", Children: kids}
@@ -617,7 +555,6 @@ func TestOutdentFoldedToggleShowsSiblings(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, want) {
 		t.Errorf("after Shift-Tab %v, want %v", got, want)
 	}
-	// Without siblings after it, it stays folded.
 	e = New(doc.FromBlocks([]*doc.Node{item("L", "parent", foldedToggle("T", "Toggle", "kid"))}), &fakeHost{})
 	e.PlaceCaret("T", 0)
 	e.Outdent()
@@ -626,9 +563,6 @@ func TestOutdentFoldedToggleShowsSiblings(t *testing.T) {
 	}
 }
 
-// Pasting blocks that end in a folded toggle into the middle of a line
-// puts the rest of the line, and the caret, where they show: on a line
-// after the toggle, never among its hidden children.
 func TestPasteEndingInFoldedToggleShowsTheRest(t *testing.T) {
 	kid := para("C", "child")
 	b := para("B", "abcdef")
@@ -648,8 +582,6 @@ func TestPasteEndingInFoldedToggleShowsTheRest(t *testing.T) {
 	}
 }
 
-// Tab and Shift-Tab move every block selected, with what is in them, and
-// none when the first can't go in.
 func TestIndentSelection(t *testing.T) {
 	item := func(id, text string, kids ...*doc.Node) *doc.Node {
 		n := &doc.Node{ID: id, Type: "bulleted_list", Children: kids}
@@ -678,7 +610,6 @@ func TestIndentSelection(t *testing.T) {
 	if got := shape(e); got != "A B >B1 C" {
 		t.Errorf("after Shift-Tab %q", got)
 	}
-	// The first selected can't go in: nothing moves.
 	e.Select(Pos{"A", 0}, Pos{"B", 1})
 	e.Indent()
 	if got := shape(e); got != "A B >B1 C" {
@@ -686,8 +617,6 @@ func TestIndentSelection(t *testing.T) {
 	}
 }
 
-// Tab doesn't put a block in a toggle a folded heading hides: the block
-// would be hidden with it, the caret jumping away.
 func TestIndentNotIntoAHiddenToggle(t *testing.T) {
 	heading := func(id, text string) *doc.Node {
 		n := &doc.Node{ID: id, Type: "heading", Data: map[string]any{"level": 2}}
@@ -707,8 +636,6 @@ func TestIndentNotIntoAHiddenToggle(t *testing.T) {
 	}
 }
 
-// A page that can't be changed still unfolds a section its owner folded,
-// as it opens its toggles.
 func TestReadOnlyUnfoldsAHeading(t *testing.T) {
 	e, tt, _, b := foldPage(t)
 	b["B"].Set("collapsed", true)

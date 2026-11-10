@@ -2,14 +2,10 @@ import LeafletCore
 import SwiftUI
 import UIKit
 
-/// MenuItem is one choice of the menu at the caret, as the core offers
-/// it (internal/menu): a block or a template for "/"; an agent, a page or
-/// a person for "@". Its key says what it is.
 struct MenuItem: Decodable, Identifiable {
     let key: String
     let label: String
     let hint: String
-    /// icon is a Lucide icon's name, as the desktop shows it.
     let icon: String
     let group: String
 
@@ -17,19 +13,12 @@ struct MenuItem: Decodable, Identifiable {
     var symbol: String { Lucide.symbol(icon) }
 }
 
-/// CaretMenu is the list the editor shows under the caret while "/" or "@"
-/// is being typed: what is typed after it filters it, and it is picked
-/// from with the arrow keys and Return or Tab, or a tap.
 @MainActor
 final class CaretMenu {
-    /// anchor is where the "/" or "@" is in the text, which a change from
-    /// outside moves.
     var anchor: Int
     let trigger: Character
     private(set) var items: [MenuItem] = []
     private(set) var selected = 0
-    /// all is everything the menu offers, as the core's JSON, to filter,
-    /// and query what was typed after the trigger last.
     private var all: String?
     private var query = ""
     private let host: UIHostingController<CaretMenuView>
@@ -44,18 +33,13 @@ final class CaretMenu {
     }
 
     var view: UIView { host.view }
-    /// loaded says the core has said what the menu offers.
     var loaded: Bool { all != nil }
 
-    /// load gives the menu what it offers, once the core has said.
     func load(_ items: String) {
         all = items
         filter(query)
     }
 
-    /// filter keeps what query finds. The item chosen stays chosen while
-    /// what is typed does, as a change from outside filters again: the
-    /// first is chosen again only as the query changes, or the item goes.
     func filter(_ query: String) {
         let kept = query == self.query ? current?.key : nil
         self.query = query
@@ -85,12 +69,9 @@ final class CaretMenu {
             })
     }
 
-    /// place puts the menu under the caret, or over it when there is no
-    /// room below, within the part of the text view that shows.
     func place(in textView: UITextView, caret: CGRect) {
         var room = textView.bounds.width - 24
         var visible = textView.bounds.inset(by: textView.adjustedContentInset)
-        // Clear of a fold, over the text that keeps to one side of it.
         if (textView as? EditorTextView)?.fold != nil {
             let inset = textView.textContainerInset
             visible.origin.x = inset.left - 12
@@ -114,7 +95,6 @@ final class CaretMenu {
     func close() { view.removeFromSuperview() }
 }
 
-/// CaretMenuView draws the menu at the caret.
 struct CaretMenuView: View {
     let items: [MenuItem]
     let selected: Int
@@ -131,10 +111,6 @@ struct CaretMenuView: View {
                             .padding(14)
                     }
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                        // One view for each item, its group's header with
-                        // it: scrollTo stops at the first of what an id
-                        // has, and a row after a header would stay out of
-                        // view.
                         VStack(alignment: .leading, spacing: 0) {
                             if i == 0 || items[i - 1].group != item.group {
                                 Text(item.group)

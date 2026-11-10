@@ -35,9 +35,6 @@ $Name = 'Leaflet Debug'
 $Out = 'build\win-debug'
 $Dir = Join-Path $Out "windows-$GoArch"
 try {
-	# MyGo names the data folder after the app and keeps secrets under its
-	# identifier, both from mygo.json, which this build alone sees changed.
-	# Without updates, the app has no updater.
 	Set-Config "name=$Name", "identifier=$(Get-ConfigValue identifier).debug", '-updates'
 	Build-Cli $Name (Get-ConfigValue version) $GoArch
 	Info "building $Name for windows/$GoArch"
@@ -49,7 +46,6 @@ $Exe = Join-Path $Dir "$Name.exe"
 if (-not (Test-Path -PathType Leaf $Exe)) { Fail "expected $Exe after the build" }
 Info "built $(Join-Path $RootDir $Dir)"
 if ($Open) {
-	# arm64 Windows runs x64 apps too, but x64 Windows can't run arm64 ones.
 	if ($GoArch -eq 'arm64' -and (Get-HostArch) -ne 'arm64') { Fail '-Open cannot launch an arm64 build on an x64 PC' }
 	Start-Process -FilePath (Join-Path $RootDir $Exe)
 }

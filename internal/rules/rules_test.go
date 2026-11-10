@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// A new line after a list goes on as the list, a to-do unchecked; after
-// a heading, a quote, a callout or code it is a paragraph.
 func TestNewLine(t *testing.T) {
 	for typ, want := range map[string]string{
 		"bulleted_list": "bulleted_list", "numbered_list": "numbered_list", "toggle_list": "toggle_list",
@@ -22,8 +20,6 @@ func TestNewLine(t *testing.T) {
 	}
 }
 
-// Enter splits a block, ends an empty one, or puts a line before it at
-// its start, as the block and where it is say.
 func TestEnter(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -37,10 +33,7 @@ func TestEnter(t *testing.T) {
 		{"an empty item", Block{Type: "todo_list", Empty: true}, true, Line{Action: Plain}},
 		{"an empty quote", Block{Type: "quote", Empty: true, Nested: true}, true, Line{Action: Plain}},
 		{"an empty paragraph last in a toggle", Block{Type: "paragraph", Empty: true, Nested: true, Last: true}, true, Line{Action: Outdent}},
-		// An empty paragraph with more after it in a toggle stays in it,
-		// a line after it: going out, it would take them with it.
 		{"an empty paragraph in a toggle", Block{Type: "paragraph", Empty: true, Nested: true}, true, Line{Action: Split, Type: "paragraph"}},
-		// An empty heading keeps its kind: Enter writes on after it.
 		{"an empty heading", Block{Type: "heading", Empty: true}, true, Line{Action: Split, Type: "paragraph"}},
 		{"the start of a to-do", Block{Type: "todo_list"}, true, Line{Action: LineBefore, Type: "todo_list", Data: map[string]any{"checked": false}}},
 		{"the start of a heading", Block{Type: "heading"}, true, Line{Action: LineBefore, Type: "paragraph"}},
@@ -56,9 +49,6 @@ func TestEnter(t *testing.T) {
 	}
 }
 
-// Backspace at a block's start ends a list item, a quote or a heading,
-// takes a paragraph last in a toggle out of it, and else joins the block
-// to the one before: one without text is chosen first.
 func TestBackspace(t *testing.T) {
 	text, image := Block{Type: "paragraph"}, Block{Type: "image"}
 	for _, tc := range []struct {
@@ -71,8 +61,6 @@ func TestBackspace(t *testing.T) {
 		{"a nested item", Block{Type: "bulleted_list", Nested: true}, text, true, Outdent},
 		{"a nested quote", Block{Type: "quote", Nested: true}, text, true, Plain},
 		{"a paragraph last in a toggle", Block{Type: "paragraph", Nested: true, Last: true}, text, true, Outdent},
-		// A paragraph with more after it in a toggle joins the block
-		// before, as text does: going out, it would take them with it.
 		{"a paragraph in a toggle", Block{Type: "paragraph", Nested: true}, text, true, Key},
 		{"the page's first paragraph", text, Block{}, false, Nothing},
 		{"an empty paragraph after an image", Block{Type: "paragraph", Empty: true}, image, true, Remove},
@@ -85,8 +73,6 @@ func TestBackspace(t *testing.T) {
 	}
 }
 
-// Delete at a block's end chooses a block without text, after it or
-// itself, before joining.
 func TestDelete(t *testing.T) {
 	text, image := Block{Type: "paragraph"}, Block{Type: "image"}
 	if Delete(text, image) != SelectAfter || Delete(image, text) != SelectThis || Delete(text, text) != Key {
@@ -94,8 +80,6 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-// Tab nests list items in list items, and any text in a toggle: not a
-// paragraph in a list item, nor a block without text.
 func TestNests(t *testing.T) {
 	for _, tc := range []struct {
 		typ, under string
@@ -115,8 +99,6 @@ func TestNests(t *testing.T) {
 	}
 }
 
-// A closed toggle hides what is in it; a folded heading its section, up
-// to a heading of its level or higher, or a block out of what it is in.
 func TestHidden(t *testing.T) {
 	blocks := []Fold{
 		{Type: "toggle_list", Depth: 0, Collapsed: true},
@@ -134,7 +116,6 @@ func TestHidden(t *testing.T) {
 	if got := Hidden(blocks); !reflect.DeepEqual(got, want) {
 		t.Errorf("Hidden = %v, want %v", got, want)
 	}
-	// A folded heading in a list item ends with it.
 	nested := []Fold{
 		{Type: "bulleted_list", Depth: 0},
 		{Type: "heading", Depth: 1, Collapsed: true},
@@ -146,9 +127,6 @@ func TestHidden(t *testing.T) {
 	}
 }
 
-// Text mostly in Chinese, Japanese or Korean is set higher: their scripts
-// count, halfwidth katakana and iteration marks too, a few English terms
-// among them leaving it so.
 func TestMostlyCJK(t *testing.T) {
 	for text, want := range map[string]bool{
 		"":                    false,

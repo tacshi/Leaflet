@@ -1,4 +1,4 @@
 {
-  "fmt": { "lineWidth": 120, "exclude": ["_shared/testdata/corpus/"] },
+  "fmt": { "lineWidth": 120 },
   "lint": { "rules": { "tags": ["recommended"] } }
 }

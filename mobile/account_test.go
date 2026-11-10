@@ -45,13 +45,11 @@ func TestBeginSupabaseSignIn(t *testing.T) {
 	if q.Get("code_challenge") == "" || q.Get("code_challenge") == s.Verifier {
 		t.Errorf("code_challenge %q: want the verifier's hash", q.Get("code_challenge"))
 	}
-	// The app's web session waits for this https callback.
 	if r := q.Get("redirect_uri"); !strings.HasSuffix(r, "/auth/supabase") {
 		t.Errorf("redirect_uri %q: want the Worker's /auth/supabase", r)
 	}
 }
 
-// FinishSupabaseSignIn refuses an answer before it goes to the network.
 func TestFinishSupabaseSignInRefuses(t *testing.T) {
 	c, _ := open(t)
 	raw, err := BeginSupabaseSignIn()
@@ -81,8 +79,6 @@ func TestFinishSupabaseSignInRefuses(t *testing.T) {
 	}
 }
 
-// Signed out, there is no sign-in to confirm, and signing out leaves the
-// device's own pages as they are.
 func TestSignedOut(t *testing.T) {
 	c, _ := open(t)
 	if err := c.ConfirmSignIn(true); err != nil {
@@ -120,8 +116,6 @@ func account0(t *testing.T, c *Core) account {
 	return a
 }
 
-// A free project Supabase paused is woken, and signed in to once it says
-// it is Leaflet's; a project up with nothing of Leaflet's is passed over.
 func TestLeafletProjectWakesAPausedOne(t *testing.T) {
 	restored := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,8 +154,6 @@ func TestLeafletProjectWakesAPausedOne(t *testing.T) {
 	}
 }
 
-// A sign-in with Supabase that fails before it signs in leaves the
-// Supabase sign-in kept for the project in use as it was.
 func TestFailedSignInKeepsTheManagementSignIn(t *testing.T) {
 	c, _ := open(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,16 +180,8 @@ func TestFailedSignInKeepsTheManagementSignIn(t *testing.T) {
 	}
 }
 
-// Signed in for real, to a server that takes nothing up: signing out
-// counts the changes still to go up and leaves all as it is; once they
-// have gone, it signs out and removes the account's pages, and the
-// device's own pages, made signed out, stay through signing out again.
-// signInRocky signs c in to a server that answers only sign-in and
-// sign-out, as rocky@example.com.
 func signInRocky(t *testing.T, c *Core) { signInRockyTo(t, c, nil) }
 
-// signInRockyTo signs c in as signInRocky does, to a server that answers
-// the rest with other, or not at all without it.
 func signInRockyTo(t *testing.T, c *Core, other http.HandlerFunc) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +225,6 @@ func signInRockyTo(t *testing.T, c *Core, other http.HandlerFunc) {
 	}
 }
 
-// uploadAll takes every change waiting off the outbox, as a pass would.
 func uploadAll(t *testing.T, c *Core) {
 	t.Helper()
 	entries, err := c.core.Store.Pending()
@@ -260,7 +243,6 @@ func TestSignOutOfAnAccount(t *testing.T) {
 	signInRocky(t, c)
 	plan := create(t, c, `{"title":"Plan"}`)
 
-	// Not up yet: nothing goes.
 	n, err := c.SignOut(false)
 	if err != nil || n == 0 {
 		t.Fatalf("SignOut: %d, %v; want the changes counted", n, err)
@@ -269,7 +251,6 @@ func TestSignOutOfAnAccount(t *testing.T) {
 		t.Fatal("signed out with changes not up")
 	}
 
-	// Gone up, as a pass would take them.
 	uploadAll(t, c)
 	if n, err := c.SignOut(false); err != nil || n != 0 {
 		t.Fatalf("SignOut: %d, %v", n, err)
@@ -281,20 +262,16 @@ func TestSignOutOfAnAccount(t *testing.T) {
 		t.Fatal("the account's page stayed")
 	}
 
-	// The device's own page stays: there is no account to leave.
 	own := create(t, c, `{"title":"Mine"}`)
 	if n, err := c.SignOut(false); err != nil || n != 0 || !hasPage(t, c, own.ID) {
 		t.Fatalf("SignOut signed out: %d, %v; the page stayed %v", n, err, hasPage(t, c, own.ID))
 	}
 }
 
-// onlinePlatform is a device with a connection.
 type onlinePlatform struct{ fakePlatform }
 
 func (*onlinePlatform) Online() bool { return true }
 
-// A file that takes longer to go up than a push waits is waited for: it
-// is no change left behind, to ask about.
 func TestSignOutWaitsForAnUpload(t *testing.T) {
 	defer syncsvc.UploadWaitForTest(10 * time.Millisecond)()
 	cfg, _ := json.Marshal(config{DataDir: t.TempDir(), Locale: "en"})
@@ -335,9 +312,6 @@ func TestSignOutWaitsForAnUpload(t *testing.T) {
 	}
 }
 
-// A recording in progress is a change not up yet, though the outbox gets
-// it only once it is saved: signing out keeps it, and its audio, until its
-// upload is queued and gone.
 func TestSignOutWaitsForARecording(t *testing.T) {
 	c, _ := open(t)
 	signInRocky(t, c)
@@ -380,9 +354,6 @@ func TestSignOutWaitsForARecording(t *testing.T) {
 	}
 }
 
-// Deleting the account closes the open pages as it removes them: a save
-// waiting for the typing to stop, which comes due while the sign-out
-// goes to the server, writes nothing of the account back to the device.
 func TestDeleteAccountLeavesNoSaveOfAnOpenPage(t *testing.T) {
 	c, _ := open(t)
 	signInRockyTo(t, c, func(w http.ResponseWriter, r *http.Request) {
@@ -390,15 +361,12 @@ func TestDeleteAccountLeavesNoSaveOfAnOpenPage(t *testing.T) {
 		case "/functions/v1/account":
 			_, _ = io.WriteString(w, `{}`)
 		case "/auth/v1/logout":
-			// Past the page's save, which would come due meanwhile.
 			time.Sleep(live.SaveDelay + 500*time.Millisecond)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "down", http.StatusServiceUnavailable)
 		}
 	})
-	// A page whose content has not come to this device yet: its first
-	// save is over no content.
 	page := create(t, c, `{"title":"Plan"}`)
 	if _, err := c.core.Store.DB().Exec(`DELETE FROM page_contents WHERE page_id = ?`, page.ID); err != nil {
 		t.Fatal(err)
@@ -436,9 +404,6 @@ func hasPage(t *testing.T, c *Core, id string) bool {
 	return false
 }
 
-// Signing in as another account that fails other than for changes not up
-// yet signs that account out again, rather than leave it signed in over
-// the pages of the one before.
 func TestFailedUseAccountSignsOut(t *testing.T) {
 	c, _ := open(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +421,6 @@ func TestFailedUseAccountSignsOut(t *testing.T) {
 	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, PublishableKey: "anon"}); err != nil {
 		t.Fatal(err)
 	}
-	// The pages of another account, all gone up, which can't be removed.
 	create(t, c, `{"title":"Uploaded"}`)
 	st := c.core.Store
 	uploadAll(t, c)
@@ -481,9 +445,6 @@ func TestFailedUseAccountSignsOut(t *testing.T) {
 	}
 }
 
-// Signing in as another account, the pages of the one before all gone up,
-// forgets its agents' chats with its pages, as signing out does: none
-// shows to the next account, nor goes in its runs as history.
 func TestAnotherAccountForgetsTheAgentsChats(t *testing.T) {
 	c, _ := open(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -6,8 +6,6 @@ import (
 	"unicode/utf8"
 )
 
-// A client's text is kept fit to sync, in whichever tool it comes: a NUL
-// would have the server refuse the page for good.
 func TestCleanArgs(t *testing.T) {
 	st := newStore(t)
 	s := NewServer(st, "1.0.0")
@@ -54,8 +52,6 @@ func TestCleanArgs(t *testing.T) {
 	}
 }
 
-// The command line calls the tools directly, with bytes as they were
-// piped in, which no JSON has cleaned on the way.
 func TestCleanArgsOfCall(t *testing.T) {
 	st := newStore(t)
 	s := NewServer(st, "1.0.0")
@@ -80,7 +76,6 @@ func TestCleanArgsOfCall(t *testing.T) {
 	}
 }
 
-// Everything but text comes through as it is, nested as it was.
 func TestCleanArgKeepsTheRest(t *testing.T) {
 	got, _ := cleanArg(map[string]any{"n": 1.5, "b": true, "none": nil, "list": []any{"a\x00", map[string]any{"s": "\xff"}}}).(map[string]any)
 	list, _ := got["list"].([]any)

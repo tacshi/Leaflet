@@ -26,7 +26,6 @@ func TestWelcomePage(t *testing.T) {
 	if err := co.createWelcome(); err != nil {
 		t.Fatal(err)
 	}
-	// The guide and the example subpage inside it.
 	pages, _ := st.Pages()
 	if len(pages) != 2 {
 		t.Fatalf("%d pages", len(pages))
@@ -54,9 +53,8 @@ func TestWelcomePage(t *testing.T) {
 	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Comments, history and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
-	// The picture is a file of the page.
 	path := strings.TrimPrefix(image.Str("url"), "file://")
-	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) { // #nosec G304 -- the image file the store just added.
+	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) { // #nosec G304
 		t.Errorf("image file %s: %v", path, err)
 	}
 	if p, err := st.Page(sub); err != nil || p.ParentID != welcome {
@@ -65,7 +63,6 @@ func TestWelcomePage(t *testing.T) {
 	if got := linkedPage(c); got != sub {
 		t.Errorf("the guide links to %q, want the subpage %q", got, sub)
 	}
-	// A comment from Leaflet on the paragraph about comments.
 	threads, _ := st.Threads(welcome)
 	if len(threads) != 1 || threads[0].Root.AuthorKind != "agent" || threads[0].Root.AuthorName != "Leaflet" {
 		t.Fatalf("threads %+v", threads)
@@ -73,7 +70,6 @@ func TestWelcomePage(t *testing.T) {
 	if b := c.Find(threads[0].Root.BlockID); b == nil || !strings.HasPrefix(b.Delta().Plain(), "Select text and choose Comment") {
 		t.Errorf("the comment is on %v", b)
 	}
-	// The guide and its meeting carry a tag each, as does the template.
 	if p, _ := st.Page(welcome); !slices.Equal(p.Tags, []string{"guide"}) {
 		t.Errorf("the guide's tags %q", p.Tags)
 	}
@@ -83,7 +79,6 @@ func TestWelcomePage(t *testing.T) {
 	if !strings.Contains(c.PlainText(), "In search, #meetings keeps to the pages tagged meetings") {
 		t.Error("the guide does not say how tags work")
 	}
-	// The subpage's meeting is a template too, which starts at its agenda.
 	templates, _ := st.Templates()
 	if len(templates) != 1 || templates[0].Title != "Weekly team sync" || !slices.Equal(templates[0].Tags, []string{"meetings"}) {
 		t.Fatalf("templates %+v", templates)
@@ -91,15 +86,12 @@ func TestWelcomePage(t *testing.T) {
 	if first := st.Content(templates[0].ID).Children[0]; first.Delta().Plain() != "Agenda" {
 		t.Errorf("the template starts with %q", first.Delta().Plain())
 	}
-	// A second start makes no more pages.
 	if err := co.createWelcome(); err != nil {
 		t.Fatal(err)
 	}
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second start", len(pages))
 	}
-	// They are this device's starter pages: joining a library other
-	// devices made, which has its own, they all go, untouched.
 	if err := st.SettleStarterPages(true); err != nil {
 		t.Fatal(err)
 	}
@@ -110,8 +102,6 @@ func TestWelcomePage(t *testing.T) {
 	}
 }
 
-// A guide that could not all be made leaves nothing behind, and the next
-// start makes it whole.
 func TestWelcomeHalfMadeGoes(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -122,13 +112,11 @@ func TestWelcomeHalfMadeGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	co := &Core{Store: st}
-	// The system's temporary folder, by each system's name for it.
 	setTemp := func(dir string) {
 		for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
 			t.Setenv(name, dir)
 		}
 	}
-	// No folder to write the guide's picture in, once the guide is made.
 	setTemp(filepath.Join(t.TempDir(), "gone"))
 	if err := co.createWelcome(); err == nil {
 		t.Fatal("the guide was made without its picture")
@@ -147,9 +135,6 @@ func TestWelcomeHalfMadeGoes(t *testing.T) {
 	}
 }
 
-// TestWelcomeTranslated checks the guide and its subpage say every text in
-// Chinese and Japanese: the same blocks as in English, none of whose texts
-// is left in English but the keys of shortcuts.
 func TestWelcomeTranslated(t *testing.T) {
 	build := func(m locales.Messages) []*doc.Node {
 		blocks, _, err := welcomeBlocks(m, store.File{ID: "image", LocalPath: "/dawn.jpg"}, "sub")
@@ -182,8 +167,6 @@ func TestWelcomeTranslated(t *testing.T) {
 			if text != "" && text == english && !strings.ContainsAny(text, "⌘⇧") {
 				t.Errorf("%s: %s block %q is in English", lang, n.Type, text)
 			}
-			// Charts, embeds, the picture and the diagram keep their texts
-			// in their data.
 			var data, englishData []byte
 			for _, k := range []string{"title", "labels", "series", "caption", "html", "alt", "source"} {
 				if n.Type == "video" {
@@ -201,7 +184,6 @@ func TestWelcomeTranslated(t *testing.T) {
 	}
 }
 
-// linkedPage is the page a block of the guide mentions.
 func linkedPage(c *doc.Content) string {
 	for _, n := range c.All() {
 		for _, r := range n.Delta() {

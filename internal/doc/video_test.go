@@ -108,8 +108,6 @@ func TestVideoURLs(t *testing.T) {
 			"https://www.bilibili.com/video/BV1KofNYjEuK?p=2&t=30",
 			"https://player.bilibili.com/player.html?autoplay=0&bvid=BV1KofNYjEuK&high_quality=1&p=2&t=30",
 			"https://api.bilibili.com/x/player/pagelist?bvid=BV1KofNYjEuK"},
-		// Given its part, as its parts list it, its player is told the
-		// video's av number and the part's, as Bilibili's embed code says.
 		{Video{Provider: "bilibili", ID: "BV1uVxD6oE1y", CID: 43310384091},
 			"https://www.bilibili.com/video/BV1uVxD6oE1y",
 			"https://player.bilibili.com/player.html?aid=117555888986356&autoplay=0&bvid=BV1uVxD6oE1y&cid=43310384091&high_quality=1",
@@ -187,7 +185,6 @@ func TestVideoInfo(t *testing.T) {
 	}
 }
 
-// A BV ID is its video's av number, encoded, as Bilibili's pages read it.
 func TestBilibiliAID(t *testing.T) {
 	for id, want := range map[string]int64{"BV17x411w7KC": 170001, "BV1uVxD6oE1y": 117555888986356, "av573719854": 573719854} {
 		if got, ok := bilibiliAID(id); !ok || got != want {

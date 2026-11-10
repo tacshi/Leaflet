@@ -1,22 +1,3 @@
-// Leaflet's sign-in with Supabase, on Cloudflare Workers. Three routes:
-//
-//   GET  /auth/supabase   the OAuth app's redirect URL. Supabase takes only
-//                         https ones, which a desktop app can't answer: the
-//                         page sends the browser on to the app, waiting on
-//                         this computer, with the code and state.
-//   POST /token           Supabase's token endpoint, with the OAuth app's
-//                         client secret added, so the secret never ships in
-//                         the app.
-//   GET  /.well-known/apple-app-site-association
-//                         ties this domain to the iOS app, whose web session
-//                         takes /auth/supabase as its https callback, and so
-//                         never loads the page.
-//
-// The secret is CLIENT_SECRET (wrangler secret put CLIENT_SECRET); the app's
-// client ID is CLIENT_ID in wrangler.toml, as is APPLE_TEAM_ID, the team that
-// signs the iOS app, and TOKEN_LIMIT, the rate limit on /token.
-
-// A Workers rate limit (wrangler.toml [[ratelimits]]).
 export interface RateLimit {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
@@ -25,26 +6,16 @@ export interface Env {
   CLIENT_ID: string;
   CLIENT_SECRET: string;
   APPLE_TEAM_ID?: string;
-  // How often one address may exchange tokens. The client secret is in
-  // every app that signs in, in effect, so anyone may call /token: the
-  // limit keeps one caller from spending the OAuth app's own limits.
   TOKEN_LIMIT?: RateLimit;
-  // The token endpoint; tests point it elsewhere.
   SUPABASE_TOKEN_URL?: string;
 }
 
-// How long Supabase's token endpoint may take.
 const TOKEN_TIMEOUT_MS = 20_000;
 
-// The port Leaflet waits on for the browser (internal/supabaseapi.Port).
 const LOOPBACK = "http://127.0.0.1:51741/auth/callback";
 
-// The iOS app's bundle IDs: the App Store's, and the debug build's
-// (ios/Config).
 const IOS_APPS = ["app.capyvibe.leaflet", "app.capyvibe.leaflet.debug"];
 
-// siteAssociation lets the iOS app take https callbacks from this domain:
-// ASWebAuthenticationSession asks for the webcredentials service.
 function siteAssociation(env: Env): Response {
   if (!env.APPLE_TEAM_ID) return new Response("Not found", { status: 404 });
   return Response.json({ webcredentials: { apps: IOS_APPS.map((id) => `${env.APPLE_TEAM_ID}.${id}`) } }, {
@@ -78,9 +49,6 @@ function refuse(status: number, error: string, description: string): Response {
   return Response.json({ error, error_description: description }, { status });
 }
 
-// token passes an exchange on to Supabase with the client secret: a code,
-// only with its PKCE verifier and this Worker's redirect URL, or a refresh
-// token, only for Leaflet's client ID.
 async function token(request: Request, env: Env): Promise<Response> {
   if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
     return refuse(415, "invalid_request", "Send the form url-encoded.");
@@ -110,9 +78,6 @@ async function token(request: Request, env: Env): Promise<Response> {
     default:
       return refuse(400, "unsupported_grant_type", "Only codes and refresh tokens.");
   }
-  // Supabase out of reach fails as OAuth does, in JSON, which the app
-  // reads, not as the platform's page of an exception; and not as 400,
-  // which the app takes for a refresh token refused, and signs out.
   let res: Response;
   try {
     res = await fetch(env.SUPABASE_TOKEN_URL ?? "https://api.supabase.com/v1/oauth/token", {
@@ -129,8 +94,6 @@ async function token(request: Request, env: Env): Promise<Response> {
     console.error("token endpoint:", e);
     return refuse(502, "server_error", "Supabase could not be reached. Try again.");
   }
-  // Supabase's answer as it is, but for headers that are not the proxy's
-  // to pass on.
   return new Response(res.body, {
     status: res.status,
     headers: { "Content-Type": res.headers.get("Content-Type") ?? "application/json", "Cache-Control": "no-store" },
@@ -154,7 +117,6 @@ export default {
     }
     if (pathname === "/token" && request.method === "POST") {
       if (!env.CLIENT_SECRET) return refuse(500, "server_error", "The proxy has no client secret.");
-      // 429, not 400, which the app would take for its sign-in ended.
       const caller = request.headers.get("CF-Connecting-IP") ?? "";
       if (env.TOKEN_LIMIT && !(await env.TOKEN_LIMIT.limit({ key: caller })).success) {
         return refuse(429, "slow_down", "Too many sign-ins from here. Try again in a minute.");

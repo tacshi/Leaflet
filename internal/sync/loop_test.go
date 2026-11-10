@@ -43,8 +43,6 @@ func TestOpeningAPageFetchesItsContent(t *testing.T) {
 	}
 }
 
-// An opened page has its time to come once the pass in progress is done,
-// not from when it was opened.
 func TestOpeningAPageWaitsForThePassFirst(t *testing.T) {
 	old := openWait
 	openWait = 200 * time.Millisecond
@@ -72,9 +70,6 @@ func TestOpeningAPageWaitsForThePassFirst(t *testing.T) {
 	}
 }
 
-// An open page takes what changed on the server, as another device's agent
-// wrote it, from the check between the passes: it asks for the page's
-// revision, and its content only once that moved.
 func TestTheOpenPageTakesWhatChangedOnTheServer(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -122,8 +117,6 @@ func TestTheOpenPageTakesWhatChangedOnTheServer(t *testing.T) {
 	}
 }
 
-// What changed on the server merges into what is being typed here, which
-// still waits to go up.
 func TestTheOpenPageMergesWhatChangedIntoWhatIsTyped(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -154,9 +147,6 @@ func TestTheOpenPageMergesWhatChangedIntoWhatIsTyped(t *testing.T) {
 	}
 }
 
-// A page whose content on the server can't be read is passed over, as is
-// one whose merge fails here on its own, as it kept changing while it
-// merged, and the other open pages are checked all the same.
 func TestTheOpenPagesAreCheckedPastOneThatFails(t *testing.T) {
 	st := openStore(t)
 	var ids []string
@@ -171,8 +161,6 @@ func TestTheOpenPagesAreCheckedPastOneThatFails(t *testing.T) {
 	}
 	dequeueAll(t, st)
 	slices.Sort(ids)
-	// The first checked can't be read, and the second is typed in each
-	// time before its merge is stored.
 	old := beforeStore
 	t.Cleanup(func() { beforeStore = old })
 	typed := 0
@@ -218,10 +206,6 @@ func TestTheOpenPagesAreCheckedPastOneThatFails(t *testing.T) {
 	}
 }
 
-// The check asks the server nothing for an open page no one sees, while a
-// pass or an opened page's refresh runs, which brings the page already,
-// while the server asks for a wait or rests after a failed check, or while
-// sync goes through iCloud Drive, whose changes start a pass as they come.
 func TestTheOpenPagesWait(t *testing.T) {
 	st := openStore(t)
 	var pages []string
@@ -270,8 +254,6 @@ func TestTheOpenPagesWait(t *testing.T) {
 	}
 }
 
-// A server that fails a check, as one out of order, is asked for no other
-// page, and is left to the passes for a while.
 func TestTheOpenPagesRestAfterTheServerFails(t *testing.T) {
 	st := openStore(t)
 	var requests atomic.Int32
@@ -306,8 +288,6 @@ func TestTheOpenPagesRestAfterTheServerFails(t *testing.T) {
 	}
 }
 
-// The loop checks the open pages between its passes: what changed on the
-// server comes though a pass failed before it.
 func TestTheLoopChecksTheOpenPages(t *testing.T) {
 	old := watchEvery
 	watchEvery = 20 * time.Millisecond
@@ -322,7 +302,6 @@ func TestTheLoopChecksTheOpenPages(t *testing.T) {
 	dequeueAll(t, st)
 	srv := &contentServer{content: mine.Encode(), revision: 1}
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only the check's reads of the page are answered.
 		if r.Method == "GET" && r.URL.Path == "/rest/v1/page_content" && r.URL.Query().Get("page_id") == "eq."+p.ID {
 			srv.ServeHTTP(w, r)
 			return

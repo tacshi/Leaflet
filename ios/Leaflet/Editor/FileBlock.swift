@@ -1,33 +1,19 @@
 import LeafletCore
 import SwiftUI
 
-/// SpeakerEdit is a speaker of a file block's notes being named: from, on
-/// all their lines, or for nil a new one for the line at place.
 struct SpeakerEdit {
     let node: DocNode
     let from: String?
     let place: Int
 }
 
-/// FileBlock is a file in the page, as the desktop draws it: its card, its
-/// player once it plays, as audio and video play in the page, and its notes,
-/// a time in them playing it from there. Audio is one card with all of these,
-/// as a recording is. A tap shows any other file with Quick Look. It is as
-/// tall as it needs, which it tells onHeight.
 struct FileBlock: View {
     let node: DocNode
-    /// canEdit says the page can be changed: the notes only show otherwise.
     var canEdit = false
-    /// editor is the page's, which writes the notes and shows the file.
     weak var editor: EditorController?
     var onHeight: (@MainActor (CGSize) -> Void)?
-    /// lines are the notes as the core reads them, read as they change: a
-    /// transcript has thousands, and a block draws often.
     @State private var lines: [VideoBlock.Line] = []
-    /// speakers are those the notes name, read with them.
     @State private var speakers: [String] = []
-    /// clock says what is being said while the block plays, and starts are
-    /// when the lines it goes through start.
     @State private var clock = LineClock()
     @State private var starts: [Double] = []
     @State private var width: CGFloat = 0
@@ -40,34 +26,26 @@ struct FileBlock: View {
     private var kind: String { Self.kind(node) }
     private var audio: Bool { kind == "audio" }
 
-    /// speakersHidden says block's notes show without the speakers' names.
     private static func speakersHidden(_ block: DocNode) -> Bool {
         block.data?["speakers_hidden"] == .bool(true)
     }
 
-    /// names are the names the user gave speakers in block's notes, for
-    /// the core, as JSON.
     private static func names(_ block: DocNode) -> String {
         let list = block.data?["speaker_names"]?.array?.compactMap(\.string) ?? []
         return (try? JSONEncoder().encode(list)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
     }
 
-    /// Reading is what the lines shown are read from.
     private struct Reading: Equatable {
         let notes: String
         let names: String
         let hidden: Bool
     }
 
-    /// SpeakersEdit is notes after a change of speakers, as the core says.
     private struct SpeakersEdit: Decodable {
         let notes: String
         let names: [String]
     }
 
-    /// editSpeakers changes the notes and speakers' names of block id, as
-    /// it is now, with what synced in since, with edit, which goes through
-    /// the core, as one step to undo.
     static func editSpeakers(
         _ id: String, in editor: EditorController?, _ edit: (String, String) -> String
     ) {
@@ -81,7 +59,6 @@ struct FileBlock: View {
         editor.setData(data, ofBlock: id)
     }
 
-    /// kind is how the app shows block's file (doc.FilePreviewKind).
     static func kind(_ block: DocNode) -> String {
         MobileFileKind(block.data?["name"]?.string ?? "", block.data?["mime"]?.string ?? "")
     }
@@ -139,7 +116,6 @@ struct FileBlock: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: Reading(notes: notes, names: Self.names(node), hidden: speakersHidden)) {
-            // Audio names its speakers over their lines, as a recording does.
             let (notes, names, hidden) = (notes, Self.names(node), speakersHidden || audio)
             let read = await Task.detached {
                 (
@@ -148,7 +124,6 @@ struct FileBlock: View {
                         [String].self, from: Data(MobileFileSpeakers(notes, names).utf8))) ?? []
                 )
             }.value
-            // Notes changed meanwhile are read by their own task.
             guard !Task.isCancelled else { return }
             (lines, speakers) = read
             starts = lines.map { Double($0.at) }
@@ -166,7 +141,6 @@ struct FileBlock: View {
         }
     }
 
-    /// speakerActions are what a line's menu does to its speaker.
     private var speakerActions: NotesPanel.Speakers {
         let (id, node, editor) = (node.id, node, editor)
         return NotesPanel.Speakers(
@@ -180,7 +154,6 @@ struct FileBlock: View {
             rename: { editor?.onEditSpeaker?(node, $0, $1) })
     }
 
-    /// header is an audio file's name and controls, as a recording's.
     private func header(_ playback: FilePlayback) -> some View {
         let palette = BlockLook.palette
         let failed = playback.failed.contains(node.id)
@@ -221,9 +194,6 @@ struct FileBlock: View {
         }
     }
 
-    /// status is the line under an audio file's name: what runs for it, else
-    /// its kind and size, and the engine that made the transcript its notes
-    /// have.
     private var status: String {
         if Recorder.shared.state.transcribingFiles.contains(node.id) { return L.recTranscribing }
         guard let size = node.data?["size"]?.int, size > 0 else { return "" }
@@ -236,8 +206,6 @@ struct FileBlock: View {
         return L.cardTranscribedBy(detail: detail, engine: engine)
     }
 
-    /// engine names the speech provider that made a transcript, as
-    /// recording.EngineName does, or nil for none.
     static func engine(_ provider: String?) -> String? {
         switch provider {
         case nil, "": nil
@@ -304,7 +272,6 @@ struct FileBlock: View {
         }
     }
 
-    /// play plays the file from at seconds in.
     private func play(_ at: Int) {
         guard Self.media(kind) else { return }
         FilePlayback.shared.play(block: node.id, file: fileID, at: at, client: editor?.client)
@@ -324,15 +291,11 @@ struct FileBlock: View {
         .accessibilityLabel(L.cardActions)
     }
 
-    /// actions are what block offers now, for VoiceOver at the caret, which
-    /// can't reach the block in the text.
     static func actions(_ block: DocNode, canEdit: Bool, editor: EditorController?) -> [BlockAction]
     {
         menuItems(block, canEdit: canEdit, editor: editor).filter(\.enabled)
     }
 
-    /// menuItems are the items of block's menu, in editor's page: to show
-    /// it, its notes, and a transcript of them for audio.
     private static func menuItems(_ block: DocNode, canEdit: Bool, editor: EditorController?)
         -> [BlockAction]
     {
@@ -357,8 +320,6 @@ struct FileBlock: View {
                     title: hidden ? L.cardShowSpeakers : L.cardHideSpeakers, symbol: "person.2",
                     enabled: canEdit
                 ) {
-                    // Into the block as it is now, with what synced in since
-                    // the menu was made.
                     guard let editor, let now = editor.node(ofBlock: block.id) else { return }
                     var data = now.data ?? [:]
                     data["speakers_hidden"] = hidden ? nil : .bool(true)
@@ -380,7 +341,6 @@ struct FileBlock: View {
                     else { return }
                     Recorder.put(made, after: block.id, in: editor)
                 })
-            // The agent reads the notes with the block.
             out.append(
                 BlockAction(title: L.recSummarize, symbol: "sparkles", enabled: canEdit) {
                     editor?.onSummarize?(block, L.recSummarizePrompt(title: title))

@@ -19,9 +19,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// refreshServer answers refresh_token grants with status and body (%d
-// numbering the answers), after signalling started and waiting for
-// release when they are set.
 type refreshServer struct {
 	status   int
 	body     string
@@ -48,7 +45,6 @@ func (rs *refreshServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 const newSession = `{"access_token":"new%d","refresh_token":"r2","expires_in":3600}`
 
-// expiredClient is signed in with a session whose access token has run out.
 func expiredClient(t *testing.T, rs *refreshServer) *Client {
 	t.Helper()
 	hs := httptest.NewServer(rs)
@@ -89,8 +85,6 @@ func TestTokenRefreshesOnceForAll(t *testing.T) {
 	}
 }
 
-// A refresh that panics fails for those waiting on it, and the app goes
-// on.
 func TestRefreshThatPanicsFails(t *testing.T) {
 	c := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
 	c.st = signedInStore(t)
@@ -138,8 +132,6 @@ func TestSignInDuringRefreshStays(t *testing.T) {
 	}
 }
 
-// A refresh token the server refuses ends the sign-in, and the app's
-// session with it; any other failure keeps both.
 func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 	cases := []struct {
 		status  int
@@ -163,7 +155,6 @@ func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 	}
 }
 
-// signedInStore is a store whose session is signed in as u1.
 func signedInStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())
@@ -177,9 +168,6 @@ func signedInStore(t *testing.T) *store.Store {
 	return st
 }
 
-// Storage transfers take as long as they need, past the timeout of the
-// other calls, as a large recording's upload does; a server that does
-// not answer once the request is sent still fails them.
 func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
 	was := longHeaderWait
 	longHeaderWait = 500 * time.Millisecond
@@ -217,44 +205,27 @@ func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
 	if err := c.Upload(ctx, "recordings", "u1/r.wav", strings.NewReader("RIFF"), "audio/wav"); err == nil || !IsNetwork(err) {
 		t.Errorf("upload to a server that does not answer: %v", err)
 	}
-	if err := c.InvokeStream(ctx, "agent", map[string]any{}, func(map[string]any) {}); err == nil {
-		t.Error("a run on a server that does not answer went")
+	if _, err := c.Download(ctx, "recordings", "u1/r.wav"); err == nil || !IsNetwork(err) {
+		t.Errorf("download from a server that does not answer: %v", err)
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("gave up after %v", d)
 	}
 }
 
-// A function that works a while before it answers, as transcribing does,
-// is waited for past the other calls' timeout and the long client's wait
-// for an answer, as long as ctx lets it.
-func TestInvokeLongOutlastsTheCallTimeout(t *testing.T) {
-	was := longHeaderWait
-	longHeaderWait = 100 * time.Millisecond
-	t.Cleanup(func() { longHeaderWait = was })
+func TestInvokeEndsAtTheCallTimeout(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(300 * time.Millisecond)
-		_, _ = io.WriteString(w, `{"segments": []}`)
+		_, _ = io.WriteString(w, `{}`)
 	}))
 	t.Cleanup(hs.Close)
 	c := SignedInForTest(hs.URL, nil, "u1")
 	c.http.Timeout = 100 * time.Millisecond
-	if _, err := c.Invoke(context.Background(), "stt", map[string]any{}); err == nil {
-		t.Error("Invoke outlasted its timeout")
-	}
-	res, err := c.InvokeLong(context.Background(), "stt", map[string]any{})
-	if _, ok := res["segments"]; err != nil || !ok {
-		t.Errorf("res %v, %v", res, err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if _, err := c.InvokeLong(ctx, "stt", map[string]any{}); err == nil {
-		t.Error("InvokeLong outlasted its ctx")
+	if _, err := c.Invoke(context.Background(), "account", map[string]any{}); err == nil || !IsNetwork(err) {
+		t.Errorf("Invoke outlasted its timeout: %v", err)
 	}
 }
 
-// A session's expiry goes by how long the server says it lasts, from when
-// it came by this device's clock, not by the server's clock.
 func TestExpiryByThisDevicesClock(t *testing.T) {
 	s, err := decodeSession(map[string]any{"access_token": "a", "expires_in": 3600.0, "expires_at": float64(time.Now().Add(-time.Hour).Unix())})
 	if err != nil {
@@ -269,9 +240,6 @@ func TestExpiryByThisDevicesClock(t *testing.T) {
 	}
 }
 
-// A request the server refuses for an expired token renews the token and
-// goes once more, with its body; one whose body cannot be read again, as
-// an upload's file, fails instead.
 func TestRefusedTokenRenewsAndRetries(t *testing.T) {
 	var refreshes atomic.Int32
 	var mu sync.Mutex
@@ -320,37 +288,7 @@ func TestRefusedTokenRenewsAndRetries(t *testing.T) {
 	}
 }
 
-// A stream that stops sending, its connection gone half-open, ends rather
-// than holding the run for the rest of its time.
-func TestQuietStreamEnds(t *testing.T) {
-	was := streamIdle
-	streamIdle = 200 * time.Millisecond
-	t.Cleanup(func() { streamIdle = was })
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"type":"status","status":"running"}`+"\n")
-		w.(http.Flusher).Flush()
-		select {
-		case <-r.Context().Done():
-		case <-time.After(5 * time.Second):
-		}
-	}))
-	t.Cleanup(hs.Close)
-	c := SignedInForTest(hs.URL, nil, "u1")
-	events := 0
-	start := time.Now()
-	err := c.InvokeStream(context.Background(), "agent", map[string]any{}, func(map[string]any) { events++ })
-	if !errors.Is(err, errStreamIdle) || events != 1 {
-		t.Errorf("err %v, %d events", err, events)
-	}
-	if d := time.Since(start); d > 2*time.Second {
-		t.Errorf("ended after %v", d)
-	}
-}
-
-// A function that writes as the caller until it ends, an agent run or a
-// transcription, gets a token that lasts as long as it may run: one with
-// less left is renewed first, though it would do for other calls.
-func TestLongCallsRenewATokenRunningOutFirst(t *testing.T) {
+func TestCallsRenewATokenRunningOutFirst(t *testing.T) {
 	var refreshes atomic.Int32
 	var mu sync.Mutex
 	var sent []string
@@ -370,18 +308,21 @@ func TestLongCallsRenewATokenRunningOutFirst(t *testing.T) {
 	c.sess.RefreshToken = "r1"
 	c.sess.ExpiresAt = time.Now().Add(3 * time.Minute).Unix()
 	ctx := context.Background()
-	if _, err := c.Invoke(ctx, "providers", map[string]any{}); err != nil {
+	if _, err := c.Invoke(ctx, "account", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.InvokeStream(ctx, "agent", map[string]any{}, func(map[string]any) {}); err != nil {
+	c.mu.Lock()
+	c.sess.ExpiresAt = time.Now().Add(30 * time.Second).Unix()
+	c.mu.Unlock()
+	if _, err := c.Invoke(ctx, "account", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.InvokeLong(ctx, "stt", map[string]any{}); err != nil {
+	if _, err := c.Invoke(ctx, "account", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	want := []string{"/functions/v1/providers Bearer test", "/functions/v1/agent Bearer new1", "/functions/v1/stt Bearer new1"}
+	want := []string{"/functions/v1/account Bearer test", "/functions/v1/account Bearer new1", "/functions/v1/account Bearer new1"}
 	if fmt.Sprint(sent) != fmt.Sprint(want) {
 		t.Errorf("sent %q, want %q", sent, want)
 	}
@@ -390,9 +331,7 @@ func TestLongCallsRenewATokenRunningOutFirst(t *testing.T) {
 	}
 }
 
-// A function that refuses a token running out before it would finish has
-// the call renew it and go again, as an expired one does.
-func TestFunctionRefusingAShortTokenRetries(t *testing.T) {
+func TestFunctionRefusingATokenRetries(t *testing.T) {
 	var refreshes, calls atomic.Int32
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/v1/token" {
@@ -403,16 +342,17 @@ func TestFunctionRefusingAShortTokenRetries(t *testing.T) {
 		calls.Add(1)
 		if r.Header.Get("Authorization") == "Bearer test" {
 			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = io.WriteString(w, `{"error":"JWT expires before this would finish: renew it and try again"}`)
+			_, _ = io.WriteString(w, `{"code":401,"message":"Invalid JWT"}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"segments": []}`)
+		data, _ := io.ReadAll(r.Body)
+		_, _ = w.Write(data)
 	}))
 	t.Cleanup(hs.Close)
 	c := SignedInForTest(hs.URL, nil, "u1")
 	c.sess.RefreshToken = "r1"
-	res, err := c.InvokeLong(context.Background(), "stt", map[string]any{"action": "transcribe"})
-	if _, ok := res["segments"]; err != nil || !ok {
+	res, err := c.Invoke(context.Background(), "account", map[string]any{"action": "usage"})
+	if err != nil || res["action"] != "usage" {
 		t.Fatalf("res %v, %v", res, err)
 	}
 	if refreshes.Load() != 1 || calls.Load() != 2 {
@@ -420,18 +360,12 @@ func TestFunctionRefusingAShortTokenRetries(t *testing.T) {
 	}
 }
 
-// Only what says the server could not be reached counts as the network's:
-// a failed connection, one that broke or went quiet, a gateway that could
-// not reach the server. The server's refusals, answers that do not parse
-// and the caller's own waits running out are not.
 func TestIsNetwork(t *testing.T) {
 	c := SignedInForTest("http://127.0.0.1:1", nil, "u1")
 	_, refused := c.Select(context.Background(), "pages", Query{})
 	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	<-expired.Done()
-	// A request the caller's wait ended, and one the client's own timeout
-	// did.
 	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer slow.Close()
 	waited, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -450,7 +384,6 @@ func TestIsNetwork(t *testing.T) {
 	}{
 		{refused, true},
 		{fmt.Errorf("reading: %w", io.ErrUnexpectedEOF), true},
-		{errStreamIdle, true},
 		{&Error{Status: http.StatusServiceUnavailable}, true},
 		{&Error{Status: http.StatusConflict}, false},
 		{errors.New("the page's content on this device could not be read"), false},
@@ -468,7 +401,6 @@ func TestIsNetwork(t *testing.T) {
 	}
 }
 
-// The owner is found on any page of the project's users.
 func TestProjectOwnerReadsEveryPage(t *testing.T) {
 	was, wasPages := usersPerPage, maxUserPages
 	usersPerPage = 2
@@ -494,8 +426,6 @@ func TestProjectOwnerReadsEveryPage(t *testing.T) {
 	}
 }
 
-// A profile change refused for an expired token renews the token and goes
-// again, as the other requests do.
 func TestUpdateUserRenewsARefusedToken(t *testing.T) {
 	var mu sync.Mutex
 	var sent []string
@@ -528,9 +458,6 @@ func TestUpdateUserRenewsARefusedToken(t *testing.T) {
 	}
 }
 
-// A refusal that sending again cannot change is told apart by its code:
-// a check the change fails, or Storage's object too large, which it may
-// answer as a 400.
 func TestIsInvalidReadsTheCode(t *testing.T) {
 	answers := map[string]struct {
 		status int
@@ -563,9 +490,6 @@ func TestIsInvalidReadsTheCode(t *testing.T) {
 	}
 }
 
-// Storage's refusal of a key is told apart by its name, as it has written
-// it either way, and its object-too-large by the status in its body
-// whichever way it writes it.
 func TestStorageRefusalsReadTheirNames(t *testing.T) {
 	answers := map[string]string{
 		"/storage/v1/object/old/x": `{"statusCode":"400","error":"InvalidKey","message":"Invalid key: x"}`,
@@ -589,9 +513,6 @@ func TestStorageRefusalsReadTheirNames(t *testing.T) {
 	}
 }
 
-// An error a trigger raised is the request's, which the next one does not
-// meet. Any other 5xx is the server's, whatever code it comes with: a
-// database in trouble answers statement after statement so.
 func TestABusyServerIsToldFromARefusedRequest(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
@@ -618,8 +539,6 @@ func TestABusyServerIsToldFromARefusedRequest(t *testing.T) {
 	}
 }
 
-// A request that took too long is told by whoever gave up on it: this
-// client, the database or a gateway on the way.
 func TestTooSlowIsToldWhoeverGaveUp(t *testing.T) {
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-block }))
@@ -649,8 +568,6 @@ func TestTooSlowIsToldWhoeverGaveUp(t *testing.T) {
 	}
 }
 
-// An answer that does not parse is an error, as a sign-in page a network
-// puts in the server's place, and no answer at all is none.
 func TestRPCAnswers(t *testing.T) {
 	body := "<html>Sign in to the wifi</html>"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -671,8 +588,6 @@ func TestRPCAnswers(t *testing.T) {
 	}
 }
 
-// What the server's client says to people is in the app's language, and
-// still the error it is to errors.Is.
 func TestErrorsInTheAppsLanguage(t *testing.T) {
 	i18n.SetLocaleFunc(func() string { return "ja" })
 	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
@@ -684,7 +599,6 @@ func TestErrorsInTheAppsLanguage(t *testing.T) {
 	}
 }
 
-// readAll reads what Download opened, and closes it.
 func readAll(body io.ReadCloser, err error) ([]byte, error) {
 	if err != nil {
 		return nil, err
@@ -693,8 +607,6 @@ func readAll(body io.ReadCloser, err error) ([]byte, error) {
 	return io.ReadAll(body)
 }
 
-// A change asks for only the columns it names back, as a page's content
-// saved whole need not come back whole.
 func TestWritesAnswerWithTheColumnsAskedFor(t *testing.T) {
 	var mu sync.Mutex
 	var queries []string
@@ -732,8 +644,6 @@ func TestWritesAnswerWithTheColumnsAskedFor(t *testing.T) {
 	}
 }
 
-// A download comes as it is read, and one cut short before the length the
-// server gave fails as it is read rather than read as a whole file.
 func TestDownloadComesAsItIsRead(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "100")
@@ -741,7 +651,6 @@ func TestDownloadComesAsItIsRead(t *testing.T) {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		// The connection goes with only 4 of the 100 bytes sent.
 		if hj, ok := w.(http.Hijacker); ok {
 			conn, _, err := hj.Hijack()
 			if err == nil {
@@ -757,8 +666,6 @@ func TestDownloadComesAsItIsRead(t *testing.T) {
 	}
 }
 
-// Each session the client has counts, a token renewed not: a sign-in, a
-// sign-out, and a refresh token refused, which ends the session.
 func TestSessionsCount(t *testing.T) {
 	c := expiredClient(t, &refreshServer{status: 200, body: newSession})
 	n := c.Sessions()

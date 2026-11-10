@@ -15,7 +15,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// textPage makes a page of one paragraph of text.
 func textPage(t *testing.T, s *Store, title, text string) Page {
 	t.Helper()
 	n := &doc.Node{Type: "paragraph"}
@@ -45,10 +44,6 @@ func searchFor(t *testing.T, s *Store, q string) []string {
 	return titlesOf(hits)
 }
 
-// The texts that may hold what is searched for are all found while the
-// index catches up beside the search, as it does in the background: one
-// indexed meanwhile is found as indexed or as still to index, never as
-// neither.
 func TestSearchCandidatesWhileIndexing(t *testing.T) {
 	s := open(t)
 	const pages = 60
@@ -57,7 +52,6 @@ func TestSearchCandidatesWhileIndexing(t *testing.T) {
 	}
 	ctx := context.Background()
 	for range 5 {
-		// Every text waits to be indexed again.
 		if _, err := s.db.Exec(`UPDATE text_writes SET indexed = NULL`); err != nil {
 			t.Fatal(err)
 		}
@@ -90,10 +84,6 @@ func TestSearchCandidatesWhileIndexing(t *testing.T) {
 	}
 }
 
-// Search finds text as it is now through the index: text written since it
-// was indexed, by this process or another, a page's, a recording's or a
-// comment's, and no text that has gone; what the index has of a removed
-// page goes with it.
 func TestSearchFollowsWritesThroughItsIndex(t *testing.T) {
 	s := open(t)
 	p := textPage(t, s, "Notes", "the quarterly budget")
@@ -111,7 +101,6 @@ func TestSearchFollowsWritesThroughItsIndex(t *testing.T) {
 	if got := searchFor(t, s, "yearly"); !slices.Equal(got, []string{"page:Notes"}) {
 		t.Errorf("found %v", got)
 	}
-	// Another process writes the text, which no method of the store's does.
 	other := doc.FromBlocks([]*doc.Node{{ID: "x", Type: "paragraph", Data: map[string]any{"delta": doc.Delta{{Text: "an offsite agenda"}}.JSON()}}})
 	if _, err := s.DB().Exec(`UPDATE page_contents SET content = ?, plain_text = ? WHERE page_id = ?`, other.Encode(), other.PlainText(), p.ID); err != nil {
 		t.Fatal(err)
@@ -148,9 +137,6 @@ func TestSearchFollowsWritesThroughItsIndex(t *testing.T) {
 	}
 }
 
-// What search matches through its index is as it was without one: text
-// lowered as Go lowers it, as written, words of other scripts, and, below
-// the three characters the index goes by, any text.
 func TestSearchMatchesAsWritten(t *testing.T) {
 	s := open(t)
 	for title, text := range map[string]string{
@@ -169,7 +155,6 @@ func TestSearchMatchesAsWritten(t *testing.T) {
 	}
 }
 
-// A search given up on stops with the error of its context.
 func TestSearchStopsWhenGivenUpOn(t *testing.T) {
 	s := open(t)
 	textPage(t, s, "Notes", "the quarterly budget")
@@ -180,8 +165,6 @@ func TestSearchStopsWhenGivenUpOn(t *testing.T) {
 	}
 }
 
-// A database from before the index has its text found as it opens, and
-// indexed as search runs.
 func TestOldDatabaseIsSearchedAndIndexed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -211,9 +194,6 @@ func TestOldDatabaseIsSearchedAndIndexed(t *testing.T) {
 	}
 }
 
-// A save returns what it stored, encoded, with its write; one that changes
-// nothing keeps the write as it was. Its label counts the blocks edited
-// since the version last synced.
 func TestSaveOverReturnsWhatItStored(t *testing.T) {
 	s := open(t)
 	blocks := func(texts ...string) *doc.Content {
@@ -256,8 +236,6 @@ func TestSaveOverReturnsWhatItStored(t *testing.T) {
 	}
 }
 
-// A file kept as it downloads is written as it comes, and one whose
-// download fails part way keeps nothing.
 func TestDownloadedFileFromKeepsNothingCutShort(t *testing.T) {
 	s := open(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -286,18 +264,15 @@ func TestDownloadedFileFromKeepsNothingCutShort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(local); string(data) != "the whole file" { // #nosec G304 -- the file the store just wrote.
+	if data, _ := os.ReadFile(local); string(data) != "the whole file" { // #nosec G304
 		t.Errorf("kept %q", data)
 	}
 }
 
-// errReader fails with err.
 type errReader struct{ err error }
 
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
-// A tree read once answers as the store does, page by page, for who may
-// change a page and which is inside which.
 func TestTreeAnswersAsTheStore(t *testing.T) {
 	s := open(t)
 	own, _ := s.CreatePage(NewPageOptions{Title: "Mine"})
@@ -347,8 +322,6 @@ func TestTreeAnswersAsTheStore(t *testing.T) {
 	}
 }
 
-// A save stands where text_writes has lost the page's row, as one removed
-// by hand: it says nothing of the write.
 func TestSaveWithoutItsWriteRow(t *testing.T) {
 	s := open(t)
 	p := textPage(t, s, "A", "alpha")
@@ -366,9 +339,6 @@ func TestSaveWithoutItsWriteRow(t *testing.T) {
 	}
 }
 
-// A recording is found by what was said in it, with the quotes and &s its
-// stored JSON writes another way, and not by the names and times that
-// JSON has for every line.
 func TestSearchReadsWhatARecordingSaid(t *testing.T) {
 	st, err := OpenMemory(t.TempDir())
 	if err != nil {

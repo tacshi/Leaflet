@@ -17,9 +17,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// A file larger than the server takes is refused for good: its upload
-// waits the longest at once rather than going whole again on the next
-// passes, its row waits with it, and the page's other changes still go.
 func TestUploadTooLargeWaitsTheLongest(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
@@ -65,8 +62,6 @@ func TestUploadTooLargeWaitsTheLongest(t *testing.T) {
 	}
 }
 
-// An entry that failed waits before it goes again, longer each time, as a
-// pass runs after every save; a change to it goes at once.
 func TestFailedEntriesWait(t *testing.T) {
 	retryBase = time.Minute
 	t.Cleanup(func() { retryBase = 0 })

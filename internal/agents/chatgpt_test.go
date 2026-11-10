@@ -63,8 +63,6 @@ func TestChatGPTResponses(t *testing.T) {
 	}
 }
 
-// The backend may send the items as they finish and end with an empty
-// output: the call and the text still count.
 func TestChatGPTStreamedItems(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,8 +92,6 @@ func TestChatGPTStreamedItems(t *testing.T) {
 	}
 }
 
-// ChatGPT's answer may send nothing for longer than other models' while
-// the model reasons: it is waited for, though not without end.
 func TestChatGPTWaitsOutReasoning(t *testing.T) {
 	savedIdle, savedStream := idleTimeout, streamIdleTimeout
 	idleTimeout, streamIdleTimeout = 50*time.Millisecond, time.Second
@@ -141,9 +137,6 @@ func TestRecordingViewsCarryTranscript(t *testing.T) {
 	}
 }
 
-// A page where the sign-in should answer with JSON, such as a region's
-// block page or a network's own page when the proxy is not used, says
-// the sign-in can't be reached rather than failing to read JSON.
 func TestSignInJSONNotAPage(t *testing.T) {
 	cases := []struct {
 		status int
@@ -174,9 +167,6 @@ func TestSignInJSONNotAPage(t *testing.T) {
 	}
 }
 
-// Renewing the access token waits on the network without holding the
-// account, which Settings reads on the main thread, and calls that need a
-// token at once share one renewal.
 func TestChatGPTRenewsOutsideTheAccount(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -210,7 +200,6 @@ func TestChatGPTRenewsOutsideTheAccount(t *testing.T) {
 			toks <- tok
 		}()
 	}
-	// Both are waiting on the renewal now, or about to.
 	time.Sleep(50 * time.Millisecond)
 	read := make(chan ChatGPTAccount, 1)
 	go func() { read <- g.Account() }()
@@ -235,7 +224,6 @@ func TestChatGPTRenewsOutsideTheAccount(t *testing.T) {
 	}
 }
 
-// fakeDiscovery has OpenAI's sign-in answer as d for the test.
 func fakeDiscovery(t *testing.T, d *chatgptDiscovery) {
 	discoveryMu.Lock()
 	saved := discoveryCache
@@ -248,8 +236,6 @@ func fakeDiscovery(t *testing.T, d *chatgptDiscovery) {
 	})
 }
 
-// An access token the API refuses before it said it would expire is
-// renewed, and the request made again, once.
 func TestChatGPTRenewsARefusedToken(t *testing.T) {
 	var mu sync.Mutex
 	var auths []string
@@ -282,9 +268,6 @@ func TestChatGPTRenewsARefusedToken(t *testing.T) {
 	}
 }
 
-// A renewal outlasts the run that asked for it, stopped meanwhile: the
-// refresh token OpenAI rotated to is kept, rather than lost with the old
-// one spent.
 func TestChatGPTRenewalOutlastsAStoppedRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -304,9 +287,6 @@ func TestChatGPTRenewalOutlastsAStoppedRun(t *testing.T) {
 	}
 }
 
-// A sign-in that another replaced, or that was signed out, keeps its
-// renewals to itself: they do not overwrite the one kept, or bring back
-// the one signed out.
 func TestOldChatGPTSignInKeepsNothing(t *testing.T) {
 	var mu sync.Mutex
 	kept := map[string]string{}
@@ -360,8 +340,6 @@ func TestOldChatGPTSignInKeepsNothing(t *testing.T) {
 	}
 }
 
-// What is drawn asks for a sign-in without waiting on the keychain, which
-// may be waiting on the user while another goroutine reads it.
 func TestKnownChatGPTDoesNotWaitOnTheKeychain(t *testing.T) {
 	reading, answer := make(chan struct{}), make(chan struct{})
 	was := readSecret
@@ -399,8 +377,6 @@ func TestKnownChatGPTDoesNotWaitOnTheKeychain(t *testing.T) {
 	}
 }
 
-// A sign-in signed out while the keychain was reading it does not come
-// back from what the keychain gave.
 func TestChatGPTSignedOutAsItIsRead(t *testing.T) {
 	useMemKeys(t)
 	reading, answer := make(chan struct{}), make(chan struct{})
@@ -432,10 +408,6 @@ func TestChatGPTSignedOutAsItIsRead(t *testing.T) {
 	}
 }
 
-// A sign-in that leaves the keychain slowly, as a prompt can make it, is
-// not kept by a read that came in the meantime: one that ended before it
-// has gone hands on what will be no sign-in, whose renewals go nowhere, and
-// one that ends after finds it gone.
 func TestChatGPTReadWhileItGoes(t *testing.T) {
 	keys := useMemKeys(t)
 	fakeDiscovery(t, &chatgptDiscovery{})
@@ -447,10 +419,10 @@ func TestChatGPTReadWhileItGoes(t *testing.T) {
 	var reads atomic.Int32
 	readSecret = func(name string) ([]byte, error) {
 		switch reads.Add(1) {
-		case 1: // the sign-out's
+		case 1:
 			close(dropping)
 			<-goOn
-		case 2: // the read that ends after it
+		case 2:
 			close(reading)
 			<-late
 		}
@@ -488,8 +460,6 @@ func TestChatGPTReadWhileItGoes(t *testing.T) {
 	}
 }
 
-// One provider's sign-ins coming and going are no change to another's: a
-// read of it under way goes on.
 func TestChatGPTReadsKeepToTheirProvider(t *testing.T) {
 	useMemKeys(t)
 	fakeDiscovery(t, &chatgptDiscovery{})
@@ -533,9 +503,6 @@ func TestChatGPTReadsKeepToTheirProvider(t *testing.T) {
 	}
 }
 
-// Signing a provider out tells OpenAI, though no run has read its sign-in
-// from the keychain yet: its refresh token goes on working otherwise, kept
-// nowhere.
 func TestForgetChatGPTRevokesOneNotRead(t *testing.T) {
 	keys := useMemKeys(t)
 	revoked := make(chan string, 1)
@@ -563,8 +530,6 @@ func TestForgetChatGPTRevokesOneNotRead(t *testing.T) {
 	}
 }
 
-// A second answer to the sign-in's callback, such as the tab loaded
-// again, is answered too, rather than waiting for ever.
 func TestSignInCallbackAnsweredTwice(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -598,8 +563,6 @@ func TestSignInCallbackAnsweredTwice(t *testing.T) {
 	}
 }
 
-// ChatGPT's function calls stream too, their blocks going in the page as
-// they come.
 func TestChatGPTInsertStreams(t *testing.T) {
 	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time."}]}`
 	n := 0
@@ -637,10 +600,6 @@ func TestChatGPTInsertStreams(t *testing.T) {
 	}
 }
 
-// A recording block carries the transcript only of a recording of its
-// page: a block can name any recording's ID, another page's among them,
-// whose transcript the run, or an MCP client, would read through it. The
-// other page's own read gives its own.
 func TestRecordingTranscriptsOfThePageAlone(t *testing.T) {
 	st := openStore(t)
 	here, err := st.CreatePage(store.NewPageOptions{Title: "Here"})

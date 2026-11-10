@@ -1,13 +1,9 @@
 import SwiftUI
 
-/// LeafletCommands are the app's menu bar on iPad, whose shortcuts hold
-/// ⌘ shows: the desktop's, so a Magic Keyboard works as it does there.
 struct LeafletCommands: Commands {
     let app: AppModel
     @FocusedValue(\.scene) private var focused
 
-    /// scene is the window in front: the one with focus, or the one that
-    /// came to the front last, before anything in it took focus.
     private var scene: SceneModel? { focused ?? app.activeScene }
     @Environment(\.openWindow) private var openWindow
 
@@ -30,7 +26,6 @@ struct LeafletCommands: Commands {
                 .disabled(scene == nil)
         }
 
-        // ⌥⇧⌘C, as on the desktop, beside Paste and Match Style's ⌥⇧⌘V.
         CommandGroup(after: .pasteboard) {
             Button(L.editorCopyPlainText) { scene?.editor?.copyPlainText() }
                 .keyboardShortcut("c", modifiers: [.command, .option, .shift])
@@ -72,8 +67,6 @@ struct LeafletCommands: Commands {
     }
 }
 
-/// FormatCommands are the editor's commands in the Format menu, besides
-/// the system's bold, italic and underline.
 struct FormatCommands: View {
     let editor: EditorController?
 
@@ -109,7 +102,6 @@ struct FormatCommands: View {
             Button(LI.moveBlockDown) { editor?.moveBlock(by: 1) }
                 .keyboardShortcut(.downArrow, modifiers: [.option, .shift])
         }
-        // A page the user may only view takes no format.
         .disabled(editor?.textView.isEditable != true)
     }
 }

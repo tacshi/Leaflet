@@ -10,16 +10,11 @@ import (
 	"time"
 )
 
-// Tags are at most maxTags to a page, each at most maxTagLen characters,
-// as the server's pages table checks.
 const (
 	maxTags   = 50
 	maxTagLen = 64
 )
 
-// NormalizeTags tidies tags as people type them: each trimmed, without a
-// leading #, its spaces one, cut to maxTagLen; the blank ones and those
-// repeated, in any case, left out, the first spelling kept, in order.
 func NormalizeTags(in []string) []string {
 	out := []string{}
 	seen := map[string]bool{}
@@ -55,7 +50,6 @@ func encodeTags(tags []string) string {
 	return string(b)
 }
 
-// HasTag reports whether a page has a tag, in any case.
 func (p Page) HasTag(tag string) bool {
 	for _, t := range p.Tags {
 		if strings.EqualFold(t, tag) {
@@ -65,7 +59,6 @@ func (p Page) HasTag(tag string) bool {
 	return false
 }
 
-// SetPageTags changes a page's tags.
 func (s *Store) SetPageTags(id string, tags []string) error {
 	tags = NormalizeTags(tags)
 	return s.changePage(id, "tagged", func(_ *sql.Tx, p *Page) (bool, error) {
@@ -77,14 +70,11 @@ func (s *Store) SetPageTags(id string, tags []string) error {
 	})
 }
 
-// TagCount is a tag and how many pages have it.
 type TagCount struct {
 	Name  string
 	Count int
 }
 
-// TagsOf counts the tags of pages, by name: a tag spelled differently on
-// two pages is one, as the first page spells it.
 func TagsOf(pages []Page) []TagCount {
 	at := map[string]int{}
 	var out []TagCount
@@ -103,30 +93,19 @@ func TagsOf(pages []Page) []TagCount {
 	return out
 }
 
-// RenameTag renames a tag on every page the user may change, templates
-// too, merging it into a tag of the new name a page has already. It
-// returns the pages changed, with the tags each had before.
 func (s *Store) RenameTag(old, name string) (map[string][]string, error) {
 	return s.retag(old, func(t string) string { return name })
 }
 
-// DeleteTag takes a tag off every page the user may change, templates
-// too, and returns the pages changed, with the tags each had before.
 func (s *Store) DeleteTag(tag string) (map[string][]string, error) {
 	return s.retag(tag, func(string) string { return "" })
 }
 
-// retag changes tag on every page the user may change that has it, to
-// what to says ("" takes it off), and returns the pages changed with
-// their tags before.
 func (s *Store) retag(tag string, to func(string) string) (map[string][]string, error) {
 	pages, err := s.queryPages(`deleted_at IS NULL`)
 	if err != nil {
 		return nil, err
 	}
-	// Which pages the user may change is read first, as CanEdit reads the
-	// database, which the transaction holds; the pages are read again in
-	// it, so a change made to them since is kept.
 	var ids []string
 	for _, p := range pages {
 		if p.HasTag(tag) && s.CanEdit(p) {

@@ -11,30 +11,14 @@ import (
 	"leaflet/locales"
 )
 
-// A transcript's speakers, in a block's notes. A line names its speaker in
-// its own text, after its time, as "Speaker 1: " in the language the notes
-// were made in, or by the name the user gave them, so search, exports and
-// agents read what the page shows. What sets a given name apart from words
-// that only read like one is the block's list of them.
-
 const (
-	// SpeakersHidden is the data key of a block whose notes show without
-	// the speakers' names, which stay in its notes.
 	SpeakersHidden = "speakers_hidden"
-	// SpeakerNames is the data key of the names the user gave speakers in
-	// a block's notes.
-	SpeakerNames = "speaker_names"
-	// TranscribedBy is the data key of the engine that wrote the
-	// transcript in a file block's notes, as the speech settings name it.
-	TranscribedBy = "transcribed_by"
+	SpeakerNames   = "speaker_names"
+	TranscribedBy  = "transcribed_by"
 )
 
-// maxSpeakerName is the most characters a speaker's name takes.
 const maxSpeakerName = 64
 
-// speakerLabel matches a speaker as a transcript names them, at the start
-// of a line, in any of the app's languages, a group for each language
-// around the speaker alone.
 var speakerLabel = sync.OnceValue(func() *regexp.Regexp {
 	const name, text = "", ""
 	var forms []string
@@ -49,8 +33,6 @@ var speakerLabel = sync.OnceValue(func() *regexp.Regexp {
 	return regexp.MustCompile(`^(?:` + strings.Join(forms, "|") + `)`)
 })
 
-// speakerAt is the speaker text starts with, and where their words start,
-// or "" for text that names none.
 func speakerAt(text string, names []string) (string, int) {
 	for _, name := range names {
 		after, ok := strings.CutPrefix(text, name)
@@ -67,7 +49,6 @@ func speakerAt(text string, names []string) (string, int) {
 	return "", 0
 }
 
-// spokenLine is a line of notes in its parts.
 type spokenLine struct {
 	head, speaker, sep, words string
 }
@@ -83,7 +64,6 @@ func splitSpoken(line string, names []string) spokenLine {
 
 func (s spokenLine) String() string { return s.head + s.speaker + s.sep + s.words }
 
-// SpeakerNamesOf are the names the user gave speakers in block n's notes.
 func SpeakerNamesOf(n *Node) []string {
 	if n == nil {
 		return nil
@@ -98,7 +78,6 @@ func SpeakerNamesOf(n *Node) []string {
 	return names
 }
 
-// SetSpeakerNames keeps names in block n, or none.
 func SetSpeakerNames(n *Node, names []string) {
 	if len(names) == 0 {
 		delete(n.Data, SpeakerNames)
@@ -111,7 +90,6 @@ func SetSpeakerNames(n *Node, names []string) {
 	n.Set(SpeakerNames, list)
 }
 
-// NoteSpeakers are the speakers notes name, as each first speaks.
 func NoteSpeakers(notes string, names []string) []string {
 	out := []string{}
 	seen := map[string]bool{}
@@ -125,7 +103,6 @@ func NoteSpeakers(notes string, names []string) []string {
 	return out
 }
 
-// HasSpeakers reports whether a line of notes names its speaker.
 func HasSpeakers(notes string, names []string) bool {
 	for line := range strings.SplitSeq(notes, "\n") {
 		if splitSpoken(strings.TrimSpace(line), names).speaker != "" {
@@ -135,8 +112,6 @@ func HasSpeakers(notes string, names []string) bool {
 	return false
 }
 
-// WithoutSpeakers is notes with no line naming its speaker: each keeps its
-// time and its words.
 func WithoutSpeakers(notes string, names []string) string {
 	lines := strings.Split(notes, "\n")
 	for i, line := range lines {
@@ -148,7 +123,6 @@ func WithoutSpeakers(notes string, names []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// ShownNotes are block n's notes as they read, its choice of speakers made.
 func ShownNotes(n *Node) string {
 	if n.Bool(SpeakersHidden) {
 		return WithoutSpeakers(n.Str("notes"), SpeakerNamesOf(n))
@@ -156,9 +130,6 @@ func ShownNotes(n *Node) string {
 	return n.Str("notes")
 }
 
-// SpokenLines are notes in lines, as NoteLines reads them, each with its
-// speaker and its place in the notes, for SetLineSpeaker, and with the
-// speaker out of its text when hidden.
 func SpokenLines(notes string, names []string, hidden bool) []NoteLine {
 	var out []NoteLine
 	for i, line := range strings.Split(NormalizeNotes(notes), "\n") {
@@ -176,8 +147,6 @@ func SpokenLines(notes string, names []string, hidden bool) []NoteLine {
 	return out
 }
 
-// NotesText is notes as text to copy, as a recording's transcript copies:
-// a line each, without times, and their speakers unless hidden.
 func NotesText(notes string, names []string, hidden bool) string {
 	var lines []string
 	for _, l := range SpokenLines(notes, names, hidden) {
@@ -186,9 +155,6 @@ func NotesText(notes string, names []string, hidden bool) string {
 	return strings.Join(lines, "\n")
 }
 
-// NotesBlocks are notes as blocks to put in a page, as a recording's
-// transcript goes in: a paragraph a line, each after its time in bold, and
-// their speakers unless hidden.
 func NotesBlocks(notes string, names []string, hidden bool) []*Node {
 	nodes := []*Node{}
 	for _, l := range SpokenLines(notes, names, hidden) {
@@ -203,8 +169,6 @@ func NotesBlocks(notes string, names []string, hidden bool) []*Node {
 	return nodes
 }
 
-// CleanSpeakerName is a name as a line of notes can hold it: on one line,
-// without the colon that ends a speaker's name, and not too long.
 func CleanSpeakerName(name string) string {
 	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool {
 		return unicode.IsSpace(r) || r == ':' || r == '：'
@@ -215,9 +179,6 @@ func CleanSpeakerName(name string) string {
 	return name
 }
 
-// RenameSpeaker has every line of from name to as their speaker, and gives
-// the notes and the names they now use. A name another speaker has makes
-// them one.
 func RenameSpeaker(notes string, names []string, from, to string) (string, []string) {
 	to = CleanSpeakerName(to)
 	if to == "" || to == from {
@@ -234,9 +195,6 @@ func RenameSpeaker(notes string, names []string, from, to string) (string, []str
 	return notes, usedNames(notes, names, to)
 }
 
-// SetLineSpeaker has line number line of the notes, as SpokenLines numbers
-// them, name to as its speaker, and gives the notes and the names they now
-// use.
 func SetLineSpeaker(notes string, names []string, line int, to string) (string, []string) {
 	to = CleanSpeakerName(to)
 	lines := strings.Split(NormalizeNotes(notes), "\n")
@@ -253,7 +211,6 @@ func SetLineSpeaker(notes string, names []string, line int, to string) (string, 
 	return notes, usedNames(notes, names, to)
 }
 
-// speakerSep is what comes between a speaker and their words in lines.
 func speakerSep(lines, names []string) string {
 	for _, line := range lines {
 		if s := splitSpoken(strings.TrimSpace(line), names); s.speaker != "" {
@@ -263,7 +220,6 @@ func speakerSep(lines, names []string) string {
 	return ": "
 }
 
-// usedNames are names, and to, as far as notes use them.
 func usedNames(notes string, names []string, to string) []string {
 	all := names
 	if !strings.Contains("\n"+strings.Join(names, "\n")+"\n", "\n"+to+"\n") {
@@ -282,8 +238,6 @@ func usedNames(notes string, names []string, to string) []string {
 	return kept
 }
 
-// SpeakerNamesJSON and its reverse keep names in one string for the iOS
-// app, whose bridge takes no lists.
 func SpeakerNamesJSON(names []string) string {
 	if names == nil {
 		names = []string{}
@@ -292,7 +246,6 @@ func SpeakerNamesJSON(names []string) string {
 	return string(raw)
 }
 
-// SpeakerNamesFrom reads what SpeakerNamesJSON wrote.
 func SpeakerNamesFrom(raw string) []string {
 	var names []string
 	_ = json.Unmarshal([]byte(raw), &names)

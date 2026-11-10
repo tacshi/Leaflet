@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-// A save over a file keeps its permissions, and a new file has those the
-// umask leaves, as any new file the user makes.
 func TestSaveKeepsPermissions(t *testing.T) {
 	old := syscall.Umask(0o027)
 	t.Cleanup(func() { syscall.Umask(old) })

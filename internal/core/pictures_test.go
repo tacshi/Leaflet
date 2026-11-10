@@ -17,8 +17,6 @@ import (
 	"leaflet/internal/webpage"
 )
 
-// A page's pictures another device uploaded come down before it is
-// written whole, as a PDF prints it; another page's stay where they are.
 func TestDownloadPictures(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {

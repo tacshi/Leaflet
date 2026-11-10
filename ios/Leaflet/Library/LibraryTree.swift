@@ -1,21 +1,11 @@
 import Foundation
 
-/// LibraryTree is the library as the sidebar arranges it, as the core gives
-/// it (mobile.Library): folders with their pages, the pages nested in
-/// pages, the pages shared with the user, and the pages of each tag. Its
-/// pages are looked up once, as the library is read: the sidebar asks for
-/// them row by row.
 struct LibraryTree: Sendable {
     let byID: [String: PageRow]
-    /// children are the pages under each page, by its ID, in order.
     let children: [String: [PageRow]]
-    /// inFolder are the top-level pages of each folder, by its ID.
     let inFolder: [String: [PageRow]]
-    /// top are the user's pages in no folder and no other page.
     let top: [PageRow]
-    /// shared are the top pages of what others shared with the user.
     let shared: [PageRow]
-    /// tagged are the pages with each tag, by title.
     let tagged: [String: [PageRow]]
 
     init(
@@ -34,20 +24,15 @@ struct LibraryTree: Sendable {
     }
 }
 
-/// The library as the sidebar arranges it, from its tree.
 extension LibrarySnapshot {
-    /// own reports whether a page is in the user's space, not shared with
-    /// them by someone else.
     func own(_ page: PageRow) -> Bool { spaceID.isEmpty || page.spaceID == spaceID }
 
-    /// topPages are the user's pages in no folder and no other page.
     var topPages: [PageRow] { tree.top }
 
     func pages(in folder: FolderRow) -> [PageRow] { tree.inFolder[folder.id] ?? [] }
 
     func children(of page: PageRow) -> [PageRow] { tree.children[page.id] ?? [] }
 
-    /// sharedPages are the top pages of what others shared with the user.
     var sharedPages: [PageRow] { tree.shared }
 
     func pages(tagged tag: String) -> [PageRow] { tree.tagged[tag] ?? [] }
@@ -56,15 +41,11 @@ extension LibrarySnapshot {
 
     func files(in folder: FolderRow) -> [FileRow] { files.filter { $0.folderID == folder.id } }
 
-    /// topFiles are the files of no folder, or of one deleted.
     var topFiles: [FileRow] {
         let held = Set(folders.map(\.id))
         return files.filter { !held.contains($0.folderID ?? "") }
     }
 
-    /// rows are pages as the rows of the sidebar's tree, in order: each
-    /// page, and right under one that is open, its subpages, a level
-    /// deeper. A page comes once, even where parents go round in a loop.
     func rows(of pages: [PageRow], open: Set<String>) -> [TreeRow] {
         var out: [TreeRow] = []
         var seen: Set<String> = []
@@ -79,7 +60,6 @@ extension LibrarySnapshot {
         return out
     }
 
-    /// path is the page's ancestors, from the top, for its breadcrumbs.
     func path(to page: PageRow) -> [PageRow] {
         var out: [PageRow] = []
         var seen: Set<String> = [page.id]
@@ -92,8 +72,6 @@ extension LibrarySnapshot {
     }
 }
 
-/// TreeRow is a page as a row of the sidebar's tree: how deep it is
-/// nested, and whether subpages fold under it.
 struct TreeRow: Identifiable {
     let page: PageRow
     let depth: Int
@@ -102,8 +80,6 @@ struct TreeRow: Identifiable {
 }
 
 extension PageRow {
-    /// displayTitle is the title, or Untitled for a page without one, as
-    /// the core names it.
     var displayTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L.commonUntitled : title
     }

@@ -12,11 +12,8 @@ import (
 	"leaflet/internal/doc"
 )
 
-// An agent's op applied to a thawed content changes it as it would a
-// copy of the whole page, and leaves the content it came from, and each
-// before that, as they were: the revs share the blocks they have alike.
 func TestThawedOpsLeaveEarlierRevsAsTheyWere(t *testing.T) {
-	r := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- seeded, for runs a test can repeat.
+	r := rand.New(rand.NewPCG(1, 2)) // #nosec G404
 	ids := 0
 	newID := func() string {
 		ids++
@@ -72,8 +69,6 @@ func TestThawedOpsLeaveEarlierRevsAsTheyWere(t *testing.T) {
 			id := pick(c)
 			n := item("numbered_list")
 			if prev := c.Find(id); prev != nil && r.IntN(2) == 0 {
-				// A replace that keeps the block's children, as an agent's
-				// replace_block without them.
 				n.Children = prev.Clone().Children
 				op = doc.Op{Op: "replace", ID: id, Node: n, PrevNode: prev.Clone()}
 			} else {
@@ -103,7 +98,6 @@ func TestThawedOpsLeaveEarlierRevsAsTheyWere(t *testing.T) {
 		c = thawedC
 		applied++
 		if len(c.All()) > 400 {
-			// The page stays small enough to check every rev each time.
 			c = thawedC.Copy()
 			c.Children = c.Children[:len(c.Children)/2]
 		}
@@ -118,8 +112,6 @@ func TestThawedOpsLeaveEarlierRevsAsTheyWere(t *testing.T) {
 	}
 }
 
-// The page as the app is given it is the page's JSON, whether its blocks
-// were encoded before or not.
 func TestPageEncodesAsItsContent(t *testing.T) {
 	p := &openPage{}
 	c := doc.FromBlocks([]*doc.Node{paragraph("a", "<One> & two"), paragraph("b", "Two")})
@@ -133,7 +125,6 @@ func TestPageEncodesAsItsContent(t *testing.T) {
 		}
 		c = next
 	}
-	// A block whose children another can't hold is lifted after it.
 	stranded := doc.FromBlocks([]*doc.Node{{ID: "q", Type: "quote", Children: []*doc.Node{paragraph("in", "x")}}})
 	if got, want := p.encode(stranded), stranded.Lifted().Encode(); got != want {
 		t.Fatalf("encoded\n%s\nnot\n%s", got, want)
@@ -143,9 +134,6 @@ func TestPageEncodesAsItsContent(t *testing.T) {
 	}
 }
 
-// An agent writing in a long page leaves revs that share the blocks it
-// did not touch, rather than a copy of the page each, and its edits reach
-// the app as they would whole.
 func TestAgentRevsShareTheBlocksTheyHaveAlike(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Long"}`)
@@ -186,17 +174,12 @@ func TestAgentRevsShareTheBlocksTheyHaveAlike(t *testing.T) {
 			}
 			total += e.sizes[r]
 		}
-		// The page's edit is a page of its own; each agent rev, little
-		// more than the list of the page's blocks.
 		if edit := len(doc.FromBlocks(blocks).Encode()); total > edit+5*(8*2001+4096) {
 			t.Errorf("the revs hold about %d bytes, for a page of %d", total, edit)
 		}
 	})
 }
 
-// An editor keeps the newest revs' content as long as they hold few bytes
-// of their own, and fewer of them once they hold many: never its latest
-// edit's, nor the newest's.
 func TestEditorKeepsRevsBoundedByBytes(t *testing.T) {
 	e := &pageEditor{seen: map[int64]*doc.Content{}, last: 1}
 	e.saw(1, doc.Empty(), 1000)
@@ -216,17 +199,12 @@ func TestEditorKeepsRevsBoundedByBytes(t *testing.T) {
 	if total > keepBytes || e.seen[1] == nil || e.seen[45] == nil || e.seen[41] != nil {
 		t.Fatalf("kept %d bytes in %d revs", total, len(e.seen))
 	}
-	// A page bigger than all that is still kept, at its latest edit's rev
-	// and the newest.
 	e.saw(46, doc.Empty(), 2*keepBytes)
 	if len(e.seen) != 2 || e.seen[1] == nil || e.seen[46] == nil {
 		t.Fatalf("kept revs %v", e.sizes)
 	}
 }
 
-// Opening one of the user's own pages leaves reading who it is shared
-// with to sync, which reads it as the page opens (sync.Service.SetOpen);
-// a page others share with them has it read here.
 func TestOpeningReadsTheMembersOfSharedPages(t *testing.T) {
 	c, _ := open(t)
 	asked := make(chan string, 8)

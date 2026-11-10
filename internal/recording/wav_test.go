@@ -14,7 +14,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// tone is a chunk of a sine at an RMS of the given dBFS.
 func tone(db float64) []byte {
 	amp := math.Pow(10, db/20) * math.Sqrt2
 	pcm := make([]byte, 2*1600)
@@ -29,8 +28,6 @@ func TestLevel(t *testing.T) {
 	if l := Level(make([]byte, 3200)); l != 0 {
 		t.Errorf("silence %v", l)
 	}
-	// Quiet speech into a laptop microphone, around -35 dBFS, shows
-	// clearly; loud speech fills the meter.
 	if l := Level(tone(-35)); l < 0.4 || l > 0.5 {
 		t.Errorf("-35 dBFS %v", l)
 	}
@@ -50,8 +47,6 @@ func TestLatePunctuationEndsTheLine(t *testing.T) {
 	}
 }
 
-// Punctuation Soniox sends as tokens of its own ends a sentence as a word's
-// does: the line ends there four seconds in, and not inside a number.
 func TestPunctuationTokensEndLines(t *testing.T) {
 	segs := TokensToSegments([]Token{
 		{Text: "It", StartMs: 0, EndMs: 200},
@@ -116,9 +111,8 @@ func TestTidyJoinsSplitSentences(t *testing.T) {
 }
 
 func TestMeterWindowsAcrossChunks(t *testing.T) {
-	// Chunks of any size give one level per 50 ms window.
 	var m Meter
-	pcm := tone(-20) // 1600 samples: two windows
+	pcm := tone(-20)
 	got := 0
 	for _, part := range [][]byte{pcm[:500], pcm[500:2100], pcm[2100:]} {
 		got += len(m.Levels(part))
@@ -128,9 +122,6 @@ func TestMeterWindowsAcrossChunks(t *testing.T) {
 	}
 }
 
-// A WAV file is the user's alone, and never one that was there already.
-// Windows keeps no Unix modes: Go reports any file it can write as 0666,
-// and who else may read it is up to the access list of its folder.
 func TestCreateWavIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.wav")
 	w, err := CreateWav(path)
@@ -150,8 +141,6 @@ func TestCreateWavIsPrivate(t *testing.T) {
 	}
 }
 
-// Only addresses on this machine or its network are local, not names
-// that start like them.
 func TestIsLocalEndpoint(t *testing.T) {
 	for u, want := range map[string]bool{
 		"http://localhost:8000/v1": true, "http://127.0.0.1:8000": true, "http://[::1]:8000": true,
@@ -166,8 +155,6 @@ func TestIsLocalEndpoint(t *testing.T) {
 	}
 }
 
-// A long recording gets longer to transcribe on an endpoint than a short
-// one: an hour's audio is not given up on at five minutes.
 func TestTranscribeWaitGrowsWithTheAudio(t *testing.T) {
 	if got := transcribeWait(32000 * 60); got < 5*time.Minute || got > 10*time.Minute {
 		t.Errorf("a minute's audio waits %v", got)
@@ -177,9 +164,8 @@ func TestTranscribeWaitGrowsWithTheAudio(t *testing.T) {
 	}
 }
 
-// ReadWav reads the PCM16 samples of a simple WAV file.
 func ReadWav(path string) ([]byte, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- a test's own file.
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil, err
 	}
@@ -195,8 +181,6 @@ func ReadWav(path string) ([]byte, error) {
 	return nil, errors.New("no audio in the file")
 }
 
-// Level is the loudness of a PCM16 chunk from 0 to 1, as one window of
-// the meter.
 func Level(pcm []byte) float64 {
 	var m Meter
 	if l := m.levels(pcm, len(pcm)/2); len(l) > 0 {
@@ -205,8 +189,6 @@ func Level(pcm []byte) float64 {
 	return 0
 }
 
-// A WAV file as long as one can be takes no more audio, and its header
-// counts what fits.
 func TestWavCap(t *testing.T) {
 	w, err := CreateWav(filepath.Join(t.TempDir(), "full.wav"))
 	if err != nil {
@@ -227,7 +209,6 @@ func TestWavCap(t *testing.T) {
 	}
 }
 
-// A WAV file cut off inside a sample is repaired to its whole samples.
 func TestRepairOddWav(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cut.wav")
 	if err := os.WriteFile(path, append(wavHeader(0), make([]byte, 2*SampleRate+1)...), 0o600); err != nil {
@@ -241,7 +222,6 @@ func TestRepairOddWav(t *testing.T) {
 	}
 }
 
-// fullFile is a file on a disk with room bytes left.
 type fullFile struct {
 	*os.File
 	room int
@@ -260,8 +240,6 @@ func (f *fullFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// A disk filled up in the middle of a sample leaves no half of it in the
-// file: what is written once there is room again stays on a sample's edge.
 func TestWavFullDiskKeepsSamples(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -298,8 +276,6 @@ func TestWavFullDiskKeepsSamples(t *testing.T) {
 	}
 }
 
-// The meter measures the same audio the same, split into chunks of an odd
-// number of bytes as it may come.
 func TestMeterOddChunks(t *testing.T) {
 	pcm := append(tone(-35), tone(-35)...)
 	var whole, split Meter

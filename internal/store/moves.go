@@ -7,10 +7,6 @@ import (
 	"slices"
 )
 
-// IsDescendant reports whether candidate is page of or one under it. Pages
-// in a loop of parents, which sync breaks, are under none outside it. One
-// whose parents cannot be read counts as under it, so nothing moves into
-// itself.
 func (s *Store) IsDescendant(candidate, of string) bool {
 	under, err := isDescendant(s.db, candidate, of)
 	return under || err != nil
@@ -34,8 +30,6 @@ func isDescendant(q querier, candidate, of string) (bool, error) {
 	return false, nil
 }
 
-// ParentLoop returns the pages of the loop that putting page id under
-// parentID would close, id first, or nil when it closes none.
 func (s *Store) ParentLoop(id, parentID string) []string {
 	loop := []string{id}
 	seen := map[string]bool{id: true}
@@ -44,7 +38,7 @@ func (s *Store) ParentLoop(id, parentID string) []string {
 			return loop
 		}
 		if seen[cursor] {
-			return nil // a loop above, not through id
+			return nil
 		}
 		seen[cursor] = true
 		loop = append(loop, cursor)
@@ -57,46 +51,29 @@ func (s *Store) ParentLoop(id, parentID string) []string {
 	return nil
 }
 
-// DetachPage puts a page at the top level here, without queueing it or
-// changing when it changed: sync uses it to break a loop of parents the
-// same way on every device.
 func (s *Store) DetachPage(id string) error {
 	_, err := s.db.Exec(`UPDATE pages SET parent_id = NULL, folder_id = NULL WHERE id = ?`, id)
 	return err
 }
 
-// ErrMoveIntoSelf is returned for a move under the page itself.
 var ErrMoveIntoSelf = errors.New("a page cannot move inside itself")
 
-// ErrMoveAcrossSpaces is returned for a move under a page, or into a
-// folder, of another space: a page stays in the space it was made in,
-// and the server would refuse the move every time it went up.
 var ErrMoveAcrossSpaces = errors.New("a page cannot move into another space")
 
-// ErrMoveIntoDeleted is returned for a move under a page deleted, as on
-// another device since: under it, the page would show nowhere.
 var ErrMoveIntoDeleted = errors.New("a page cannot move inside a deleted page")
 
-// MovePage moves a page under parentID (or to the top level, into
-// folderID), after afterID among its new siblings, or last.
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
 		return keyAfter(q, parentID, spaceID, folderID, afterID, id)
 	})
 }
 
-// MovePageBefore moves a page under parentID (or to the top level, into
-// folderID), before beforeID among its new siblings, or first.
 func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
 	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
 		return keyBefore(q, parentID, spaceID, folderID, beforeID, id)
 	})
 }
 
-// PlacePage puts a page back where it was: under parentID, or at the top
-// level, into folderID, at sortKey among its siblings, or last when that
-// is "". A parent deleted since is no place to put it, as for any move
-// (ErrMoveIntoDeleted).
 func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
 	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
 		if sortKey != "" {
@@ -106,9 +83,6 @@ func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
 	})
 }
 
-// movePage moves a page under parentID or into folderID, at the sort key
-// key gives for its space, reading the page and its new siblings in the
-// transaction that saves it.
 func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spaceID string) (string, error)) error {
 	return s.changePage(id, "moved", func(tx *sql.Tx, p *Page) (bool, error) {
 		folder := folderID
@@ -143,11 +117,6 @@ func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spac
 	})
 }
 
-// keyAfter is a sort key for a page put after afterID among the pages
-// under parentID, or the top-level pages of folderID, or last when afterID
-// is "" or not among them: a key between nothing and nothing is the one
-// rows from the server have, which would sort it anywhere among them.
-// skip, the page being put, is left out of them.
 func keyAfter(q querier, parentID, spaceID, folderID, afterID, skip string) (string, error) {
 	siblings, err := siblings(q, parentID, spaceID, folderID, skip)
 	if err != nil {
@@ -170,8 +139,6 @@ func keyAfter(q querier, parentID, spaceID, folderID, afterID, skip string) (str
 	return NewKey(before, after), nil
 }
 
-// keyBefore is a sort key for a page put before beforeID among the pages
-// keyAfter takes, or first when beforeID is "" or not among them.
 func keyBefore(q querier, parentID, spaceID, folderID, beforeID, skip string) (string, error) {
 	siblings, err := siblings(q, parentID, spaceID, folderID, skip)
 	if err != nil {
@@ -195,10 +162,6 @@ func keyBefore(q querier, parentID, spaceID, folderID, beforeID, skip string) (s
 	return NewKey(before, after), nil
 }
 
-// siblings are the pages under parentID, or the top-level pages of
-// folderID, in order, but skip. The top level is as the library shows it
-// (library.Arrange): with the pages whose parent is gone, deleted or not
-// on this device, and in no folder the pages of a folder that is gone.
 func siblings(q querier, parentID, spaceID, folderID, skip string) ([]Page, error) {
 	if parentID != "" {
 		all, err := childrenIn(q, parentID, spaceID)
@@ -215,7 +178,6 @@ func siblings(q querier, parentID, spaceID, folderID, skip string) ([]Page, erro
 	if err != nil {
 		return nil, err
 	}
-	// shown is the folder a page of folder shows in: none for one gone.
 	shown := func(folder string) string {
 		if slices.Contains(folders, folder) {
 			return folder

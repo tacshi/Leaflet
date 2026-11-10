@@ -14,36 +14,22 @@ import (
 	"leaflet/locales"
 )
 
-// Searching the web for a run, through its provider: each searches in its
-// own way, as a request of its own whose answer comes back to the run as a
-// tool's result, its links among them, which the URL guard then knows
-// (checkURLs). The agent function searches the same ways
-// (supabase/functions/_shared/search.ts).
-
-// Source is a page a search found.
 type Source struct {
 	Title   string `json:"title,omitempty"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet,omitempty"`
 }
 
-// Search is what a search of the web found: its sources, and what the
-// model that searched said of them.
 type Search struct {
 	Answer  string
 	Sources []Source
 }
 
-// Searcher is a model whose provider may search the web for it.
 type Searcher interface {
-	// CanSearch reports whether the provider searches the web.
 	CanSearch() bool
-	// SearchWeb searches the web for query, with model.
 	SearchWeb(ctx context.Context, model, query string) (Search, error)
 }
 
-// maxSearchAnswer, maxSources and maxSnippet bound what a search gives
-// the run; maxSearchBytes, the answer read from the provider.
 const (
 	maxSearchAnswer = 8000
 	maxSources      = 20
@@ -51,15 +37,11 @@ const (
 	maxSearchBytes  = 8 << 20
 )
 
-// searchPrompt asks the model that searches for what it found.
 func searchPrompt(query string) string {
 	return "Search the web for: " + query + "\n\nToday is " + Today() +
 		". Say briefly what the most relevant results say, each with its link. Answer from the results alone."
 }
 
-// searchKind is how a provider at baseURL searches the web: on OpenAI's
-// and xAI's Responses API, Claude's Messages API, or the Chat Completions
-// of OpenRouter or GLM, with their own search tools; "" when it does not.
 func searchKind(baseURL string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -78,17 +60,14 @@ func searchKind(baseURL string) string {
 	return ""
 }
 
-// CanSearch reports whether the client's provider searches the web.
 func (c *Client) CanSearch() bool { return searchKind(c.BaseURL) != "" }
 
-// SearchWeb searches the web through the client's provider.
 func (c *Client) SearchWeb(ctx context.Context, model, query string) (Search, error) {
 	prompt := searchPrompt(query)
 	user := []map[string]any{{"role": "user", "content": prompt}}
 	switch kind := searchKind(c.BaseURL); kind {
 	case "responses":
 		body := map[string]any{"model": model, "input": user, "tools": []any{map[string]any{"type": "web_search"}}, "store": false}
-		// xAI takes include's values of its own.
 		if strings.Contains(c.BaseURL, "api.openai.com") {
 			body["include"] = []string{"web_search_call.action.sources"}
 		}
@@ -124,8 +103,6 @@ func (c *Client) SearchWeb(ctx context.Context, model, query string) (Search, er
 	return Search{}, &APIError{Message: locales.AgentSearchUnavailable()}
 }
 
-// post sends a request of the client's own and reads its JSON answer into
-// out. Claude's Messages API takes the key in x-api-key alone.
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -157,12 +134,8 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-// CanSearch reports that a ChatGPT plan searches the web, as its
-// workspace lets it: one that does not answers the search with an error.
 func (g *ChatGPT) CanSearch() bool { return true }
 
-// SearchWeb searches the web on the ChatGPT plan, with the Responses API's
-// web_search.
 func (g *ChatGPT) SearchWeb(ctx context.Context, model, query string) (Search, error) {
 	body := map[string]any{
 		"model": model, "input": []any{map[string]any{"role": "user", "content": searchPrompt(query)}},
@@ -218,9 +191,6 @@ func (g *ChatGPT) SearchWeb(ctx context.Context, model, query string) (Search, e
 	return Search{}, &APIError{Message: locales.AgentChatgptCutOff()}
 }
 
-// chatSearchAnswer is a search's answer from OpenRouter's or GLM's Chat
-// Completions: GLM's results in web_search, OpenRouter's in the message's
-// annotations.
 type chatSearchAnswer struct {
 	Choices []struct {
 		Message struct {
@@ -248,7 +218,6 @@ func (a chatSearchAnswer) search() Search {
 	return s.search()
 }
 
-// searchFound gathers a search's answer and sources, each source once.
 type searchFound struct {
 	answer  strings.Builder
 	sources []Source
@@ -279,8 +248,6 @@ func (s *searchFound) add(title, link, snippet string) {
 	s.sources = append(s.sources, Source{Title: title, URL: link, Snippet: clip(snippet, maxSnippet)})
 }
 
-// citations adds the sources of url_citation annotations, as OpenAI's and
-// OpenRouter's give them: the citation's fields in it, or in url_citation.
 func (s *searchFound) citations(annotations []any) {
 	for _, a := range annotations {
 		m, _ := a.(map[string]any)
@@ -301,8 +268,6 @@ func (s *searchFound) search() Search {
 	return Search{Answer: clip(strings.TrimSpace(s.answer.String()), maxSearchAnswer), Sources: s.sources}
 }
 
-// responsesSearch is what a Responses API search found: its answer's text
-// and citations, then the sources its searches went through.
 func responsesSearch(output []any) Search {
 	var s searchFound
 	var calls []map[string]any
@@ -337,8 +302,6 @@ func responsesSearch(output []any) Search {
 	return s.search()
 }
 
-// anthropicSearch is what a search with Claude's web_search found: the
-// answer's text and its citations, then the results.
 func anthropicSearch(content []any) Search {
 	var s searchFound
 	var results []any
@@ -371,7 +334,6 @@ func anthropicSearch(content []any) Search {
 	return s.search()
 }
 
-// clip cuts s to n characters, an ellipsis ending one it cut.
 func clip(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
 		return s

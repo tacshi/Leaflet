@@ -1,34 +1,23 @@
 import SwiftUI
 import UIKit
 
-/// RootView is a window: the library in the sidebar, and the page chosen
-/// in it. On iPhone, on a foldable closed, and in a narrow window on iPad,
-/// the two stack.
 struct RootView: View {
-    /// opening is the page a window opened for one starts on.
     var opening: String?
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
-    /// sizeClass is the window's: compact, the columns stack. (A column's
-    /// own is compact on iPad too.)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @SceneStorage("page") private var savedPage: String?
     @SceneStorage("inspector.shown") private var savedInspector = false
     @State private var scene = SceneModel()
-    /// folderName is the name typed for a new folder.
     @State private var folderName = ""
 
-    /// openReminder opens the to-do of a reminder tapped, in the window in
-    /// front.
     private func openReminder() {
         guard app.activeScene === scene, let target = ReminderInbox.shared.target else { return }
         ReminderInbox.shared.target = nil
         scene.open(target.pageID, at: target.blockID)
     }
 
-    /// openVoiceNote opens the page of a voice note started from outside
-    /// the app, in the window in front.
     private func openVoiceNote() {
         guard app.activeScene === scene, let id = app.voiceNote else { return }
         app.voiceNote = nil
@@ -45,9 +34,6 @@ struct RootView: View {
                     description: Text(failure))
             } else {
                 NavigationSplitView(columnVisibility: $scene.columns) {
-                    // Each column makes room for the keyboard on its own: in
-                    // neither does a band of background stand behind the
-                    // keyboard's floating shortcuts bar.
                     SidebarView(stacked: sizeClass == .compact)
                         .ignoresSafeArea(.keyboard, edges: .bottom)
                         .toolbar {
@@ -55,7 +41,6 @@ struct RootView: View {
                                 Button(L.settingsTitle, systemImage: "gearshape") {
                                     scene.settingsShown = true
                                 }
-                                // Plain, as the sidebar's own button.
                                 .tint(Color.primary)
                             }
                         }
@@ -70,26 +55,16 @@ struct RootView: View {
                         NoPageScreen()
                     }
                 }
-                // Drawn again in a language chosen in the settings.
                 .id(app.shown)
             }
         }
-        // Nothing makes room for the keyboard's floating shortcuts bar, or
-        // a keyboard, with a band of background: the editor keeps its
-        // text clear of them itself, and the sidebar scrolls under them.
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .preferredColorScheme(app.theme.colorScheme)
-        // The toast shows in a window of its own, over the sheets.
         .background(SceneReader { scene.toasts.show(in: $0, app: app) })
         .background(FoldReader { scene.sidebarToFold = $0 })
         .sheet(isPresented: $scene.settingsShown) {
-            // A sheet open keeps the scheme it opened with, and one let go
-            // to follow the system keeps the last it was given: the theme
-            // chosen in it comes as the scheme it shows, the system's too.
             SettingsView().preferredColorScheme(app.theme.colorScheme ?? scheme)
         }
-        // The window's, not the sidebar's, for ⇧⌘N to ask with the sidebar
-        // hidden, or behind the page on iPhone; each time with no name yet.
         .alert(L.dialogFolderNew, isPresented: $scene.newFolderShown) {
             TextField(L.dialogFolderName, text: $folderName)
             Button(L.commonCancel, role: .cancel) {}
@@ -100,19 +75,14 @@ struct RootView: View {
         }
         .onChange(of: scene.newFolderShown) { if scene.newFolderShown { folderName = "" } }
         .sheet(item: $scene.moving) { MoveSheet(page: $0) }
-        // The workspace agent's chat with no panel beside a page for it, as
-        // on iPhone's list of pages.
         .sheet(isPresented: $scene.workspaceShown) {
             AgentPanel(model: scene.workspace, isSheet: true)
                 .task { scene.workspace.start(app) }
-                // A panel as a sheet, which Settings waits for to go.
                 .onAppear { scene.panelShown(asSheet: true) }
                 .onDisappear {
                     scene.focusChat = false
                     scene.panelGone(asSheet: true)
                 }
-                // Clear of the sheet's grabber and its round corners: no
-                // tabs stand above the chat here, as they do in a page's.
                 .padding(.top, 14)
                 .padding(.horizontal, 8)
                 .presentationDetents([.medium, .large])
@@ -133,7 +103,6 @@ struct RootView: View {
                 app.show(Toast(message: L.hostErrorExport(error: error.localizedDescription)))
             }
         }
-        // After the sheets, for them to take the theme too.
         .environment(\.palette, palette)
         .tint(palette.accent)
         .environment(scene)
@@ -141,14 +110,10 @@ struct RootView: View {
         .onAppear {
             app.activeScene = scene
             scene.reopened()
-            // The page the window was left at, as it comes back, over the
-            // one it opened for, which it keeps as its own.
             scene.open(savedPage ?? opening)
             openReminder()
             openVoiceNote()
             #if DEBUG
-                // -LeafletOpen <title> opens the page of that title, to
-                // look at it on a simulator without a tap.
                 if let title = UserDefaults.standard.string(forKey: "LeafletOpen") {
                     Task {
                         await app.reload()
@@ -158,11 +123,9 @@ struct RootView: View {
             #endif
             scene.inspectorShown = savedInspector
             #if DEBUG
-                // -LeafletSettings YES opens Settings.
                 if UserDefaults.standard.bool(forKey: "LeafletSettings") {
                     scene.settingsShown = true
                 }
-                // -LeafletInspector <tab> opens the panel on that tab.
                 if let tab = UserDefaults.standard.string(forKey: "LeafletInspector")
                     .flatMap(InspectorTab.init(rawValue:))
                 {
@@ -177,13 +140,8 @@ struct RootView: View {
         .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }
         .onChange(of: app.library.pages.map(\.id)) { _, ids in
-            // Pages deleted, here or on another device, or gone as the
-            // account signed out, leave the window, once the library is
-            // read: the last page too.
             if app.libraryLoaded { scene.keep(Set(ids)) }
         }
-        // The page the window still holds closes with it, and its
-        // workspace agent's chat stops following the core.
         .onDisappear {
             scene.closeHeld()
             scene.workspace.stop()
@@ -201,15 +159,10 @@ struct RootView: View {
     }
 }
 
-/// ToastWindow shows the app's toast in a window of its own, over the
-/// window scene's: drawn in the scene's window, it would go under the
-/// sheets, as Settings and History, which raise toasts too. The window
-/// lets touches through, but on the toast.
 @MainActor
 final class ToastWindow {
     private var window: UIWindow?
 
-    /// show puts the window up in scene, once.
     func show(in scene: UIWindowScene, app: AppModel) {
         guard window == nil else { return }
         let w = PassThroughWindow(windowScene: scene)
@@ -217,19 +170,13 @@ final class ToastWindow {
             rootView: ToastHost { [weak w] in w?.toast = $0 }.environment(app))
         host.view.backgroundColor = .clear
         w.rootViewController = host
-        // Over the scene's window and the sheets in it, under the alerts.
         w.windowLevel = .normal + 1
         w.isHidden = false
         window = w
     }
 }
 
-/// PassThroughWindow takes only the touches on the toast, where its view
-/// says the toast is: the others go to the window under it. From iOS 18,
-/// SwiftUI's hit test finds the hosting view for its buttons too, so what
-/// is under a touch says nothing of whether the toast is.
 private final class PassThroughWindow: UIWindow {
-    /// toast is where the toast is in the window, or null with none.
     var toast = CGRect.null
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -237,11 +184,7 @@ private final class PassThroughWindow: UIWindow {
     }
 }
 
-/// ToastHost is the toast window's view: the toast at its foot, in the
-/// app's theme, as the windows have it. It says where the toast is, for
-/// the window to take its touches.
 private struct ToastHost: View {
-    /// placed hears where the toast is, in the window.
     var placed: (CGRect) -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var scheme
@@ -260,7 +203,6 @@ private struct ToastHost: View {
     }
 }
 
-/// SceneReader gives the window scene the view is in, once it is in one.
 private struct SceneReader: UIViewRepresentable {
     var found: (UIWindowScene) -> Void
 
@@ -282,13 +224,9 @@ private struct SceneReader: UIViewRepresentable {
     }
 }
 
-/// FoldReader says the width that takes the sidebar up to the fold of a
-/// half folded display, or nil with no fold, as it changes.
 struct FoldReader: UIViewRepresentable {
     var changed: (CGFloat?) -> Void
 
-    /// width is the sidebar's in a window of width with fold down it: to
-    /// the middle of the fold, as long as that leaves it and the page room.
     static func width(of window: CGFloat, fold: ClosedRange<CGFloat>?) -> CGFloat? {
         guard let fold else { return nil }
         let middle = (fold.lowerBound + fold.upperBound) / 2
@@ -306,8 +244,6 @@ struct FoldReader: UIViewRepresentable {
 
     final class FoldView: UIView {
         var changed: ((CGFloat?) -> Void)?
-        // Before the page's own, for it to come in clear of the fold and
-        // not lay out twice.
         private lazy var watch = FoldWatch(view: self, wait: .milliseconds(250)) { [weak self] in
             guard let self else { return }
             changed?(FoldReader.width(of: bounds.width, fold: $0))
@@ -329,10 +265,7 @@ struct FoldReader: UIViewRepresentable {
     }
 }
 
-/// ToastView shows the app's toast, with its action, at the foot of the
-/// window.
 struct ToastView: View {
-    /// placed hears where the toast is in the window, as it shows.
     var placed: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
 
@@ -351,8 +284,6 @@ struct ToastView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .glassEffect(.regular, in: .capsule)
-            // The toast window's hosting view fills it, so the global
-            // space is the window's.
             .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: placed)
             .padding(.bottom, 24)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -362,16 +293,11 @@ struct ToastView: View {
     }
 }
 
-/// NoPageScreen is the window with no page open: a new page to start, or a
-/// recording in one, and the panel beside it, the workspace agent's chat
-/// alone, of all the user's pages.
 private struct NoPageScreen: View {
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.palette) private var palette
-    /// pageTrailing is where this view ends on screen, for the panel to
-    /// tell whether it stands beside it or floats over it.
     @State private var pageTrailing: CGFloat?
 
     var body: some View {
@@ -387,15 +313,10 @@ private struct NoPageScreen: View {
             Button(L.shellAskAgent, systemImage: "sparkles") { scene.askWorkspace() }
                 .buttonStyle(.bordered)
         }
-        // On the page's ground, as a page open is: the sidebar's glass
-        // takes its color from it. Under the keyboard too, while the
-        // sidebar's search has it.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { palette.surface.ignoresSafeArea() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                // A recording in a page of its own, which records once it
-                // shows, as the desktop's New Recording.
                 Button(L.trayNewRecording, systemImage: "record.circle") {
                     Task {
                         guard let id = await app.createRecordingPage() else { return }

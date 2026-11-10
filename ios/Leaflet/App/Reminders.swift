@@ -3,8 +3,6 @@ import Observation
 import UserNotifications
 import os
 
-/// Reminder is a to-do's notification, as the core says it
-/// (mobile.Reminders).
 struct Reminder: Codable, Hashable, Sendable {
     var id: String
     var pageID: String
@@ -12,9 +10,7 @@ struct Reminder: Codable, Hashable, Sendable {
     var title: String
     var subtitle: String
     var body: String
-    /// at is when it shows, in milliseconds, or 0 for now.
     var at: Int64
-    /// due is the date it reminds of, kept once it is scheduled.
     var due: String
 
     enum CodingKeys: String, CodingKey {
@@ -24,18 +20,9 @@ struct Reminder: Codable, Hashable, Sendable {
     }
 }
 
-/// Reminders schedules a to-do's notification with the system, which shows
-/// it whether or not the app is running. The desktop looks each minute for
-/// what is due; iOS doesn't keep an app running to, so what is to come is
-/// scheduled ahead, again each time the to-dos may have changed.
 enum Reminders {
-    /// limit is how many stay scheduled: iOS keeps the 64 soonest of an
-    /// app's, and the rest are scheduled as those go by.
     static let limit = 60
 
-    /// request is the system's request for r. It is Time Sensitive, for a
-    /// to-do due to get through a Focus, which needs the app's
-    /// com.apple.developer.usernotifications.time-sensitive entitlement.
     static func request(_ r: Reminder, calendar: Calendar = .current) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = r.title
@@ -55,15 +42,6 @@ enum Reminders {
         return UNNotificationRequest(identifier: r.id, content: content, trigger: trigger)
     }
 
-    /// schedule puts what the core says in place of what is scheduled.
-    /// asking says the app is on the screen, to ask for permission once
-    /// there is something to remind of: never before, and never from the
-    /// background.
-    ///
-    /// One run at a time: two interleaved across their waits could leave
-    /// a to-do checked off scheduled, or schedule one twice. A call while
-    /// one runs has another run after it, one for all such calls, and
-    /// returns once that is done.
     @MainActor
     static func schedule(_ client: CoreClient, asking: Bool) async {
         if let running {
@@ -84,17 +62,14 @@ enum Reminders {
         await run.value
     }
 
-    /// Again is a run asked for while another was under way.
     private struct Again {
         let client: CoreClient
         let asking: Bool
     }
 
-    /// running is the run under way, and again the one asked for meanwhile.
     @MainActor private static var running: Task<Void, Never>?
     @MainActor private static var again: Again?
 
-    /// scheduleOnce is one run of schedule.
     @MainActor
     private static func scheduleOnce(_ client: CoreClient, asking: Bool) async {
         let center = UNUserNotificationCenter.current()
@@ -123,8 +98,6 @@ enum Reminders {
         }
     }
 
-    /// allowed says the system shows the app's notifications, asking first
-    /// where it may and hasn't.
     @MainActor
     private static func allowed(_ center: UNUserNotificationCenter, asking: Bool) async -> Bool {
         switch await center.notificationSettings().authorizationStatus {
@@ -141,28 +114,20 @@ enum Reminders {
     }
 }
 
-/// ReminderTarget is the to-do a reminder opens.
 struct ReminderTarget: Equatable, Sendable {
     let pageID: String
     let blockID: String
 }
 
-/// ReminderInbox holds the to-do of a reminder tapped until a window opens
-/// it: the tap that launches the app comes before any window.
 @MainActor @Observable
 final class ReminderInbox {
     static let shared = ReminderInbox()
     var target: ReminderTarget?
 }
 
-/// ReminderDelegate hears what the system does with the app's
-/// notifications. It is the system center's delegate from before the app
-/// finishes launching, as a tap that launches the app needs.
 final class ReminderDelegate: NSObject, UNUserNotificationCenterDelegate, Sendable {
     static let shared = ReminderDelegate()
 
-    /// A reminder shows while the app is on the screen too, where the
-    /// system would hold it back.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void
@@ -184,11 +149,6 @@ final class ReminderDelegate: NSObject, UNUserNotificationCenterDelegate, Sendab
         Self.take(target, then: completionHandler)
     }
 
-    /// take keeps the to-do tapped for a window to open, and then says the
-    /// tap is handled, on the main thread: what UIKit does as it hears that
-    /// aborts the app anywhere else, which is why these are the delegate's
-    /// completion handlers and not its async methods, whose end Swift says
-    /// from a thread of its own.
     nonisolated static func take(_ target: ReminderTarget?, then done: @escaping () -> Void) {
         nonisolated(unsafe) let done = done
         Task { @MainActor in

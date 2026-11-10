@@ -17,7 +17,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// versions returns page id's kept versions, newest first.
 func versions(t *testing.T, c *Core, id string) []version {
 	t.Helper()
 	raw, err := c.History(id)
@@ -29,9 +28,6 @@ func versions(t *testing.T, c *Core, id string) []version {
 	return out
 }
 
-// A version of no blocks restores as one to type in, the page open or
-// not, as on the desktop; the version kept before restoring brings the
-// page back, for Undo.
 func TestRestoringAnEmptyVersionLeavesABlock(t *testing.T) {
 	c, ev := open(t)
 	page := create(t, c, `{"title":"Plan"}`)
@@ -65,7 +61,6 @@ func TestRestoringAnEmptyVersionLeavesABlock(t *testing.T) {
 		t.Fatalf("undone to %q", got)
 	}
 
-	// Open, the editor is given the block.
 	openEditor(t, c, page.ID)
 	if _, err := c.RestoreVersion(page.ID, empty.ID); err != nil {
 		t.Fatal(err)
@@ -79,9 +74,6 @@ func TestRestoringAnEmptyVersionLeavesABlock(t *testing.T) {
 	}
 }
 
-// Restoring a version settles the page's last agent run: its Undo shows
-// no more outside the chat, as the desktop's run bar hides, until a run
-// changes the page again.
 func TestRestoringAVersionSettlesTheLastRun(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Plan"}`)
@@ -115,8 +107,6 @@ func TestRestoringAVersionSettlesTheLastRun(t *testing.T) {
 	}
 }
 
-// A file another device uploaded downloads as a block asks for it, to the
-// disk as it comes, and is found there from then on.
 func TestLocalFileDownloadsAFileFromElsewhere(t *testing.T) {
 	c, _ := open(t)
 	data := strings.Repeat("a long video's bytes ", 50000)
@@ -139,7 +129,7 @@ func TestLocalFileDownloadsAFileFromElsewhere(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(path) // #nosec G304 -- the file the core just kept.
+		got, err := os.ReadFile(path) // #nosec G304
 		if err != nil || string(got) != data {
 			t.Fatalf("downloaded %d bytes, %v", len(got), err)
 		}
@@ -149,8 +139,6 @@ func TestLocalFileDownloadsAFileFromElsewhere(t *testing.T) {
 	}
 }
 
-// A picture the app gives up on, as its page closes, stops waiting on
-// its site at once.
 func TestPictureEndsAsItIsGivenUp(t *testing.T) {
 	c, _ := open(t)
 	started := make(chan struct{})
@@ -178,9 +166,6 @@ func TestPictureEndsAsItIsGivenUp(t *testing.T) {
 	}
 }
 
-// A file whose page left the window as it was copied goes at the end of
-// the page, closed or open in another window: no editor of it has a caret
-// to put it at.
 func TestAppendBlockGoesAtThePagesEnd(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Notes"}`)
@@ -202,8 +187,6 @@ func TestAppendBlockGoesAtThePagesEnd(t *testing.T) {
 	}
 }
 
-// The page as it is now is there to compare a version with, with what is
-// being typed.
 func TestCurrentMarkdown(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Plan"}`)
@@ -219,8 +202,6 @@ func TestCurrentMarkdown(t *testing.T) {
 	}
 }
 
-// The sidebar has a folder's files, and the top level those of a folder
-// gone; the files pages hold are the pages'.
 func TestFolderFiles(t *testing.T) {
 	c, _ := open(t)
 	raw, err := c.CreateFolder("Docs")
@@ -271,7 +252,6 @@ func TestFolderFiles(t *testing.T) {
 	}
 }
 
-// A page goes before another, or first, as well as after one.
 func TestMovePageBefore(t *testing.T) {
 	c, _ := open(t)
 	a := create(t, c, `{"title":"A"}`)
@@ -304,7 +284,6 @@ func TestMovePageBefore(t *testing.T) {
 	}
 }
 
-// How long audio stays is a choice of three, kept among the settings.
 func TestKeepAudio(t *testing.T) {
 	c, _ := open(t)
 	if err := c.SetKeepAudio("30_days"); err != nil {
@@ -326,8 +305,6 @@ func TestKeepAudio(t *testing.T) {
 	}
 }
 
-// A page's earlier conversations are there to go back to, and the one left
-// joins them.
 func TestPastConversations(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Plan"}`)

@@ -6,14 +6,11 @@ import (
 	"slices"
 )
 
-// Removed is a block a delete took out and where it was.
 type Removed struct {
 	Node     *Node    `json:"node"`
 	Position Position `json:"position"`
 }
 
-// NewPage is the page a create_page op makes: inside ParentID, or at the
-// top level, in FolderID when it has one.
 type NewPage struct {
 	ID       string `json:"id"`
 	SpaceID  string `json:"space_id,omitempty"`
@@ -23,10 +20,6 @@ type NewPage struct {
 	SortKey  string `json:"sort_key,omitempty"`
 }
 
-// PagePlace is where a page is among the user's pages: inside ParentID, or
-// at the top level, in FolderID when it has one, at SortKey among the
-// pages there. Card is where its card is in ParentID, for Undo to put it
-// back there: none for the end.
 type PagePlace struct {
 	ParentID string    `json:"parent_id,omitempty"`
 	FolderID string    `json:"folder_id,omitempty"`
@@ -34,13 +27,10 @@ type PagePlace struct {
 	Card     *Position `json:"card,omitempty"`
 }
 
-// Same reports whether p and q are the same place, wherever among the
-// pages there.
 func (p PagePlace) Same(q PagePlace) bool {
 	return p.ParentID == q.ParentID && p.FolderID == q.FolderID
 }
 
-// NewFolder is the folder a create_folder op makes.
 type NewFolder struct {
 	ID      string `json:"id"`
 	SpaceID string `json:"space_id,omitempty"`
@@ -48,39 +38,20 @@ type NewFolder struct {
 	SortKey string `json:"sort_key,omitempty"`
 }
 
-// Op is one block change by ID, as agents make and Undo run inverts, or
-// one of the pages around them (docs/protocol.md §3):
-//
-//	insert   position, nodes
-//	replace  id, node, previous (node)
-//	move     id, position, from
-//	delete   ids, previous ([{node, position}])
-//	create_page  page, content
-//	delete_page  page_id
-//	move_page    page_id, title, place, previous (place)
-//	rename_page  page_id, title, previous (title)
-//	set_page_tags  page_id, title, tags, previous (tags)
-//	create_folder  folder
-//	delete_folder  folder_id
 type Op struct {
-	Op       string
-	Position *Position
-	Nodes    []*Node
-	ID       string
-	Node     *Node
-	// PrevNode is a replace's previous node; Removed a delete's previous.
-	PrevNode *Node
-	Removed  []Removed
-	From     *Position
-	IDs      []string
-	Page     *NewPage
-	Content  *Content
-	PageID   string
-	// Title is the title of the page a page op changes, after it.
-	Title string
-	// Place is where a move_page puts its page, PrevPlace where it was;
-	// PrevTitle is a rename's title before, Tags and PrevTags a page's
-	// tags after and before.
+	Op        string
+	Position  *Position
+	Nodes     []*Node
+	ID        string
+	Node      *Node
+	PrevNode  *Node
+	Removed   []Removed
+	From      *Position
+	IDs       []string
+	Page      *NewPage
+	Content   *Content
+	PageID    string
+	Title     string
 	Place     *PagePlace
 	PrevPlace *PagePlace
 	PrevTitle string
@@ -90,8 +61,6 @@ type Op struct {
 	FolderID  string
 }
 
-// IsPageOp reports whether o changes the pages around a page's blocks,
-// rather than its blocks: the caller's to make, as Apply leaves them.
 func (o Op) IsPageOp() bool {
 	switch o.Op {
 	case "create_page", "delete_page", "move_page", "rename_page", "set_page_tags", "create_folder", "delete_folder":
@@ -112,16 +81,13 @@ type opJSON struct {
 	Page     *NewPage        `json:"page,omitempty"`
 	Content  *Content        `json:"content,omitempty"`
 	PageID   string          `json:"page_id,omitempty"`
-	// Title is written for move_page, rename_page and set_page_tags,
-	// "" for an untitled page's, as the server writes it.
-	Title    *string    `json:"title,omitempty"`
-	Place    *PagePlace `json:"place,omitempty"`
-	Tags     []string   `json:"tags,omitempty"`
-	Folder   *NewFolder `json:"folder,omitempty"`
-	FolderID string     `json:"folder_id,omitempty"`
+	Title    *string         `json:"title,omitempty"`
+	Place    *PagePlace      `json:"place,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
+	Folder   *NewFolder      `json:"folder,omitempty"`
+	FolderID string          `json:"folder_id,omitempty"`
 }
 
-// MarshalJSON writes the op as the protocol has it.
 func (o Op) MarshalJSON() ([]byte, error) {
 	j := opJSON{Op: o.Op, Position: o.Position, Nodes: o.Nodes, ID: o.ID, Node: o.Node,
 		From: o.From, IDs: o.IDs, Page: o.Page, Content: o.Content, PageID: o.PageID,
@@ -149,7 +115,6 @@ func (o Op) MarshalJSON() ([]byte, error) {
 	case "rename_page":
 		j.Previous, err = json.Marshal(o.PrevTitle)
 	case "set_page_tags":
-		// None are tags too: a page that had none gets none back.
 		prev := o.PrevTags
 		if prev == nil {
 			prev = []string{}
@@ -162,7 +127,6 @@ func (o Op) MarshalJSON() ([]byte, error) {
 	return json.Marshal(j)
 }
 
-// UnmarshalJSON reads an op.
 func (o *Op) UnmarshalJSON(raw []byte) error {
 	var j opJSON
 	if err := json.Unmarshal(raw, &j); err != nil {
@@ -194,8 +158,6 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 			return err
 		}
 	}
-	// Ops come from outside, as a run on the server sends them: nulls among
-	// their blocks go, as they do from stored content.
 	o.Nodes = withoutNil(o.Nodes)
 	o.Removed = slices.DeleteFunc(o.Removed, func(r Removed) bool { return r.Node == nil })
 	for _, r := range o.Removed {
@@ -209,8 +171,6 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// Apply applies a block op to the content. Page ops are the caller's
-// (IsPageOp): they touch the page tree rather than this page.
 func (c *Content) Apply(o Op) error {
 	switch o.Op {
 	case "insert":
@@ -218,13 +178,6 @@ func (c *Content) Apply(o Op) error {
 		if o.Position != nil {
 			p = *o.Position
 		}
-		// Blocks the page has already, as when an undo run puts back what
-		// an undo or a merge brought back first, stay as they are; an
-		// anchor gone since, as a neighbour deleted after the op, leaves
-		// the blocks at the end of the page rather than not at all, and a
-		// parent that is no longer a list has them after it. A table holds
-		// only its cells: other blocks put in it or next to one of its
-		// cells go after the table.
 		have := map[string]bool{}
 		c.Walk(func(n, _ *Node) { have[n.ID] = true })
 		var nodes []*Node
@@ -259,9 +212,6 @@ func (c *Content) Apply(o Op) error {
 		}
 		n := o.Node.Clone()
 		DropCells(n)
-		// A replace that kept the block's children carries them as the
-		// agent read them: keep the ones the block has here instead, so a
-		// child edited or added since is not undone.
 		if keptChildren(o) && canHoldChildren(n, cur) {
 			n.Children = nil
 			if len(cur.Children) > 0 {
@@ -284,10 +234,6 @@ func (c *Content) Apply(o Op) error {
 	return nil
 }
 
-// Addressable is the block of ID id that agents' tools and a replace or a
-// delete may name: not a table's cell, nor a block in one, which change
-// with their table, whole, as the server's ops pass them over too
-// (indexBlocks). nil when there is none.
 func (c *Content) Addressable(id string) *Node {
 	var find func([]*Node) *Node
 	find = func(nodes []*Node) *Node {
@@ -306,14 +252,10 @@ func (c *Content) Addressable(id string) *Node {
 	return find(c.Children)
 }
 
-// allCells reports whether nodes are all table cells, which only a table
-// holds.
 func allCells(nodes []*Node) bool {
 	return !slices.ContainsFunc(nodes, func(n *Node) bool { return n.Type != "table/cell" })
 }
 
-// withoutPresent returns n without the blocks in it the page has already
-// (have), or nil when n itself is one.
 func withoutPresent(n *Node, have map[string]bool) *Node {
 	if n.ID != "" && have[n.ID] {
 		return nil
@@ -328,7 +270,6 @@ func withoutPresent(n *Node, have map[string]bool) *Node {
 	return n
 }
 
-// Invert returns the ops that undo o, in the order to apply them.
 func (o Op) Invert() []Op {
 	switch o.Op {
 	case "insert":
@@ -374,7 +315,6 @@ func (o Op) Invert() []Op {
 	return nil
 }
 
-// InvertRun returns the ops that undo a whole run.
 func InvertRun(ops []Op) []Op {
 	var out []Op
 	for i := len(ops) - 1; i >= 0; i-- {
@@ -383,11 +323,6 @@ func InvertRun(ops []Op) []Op {
 	return out
 }
 
-// DeleteOp builds a delete of ids that records where each block was, so it
-// can be inverted. The blocks are recorded in document order, each after
-// its previous sibling, which is either still there or restored just
-// before it; a first child goes before the next sibling that stays. A block
-// inside another deleted one comes back with it, so it isn't recorded.
 func (c *Content) DeleteOp(ids []string) Op {
 	o := Op{Op: "delete", IDs: ids, Removed: []Removed{}}
 	gone := map[string]bool{}
@@ -418,27 +353,20 @@ func (c *Content) DeleteOp(ids []string) Op {
 	return o
 }
 
-// ReplaceOp builds a replace of a block that records its previous version.
 func (c *Content) ReplaceOp(id string, n *Node) Op {
 	n.ID = id
 	return Op{Op: "replace", ID: id, Node: n, PrevNode: c.Find(id).Clone()}
 }
 
-// MoveOp builds a move that records where the block was.
 func (c *Content) MoveOp(id string, p Position) Op {
 	from := c.PositionOf(id)
 	return Op{Op: "move", ID: id, Position: &p, From: &from}
 }
 
-// InsertOp builds an insert.
 func InsertOp(p Position, nodes ...*Node) Op {
 	return Op{Op: "insert", Position: &p, Nodes: nodes}
 }
 
-// keptChildren reports whether a replace left the block's children as
-// they were: its node has the children its previous had, as replace_block
-// without children writes it. Children given anew get new IDs, so they
-// never match.
 func keptChildren(o Op) bool {
 	if o.PrevNode == nil || o.PrevNode.Type == "table" || len(o.Node.Children) != len(o.PrevNode.Children) {
 		return false
@@ -451,8 +379,6 @@ func keptChildren(o Op) bool {
 	return true
 }
 
-// canHoldChildren reports whether n may take the children cur has: a
-// list takes any, another block those of a block of its own kind.
 func canHoldChildren(n, cur *Node) bool {
 	return cur.Type != "table" && (NestableTypes[n.Type] || n.Type == cur.Type)
 }

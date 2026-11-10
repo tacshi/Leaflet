@@ -37,8 +37,6 @@ func TestInvoked(t *testing.T) {
 		{[]string{"/Applications/Leaflet.app/Contents/MacOS/Leaflet", "--json"}, true},
 		{[]string{"/Applications/Leaflet.app/Contents/MacOS/Leaflet", "__complete", "cat", ""}, true},
 		{[]string{"/Applications/Leaflet.app/Contents/MacOS/Leaflet", "nope"}, false},
-		// A link named leaflet, to an executable named otherwise (here
-		// the test's own): the command line, with no command too.
 		{[]string{"/usr/local/bin/leaflet"}, true},
 		{[]string{"leaflet"}, true},
 		{[]string{"/usr/local/bin/leaflet-debug"}, false},
@@ -49,7 +47,6 @@ func TestInvoked(t *testing.T) {
 	}
 }
 
-// pages is a data folder the app has run with.
 func pages(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -66,8 +63,6 @@ func pages(t *testing.T) string {
 	return dir
 }
 
-// run runs the command line on the pages in dir, with in piped in, and
-// returns what it printed and its exit status.
 func run(t *testing.T, dir, in string, args ...string) (out, errOut string, code int) {
 	t.Helper()
 	var o, e strings.Builder
@@ -75,7 +70,6 @@ func run(t *testing.T, dir, in string, args ...string) (out, errOut string, code
 	return o.String(), e.String(), code
 }
 
-// ok runs the command line, failing the test unless it works.
 func ok(t *testing.T, dir, in string, args ...string) string {
 	t.Helper()
 	out, errOut, code := run(t, dir, in, args...)
@@ -91,7 +85,6 @@ func TestNoPages(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "open Leaflet once first") {
 		t.Errorf("ls without pages: exit %d, %q", code, errOut)
 	}
-	// It leaves the folder for the app to set up.
 	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +100,6 @@ func TestPages(t *testing.T) {
 	if !regexp.MustCompile(`^[0-9a-f-]{36}$`).MatchString(id) {
 		t.Fatalf("new printed %q, not an ID", id)
 	}
-	// Its title from the heading piped in, which the page then leaves out.
 	ok(t, dir, "# Standup\r\n\r\nAll well.\r\n", "new")
 	ok(t, dir, "", "append", "roadmap", "Dates", "next", "week.")
 	ok(t, dir, "## Risks\n\nNone yet.\n", "append", id[:6])
@@ -144,8 +136,6 @@ func TestPages(t *testing.T) {
 		t.Errorf("ls after mv --top and tag --clear:\n%s", ls)
 	}
 
-	// Two edits close together keep one snapshot, from before the first,
-	// though each is a run of its own.
 	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +181,6 @@ func TestRefusals(t *testing.T) {
 		in   string
 		want string
 	}{
-		// Two titled so but for case, neither as given.
 		{[]string{"tag", "NOTES"}, "", `2 pages are titled "NOTES" (` + a[:8] + ` "Notes" at the top level, ` + b[:8] + ` "notes" at the top level); name one by its ID`},
 		{[]string{"cat", "Nope"}, "", `no page "Nope": leaflet ls lists them, and leaflet search finds them`},
 		{[]string{"append", "Notes"}, "", "nothing to add"},
@@ -202,14 +191,12 @@ func TestRefusals(t *testing.T) {
 		{[]string{"new", "X", "--folder", "Nowhere"}, "", `no folder "Nowhere"`},
 		{[]string{"tag", "Notes", "a", "--clear"}, "", "give tags or --clear, not both"},
 		{[]string{"rename", "Notes"}, "", "accepts 2 arg(s), received 1"},
-		// What a shell's unset variable gives is no place, nor a tag.
 		{[]string{"mv", "Notes", "--in", ""}, "", "--in names no page"},
 		{[]string{"mv", "Notes", "--folder", " "}, "", "--folder names no folder"},
 		{[]string{"new", "X", "--in", ""}, "", "--in names no page"},
 		{[]string{"new", "X", "--folder", ""}, "", "--folder names no folder"},
 		{[]string{"tag", "Notes", ""}, "", "no tag given"},
 		{[]string{"tag", "Notes", "#"}, "", "no tag given"},
-		// A subcommand mistyped is no help asked for.
 		{[]string{"folder", "nwe", "X"}, "", `unknown command "nwe" for "leaflet folder"`},
 	} {
 		_, errOut, code := run(t, dir, c.in, c.args...)
@@ -217,7 +204,6 @@ func TestRefusals(t *testing.T) {
 			t.Errorf("%v: exit %d, %q, want %q", c.args, code, errOut, c.want)
 		}
 	}
-	// The one titled as given.
 	if out := ok(t, dir, "", "cat", "notes"); out != "# notes\n" {
 		t.Errorf("cat notes: %q", out)
 	}
@@ -235,19 +221,16 @@ func TestComplete(t *testing.T) {
 	if out := ok(t, dir, "", "__complete", "new", "X", "--folder", ""); !strings.Contains(out, "Work\n") {
 		t.Errorf("completions of --folder:\n%s", out)
 	}
-	// --in completes after the page or title it follows.
 	for _, args := range [][]string{{"mv", "Work", "--in", "r"}, {"new", "X", "--in", "r"}, {"new", "--in", "r"}} {
 		if out := ok(t, dir, "", append([]string{"__complete"}, args...)...); !strings.Contains(out, "Roadmap\t") {
 			t.Errorf("completions of %v:\n%s", args, out)
 		}
 	}
-	// A page's title goes only in the first argument.
 	if out := ok(t, dir, "", "__complete", "rename", "Roadmap", "r"); strings.Contains(out, "Roadmap") {
 		t.Errorf("completions of a new title:\n%s", out)
 	}
 }
 
-// A value left empty changes nothing before it is refused.
 func TestEmptyValuesChangeNothing(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "", "new", "Parent")
@@ -267,8 +250,6 @@ func TestEmptyValuesChangeNothing(t *testing.T) {
 	}
 }
 
-// utf16Text is s as Windows' tools write it: a byte order mark, then
-// UTF-16 in the order given.
 func utf16Text(s string, order binary.AppendByteOrder, mark ...byte) string {
 	out := mark
 	for _, u := range utf16.Encode([]rune(s)) {
@@ -293,8 +274,6 @@ func TestPipedEncodings(t *testing.T) {
 	}
 }
 
-// Text no page can sync, or JSON carry, is cleaned on its way in, for what
-// is piped in and what is given alike; and Markdown lines with it stay.
 func TestTextIsCleaned(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "before\x00after\ncaf\xe9\n", "new", "Bytes", "--stdin")
@@ -332,8 +311,6 @@ func TestTextIsCleaned(t *testing.T) {
 	}
 }
 
-// A title kept before text was cleaned stops no command: it is listed,
-// and its page reached by ID, to rename it.
 func TestBadTitleKept(t *testing.T) {
 	dir := pages(t)
 	id := strings.TrimSpace(ok(t, dir, "", "new", "Good"))
@@ -370,10 +347,6 @@ func TestBadTitleKept(t *testing.T) {
 	}
 }
 
-// What is listed for people to read holds no control character of a
-// title's, a name's, a comment's or a selection's: a terminal would obey
-// an escape, and a line break would start a row of the writer's making.
-// --json and cat print them as they are kept.
 func TestControlCharactersStayOffTheTerminal(t *testing.T) {
 	dir := pages(t)
 	id := strings.TrimSpace(ok(t, dir, "Hello.\n", "new", "Plan", "--stdin"))
@@ -445,8 +418,6 @@ func TestControlCharactersStayOffTheTerminal(t *testing.T) {
 	}
 }
 
-// A title alone reads nothing: not what a loop's next turns read, nor a
-// pipe that stays open.
 func TestNewReadsOnlyWhenAsked(t *testing.T) {
 	dir := pages(t)
 	main := func(in *strings.Reader, args ...string) int {
@@ -468,8 +439,6 @@ func TestNewReadsOnlyWhenAsked(t *testing.T) {
 	}
 }
 
-// A title alone says when it leaves input unread, reading none of it and
-// waiting for none: a pipe left open with nothing in it is no reason to.
 func TestNewSaysInputWaits(t *testing.T) {
 	dir := pages(t)
 	const note = "leaflet: what is piped in was not read: --stdin reads it\n"
@@ -499,7 +468,7 @@ func TestNewSaysInputWaits(t *testing.T) {
 	if err := os.WriteFile(path, []byte("the notes\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.Open(path) // #nosec G304 -- the test's own file.
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,8 +484,6 @@ func TestNewSaysInputWaits(t *testing.T) {
 	}
 }
 
-// Markdown that starts with a dash is text, as append's help has it, and
-// the command's flags still count after the page.
 func TestAppendText(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "", "new", "Inbox")
@@ -537,15 +504,12 @@ func TestAppendText(t *testing.T) {
 			t.Errorf("%v: %q", args, out)
 		}
 	}
-	// --json after the page is no text, so what is piped in is read.
 	if out := ok(t, dir, "piped\n", "append", "Inbox", "--json"); !strings.Contains(out, "inserted_ids") {
 		t.Errorf("piped --json: %q", out)
 	}
 	if md := ok(t, dir, "", "cat", "Inbox"); !strings.Contains(md, "piped") {
 		t.Errorf("cat lacks what was piped:\n%s", md)
 	}
-	// --stdin asks for what is piped in, wherever it stands; before a "--"
-	// it is no text, and after one it is.
 	ok(t, dir, "one\n", "append", "Inbox", "--stdin")
 	ok(t, dir, "two\n", "append", "--stdin", "Inbox")
 	ok(t, dir, "three\n", "append", "Inbox")
@@ -576,7 +540,6 @@ func TestAppendText(t *testing.T) {
 	}
 }
 
-// numbered is count lines of Markdown, each a block.
 func numbered(count int) string {
 	var b strings.Builder
 	for i := range count {
@@ -585,8 +548,6 @@ func numbered(count int) string {
 	return b.String()
 }
 
-// A log longer than a call takes all goes in, in order, with one version
-// from before it in the page's history.
 func TestLongInput(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "Before.\n", "new", "CI log", "--stdin")
@@ -623,8 +584,6 @@ func TestLongInput(t *testing.T) {
 	}
 }
 
-// A block too long to cut is refused before anything is written, so
-// trying again adds nothing twice.
 func TestTooLongWritesNothing(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "Before.\n", "new", "Log", "--stdin")
@@ -646,8 +605,6 @@ func TestTooLongWritesNothing(t *testing.T) {
 	}
 }
 
-// A numbered list goes in whole however long, its items as a list, with
-// the numbers of the whole list.
 func TestLongNumberedList(t *testing.T) {
 	dir := pages(t)
 	ok(t, dir, "", "new", "List")
@@ -664,8 +621,6 @@ func TestLongNumberedList(t *testing.T) {
 	}
 }
 
-// shape is blocks as a page reads them: what kind each is, at what depth,
-// and what it says.
 func shape(nodes []*doc.Node, depth int) []string {
 	var out []string
 	for _, n := range nodes {
@@ -675,8 +630,6 @@ func shape(nodes []*doc.Node, depth int) []string {
 	return out
 }
 
-// Text is cut only where each part reads as it does in the whole, however
-// near the middle that falls.
 func TestParts(t *testing.T) {
 	lines, around := numbered(1500), numbered(1200)
 	fence := "```go\n" + strings.Repeat("code\n", 3000) + "```\n"
@@ -733,7 +686,6 @@ func TestParts(t *testing.T) {
 			}
 			t.Errorf("%s: parts read as %d blocks, the whole as %d", name, len(read), len(whole))
 		}
-		// Only a list's numbers change.
 		if !strings.HasPrefix(name, "numbered") && strings.Join(got, "") != md {
 			t.Errorf("%s: parts lose text", name)
 		}
@@ -743,7 +695,6 @@ func TestParts(t *testing.T) {
 			t.Errorf("parts(%q) = %q, %v", md, got, err)
 		}
 	}
-	// Past what any line can cut, for nothing to be written.
 	one := "| a | b |\n| --- | --- |\n" + strings.Repeat("| 1 | 2 |\n", 3000)
 	if got, err := parts(one); err == nil {
 		t.Errorf("one long table: %d parts", len(got))

@@ -1,21 +1,14 @@
 import LeafletCore
 import SwiftUI
 
-/// TableSheet edits a table's cells, as the desktop's table does: each
-/// cell's Markdown in a field, the first row the header, Return going down
-/// a column, and a row or a column added or taken away at the end.
 struct TableSheet: View {
     let node: DocNode
-    /// save gives the table with its new cells.
     let save: (DocNode) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var rows: [[String]] = []
     @FocusState private var focused: Cell?
-    /// failure is why the cells could not be put in the table, which the
-    /// sheet stays open to say, keeping them.
     @State private var failure: String?
-    /// original are the cells as the sheet opened with them.
     @State private var original: [[String]]?
 
     private var dirty: Bool { original.map { $0 != rows } ?? false }
@@ -74,26 +67,19 @@ struct TableSheet: View {
             .fontWeight(r == 0 ? .semibold : .regular)
             .foregroundStyle(palette.text)
             .padding(.horizontal, 10)
-            // As wide as the desktop's columns start.
             .frame(width: 160, alignment: .leading)
             .frame(minHeight: 44)
             .background(r == 0 ? palette.panel : palette.surface)
             .border(palette.divider, width: 0.5)
-            // A cell holds one paragraph: Return goes to the one below.
             .onSubmit { focused = r + 1 < rows.count ? Cell(row: r + 1, col: c) : nil }
     }
 
-    /// cell is the text of a cell, as long as the table has it: a row or a
-    /// column taken away, SwiftUI may still read its fields once, past
-    /// the end of rows.
     private func cell(_ r: Int, _ c: Int) -> Binding<String> {
         Binding(
             get: { r < rows.count && c < rows[r].count ? rows[r][c] : "" },
             set: { if r < rows.count && c < rows[r].count { rows[r][c] = $0 } })
     }
 
-    /// controls add and take away the last row or column, as the desktop's
-    /// buttons under a table being edited.
     private var controls: some View {
         HStack(spacing: 8) {
             Button(L.editorTableRow, systemImage: "plus") {
@@ -135,7 +121,6 @@ struct TableSheet: View {
         original = rows
     }
 
-    /// apply puts the cells in the table as the core does, and saves it.
     private func apply() {
         guard let table = try? JSONEncoder().encode(node),
             let cells = try? JSONEncoder().encode(rows)

@@ -1,6 +1,3 @@
-// Package filepreview reads files to show them in the desktop app: as text
-// in whatever encoding they have, up to a limit, or as a table. It only
-// reads: what a file says is shown, never acted on.
 package filepreview
 
 import (
@@ -20,35 +17,26 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-// The most of a file a preview reads.
 const (
 	MaxText     = 4 << 20
 	MaxMarkdown = 1 << 20
 )
 
-// The most of a table a preview shows.
 const (
 	MaxRows    = 100_000
 	MaxColumns = 256
 )
 
-// ErrBinary says a file isn't text, whatever its name says.
 var ErrBinary = errors.New("the file isn't text")
 
-// Text is a file read as text.
 type Text struct {
-	Text string
-	// Encoding names the encoding the file was guessed to have, "" for a
-	// file that says or is plainly UTF-8.
+	Text     string
 	Encoding string
-	// Cut says the file goes on past Text.
-	Cut bool
+	Cut      bool
 }
 
-// Read reads up to limit bytes of the file at path as text; lang, the
-// app's language, says which legacy encoding to try first.
 func Read(path string, limit int64, lang string) (Text, error) {
-	f, err := os.Open(path) // #nosec G304 -- a file of the store's.
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return Text{}, err
 	}
@@ -66,9 +54,6 @@ func Read(path string, limit int64, lang string) (Text, error) {
 	return t, err
 }
 
-// Decode reads b as text. A BOM says its encoding, else UTF-8, else the
-// first of the legacy encodings to read it whole, or ErrBinary for bytes
-// that are no text. cut says b ends mid-file, perhaps within a character.
 func Decode(b []byte, lang string, cut bool) (Text, error) {
 	switch {
 	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
@@ -88,9 +73,6 @@ func Decode(b []byte, lang string, cut bool) (Text, error) {
 		return Text{Text: string(s)}, nil
 	}
 	for _, e := range legacy(lang) {
-		// A character cut in two at the end reads as none in its own
-		// encoding, and the file would go to one that reads any bytes:
-		// the bytes of the longest character, less one, may go.
 		for drop := 0; drop <= partialMax && drop <= len(b); drop++ {
 			out, err := e.enc.NewDecoder().Bytes(b[:len(b)-drop])
 			if err == nil && !bytes.ContainsRune(out, utf8.RuneError) {
@@ -104,12 +86,8 @@ func Decode(b []byte, lang string, cut bool) (Text, error) {
 	return Text{}, ErrBinary
 }
 
-// partialMax is the most bytes of a character cut in two that a legacy
-// encoding leaves at the end: GB18030's characters take up to four.
 const partialMax = 3
 
-// trimPartial leaves out a character cut in two at the end of b, where cut
-// says it may be.
 func trimPartial(b []byte, cut bool) []byte {
 	if !cut {
 		return b
@@ -128,8 +106,6 @@ type legacyEncoding struct {
 	enc  encoding.Encoding
 }
 
-// legacy are the encodings to guess a file has, the likeliest in lang
-// first. Windows-1252 reads any bytes, so it comes last.
 func legacy(lang string) []legacyEncoding {
 	gb := legacyEncoding{"GB18030", simplifiedchinese.GB18030}
 	sjis := legacyEncoding{"Shift-JIS", japanese.ShiftJIS}
@@ -146,9 +122,6 @@ func legacy(lang string) []legacyEncoding {
 	return []legacyEncoding{west}
 }
 
-// ParseCSV reads text as rows of values separated by comma, of at most
-// MaxRows rows and MaxColumns columns; cut says it left some out. A line
-// that can't be read ends it: what came before still shows.
 func ParseCSV(text string, comma rune) (rows [][]string, cut bool) {
 	r := csv.NewReader(strings.NewReader(text))
 	r.Comma = comma

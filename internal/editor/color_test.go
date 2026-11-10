@@ -17,8 +17,6 @@ func TestTextColorAndHighlight(t *testing.T) {
 	n := e.Content.Children[0]
 	e.Select(Pos{n.ID, 5}, Pos{n.ID, 7})
 	tt.Frame()
-	// The toolbar's Color button opens dots of colors, and the toolbar
-	// stays while they show.
 	if err := tt.Click("Color"); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +24,7 @@ func TestTextColorAndHighlight(t *testing.T) {
 	if _, ok := tt.Find("Ask agent"); !ok || !e.colorOpen {
 		t.Fatal("no colors, or the toolbar went away")
 	}
-	if err := tt.Click("Red"); err != nil { // the text row's
+	if err := tt.Click("Red"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -39,13 +37,10 @@ func TestTextColorAndHighlight(t *testing.T) {
 	if spans[1].Color != ui.Hex("#ef4444") || spans[1].Background != ui.Hex("#eab30840") {
 		t.Errorf("span %+v", spans[1])
 	}
-	// In dark, the text shows in the color's lighter shade, which reads
-	// on dark paper; the highlight is as it was.
 	spans = e.spans(n, theme.For(true), ui.Font{})
 	if spans[1].Color != ui.Hex("#f87171") || spans[1].Background != ui.Hex("#eab30840") {
 		t.Errorf("dark span %+v", spans[1])
 	}
-	// Remove color, from the context menu, takes both away.
 	r := boxOf(e, n.ID)
 	tt.RightClickAt(r.X+20, r.Y+r.H/2)
 	if err := chooseDrawn(tt, "Remove color"); err != nil {
@@ -56,8 +51,6 @@ func TestTextColorAndHighlight(t *testing.T) {
 	}
 }
 
-// Code is colored by MyGo's highlighting, in its code theme's colors, and
-// the spans keep the text exactly.
 func TestCodeSpansUseMyGo(t *testing.T) {
 	pal := theme.For(false)
 	code := "func main() {\n\t// hi\n}"
@@ -81,8 +74,6 @@ func TestCodeSpansUseMyGo(t *testing.T) {
 	}
 }
 
-// The selection toolbar is MyGo's: its Bold and Italic toggles format the
-// selected text and show pressed while it is.
 func TestSelectionToolbar(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("ship it now")
@@ -102,15 +93,11 @@ func TestSelectionToolbar(t *testing.T) {
 	if !e.Has(func(a doc.Attrs) bool { return a.Bold }) {
 		t.Error("Bold does not show pressed")
 	}
-	// The keys stayed in the page.
 	if !e.Focused() {
 		t.Error("the toolbar took the focus")
 	}
 }
 
-// The selection toolbar's first button copies the selection as plain
-// text, says it did, and leaves the selection and the focus in the page;
-// in code, which takes no formats, it is the toolbar's one copy button.
 func TestSelectionToolbarCopiesPlainText(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("ship **it** now")
@@ -147,8 +134,6 @@ func TestSelectionToolbarCopiesPlainText(t *testing.T) {
 	}
 }
 
-// SelectionView reads the selection as those outside the editor do: its
-// text and blocks, and the colors of what is selected or typed next.
 func TestSelectionView(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("ship it now")
@@ -166,13 +151,11 @@ func TestSelectionView(t *testing.T) {
 		t.Fatalf("selection %+v", v)
 	}
 
-	// Backwards reads the same; part in color reads as mixed.
 	e.Select(Pos{n.ID, 7}, Pos{n.ID, 2})
 	if v := e.SelectionView(); v.Text != "ip it" || v.Start.Off != 2 || v.End.Off != 7 || v.Color != "" || !v.Mixed {
 		t.Fatalf("mixed selection %+v", v)
 	}
 
-	// A caret has no text, and the colors of what is typed next.
 	e.Select(Pos{n.ID, 11}, Pos{n.ID, 11})
 	calls = 0
 	e.SetColor("#3b82f6ff")

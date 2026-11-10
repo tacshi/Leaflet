@@ -4,8 +4,6 @@ import UserNotifications
 
 @testable import Leaflet
 
-/// RemindersTests check what the system is asked to show of a to-do, and
-/// the comparison of a version with its page.
 struct RemindersTests {
     private func reminder(at: Int64) -> Reminder {
         Reminder(
@@ -28,8 +26,6 @@ struct RemindersTests {
         #expect(r.identifier == "todo:p#b")
     }
 
-    /// A to-do already due shows at once, and says what it is, through a
-    /// Focus, with what a tap opens.
     @Test func aReminderDueShowsAtOnce() {
         let r = Reminders.request(reminder(at: 0))
         #expect(r.trigger == nil)
@@ -41,8 +37,6 @@ struct RemindersTests {
         #expect(r.content.userInfo["block"] as? String == "b")
     }
 
-    /// The system hears a tap is handled on the main thread, wherever it
-    /// came from: UIKit aborts the app otherwise.
     @Test func aTapIsHandledOnTheMainThread() async {
         let onMain = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
             DispatchQueue.global().async {
@@ -56,7 +50,6 @@ struct RemindersTests {
         #expect(VersionDiff.rows(from: "a\nb", to: "a\nb").isEmpty)
     }
 
-    /// What went and what came show in place, with the lines around them.
     @Test func changesShowWithTheirContext() {
         let rows = VersionDiff.rows(
             from: "1\n2\n3\n4\n5\n6\n7", to: "1\n2\n3\nfour\n5\n6\n7", context: 1)

@@ -93,7 +93,6 @@ func TestExportZip(t *testing.T) {
 	}
 }
 
-// Pages and folders named "." or ".." stay inside the zip.
 func TestExportZipDotNames(t *testing.T) {
 	pages := []store.Page{
 		{ID: "up", Title: ".."},
@@ -115,15 +114,11 @@ func TestExportZipDotNames(t *testing.T) {
 		names = append(names, f.Name)
 	}
 	slices.Sort(names)
-	// The folder and the page of one name stay apart.
 	if want := []string{"-- (2).md", "-- (2)/Notes.md", "--/-.md"}; !slices.Equal(names, want) {
 		t.Errorf("names %q, want %q", names, want)
 	}
 }
 
-// A file named as a page in a folder named "files" is, or as the
-// directory of its subpages, goes in the zip under another name, and the
-// link to it with it.
 func TestExportZipFilesBesidePages(t *testing.T) {
 	pages := []store.Page{
 		{ID: "notes", Title: "notes", FolderID: "f"},
@@ -166,10 +161,8 @@ func TestExportZipFilesBesidePages(t *testing.T) {
 	}
 }
 
-// openFile opens a test's file as Zip reads one.
-func openFile(path string) (io.ReadCloser, error) { return os.Open(path) } // #nosec G304 -- the test's own files.
+func openFile(path string) (io.ReadCloser, error) { return os.Open(path) } // #nosec G304
 
-// unzip reads a zip's files by name, failing t on one that is there twice.
 func unzip(t *testing.T, b []byte) map[string]string {
 	t.Helper()
 	r, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
@@ -189,9 +182,6 @@ func unzip(t *testing.T, b []byte) map[string]string {
 	return got
 }
 
-// A page named as another page's file is, "X.md" beside "X", has a file
-// and a directory of its subpages apart from that file, whichever comes
-// first: a zip with a file and a directory of one name opens nowhere.
 func TestExportZipNoFileNamedAsADirectory(t *testing.T) {
 	for _, pages := range [][]store.Page{
 		{{ID: "x", Title: "X"}, {ID: "xmd", Title: "X.md"}, {ID: "child", Title: "Child", ParentID: "xmd"}},
@@ -219,9 +209,6 @@ func TestExportZipNoFileNamedAsADirectory(t *testing.T) {
 	}
 }
 
-// Links are written to the zip's files where the page has them, in its
-// text and its blocks; text that only reads as a link, in code or not,
-// stays as it is.
 func TestExportZipLinksOnlyLinks(t *testing.T) {
 	pages := []store.Page{{ID: "e", Title: "Notes"}, {ID: "p", Title: "Plan"}}
 	code := doc.CodeNode("see (leaflet://page/e) and (file:///data/files/x/dawn.jpg) here", "")
@@ -244,8 +231,6 @@ func TestExportZipLinksOnlyLinks(t *testing.T) {
 	}
 }
 
-// Export takes only the files the store keeps: a block that names another
-// file in the app's own folder, as its database, leaves it out of the zip.
 func TestOwnFilesOpensOnlyTheStoresFiles(t *testing.T) {
 	dir := t.TempDir()
 	own, db := filepath.Join(dir, "files", "f1", "a.png"), filepath.Join(dir, "leaflet.db")
@@ -284,8 +269,6 @@ func keys(m map[string]string) []string {
 	return out
 }
 
-// A folder in another is a directory in that folder's; folders of one
-// name, in different folders or the same one, stay apart.
 func TestExportZipNestedFolders(t *testing.T) {
 	folders := []store.Folder{
 		{ID: "work", Name: "Work"},
@@ -300,7 +283,6 @@ func TestExportZipNestedFolders(t *testing.T) {
 		{ID: "2", Title: "Plan", FolderID: "home-notes"},
 		{ID: "3", Title: "Plan", FolderID: "home-notes2"},
 		{ID: "4", Title: "Plan", FolderID: "deep"},
-		// A page named as a folder beside it takes another name.
 		{ID: "5", Title: "Work"},
 	}
 	var buf bytes.Buffer
@@ -325,7 +307,7 @@ func TestExportZipNestedFolders(t *testing.T) {
 }
 
 func TestSafeName(t *testing.T) {
-	long := strings.Repeat("旅", 100) // 300 bytes
+	long := strings.Repeat("旅", 100)
 	for in, want := range map[string]string{
 		"Trip: day 1":        "Trip- day 1",
 		"tab\there\n":        "tab-here-",
@@ -347,9 +329,6 @@ func TestSafeName(t *testing.T) {
 	}
 }
 
-// Two blocks of one recording, as a copied block keeps its recording_id,
-// take its audio into the zip once, and leave the recording's own audio
-// as it was.
 func TestWithAudioOneRecordingTwice(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.OpenMemory(dir)
@@ -379,13 +358,11 @@ func TestWithAudioOneRecordingTwice(t *testing.T) {
 	if len(files) != 2 || files[0] != files[1] {
 		t.Errorf("files %q", files)
 	}
-	if data, err := os.ReadFile(wav); err != nil || string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+	if data, err := os.ReadFile(wav); err != nil || string(data) != "RIFF" { // #nosec G304
 		t.Errorf("the recording's audio is now %q, %v", data, err)
 	}
 }
 
-// copyAudio leaves a file already at its path, which may be a link to
-// the audio it copies.
 func TestCopyAudioKeepsALink(t *testing.T) {
 	dir := t.TempDir()
 	from, to := filepath.Join(dir, "a.wav"), filepath.Join(dir, "b.wav")
@@ -398,17 +375,14 @@ func TestCopyAudioKeepsALink(t *testing.T) {
 	if err := copyAudio(from, to); err == nil {
 		t.Error("copied over a file there")
 	}
-	if data, _ := os.ReadFile(from); string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+	if data, _ := os.ReadFile(from); string(data) != "RIFF" { // #nosec G304
 		t.Errorf("the audio is now %q", data)
 	}
 }
 
-// A copy of the audio that fails part way goes, so no other block of the
-// recording takes it as it is.
 func TestCopyAudioCutShortGoes(t *testing.T) {
 	dir := t.TempDir()
 	to := filepath.Join(dir, "b.wav")
-	// A folder opens, and fails as it is read.
 	if err := copyAudio(dir, to); err == nil {
 		t.Fatal("copied a folder")
 	}
@@ -417,8 +391,6 @@ func TestCopyAudioCutShortGoes(t *testing.T) {
 	}
 }
 
-// A link to a moment of a recording plays its audio in the zip, from a page
-// before the audio's too, and a moment of a video goes to its site.
 func TestExportZipMoments(t *testing.T) {
 	first := &doc.Node{ID: "l", Type: "paragraph"}
 	first.SetDelta(doc.Delta{{Text: "1:23", Attrs: doc.Attrs{Href: doc.MomentLink("second", "r", 83)}},
@@ -446,9 +418,6 @@ func TestExportZipMoments(t *testing.T) {
 	}
 }
 
-// In a page exported alone a moment of a recording or a file has no
-// address, so it is words; of a video, it goes to the site; other links
-// stay as they are.
 func TestMoments(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{
 		{ID: "r", Type: "recording"}, {ID: "f", Type: "file"}, {ID: "p", Type: "paragraph"},
@@ -473,8 +442,6 @@ func TestMoments(t *testing.T) {
 	}
 }
 
-// A save puts the whole file at its path, over what was there; one cut
-// short leaves that as it was, and nothing beside it.
 func TestSave(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Call.wav")
@@ -485,19 +452,17 @@ func TestSave(t *testing.T) {
 		t.Error("a cut save reported nothing")
 	}
 	entries, _ := os.ReadDir(dir)
-	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304 -- the test's own file.
+	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304
 		t.Errorf("after a cut save: %q, %d entries", data, len(entries))
 	}
 	if err := Save(path, strings.NewReader("RIFF")); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(path); string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+	if data, _ := os.ReadFile(path); string(data) != "RIFF" { // #nosec G304
 		t.Errorf("saved %q", data)
 	}
 }
 
-// A block of another page's recording, as one pasted from it, exports
-// without that page's transcript or audio.
 func TestWithTranscriptsOwnRecordingsOnly(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.OpenMemory(dir)
@@ -542,7 +507,6 @@ func TestWithTranscriptsOwnRecordingsOnly(t *testing.T) {
 	}
 }
 
-// fakeSync brings pages down from content, and fails for any other page.
 type fakeSync struct {
 	content map[string]*doc.Content
 	asked   []string
@@ -564,9 +528,6 @@ func text(s string) *doc.Content {
 	return doc.FromBlocks([]*doc.Node{n})
 }
 
-// Export all brings down the pages this device does not keep up to date,
-// even those it has an older copy of, and keeps the copy of one that can't
-// come, counting it.
 func TestAllRefreshesPagesNotKept(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -596,7 +557,7 @@ func TestAllRefreshesPagesNotKept(t *testing.T) {
 	if slices.Contains(sync.asked, kept.ID) || slices.Contains(sync.asked, open.ID) || !slices.Contains(sync.asked, away.ID) {
 		t.Errorf("brought down %q", sync.asked)
 	}
-	data, err := os.ReadFile(out) // #nosec G304 -- the test's own file.
+	data, err := os.ReadFile(out) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,14 +569,12 @@ func TestAllRefreshesPagesNotKept(t *testing.T) {
 	}
 }
 
-// An export that fails leaves the file it would have replaced as it was.
 func TestAllFailedKeepsTheFileThere(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	// The export's own folder can't be made.
 	st.Dir = filepath.Join(t.TempDir(), "gone")
 	out := filepath.Join(t.TempDir(), "export.zip")
 	if err := os.WriteFile(out, []byte("last week's"), 0o600); err != nil {
@@ -624,13 +583,11 @@ func TestAllFailedKeepsTheFileThere(t *testing.T) {
 	if _, err := All(out, Source{Store: st}, nil, nil); err == nil {
 		t.Fatal("the export reported nothing")
 	}
-	if data, err := os.ReadFile(out); err != nil || string(data) != "last week's" { // #nosec G304 -- the test's own file.
+	if data, err := os.ReadFile(out); err != nil || string(data) != "last week's" { // #nosec G304
 		t.Errorf("the file there is now %q, %v", data, err)
 	}
 }
 
-// A write that fails part way leaves what was at its path as it was, and
-// nothing beside it.
 func TestWriteCutShort(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "export.zip")
@@ -645,7 +602,7 @@ func TestWriteCutShort(t *testing.T) {
 		t.Error("a cut write reported nothing")
 	}
 	entries, _ := os.ReadDir(dir)
-	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304 -- the test's own file.
+	if data, _ := os.ReadFile(path); string(data) != "old" || len(entries) != 1 { // #nosec G304
 		t.Errorf("after a cut write: %q, %d entries", data, len(entries))
 	}
 }

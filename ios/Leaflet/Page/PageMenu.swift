@@ -2,14 +2,9 @@ import LeafletCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// PageMenu is a page's actions, as the desktop's page menu has them, in
-/// the sidebar and the page's header.
 struct PageMenu: View {
     let page: PageRow
-    /// rename starts renaming the page where the menu is.
     let rename: () -> Void
-    /// openInNewWindow opens the page in a window of its own, where the
-    /// menu offers it.
     var openInNewWindow: (() -> Void)?
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
@@ -94,8 +89,6 @@ struct PageMenu: View {
                 }
             }
         }
-        // As on the desktop, only where pages sync, and never a template;
-        // on, and fixed, while every page is kept on the device.
         if app.syncs, !page.template {
             Toggle(
                 isOn: Binding(
@@ -115,11 +108,8 @@ struct PageMenu: View {
     }
 }
 
-/// DefaultTemplateMenu chooses the template new pages in a place start
-/// from: a blank page, or one of the templates, as the desktop's submenu.
 struct DefaultTemplateMenu: View {
     let label: String
-    /// current is the template the place names now, by its page's ID.
     let current: String?
     let choose: (TemplateRow?) async -> Void
     @Environment(AppModel.self) private var app
@@ -147,8 +137,6 @@ struct DefaultTemplateMenu: View {
     }
 }
 
-/// ExportFile is a page exported as a file, Markdown or PDF, saved where
-/// the user picks under name.
 struct ExportFile: FileDocument {
     static let markdown = UTType(filenameExtension: "md") ?? .plainText
     static let readableContentTypes = [markdown, .pdf]
@@ -173,8 +161,6 @@ struct ExportFile: FileDocument {
     }
 }
 
-/// HistorySheet is a page's kept versions, as the desktop's History
-/// dialog: each to read, restore, or keep the page as it is under a name.
 struct HistorySheet: View {
     let page: PageRow
     @Environment(AppModel.self) private var app
@@ -184,12 +170,8 @@ struct HistorySheet: View {
     @State private var chosen: PageVersion.ID?
     @State private var naming = false
     @State private var name = ""
-    /// current is the page's text now, and comparing says a version shows
-    /// what changed since it, rather than itself.
     @State private var current = ""
     @State private var comparing = false
-    /// sizeClass is the sheet's: compact, as on iPhone, it shows the list
-    /// alone, which a version chosen would push away.
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
@@ -276,8 +258,6 @@ struct HistorySheet: View {
         chooseFirst()
     }
 
-    /// chooseFirst shows the latest version beside the list, where there
-    /// is room for both.
     private func chooseFirst() {
         if chosen == nil, sizeClass == .regular { chosen = versions?.first?.id }
     }
@@ -292,9 +272,6 @@ struct HistorySheet: View {
         }
     }
 
-    /// restore puts the version back, with Undo in the toast, which
-    /// restores the page as it was, kept as a version first: the editor's
-    /// own Undo has only the typing and agents' runs.
     private func restore(_ v: PageVersion) async {
         guard let client = app.client else { return }
         do {
@@ -321,21 +298,12 @@ struct HistorySheet: View {
     }
 }
 
-/// MarkdownPreview shows Markdown as the page shows its blocks, read as
-/// the core reads it pasted (MobileMarkdownBlocks): headings, lists,
-/// to-dos, quotes, code and tables, with their inline formats. History
-/// shows a version of a page so, and the Agent panel an answer, a fence
-/// still open as it streams in running to its end.
 struct MarkdownPreview: View {
     let markdown: String
-    /// size is the page's text size, which a version shows in, or nil
-    /// for the text styles', as a chat's.
     var size: Double?
     @Environment(\.palette) private var palette
-    /// last is the text the preview last read, with its rows.
     @State private var last: Read?
 
-    /// Read is a text with its rows, as read.
     private struct Read {
         let markdown: String
         let rows: [Row]
@@ -351,11 +319,6 @@ struct MarkdownPreview: View {
         .task(id: markdown) { await read() }
     }
 
-    /// shown are the rows the preview shows: markdown's, once read. Until
-    /// then, as an answer streams in, those of the text the preview had
-    /// before, which this one goes on from, and none for another text, as
-    /// another version chosen; a short text the preview reads first is read
-    /// at once, for it not to show empty.
     private var shown: [Row] {
         if let rows = Self.kept[markdown] { return rows }
         if let last, markdown.hasPrefix(last.markdown) {
@@ -367,11 +330,6 @@ struct MarkdownPreview: View {
         return rows
     }
 
-    /// read reads markdown off the main thread, unless it was read before:
-    /// an answer streaming in is read again each time it grows, which on
-    /// the main thread would hold up the window as the answer gets long,
-    /// as would a version of a long page. A read the text changed during,
-    /// its task cancelled, keeps nothing: a newer one follows it.
     private func read() async {
         let markdown = markdown
         if let rows = Self.kept[markdown] {
@@ -383,32 +341,22 @@ struct MarkdownPreview: View {
         last = Read(markdown: markdown, rows: rows)
     }
 
-    /// parse reads markdown as rows, off the main thread, unless the task
-    /// that asked was cancelled first.
     @concurrent nonisolated private static func parse(_ markdown: String) async -> [Row]? {
         guard !Task.isCancelled else { return nil }
         return rows(blocks(markdown))
     }
 
-    /// readAtOnce is the longest text, in UTF-16 units, read on the main
-    /// thread the first time it shows.
     private static let readAtOnce = 2_000
 
-    /// kept are the rows of the texts read last, by text, the latest
-    /// keptMost of them, oldest first in keptOrder: a chat's messages
-    /// shown again, as it scrolls, aren't read again.
     @MainActor private static var kept: [String: [Row]] = [:]
     @MainActor private static var keptOrder: [String] = []
     private static let keptMost = 32
 
-    /// keep keeps rows as those of markdown.
     private static func keep(_ markdown: String, _ rows: [Row]) {
         if kept.updateValue(rows, forKey: markdown) == nil { keptOrder.append(markdown) }
         while keptOrder.count > keptMost { kept[keptOrder.removeFirst()] = nil }
     }
 
-    /// Row is a block as it shows: at its depth, and its number in a
-    /// numbered list; a table with its cells' text.
     struct Row: Sendable {
         let node: DocNode
         let depth: Int
@@ -416,16 +364,12 @@ struct MarkdownPreview: View {
         var cells: [[String]] = []
     }
 
-    /// blocks reads markdown as the core does.
     nonisolated static func blocks(_ markdown: String) -> [DocNode] {
         var error: NSError?
         let raw = MobileMarkdownBlocks(markdown, &error)
         return (try? JSONDecoder().decode([DocNode].self, from: Data(raw.utf8))) ?? []
     }
 
-    /// rows are blocks one after another, those in a block after it, one
-    /// deeper; a numbered item goes on from the one before it at its depth,
-    /// as on the page.
     nonisolated static func rows(_ blocks: [DocNode], depth: Int = 0) -> [Row] {
         var out: [Row] = []
         var number = 0
@@ -435,14 +379,11 @@ struct MarkdownPreview: View {
                 Row(
                     node: n, depth: depth, number: number,
                     cells: n.type == "table" ? TableGrid.cells(n) : []))
-            // A table's children are its cells.
             if n.type != "table" { out += rows(n.children ?? [], depth: depth + 1) }
         }
         return out
     }
 
-    /// text is a block's text with its formats and links, as the page has
-    /// them.
     static func text(_ node: DocNode) -> AttributedString {
         var out = AttributedString()
         for op in node.data?["delta"]?.array ?? [] {
@@ -462,8 +403,6 @@ struct MarkdownPreview: View {
         return out
     }
 
-    /// font is the font of the text of a block of kind, scaled by scale
-    /// from the page's size, or the text style's.
     private func font(_ scale: Double = 1, style: Font.TextStyle = .body) -> Font {
         size.map { Fonts.pageText(size: $0 * scale) } ?? .system(style)
     }
@@ -512,7 +451,6 @@ struct MarkdownPreview: View {
         }
     }
 
-    /// marker is what goes before a list item, as the page draws it.
     static func marker(_ row: Row) -> String {
         switch row.node.type {
         case "numbered_list": "\(row.number)."
@@ -522,7 +460,6 @@ struct MarkdownPreview: View {
         }
     }
 
-    /// source is a code block's, a formula's or a diagram's text.
     static func source(_ node: DocNode) -> String {
         switch node.type {
         case "math_equation", "diagram":

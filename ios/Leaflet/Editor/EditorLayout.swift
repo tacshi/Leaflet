@@ -1,9 +1,6 @@
 import LeafletCore
 import UIKit
 
-/// EditorLayout lays the page's text out in TextKit: a fragment for each
-/// paragraph, which draws its block's marker and card, the last one the
-/// empty block after it, and the blocks folded away left out.
 @MainActor
 final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
     @preconcurrency NSTextContentStorageDelegate
@@ -13,13 +10,7 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
     private var text: BlockText { editor.text }
     private var storage: NSTextStorage { editor.text.storage }
 
-    /// folded are the blocks folded away, inside a closed toggle or the
-    /// section of a folded heading, which the page leaves out of its
-    /// layout: they stay in its text and its content.
     private(set) var folded: Set<String> = []
-    /// foldsFound is the change of the blocks folds go by that folded was
-    /// found at (BlockText.foldChanges), and asked the blocks the core was
-    /// last asked to fold and its answer.
     private var foldsFound = -1
     private var asked: (blocks: String, marks: String)?
 
@@ -28,8 +19,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         super.init()
     }
 
-    /// attach makes the layout the text view's: it folds the blocks inside
-    /// a closed toggle out of the layout.
     func attach() {
         textView.textLayoutManager?.delegate = self
         if let content = textView.textLayoutManager?.textContentManager as? NSTextContentStorage,
@@ -39,19 +28,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         }
     }
 
-    // MARK: Folding
-
-    /// updateFolds finds the blocks folded away, as a toggle or heading
-    /// folds or the blocks change, and lays the page out again if they
-    /// did. What a fold hides is as the core's rules have it, the
-    /// desktop's (mobile.Folded): the blocks in a closed toggle, and a
-    /// folded heading's section, the blocks after it at its depth, and
-    /// those in them, up to the next heading of its level or higher. It
-    /// looks again only once paragraphs came or went, or a block's type,
-    /// depth, level or fold changed, as a key typed in a block changes
-    /// none of them; a page with nothing folded, as most are, asks
-    /// nothing, and the core is asked again only of blocks that fold
-    /// otherwise than those it was last asked of.
     func updateFolds() {
         let all = text.blocks()
         guard text.foldChanges != foldsFound else { return }
@@ -80,10 +56,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         textView.relayout()
     }
 
-    /// keepShown unfolds what folds the block of id away, as a new line or
-    /// a block moved goes where a toggle or a heading folds: the caret
-    /// would be out of sight. What folds a block is the first block before
-    /// it that shows, the blocks between folded away with it.
     func keepShown(_ id: String) {
         for _ in 0..<8 {
             updateFolds()
@@ -98,9 +70,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         }
     }
 
-    /// foldHere folds or unfolds a toggle or heading of a page that can't
-    /// be changed, as info says: here alone, as it saves nothing, for a
-    /// section its owner folded to show.
     func foldHere(_ info: BlockInfo, at location: Int) {
         let (range, _) = text.paragraph(at: location)
         var whole = range
@@ -128,8 +97,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         return !folded.contains(info.id)
     }
 
-    // MARK: Fragments
-
     func textLayoutManager(
         _ textLayoutManager: NSTextLayoutManager,
         textLayoutFragmentFor location: any NSTextLocation,
@@ -138,7 +105,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         let f = BlockLayoutFragment(textElement: textElement, range: textElement.elementRange)
         f.palette = editor.style.palette
         f.dateOffer = editor.due.dateOffer
-        // The last paragraph's fragment draws an empty block after it.
         if let range = textElement.elementRange,
             textLayoutManager.offset(
                 from: range.endLocation, to: textLayoutManager.documentRange.endLocation)
@@ -149,10 +115,7 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         return f
     }
 
-    /// redrawEnd lays the last paragraph out again, whose fragment draws
-    /// the empty block after it.
     func redrawEnd() {
-        // An empty page's block is drawn by the text view itself.
         if storage.length == 0 { return textView.setNeedsLayout() }
         guard let tlm = textView.textLayoutManager else { return }
         let ns = storage.string as NSString
@@ -160,8 +123,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         guard let start = tlm.location(tlm.documentRange.location, offsetBy: last.location),
             let range = NSTextRange(location: start, end: tlm.documentRange.endLocation)
         else { return }
-        // Its fragment stays as the layout is made again: it draws the
-        // block as it now is, and a tap on its marker goes by it.
         let look = trailingLook()
         tlm.enumerateTextLayoutFragments(from: start, options: []) { f in
             (f as? BlockLayoutFragment)?.trailing = look
@@ -171,8 +132,6 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         textView.setNeedsLayout()
     }
 
-    /// trailingLook is the empty block the fragment of the page's last
-    /// paragraph draws after it: the trailing block.
     private func trailingLook() -> BlockLayoutFragment.Trailing? {
         guard let trailing = text.trailing else { return nil }
         return BlockLayoutFragment.Trailing(

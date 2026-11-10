@@ -5,15 +5,11 @@ import (
 	"time"
 )
 
-// DueLayout is how a to-do keeps its due date: a day, in the user's own
-// time zone; DueTimeLayout is a day with its time of day.
 const (
 	DueLayout     = "2006-01-02"
 	DueTimeLayout = "2006-01-02T15:04"
 )
 
-// ParseDue reads a due date, a day or a day with its time, here: a day is
-// at its start, and timed reports a time.
 func ParseDue(s string) (t time.Time, timed, ok bool) {
 	if t, err := time.ParseInLocation(DueTimeLayout, s, time.Local); err == nil {
 		return t, true, true
@@ -22,27 +18,17 @@ func ParseDue(s string) (t time.Time, timed, ok bool) {
 	return t, false, err == nil
 }
 
-// dueForm is a due date as a to-do keeps one: its day, and its time of
-// day, in digits of their full width.
 var dueForm = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$`)
 
-// validDue reports whether s is a due date as a to-do keeps one, a day of
-// the calendar or one with its time of day, as the server's validDue
-// takes it. Kept as it is written, a time a clock change skips here stays
-// the time it was given.
 func validDue(s string) bool {
 	_, _, ok := ParseDue(s)
 	return ok && dueForm.MatchString(s)
 }
 
-// Due returns a to-do's due date, at the start of that day here or at its
-// time of day, which timed reports.
 func (n *Node) Due() (t time.Time, timed, ok bool) {
 	return ParseDue(n.Str("due"))
 }
 
-// SetDue gives a to-do a due date, with its time of day when timed, or
-// takes it away for a zero time.
 func (n *Node) SetDue(t time.Time, timed bool) {
 	if t.IsZero() {
 		delete(n.Data, "due")
@@ -55,19 +41,15 @@ func (n *Node) SetDue(t time.Time, timed bool) {
 	n.Set("due", t.In(time.Local).Format(layout))
 }
 
-// Todo is an open to-do of a page that has a due date, or someone to do
-// it: the first person mentioned in it.
 type Todo struct {
 	BlockID string
 	Text    string
-	Due     time.Time // zero for none
-	Timed   bool      // whether Due has a time of day
+	Due     time.Time
+	Timed   bool
 	Owner   string
-	OwnerID string // the user Owner names
+	OwnerID string
 }
 
-// Todos returns a page's open to-dos with a due date or an owner, in
-// document order.
 func (c *Content) Todos() []Todo {
 	var out []Todo
 	c.Walk(func(n, _ *Node) {

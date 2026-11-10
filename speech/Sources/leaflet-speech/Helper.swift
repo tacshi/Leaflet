@@ -1,23 +1,3 @@
-// leaflet-speech transcribes recordings with macOS's own speech
-// recognition (LeafletSpeech): on the Mac, offline, once its language's
-// model is downloaded. The desktop app ships it in its resources and runs
-// it as the recorder's on-device engine (internal/macspeech):
-//
-//	leaflet-speech available
-//	    exits 0 when this Mac can transcribe, 1 when it cannot.
-//	leaflet-speech stream <language>
-//	    transcribes 16-bit mono PCM at 16 kHz from stdin until it ends.
-//	leaflet-speech file <language> <path>
-//	    transcribes the WAV file at path.
-//
-// language is an ISO 639-1 code, or "auto" for the Mac's own language.
-// What it writes to stdout is JSON, a line each, as the iOS app's engine
-// answers the core (Answer): {"text": ...}, the words so far as they
-// come, then {"done": true, "segments": [...]}, the transcript, each
-// segment with its start_ms and end_ms; or {"error": ...}, with "code":
-// "language" and the language's code when the Mac cannot transcribe the
-// language.
-
 import Foundation
 import LeafletSpeech
 import Speech
@@ -46,7 +26,6 @@ struct Helper {
         }
     }
 
-    /// run writes the transcript body makes, or why it could not.
     private static func run(_ body: @Sendable () async throws -> [SpeechSegment]) async {
         do {
             Output.write(Answer.done(try await body()))
@@ -56,13 +35,9 @@ struct Helper {
         }
     }
 
-    /// standardInput is what stdin gives, as it comes, until it ends.
     private static func standardInput() -> AsyncStream<Data> {
         let (stream, input) = AsyncStream.makeStream(of: Data.self)
         Thread.detachNewThread {
-            // A read may end inside a sample, as a pipe splits what is
-            // written where it likes: its odd byte waits for the next
-            // read, so that every later sample keeps its two bytes.
             var carry = Data()
             while true {
                 let data = FileHandle.standardInput.availableData
@@ -78,7 +53,6 @@ struct Helper {
     }
 }
 
-/// Output writes the helper's answers, a JSON line each.
 enum Output {
     private static let lock = NSLock()
 

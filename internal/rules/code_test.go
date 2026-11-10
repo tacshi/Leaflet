@@ -2,9 +2,6 @@ package rules
 
 import "testing"
 
-// Enter in code starts the new line as indented as the caret's, up to the
-// caret; on the second blank line at the end it leaves the block, without
-// the blank lines.
 func TestCodeEnter(t *testing.T) {
 	for _, tc := range []struct {
 		code   string
@@ -19,8 +16,6 @@ func TestCodeEnter(t *testing.T) {
 		{"    ", 2, false, 0, "\n  "},
 		{"x\n  \n", 5, true, 1, ""},
 		{"x\n\n", 3, true, 1, ""},
-		// Two blank lines before the end leave nothing: the caret is not
-		// on the second.
 		{"x\n\n\ny", 3, false, 0, "\n"},
 		{"一\n\n", 3, true, 1, ""},
 	} {
@@ -31,10 +26,6 @@ func TestCodeEnter(t *testing.T) {
 	}
 }
 
-// Tab indents the lines chosen by the block's own step, a tab where it
-// indents with tabs; Shift-Tab takes one off, as far as the step goes and
-// no further than a tab. A line the selection only reaches the start of
-// stays, and the selection moves with its text.
 func TestIndentCode(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

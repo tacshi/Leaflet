@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// What terminals find along a Path, in order: the command line's folder
-// says nothing of what stands in front of it.
 func TestOnPath(t *testing.T) {
 	const bin = "/programs/Leaflet/bin"
 	exe := "/programs/Leaflet/Leaflet.exe"

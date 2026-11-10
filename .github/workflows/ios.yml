@@ -1,10 +1,5 @@
 name: iOS
 
-# The iOS app links the Go core, ./mobile and every package it imports,
-# leaflet/supabase among them, so a change to any of them is checked to
-# keep MyGo's windowing packages out of it. The app's own Swift is checked
-# and tested on the developer's Mac, with make ios-check and make ios-test:
-# building and testing it on CI's simulators took too long.
 on:
   push:
     branches: [main]

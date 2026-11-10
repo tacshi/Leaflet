@@ -12,11 +12,6 @@ import (
 	"leaflet/locales"
 )
 
-// A page's sidebar chat: its conversations, kept between launches with
-// the runs their replies show, and the turns of them the model reads.
-
-// Message is a turn of the sidebar chat. The device keeps it, as a run,
-// under its fields' names.
 type Message struct {
 	Mine      bool   `json:"Mine"`
 	Text      string `json:"Text"`
@@ -24,13 +19,9 @@ type Message struct {
 	Pending   bool   `json:"Pending"`
 	Error     bool   `json:"Error"`
 	AgentName string `json:"AgentName"`
-	// Streamed is a pending reply whose Text is the answer as far as it
-	// has come, not what the run is doing.
-	Streamed bool `json:"-"`
+	Streamed  bool   `json:"-"`
 }
 
-// Session is the agent state of one page: the sidebar conversation and
-// the runs made from any surface.
 type Session struct {
 	PageID         string
 	Messages       []*Message
@@ -38,11 +29,9 @@ type Session struct {
 	ConversationID string
 	Running        bool
 	Selected       *store.ModelChoice
-	// Past are the page's earlier conversations, the latest first.
-	Past []*Conversation
+	Past           []*Conversation
 }
 
-// Run returns a run by ID.
 func (s *Session) Run(id string) *Run {
 	for _, r := range s.Runs {
 		if r.ID == id {
@@ -52,7 +41,6 @@ func (s *Session) Run(id string) *Run {
 	return nil
 }
 
-// Latest is the newest run of this launch that changed the page.
 func (s *Session) Latest() *Run {
 	for i := len(s.Runs) - 1; i >= 0; i-- {
 		if r := s.Runs[i]; len(r.Ops) > 0 && !r.Restored {
@@ -62,17 +50,13 @@ func (s *Session) Latest() *Run {
 	return nil
 }
 
-// Conversation is a page's sidebar chat as the device keeps it between
-// launches, with the runs its replies show, so they can still be undone.
 type Conversation struct {
 	ID       string     `json:"conversation_id"`
 	Messages []*Message `json:"messages"`
 	Runs     []*Run     `json:"runs,omitempty"`
-	// At is when an earlier conversation was left for a new one.
-	At time.Time `json:"at,omitzero"`
+	At       time.Time  `json:"at,omitzero"`
 }
 
-// Title is the conversation's first request, on one line.
 func (c *Conversation) Title() string {
 	for _, m := range c.Messages {
 		if m.Mine {
@@ -83,8 +67,6 @@ func (c *Conversation) Title() string {
 	return ""
 }
 
-// restore marks what an earlier launch left unfinished: a reply still
-// pending never got its answer.
 func (c *Conversation) restore() {
 	for _, m := range c.Messages {
 		if m.Pending {
@@ -99,10 +81,8 @@ func (c *Conversation) restore() {
 	}
 }
 
-// maxSavedMessages bounds the chat kept for a page.
 const maxSavedMessages = 200
 
-// maxPastConversations bounds the earlier conversations kept for a page.
 const maxPastConversations = 50
 
 func chatKey(pageID string) string { return "chat." + pageID }
@@ -111,9 +91,6 @@ func pastChatsKey(pageID string) string { return "chat.past." + pageID }
 
 func runningKey(pageID string) string { return "chat.running." + pageID }
 
-// loadChat reads a page's chat and its earlier ones from an earlier launch
-// into s, with the ops its run had made when that launch ended, should it
-// have ended during one (saveRunning).
 func (h *Hub) loadChat(s *Session) {
 	if raw, ok := h.st.Value(pastChatsKey(s.PageID)); ok {
 		if err := json.Unmarshal([]byte(raw), &s.Past); err != nil {
@@ -151,7 +128,6 @@ func (h *Hub) loadChat(s *Session) {
 	}
 }
 
-// current is the page's chat as it is kept, its runs with it.
 func (s *Session) current() *Conversation {
 	msgs := s.Messages
 	if len(msgs) > maxSavedMessages {
@@ -166,7 +142,6 @@ func (s *Session) current() *Conversation {
 	return c
 }
 
-// saveChat keeps a page's chat for the next launch.
 func (h *Hub) saveChat(s *Session) {
 	if len(s.Messages) == 0 {
 		if err := h.st.DeleteValue(chatKey(s.PageID)); err != nil {
@@ -183,10 +158,6 @@ func (h *Hub) saveChat(s *Session) {
 	}
 }
 
-// saveRunning keeps the run working in a page's chat, with the ops it
-// made so far, for the next launch to undo should the app quit before it
-// ends (loadChat): the run alone, as the rest of the chat, kept as the run
-// began, stays as it was while it works. Its end keeps the chat whole.
 func (h *Hub) saveRunning(s *Session, run *Run) {
 	raw, err := json.Marshal(run)
 	if err == nil {
@@ -197,7 +168,6 @@ func (h *Hub) saveRunning(s *Session, run *Run) {
 	}
 }
 
-// savePast keeps a page's earlier conversations for the next launch.
 func (h *Hub) savePast(s *Session) {
 	var err error
 	if len(s.Past) == 0 {
@@ -213,8 +183,6 @@ func (h *Hub) savePast(s *Session) {
 	}
 }
 
-// leave puts the page's chat first among its earlier ones, when it has
-// messages.
 func (h *Hub) leave(s *Session) {
 	if len(s.Messages) == 0 {
 		return
@@ -228,8 +196,6 @@ func (h *Hub) leave(s *Session) {
 	h.savePast(s)
 }
 
-// NewConversation starts a page's sidebar chat afresh, keeping the one it
-// had among the earlier ones.
 func (h *Hub) NewConversation(pageID string) {
 	s := h.Session(pageID)
 	if s.Running {
@@ -241,8 +207,6 @@ func (h *Hub) NewConversation(pageID string) {
 	h.saveChat(s)
 }
 
-// OpenConversation goes back to an earlier conversation of a page,
-// keeping the one it had among the earlier ones.
 func (h *Hub) OpenConversation(pageID, id string) {
 	s := h.Session(pageID)
 	if s.Running {
@@ -265,14 +229,12 @@ func (h *Hub) OpenConversation(pageID, id string) {
 	h.saveChat(s)
 }
 
-// Chat sends a sidebar chat message.
 func (h *Hub) Chat(pageID, text string, focus []string) {
 	s := h.Session(pageID)
 	t := strings.TrimSpace(text)
 	if t == "" || s.Running {
 		return
 	}
-	// The history is the turns before this one, the request itself aside.
 	history := chatHistory(s)
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: t})
 	reply := &Message{Text: locales.AgentReadingPage(), Pending: true}
@@ -281,13 +243,6 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 	h.saveChat(s)
 }
 
-// chatHistory is the sidebar chat as the model reads it: each request
-// with its reply, as the agent function builds it from the runs that are
-// done. A request whose reply failed, or whose run failed or was undone,
-// goes with it, neither said: the model would take the request for done,
-// and the page for having what its reply says. Each turn says whether its
-// run kept to the page, as keptToPage counts it, and whether its URL guard
-// was on, as a reply whose run is not known is taken to have been.
 func chatHistory(s *Session) []Turn {
 	msgs := s.Messages
 	kept := func(m *Message) bool {
@@ -323,9 +278,6 @@ func chatHistory(s *Session) []Turn {
 	return turns
 }
 
-// keptToPage reports whether the replies chatHistory gives the model came
-// from runs that read nothing beyond the page: the next run may then take
-// what the conversation holds for the user's own, and use the web.
 func keptToPage(s *Session) bool {
 	for _, m := range s.Messages {
 		if m.Mine || m.Pending || m.Error {
@@ -339,12 +291,6 @@ func keptToPage(s *Session) bool {
 	return true
 }
 
-// readOthers reports whether a run whose reply the chat holds read a page
-// someone else writes or reads, judged over the whole chat, as keptToPage
-// judges it: what that run read may be in the turns the next run reads,
-// and in what it would make a page of the user's own of. A reply whose run
-// is not known is taken for one; one whose run failed or was undone,
-// whose turn the model no longer reads, is not.
 func readOthers(s *Session) bool {
 	for _, m := range s.Messages {
 		if m.Mine || m.Pending || m.Error {
@@ -357,8 +303,6 @@ func readOthers(s *Session) bool {
 	return false
 }
 
-// saveRun keeps a run's change with the conversation that shows it: the
-// page's chat or an earlier one, whose run the page's bar can still undo.
 func (h *Hub) saveRun(s *Session, runID string) {
 	for _, c := range s.Past {
 		if slices.ContainsFunc(c.Runs, func(r *Run) bool { return r.ID == runID }) {

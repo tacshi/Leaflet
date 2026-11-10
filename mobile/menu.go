@@ -14,12 +14,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// The editor's / and @ menus, as the desktop's (internal/menu): the core
-// says what they offer and filters it as the user types; the app draws
-// them and does what an item says.
-
-// MenuItems returns what the menu trigger, "/" or "@", offers in page
-// pageID, as a JSON array of menu.Item for FilterMenu to filter.
 func (c *Core) MenuItems(pageID, trigger string) (_ string, err error) {
 	defer catch(&err)
 	var items []menu.Item
@@ -39,8 +33,6 @@ func (c *Core) MenuItems(pageID, trigger string) (_ string, err error) {
 	return encode(items)
 }
 
-// slashItems are the / menu's blocks, and the templates but the page's
-// own (templates.Items). Run on the core's queue.
 func (c *Core) slashItems(pageID string) ([]menu.Item, error) {
 	all, hint, err := c.choices()
 	if err != nil {
@@ -49,8 +41,6 @@ func (c *Core) slashItems(pageID string) ([]menu.Item, error) {
 	return menu.Slash(templates.Items(all, pageID, hint)), nil
 }
 
-// mentionItems are the @ menu's agents, pages and people. Run on the
-// core's queue.
 func (c *Core) mentionItems(pageID string) ([]menu.Item, error) {
 	st := c.core.Store
 	pages, err := st.Pages()
@@ -72,8 +62,6 @@ func (c *Core) mentionItems(pageID string) ([]menu.Item, error) {
 	return menu.Mention(m), nil
 }
 
-// FilterMenu returns the items, a JSON array as MenuItems returns it, that
-// query, what is typed after the "/" or "@", finds.
 func FilterMenu(items, query string) (_ string, err error) {
 	defer catch(&err)
 	var all []menu.Item
@@ -83,18 +71,12 @@ func FilterMenu(items, query string) (_ string, err error) {
 	return encode(menu.Filter(all, query))
 }
 
-// menuBlock is what a / menu item makes of the block at the caret.
 type menuBlock struct {
-	// Type and Data turn the block into another kind of text block.
 	Type string         `json:"type,omitempty"`
 	Data map[string]any `json:"data,omitempty"`
-	// Node is a block to put at the caret instead.
-	Node any `json:"node,omitempty"`
+	Node any            `json:"node,omitempty"`
 }
 
-// MenuBlock returns what the / menu's item key makes, as JSON: the type
-// and data the block at the caret takes, or a block to put there, a chart
-// signed by author. It returns "" for an item the app does itself.
 func MenuBlock(key, author string) (_ string, err error) {
 	defer catch(&err)
 	if typ, level, ok := menu.Turn(key); ok {
@@ -106,10 +88,6 @@ func MenuBlock(key, author string) (_ string, err error) {
 	return "", nil
 }
 
-// LinkBlock returns the block of kind "image", "video" or "link_preview"
-// for link, as JSON, or what is wrong with the link, in the app's
-// language. A video's share link, as Bilibili's app shares, is followed
-// to the video first, which asks its site: call it off the main thread.
 func LinkBlock(kind, link string) (_ string, err error) {
 	defer catch(&err)
 	if kind == "video" {
@@ -122,21 +100,16 @@ func LinkBlock(kind, link string) (_ string, err error) {
 	return encode(n)
 }
 
-// ShortVideoLink reports whether link is a video's share link, as
-// Bilibili's app shares, which LinkBlock follows to its video.
 func ShortVideoLink(link string) bool {
 	defer catch(nil)
 	return doc.ShortVideoLink(link)
 }
 
-// EmbedStart returns the page a new embed starts from, to change.
 func EmbedStart() string {
 	defer catch(nil)
 	return menu.EmbedStart
 }
 
-// EmbedBlock returns an embed of html, as tall as height, that author
-// made, as JSON.
 func EmbedBlock(title, html string, height int, author string) (_ string, err error) {
 	defer catch(&err)
 	n, err := menu.EmbedBlock(title, html, height, author)
@@ -146,17 +119,8 @@ func EmbedBlock(title, html string, height int, author string) (_ string, err er
 	return encode(n)
 }
 
-// linkRetry is how long a link whose page could not be read, as offline,
-// waits before it is asked again, as the desktop's cards wait. Tests
-// shorten it.
 var linkRetry = time.Minute
 
-// fillLinks asks the pages of page id's link cards without their info
-// for it, and the sites of its videos without a title for theirs, once a
-// run, and puts what they say in the blocks, as the desktop does as a
-// card or a video shows: for search, exports and other devices. A page
-// that could not be read is asked again once linkRetry has passed, as
-// the page next opens or changes. Run on the core's queue.
 func (c *Core) fillLinks(id string, content *doc.Content) {
 	for _, link := range web.Unfilled(content) {
 		c.askOnce(link, func() bool {
@@ -188,9 +152,6 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 	}
 }
 
-// askOnce runs ask off the queue unless key was asked this run, and lets
-// key be asked again once linkRetry has passed when ask reports it could
-// not be read. Run on the core's queue.
 func (c *Core) askOnce(key string, ask func() bool) {
 	if c.linkAsked[key] {
 		return
@@ -203,8 +164,6 @@ func (c *Core) askOnce(key string, ask func() bool) {
 	})
 }
 
-// videoTitle asks a video's site for its title, as the desktop's video
-// blocks do. Tests replace it.
 var videoTitle = func(v doc.Video) (string, error) {
 	data, err := web.Fetch(v.InfoURL())
 	if err != nil {
@@ -214,8 +173,6 @@ var videoTitle = func(v doc.Video) (string, error) {
 	return title, err
 }
 
-// untitledVideos are the videos of content's video blocks without a title,
-// each once: a file goes by its name, with no site to ask.
 func untitledVideos(content *doc.Content) []doc.Video {
 	var out []doc.Video
 	content.Walk(func(n, _ *doc.Node) {
@@ -230,8 +187,6 @@ func untitledVideos(content *doc.Content) []doc.Video {
 	return out
 }
 
-// nameVideo gives content's blocks of video v without a title the one
-// its site said, and reports whether there were any.
 func nameVideo(content *doc.Content, v doc.Video, title string) bool {
 	found := false
 	content.Walk(func(n, _ *doc.Node) {
@@ -246,21 +201,12 @@ func nameVideo(content *doc.Content, v doc.Video, title string) bool {
 	return found
 }
 
-// pasted is what text pasted makes, as PasteText gives it: the blocks of
-// lines, a video or a picture for a link pasted on an empty line, or the
-// web link the text is.
 type pasted struct {
 	Blocks []*doc.Node `json:"blocks,omitempty"`
 	Media  *doc.Node   `json:"media,omitempty"`
 	Link   string      `json:"link,omitempty"`
 }
 
-// PasteText reads text pasted, as the desktop's editor pastes text: lines
-// as blocks, read as Markdown (doc.ParseLines), and one line that is a web
-// link as that link; on an empty line, a link to a video on a site
-// Leaflet plays or to a video file as a video, and a picture's as an
-// image. empty says the caret is on an empty line. A line of other text
-// makes nothing: it goes in as typed.
 func PasteText(text string, empty bool) (_ string, err error) {
 	defer catch(&err)
 	var out pasted
@@ -282,17 +228,12 @@ func PasteText(text string, empty bool) (_ string, err error) {
 	return encode(out)
 }
 
-// fence is what Enter after a line makes, as FenceEnter gives it.
 type fence struct {
 	Code     bool      `json:"code,omitempty"`
 	Language string    `json:"language,omitempty"`
 	Block    *doc.Node `json:"block,omitempty"`
 }
 
-// FenceEnter says what Enter at the end of a paragraph of line makes, as
-// the desktop's editor has it (fenceEnter): a Markdown fence, as "```go",
-// a code block in its language; "```mermaid" a diagram, and "$$" math, to
-// be written; nothing for another line.
 func FenceEnter(line string) (_ string, err error) {
 	defer catch(&err)
 	var out fence

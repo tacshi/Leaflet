@@ -1,6 +1,3 @@
-// Package theme is Leaflet's look: the color tokens of the v1 design with a
-// matching dark set and a sepia one, in a choice of accents, Figtree for the interface, Source Serif 4 for pages
-// unless the user chose other fonts, and Lucide's icons.
 package theme
 
 import (
@@ -17,14 +14,11 @@ import (
 //go:embed fonts/*.ttf
 var fonts embed.FS
 
-// UIFont and PageFont are the families of the interface and of pages.
 const (
 	UIFont   = "Figtree"
 	PageFont = "Source Serif 4"
 )
 
-// Palette is the color tokens. Separator is a line on the sidebar, whose
-// translucent material shows a solid light line as a white stripe.
 type Palette struct {
 	Ground, Sidebar, Surface, Panel                   ui.Color
 	Border, Divider, Separator                        ui.Color
@@ -36,11 +30,8 @@ type Palette struct {
 	DangerBg, DangerBorder, Danger, DangerText        ui.Color
 	ChartMuted, Inverse, OnInverse, Hover             ui.Color
 	Shadow                                            ui.Color
-	// Code is the card of code blocks; MyGo's code theme colors the code.
-	Code ui.Color
-	// Dark is the dark appearance's; Opaque paints the sidebar over the
-	// window's material.
-	Dark, Opaque bool
+	Code                                              ui.Color
+	Dark, Opaque                                      bool
 }
 
 var light = Palette{
@@ -71,8 +62,6 @@ var dark = Palette{
 	Separator: ui.RGBA(255, 255, 255, 0.08), Dark: true,
 }
 
-// sepia is the light appearance on warm paper, for long reading. Its
-// sidebar is painted over the window's material, which would show gray.
 var sepia = Palette{
 	Ground: ui.Hex("#F1E8D6"), Sidebar: ui.Hex("#ECE2CD"), Surface: ui.Hex("#F8F1E3"), Panel: ui.Hex("#F4ECDC"),
 	Border: ui.Hex("#DCCFB6"), Divider: ui.Hex("#E5D9C3"),
@@ -87,8 +76,6 @@ var sepia = Palette{
 
 func init() { sepia = withAccent(sepia, light.Accent) }
 
-// Accents are the accent colors to choose from, by name, each light and
-// dark; Indigo is the palettes' own.
 var Accents = []struct {
 	Name        string
 	Light, Dark ui.Color
@@ -102,21 +89,15 @@ var Accents = []struct {
 	{"Graphite", ui.Hex("#525866"), ui.Hex("#6E7583")},
 }
 
-// look is what Look chose, which every palette follows.
 var look struct {
 	sepia  bool
 	accent string
 }
 
-// Look chooses sepia paper for the light appearance and the accent: a
-// name of Accents, or "system" or "" for the desktop's.
 func Look(isSepia bool, accent string) {
 	look.sepia, look.accent = isSepia, accent
 }
 
-// Accent returns the accent named, light or dark, with "system", as "",
-// the desktop's, or Blue where it has none; ok is false for Indigo, the
-// palettes' own.
 func Accent(name string, isDark bool, system ui.Color) (ui.Color, bool) {
 	if name == "system" || name == "" {
 		if system.A == 0 {
@@ -145,10 +126,8 @@ type paletteKey struct {
 	accent      ui.Color
 }
 
-// palettes are the palettes made, kept so that each look has one.
 var palettes = map[paletteKey]*Palette{}
 
-// Of returns the palette for the window's appearance and the look.
 func Of(c *ui.Context) *Palette {
 	isDark := c.Theme().Dark
 	accent, _ := Accent(look.accent, isDark, c.Preferences().Accent)
@@ -161,7 +140,6 @@ func Of(c *ui.Context) *Palette {
 	return &p
 }
 
-// For returns Leaflet's own palette of an appearance.
 func For(isDark bool) *Palette {
 	if isDark {
 		return &dark
@@ -169,18 +147,11 @@ func For(isDark bool) *Palette {
 	return &light
 }
 
-// PaletteFor returns the palette of an appearance with sepia paper or
-// not, in the accent named (a name of Accents, or "" for Blue, there
-// being no desktop's), as Of makes a window's; the iOS app's palettes are
-// made with it (ios/gen).
-// Sepia is light paper: dark is dark with it too.
 func PaletteFor(isDark, isSepia bool, accent string) Palette {
 	color, _ := Accent(accent, isDark, ui.Color{})
 	return made(isDark, isSepia && !isDark, color)
 }
 
-// made is the palette of an appearance, its paper and its accent, or
-// Indigo for none.
 func made(isDark, isSepia bool, accent ui.Color) Palette {
 	p := *For(isDark)
 	if isSepia {
@@ -192,8 +163,6 @@ func made(isDark, isSepia bool, accent ui.Color) Palette {
 	return p
 }
 
-// withAccent returns p in accent, its tints mixed from its surface as
-// Indigo's are, and the text on it dark where white would not stand out.
 func withAccent(p Palette, accent ui.Color) Palette {
 	tint := func(light, dark float32) ui.Color {
 		if p.Dark {
@@ -216,8 +185,6 @@ func withAccent(p Palette, accent ui.Color) Palette {
 	return p
 }
 
-// Apply sets the window theme from the palette, keeping what follows the
-// system (its appearance and the desktop's preferences).
 func Apply(c *ui.Context) {
 	p := Of(c)
 	t := *c.Theme()
@@ -241,34 +208,22 @@ func Apply(c *ui.Context) {
 	c.SetTheme(&t)
 }
 
-// pageFonts is what SetFonts chose, which pages are set in.
 var pageFonts struct {
 	latin, chinese, japanese, code string
 	chosen                         int
 }
 
-// SetFonts chooses the families of pages: latin for their text, chinese
-// and japanese for the characters of those languages, and code for code,
-// each "" for Leaflet's own.
 func SetFonts(latin, chinese, japanese, code string) {
 	pageFonts.latin, pageFonts.chinese, pageFonts.japanese, pageFonts.code = latin, chinese, japanese, code
 	pageFonts.chosen++
 }
 
-// FontsChosen counts the times the page fonts were chosen: what is kept of
-// PageFamily's and CodeFamily's is out of date once it changes.
 func FontsChosen() int { return pageFonts.chosen }
 
-// PageFamily returns the family list of page text: the Latin font, then
-// the font of the language text's Han characters are in, Japanese where it
-// has kana and Chinese otherwise, when one is chosen; the system's fonts
-// draw what they lack.
 func PageFamily(text string) string {
 	return family(pageFonts.latin, PageFont, text)
 }
 
-// CodeFamily returns the family list of code, as PageFamily, with the
-// code font first.
 func CodeFamily(text string) string {
 	return family(pageFonts.code, "monospace", text)
 }
@@ -287,8 +242,6 @@ func family(first, fallback, text string) string {
 	return first + ", " + cjk
 }
 
-// hasKana reports whether text has Hiragana or Katakana, which only
-// Japanese writes.
 func hasKana(text string) bool {
 	for _, r := range text {
 		if r >= 0x3040 && unicode.In(r, unicode.Hiragana, unicode.Katakana) {
@@ -300,7 +253,6 @@ func hasKana(text string) bool {
 
 var registerOnce sync.Once
 
-// RegisterFonts registers the bundled fonts; call it once at startup.
 func RegisterFonts() {
 	registerOnce.Do(func() {
 		for _, f := range []struct{ file, family string }{
@@ -325,7 +277,6 @@ var (
 	iconCache = map[string]*ui.SVG{}
 )
 
-// Icon returns a Lucide icon by name, as "file-text".
 func Icon(name string) *ui.SVG {
 	iconMu.Lock()
 	defer iconMu.Unlock()
@@ -342,6 +293,4 @@ func Icon(name string) *ui.SVG {
 	return s
 }
 
-// IconSVG returns a Lucide icon's SVG source by name, for a web page;
-// its strokes are currentColor.
 func IconSVG(name string) string { return icons.SVG(name) }

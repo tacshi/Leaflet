@@ -2,15 +2,6 @@ package rules
 
 import "strings"
 
-// Code blocks: a line breaks indented as the one it leaves, and Tab
-// indents the lines chosen by the block's own step. Offsets are in runes
-// of the block's plain text, its lines apart by "\n".
-
-// CodeEnter is what Enter does in code at caret. On the second blank line
-// at the end, leave is true: the block keeps its text up to keep, without
-// the blank lines, and the caret goes on in a paragraph after it. Else
-// insert goes in at the caret: a line break and the indent of the caret's
-// line, as far as the caret.
 func CodeEnter(code string, caret int) (leave bool, keep int, insert string) {
 	runes := []rune(code)
 	caret = min(max(caret, 0), len(runes))
@@ -34,13 +25,6 @@ func lineStart(runes []rune, off int) int {
 	return off
 }
 
-// IndentCode indents the lines of code from the one anchor is on to the
-// one focus is on, or takes an indent off them when out, by the block's
-// own step: a tab when its lines are indented with tabs, else two spaces.
-// A line the selection only reaches the start of is left out, and Tab at
-// a caret puts a step there. It returns the code, and anchor and focus
-// where they are in it then; ok is false when nothing changed, as lines
-// with no indent outdented.
 func IndentCode(code string, anchor, focus int, out bool) (_ string, _, _ int, ok bool) {
 	runes := []rune(code)
 	anchor, focus = min(max(anchor, 0), len(runes)), min(max(focus, 0), len(runes))

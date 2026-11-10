@@ -17,19 +17,11 @@ import (
 	"leaflet/locales"
 )
 
-// panel is the side panel of a page: the agent chat, the comments and the
-// outline.
 func (a *App) panel(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
-	// Only the tabs: the window controls sit at the top right on Windows
-	// and Linux, and the page's title bar has the panel's toggle.
 	ui.Row(c.Key("panel-top")).Height(max(bar.Height, headerHeight)).Padding(0, bar.Right+panelTopPadR, 0, panelTopPadL).AlignItems(ui.Center).DragWindow().
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-		// MyGo's tabs, as high as the bar, so the chosen one's line is on
-		// the bar's bottom edge. They keep their width, which panelMinW
-		// keeps the panel wide enough for.
-		// With no page open, its Agent tab alone: the workspace agent's.
 		var tabs ui.Element
 		if a.pageOpen() {
 			tabs = ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline())
@@ -59,17 +51,14 @@ type chatState struct {
 	draft   string
 	input   ui.Handle
 	end     ui.ScrollState
-	sendNow bool // Enter was pressed in the composer
+	sendNow bool
 }
 
-// pageDrafts is what was typed on a page and not sent yet: in its chat,
-// and in its threads' reply boxes, by thread.
 type pageDrafts struct {
 	chat    chatState
 	replies map[string]*threadDraft
 }
 
-// draftsOf is what was typed on a page and not sent yet.
 func (a *App) draftsOf(pageID string) *pageDrafts {
 	d := a.drafts[pageID]
 	if d == nil {
@@ -82,8 +71,6 @@ func (a *App) draftsOf(pageID string) *pageDrafts {
 	return d
 }
 
-// sends reports whether a key sends what a box holds, a chat's message, a
-// comment or a reply: Enter, or Cmd+Enter; Shift+Enter breaks the line.
 func sends(k ui.TextKey) bool {
 	return k.Key == ui.KeyEnter && (k.Mods == 0 || k.Mods == ui.Cmd)
 }
@@ -99,23 +86,14 @@ func (a *App) agentPanel(c *ui.Context) {
 	})
 }
 
-// chatOptions are what a chat view says and does: the page panel's chat
-// and the workspace agent's.
 type chatOptions struct {
 	empty, placeholder string
 	suggestions        []string
-	// send asks the session's agent text.
-	send func(text string)
-	// focus, set, has the composer take the keyboard once.
-	focus *bool
-	// scope shows the choice of what the chat asks about beside a page:
-	// the page, or all the user's pages (scopePicker).
-	scope bool
+	send               func(text string)
+	focus              *bool
+	scope              bool
 }
 
-// chatView is a session's chat: its messages, or what to ask while it has
-// none, and the composer, with the agent to ask, a new conversation, the
-// earlier ones, and Send or Stop. With no provider, it says to add one.
 func (a *App) chatView(c *ui.Context, sess *agents.Session, cs *chatState, o chatOptions) {
 	pal := theme.Of(c)
 	options := a.hub.Options()
@@ -134,12 +112,9 @@ func (a *App) chatView(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 	if cs.end.Y >= cs.end.MaxY-4 {
 		cs.end.Y = 1e9
 	}
-	// Each chat's own widgets, its composer's text and undo among them:
-	// the page's and the workspace agent's take turns in one place.
 	ui.Column(c.Key("chat-view:" + sess.PageID)).Grow(1).Children(func() { a.chatBody(c, sess, cs, o, options) })
 }
 
-// chatBody is chatView's messages and composer.
 func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o chatOptions, options []agents.Option) {
 	pal := theme.Of(c)
 	ui.Scroll(c.Key("chat:" + sess.PageID)).Grow(1).TrackScroll(&cs.end).Padding(14).Children(func() {
@@ -161,9 +136,6 @@ func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 	})
 	ui.Column(c.Key("composer")).Padding(10, 12, 12).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 		ui.Column(c).Gap(8).Children(func() {
-			// MyGo's text area. It takes a plain Enter as a newline before
-			// any Shortcut sees it; OnTextKey sees it first. Shift+Enter
-			// still breaks the line.
 			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(o.placeholder).MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
 					if !sends(k) {
@@ -202,7 +174,6 @@ func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 					}
 				})
 				ui.Spacer(c)
-				// While its run works on this device, Send stops it.
 				if run := chatRun(sess); run != nil && run.Stoppable() {
 					stop := primary(c, "stop", "square-stop", "").Size(28, 28).Padding(0).Label(locales.PageStopRun()).Tooltip(locales.PageStopRun())
 					if stop.Clicked() {
@@ -220,7 +191,6 @@ func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 	})
 }
 
-// chatRun is the run the chat waits for, or nil.
 func chatRun(sess *agents.Session) *agents.Run {
 	for i := len(sess.Messages) - 1; i >= 0; i-- {
 		if m := sess.Messages[i]; m.Pending {
@@ -230,9 +200,6 @@ func chatRun(sess *agents.Session) *agents.Run {
 	return nil
 }
 
-// focusBlocks are the blocks the editor's selection is on, as the user
-// left it: the focus is in the composer as a chat is sent. A page whose
-// caret the user hasn't placed has none.
 func (a *App) focusBlocks() []string {
 	if a.page == nil || !a.page.editor.Focused() && !a.page.caretSet {
 		return nil
@@ -240,9 +207,6 @@ func (a *App) focusBlocks() []string {
 	return []string{a.page.editor.FocusBlock()}
 }
 
-// agentPicker is the menu choosing the agent the chat asks, named alone:
-// each runs the model Settings › Agent providers chose for it, which its
-// item says. The one picked is the one pages not picked for yet ask.
 func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.Option) {
 	current, err := a.hub.Resolve(sess.Selected)
 	name := locales.PanelNoAgent()
@@ -253,8 +217,6 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 		for _, o := range options {
 			if m.Item(o.Label()).Radio(err == nil && current.Provider.ID == o.Provider.ID).Chosen() {
 				sess.Selected = &store.ModelChoice{ProviderID: o.Provider.ID}
-				// There is no default to set: the agent last picked is the
-				// one a page not picked for yet asks.
 				a.settings.DefaultModel = store.ModelChoice{ProviderID: o.Provider.ID}.Encode()
 				a.saveSettings()
 			}
@@ -266,9 +228,6 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 	})
 }
 
-// scopePicker is the choice, beside a page, of what the Agent tab's chat
-// asks about: this page, of its agent, or all the user's pages, of the
-// workspace agent. The composer takes the keyboard again once chosen.
 func (a *App) scopePicker(c *ui.Context) {
 	icon, label := "file-text", locales.PanelScopePage()
 	if a.agentScope == 1 {
@@ -283,9 +242,6 @@ func (a *App) scopePicker(c *ui.Context) {
 	}).Shrink(0)
 }
 
-// menuChip is a small button of the composer's row opening a menu: an
-// icon, if any, its label and an arrow. Unlike MyGo's MenuButton, it gives
-// way where the row has no room, its label cut short.
 func menuChip(c *ui.Context, key, icon, label, name string, build func(m *ui.Menu)) ui.Element {
 	b := ui.Button(c.Key(key), "").Label(name).Tooltip(label).Padding(4, 7).Shrink(1).MinWidth(0)
 	b.Children(func() {
@@ -301,8 +257,6 @@ func menuChip(c *ui.Context, key, icon, label, name string, build func(m *ui.Men
 	return b
 }
 
-// pastConversations is MyGo's menu on an icon button, going back to one
-// of the page's earlier conversations.
 func (a *App) pastConversations(c *ui.Context, sess *agents.Session) {
 	b := iconButton(c, "past-chats", "history", locales.PanelPastConversations()).Disabled(sess.Running)
 	b.Menu(func(m *ui.Menu) {
@@ -358,9 +312,6 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 	})
 }
 
-// runEdits is the card of what a run changed, under its reply: an edit a
-// line, which a click goes to, and beside the first Undo, or Redo once
-// undone, as one step for them all. Undone edits show struck through.
 func (a *App) runEdits(c *ui.Context, sessID string, run *agents.Run) {
 	pal := theme.Of(c)
 	ui.Row(c).FillWidth().Gap(4).Padding(4).Radius(8).Background(pal.AgentSection).AlignItems(ui.Start).Children(func() {
@@ -368,9 +319,6 @@ func (a *App) runEdits(c *ui.Context, sessID string, run *agents.Run) {
 			for j, e := range run.Edits {
 				row := ui.ButtonBase(c.Key(fmt.Sprintf("edit:%d", j))).FillWidth().Height(26).Padding(0, 8).Gap(6).Radius(6).
 					Justify(ui.Start).AlignItems(ui.Center).TextColor(pal.AccentText).Label(e.Summary)
-				// The blocks of an undone edit are gone, or as they were, and
-				// the page it made with them. A page made that has not come
-				// yet goes nowhere.
 				opens := !run.Undone && e.PageID != "" && a.pageByID(e.PageID) != nil
 				goes := opens || !run.Undone && len(e.BlockIDs) > 0 && a.page != nil
 				switch {
@@ -419,28 +367,20 @@ func (a *App) runEdits(c *ui.Context, sessID string, run *agents.Run) {
 	})
 }
 
-// Comments --------------------------------------------------------------
-
 type threadDraft struct {
 	text    string
-	sendNow bool // Enter was pressed in the reply box
+	sendNow bool
 	agents  agentPicker
 }
 
-// commentLit is how long the threads of a block asked for stay lit in
-// the comments panel, from when they show.
 const commentLit = 1500 * time.Millisecond
 
-// showComments shows a block's threads in the comments panel: lit for a
-// moment, the first of them brought into view.
 func (a *App) showComments(blockID string) {
 	a.panelOpen, a.panelTab = true, 1
 	d := &a.dialogs
 	d.commentFocus, d.commentAt, d.commentShown = blockID, time.Time{}, false
 }
 
-// litComments is the block whose threads show lit, or "": the one asked
-// for, for commentLit from the frame its threads first showed in.
 func (a *App) litComments(c *ui.Context) string {
 	d := &a.dialogs
 	if d.commentFocus == "" {
@@ -477,7 +417,6 @@ func (a *App) commentsPanel(c *ui.Context) {
 				}
 			}
 			if open == 0 && a.dialogs.newComment == nil {
-				// As the home view's empty state is: an icon over centered text.
 				ui.Column(c).FillWidth().Padding(48, 16).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Icon(c, theme.Icon("message-square")).FontSize(26).TextColor(pal.ChartMuted).Margin(0, 0, 4, 0)
 					ui.Text(c, locales.PanelCommentsEmpty()).FontSize(14).FontWeight(600).TextColor(pal.Text)
@@ -510,7 +449,6 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 			if nc.quote != "" {
 				quoteChip(c, nc.quote)
 			}
-			// Enter posts, as it sends a reply or a chat.
 			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder(locales.PanelCommentPlaceholder()).MinHeight(64).AutoFocus().
 				OnTextKey(func(k ui.TextKey) bool {
 					if nc.agents.key(k) {
@@ -558,22 +496,17 @@ func quoteChip(c *ui.Context, quote string) {
 		BorderWidth(0, 0, 0, 3).BorderColor(pal.WarnBorder).Background(pal.WarnBg).Radius(4)
 }
 
-// agentPicker is the @ menu of a comment box: typing @ lists the agents,
-// as the page's @ menu does, and choosing one writes its name, which
-// agentInComment finds to run it.
 type agentPicker struct {
 	open   bool
-	at     int // where the @ is, in runes
+	at     int
 	query  string
-	n      int // the rows listed
+	n      int
 	index  int
-	chosen bool // Enter or Tab was pressed on the highlighted row
-	closed int  // the @ whose menu was dismissed, +1; 0 for none
-	caret  int  // where to put the caret once a name is written, +1
+	chosen bool
+	closed int
+	caret  int
 }
 
-// key takes the keys that move through the open menu, choose a row or
-// close it, from the comment box's OnTextKey.
 func (p *agentPicker) key(k ui.TextKey) bool {
 	if !p.open || k.Mods != 0 {
 		return false
@@ -593,8 +526,6 @@ func (p *agentPicker) key(k ui.TextKey) bool {
 	return true
 }
 
-// mentionAt finds the @ being typed before the caret of in: at the start
-// of text or after a space, so an email address opens no menu.
 func mentionAt(in ui.Element, text string) (at int, query string, ok bool) {
 	start, end := in.TextSelection()
 	if start != end || !in.Focused() {
@@ -616,7 +547,6 @@ func mentionAt(in ui.Element, text string) (at int, query string, ok bool) {
 	return 0, "", false
 }
 
-// agentMenu shows a comment box's @ menu below it, while an @ is typed.
 func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *string) {
 	pal := theme.Of(c)
 	if p.caret > 0 {
@@ -637,7 +567,6 @@ func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *stri
 			}
 		}
 	}
-	// With no agents yet, the menu offers to add one, as the page's does.
 	connect := ok && len(all) == 0 && query == ""
 	p.n = len(options)
 	if connect {
@@ -652,7 +581,6 @@ func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *stri
 		p.at, p.query, p.index = at, query, 0
 	}
 	p.index = min(p.index, p.n-1)
-	// write puts s in place of the @ and its query, the caret after it.
 	write := func(s string) {
 		r := []rune(*text)
 		end := min(at+1+len([]rune(query)), len(r))
@@ -710,13 +638,11 @@ func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *stri
 			}
 		})
 	})
-	// Pressing outside the menu, or Escape, closes it until another @.
 	if !p.open && p.caret == 0 {
 		p.closed = at + 1
 	}
 }
 
-// threadCard is a thread of the open page's, lit when asked for.
 func (a *App) threadCard(c *ui.Context, t store.Thread, lit bool) {
 	pal := theme.Of(c)
 	ps := a.page
@@ -740,9 +666,6 @@ func (a *App) threadCard(c *ui.Context, t store.Thread, lit bool) {
 				if jump.Clicked() {
 					ps.editor.PlaceCaret(t.Root.BlockID, 0)
 				}
-				// Who may change the thread, as the server allows: its
-				// author, or someone who may edit the page. Another's
-				// resolve would never go up.
 				root := t.Root
 				mayResolve := a.canEdit(ps.id) || root.AuthorKind == "user" && (root.AuthorID == "" || root.AuthorID == a.session.UserID)
 				tools(c, func() {
@@ -808,7 +731,6 @@ func (a *App) threadCard(c *ui.Context, t store.Thread, lit bool) {
 	})
 	if lit {
 		k.Border(1.5, pal.WarnBorder)
-		// The first of the block's threads comes into view, once.
 		if !a.dialogs.commentShown {
 			a.dialogs.commentShown = true
 			k.ScrollIntoView()
@@ -821,8 +743,6 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	ui.Column(c.Key(cm.ID)).Gap(4).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			avatar(c, cm.AuthorName, 20, cm.AuthorKind == "agent")
-			// Short of room, the name gives way before the time, which keeps
-			// its line.
 			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine().MinWidth(0).Tooltip(cm.AuthorName)
 			if asked := a.askedBy(cm); asked != "" {
 				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().MinWidth(0)
@@ -833,8 +753,6 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine().Shrink(0)
 			ui.Spacer(c)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
-			// A guest's comment came through the owner's public link: the
-			// owner may delete it.
 			guest := cm.AuthorKind == "guest" && a.page != nil && a.ownsPage(a.page.id)
 			if (mine || guest) && cm.DeletedAt.IsZero() {
 				tools(c, func() {
@@ -857,13 +775,8 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	})
 }
 
-// alertTones are the tones of the callouts GitHub's alerts stand for, in
-// the order of markdown.Theme's Alerts: Note, Tip, Important, Warning and
-// Caution, as doc.AlertTone reads them.
 var alertTones = [5]string{"info", "tip", "info", "warning", "danger"}
 
-// markdownView is markdown.View with alerts in the colors of callouts:
-// a page's callouts are alerts in its Markdown, as page history shows it.
 func markdownView(c *ui.Context, md string, o *markdown.Options) ui.Element {
 	if o.Theme == nil {
 		o.Theme = &markdown.Theme{}
@@ -875,8 +788,6 @@ func markdownView(c *ui.Context, md string, o *markdown.Options) ui.Element {
 	return markdown.View(c, md, o)
 }
 
-// commentText shows a comment's Markdown as the agents' replies show, its
-// mentions of agents marked as the editor marks mentions.
 func (a *App) commentText(c *ui.Context, body string) ui.Element {
 	pal := theme.Of(c)
 	if a.commentMD.Theme == nil || a.commentMD.Theme.Mark != pal.AccentSoft {
@@ -886,13 +797,10 @@ func (a *App) commentText(c *ui.Context, body string) ui.Element {
 	for _, o := range a.hub.Options() {
 		names = append(names, o.Name())
 	}
-	// Marked as bold in the accent, as the editor marks mentions.
 	md := core.MarkMentions(body, names, func(m string) string { return "<mark><b>" + m + "</b></mark>" })
 	return markdownView(c, md, &a.commentMD)
 }
 
-// commentBody is a comment's text, or says it was deleted: a thread whose
-// first comment was deleted keeps its replies.
 func commentBody(cm store.Comment) string {
 	if !cm.DeletedAt.IsZero() {
 		return locales.PanelCommentDeleted()
@@ -900,8 +808,6 @@ func commentBody(cm store.Comment) string {
 	return cm.Body
 }
 
-// askedBy names who asked for an agent's comment, when that was someone
-// else: anyone who can comment can post one, so it says whose it is.
 func (a *App) askedBy(cm store.Comment) string {
 	if cm.AuthorKind != "agent" || cm.AuthorID == "" || cm.AuthorID == a.session.UserID {
 		return ""
@@ -916,9 +822,6 @@ func (a *App) askedBy(cm store.Comment) string {
 	return locales.PanelAskedBySomeone()
 }
 
-// agentInComment runs an agent mentioned in a comment on the thread's
-// block, where the comment shows it marked: one named, or the default for
-// @agent. Its answer is posted in the thread.
 func (a *App) agentInComment(root store.Comment, body string) {
 	agent, mentioned, err := core.CommentAgent(a.hub, body)
 	if err != nil {

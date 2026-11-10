@@ -9,8 +9,6 @@ import (
 	"leaflet/locales"
 )
 
-// chartBlock is a chart block of kind, with a series of values for each
-// of series, over labels.
 func chartBlock(t *testing.T, kind string, labels []any, series ...[]any) *doc.Node {
 	t.Helper()
 	var ss []any
@@ -24,8 +22,6 @@ func chartBlock(t *testing.T, kind string, labels []any, series ...[]any) *doc.N
 	return &doc.Node{ID: "c", Type: "chart", Data: data}
 }
 
-// A chart of one value draws whole: a pie of it is one slice, all of it,
-// and a line or bar of it sits within the plot.
 func TestChartOfOneValue(t *testing.T) {
 	pie := chartHTML(chartBlock(t, "pie", []any{"All"}, []any{4.0}))
 	if strings.Count(pie, "<path") != 1 || !strings.Contains(pie, locales.EditorPieShare(1)) {
@@ -39,16 +35,12 @@ func TestChartOfOneValue(t *testing.T) {
 	}
 }
 
-// A pie with nothing to share draws nothing, which the page shows as the
-// chart's table instead.
 func TestPieOfNothing(t *testing.T) {
 	if got := chartHTML(chartBlock(t, "pie", []any{"A", "B"}, []any{0.0, -2.0})); got != "" {
 		t.Errorf("pie:\n%s", got)
 	}
 }
 
-// More series than colors take the colors again from the first, each in
-// the legend.
 func TestChartColorsComeRound(t *testing.T) {
 	n := len(editor.ChartColors) + 3
 	var series [][]any
@@ -62,9 +54,6 @@ func TestChartColorsComeRound(t *testing.T) {
 	}
 }
 
-// A pie with a slice more than there are colors gives the last slice,
-// beside the first, the second's color rather than the first's, in the
-// legend too, as the editor does.
 func TestPieLastSliceNotLikeTheFirst(t *testing.T) {
 	n := len(editor.ChartColors) + 2
 	var labels, vals []any

@@ -1,24 +1,16 @@
 import UIKit
 
-/// DuePopover changes a to-do's due date, as the desktop's due chip's
-/// popover: a calendar, a time of day to add or take away, and Remove
-/// date. It changes a draft, which the to-do takes as it closes; one closed
-/// untouched leaves the to-do as it was.
 final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
     UIPopoverPresentationControllerDelegate
 {
-    /// dueHour is the time of day a due date takes as it is given one.
     static let dueHour = 9
 
     private let had: Bool
-    /// day is the day chosen, none until one is for a to-do without a date.
     private var day: DateComponents?
     private var time: Date
     private var timed: Bool
     private var edited = false
     private var done = false
-    /// onClose takes the date chosen, or none to take it away, and whether
-    /// it changed: it is told as the popover closes untouched too.
     private let onClose: (_ due: Due?, _ changed: Bool) -> Void
 
     private let calendar = UICalendarView()
@@ -73,8 +65,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         stack.axis = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        // It scrolls where the screen is lower than it, as an iPhone on its
-        // side: the popover is as tall as there is room.
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceVertical = false
@@ -98,8 +88,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         preferredContentSize = CGSize(width: 344, height: fitting.height + 20)
     }
 
-    /// fillTimeRow shows Add time, or the time of day with a button that
-    /// takes it away.
     private func fillTimeRow() {
         for v in timeRow.arrangedSubviews { v.removeFromSuperview() }
         guard timed else {
@@ -135,7 +123,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
                 self?.fillTimeRow()
             })
         x.accessibilityLabel = L.editorRemoveTime
-        // The time at the start, its button at the end.
         let space = UIView()
         space.setContentHuggingPriority(.defaultLow, for: .horizontal)
         picker.setContentHuggingPriority(.required, for: .horizontal)
@@ -162,7 +149,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         dismiss(animated: true)
     }
 
-    /// chosen is the draft's date.
     private var chosen: Due? {
         let cal = Calendar.current
         guard let day, let start = cal.date(from: day) else { return nil }
@@ -183,8 +169,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
     func dateSelection(
         _ selection: UICalendarSelectionSingleDate, didSelectDate dateComponents: DateComponents?
     ) {
-        // A tap on the day chosen takes it away; the day stays, as the
-        // desktop's calendar has no day unchosen.
         guard let dateComponents else {
             selection.setSelected(day, animated: false)
             return
@@ -193,7 +177,6 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         edited = true
     }
 
-    // A popover on iPhone too, as the calendar fits.
     func adaptivePresentationStyle(
         for controller: UIPresentationController, traitCollection: UITraitCollection
     ) -> UIModalPresentationStyle { .none }

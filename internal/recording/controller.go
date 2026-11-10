@@ -781,6 +781,9 @@ func (r *Controller) Stop() {
 			r.update(func() { test(text, err) })
 			return
 		}
+		if st.ID == "" {
+			return // no row to finish, and gone would take its audio
+		}
 		if !withText {
 			if _, err := r.st.FinishRecording(st.ID, r.uploads(), func(rec *store.Recording) {
 				rec.Status, rec.DurationMs, rec.SttProvider, rec.SttModel = "ready", int(duration.Milliseconds()), "", ""

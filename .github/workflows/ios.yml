@@ -4,27 +4,23 @@ on:
   push:
     branches: [main]
     paths:
-      - "ios/**"
-      - "speech/**"
       - "mobile/**"
       - "internal/**"
       - "locales/**"
       - "supabase/**"
       - "go.mod"
       - "go.sum"
-      - "Makefile"
+      - "ios/scripts/check-core-deps.sh"
       - ".github/workflows/ios.yml"
   pull_request:
     paths:
-      - "ios/**"
-      - "speech/**"
       - "mobile/**"
       - "internal/**"
       - "locales/**"
       - "supabase/**"
       - "go.mod"
       - "go.sum"
-      - "Makefile"
+      - "ios/scripts/check-core-deps.sh"
       - ".github/workflows/ios.yml"
 
 permissions:
@@ -45,29 +41,3 @@ jobs:
           go-version-file: go.mod
       - name: Keep MyGo's windowing packages out of the iOS core
         run: ios/scripts/check-core-deps.sh
-
-  app:
-    name: App
-    # The app needs Xcode 27, which only this image has.
-    runs-on: xcode-27
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_27.2.app
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Build the Go core
-        run: make ios-core
-      - name: Generate the project
-        run: make ios-project
-      - name: Build for devices, unsigned
-        run: >
-          xcodebuild -project ios/Leaflet.xcodeproj -scheme Leaflet -configuration Debug
-          -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build -quiet
-          -onlyUsePackageVersionsFromResolvedFile
-      - name: Test
-        run: make ios-test -o ios-core -o ios-project

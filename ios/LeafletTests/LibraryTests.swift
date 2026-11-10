@@ -4,9 +4,6 @@ import Testing
 
 @testable import Leaflet
 
-/// LibraryTests cover the library as the sidebar arranges it, a window's
-/// pages before and after, and the values the app keeps as JSON, apart
-/// from the core.
 @MainActor
 struct LibraryTests {
     private func page(_ id: String, parent: String? = nil) -> PageRow {
@@ -16,9 +13,6 @@ struct LibraryTests {
             canEdit: true, createdBy: nil, defaultTemplateID: nil)
     }
 
-    /// The library reads as the core arranges it: each list of the tree
-    /// its pages, in the core's order, and an ID it has no page of left
-    /// out.
     @Test func theCoresTreeReadsAsItsPages() throws {
         func row(_ id: String, parent: String? = nil) -> String {
             let p = parent.map { #","parent_id":"\#($0)""# } ?? ""
@@ -48,9 +42,6 @@ struct LibraryTests {
         #expect(lib.topFiles.map(\.id) == ["left", "top"])
     }
 
-    /// The tree's rows are the pages and, under each one open, its
-    /// subpages a level deeper: closing a page takes away all under it,
-    /// and pages nested in a loop come once.
     @Test func theTreesRowsFollowThePagesOpen() {
         let lib = LibrarySnapshot(
             spaceID: "me",
@@ -70,8 +61,6 @@ struct LibraryTests {
         #expect(rows(["a1"]) == ["a:0+", "b:0"])
     }
 
-    /// A page whose parents go round in a loop, as two devices' moves can
-    /// leave them, still has a path, which ends.
     @Test func aLoopOfParentsEnds() {
         let lib = LibrarySnapshot(
             spaceID: "me", pages: [page("x", parent: "y"), page("y", parent: "x")], folders: [],
@@ -79,8 +68,6 @@ struct LibraryTests {
         #expect(lib.path(to: page("x", parent: "y")).map(\.id) == ["y"])
     }
 
-    /// Back and Forward leave out the pages deleted, and a window whose
-    /// page goes shows the one before it.
     @Test func aWindowKeepsOnlyThePagesStillThere() {
         let scene = SceneModel()
         scene.open("a")
@@ -96,7 +83,6 @@ struct LibraryTests {
         #expect(!scene.canGoBack)
     }
 
-    /// A block's data reads back as it was written, whatever its values.
     @Test func jsonValuesRoundTrip() throws {
         let value = JSONValue.object([
             "n": .null, "b": .bool(true), "i": .int(42), "d": .double(1.5), "s": .string("é"),
@@ -108,8 +94,6 @@ struct LibraryTests {
         #expect(value["d"]?.double == 1.5)
     }
 
-    /// A bookmark of the iCloud Drive folder that no longer opens has the
-    /// user pick it again, rather than sync through nothing.
     @Test func aBookmarkThatNoLongerOpensIsLost() throws {
         let suite = "LibraryTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -120,7 +104,6 @@ struct LibraryTests {
         #expect(folder.root == nil)
     }
 
-    /// A tag's color is the core's, whatever its case, for every device.
     @Test func tagsAreColoredByTheCore() {
         #expect(TagChip<EmptyView>.color("Work") == TagChip<EmptyView>.color("WORK"))
     }

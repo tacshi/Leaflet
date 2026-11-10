@@ -9,9 +9,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// Two toasts with an action and the same text, as after deleting two pages
-// called alike, show apart, each with its own Undo: as one, the second's
-// would take the first's place, and the first page could not come back.
 func TestActionToastsAlikeShowApart(t *testing.T) {
 	a := &App{}
 	var undone []int
@@ -36,8 +33,6 @@ func TestActionToastsAlikeShowApart(t *testing.T) {
 	}
 }
 
-// Whether a page can be edited is read once, until its members, the pages
-// or the session change: the sidebar asks it of every row as it draws.
 func TestCanEditIsReadAgainWhenMembersChange(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {

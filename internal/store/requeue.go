@@ -6,12 +6,6 @@ import (
 	"path"
 )
 
-// Requeue queues a page (with its content), folder or comment to go up
-// whole, as stored now, in one transaction: sending everything again
-// takes a while, and a change made meanwhile, as a deletion, goes up with
-// it, not under the copy read before. A row that is gone has nothing to
-// send. A row with a change of some columns still queued goes as stored
-// now too, but still as a change of only those (requeueRow).
 func (s *Store) Requeue(table, id string) error {
 	pageID := ""
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -51,15 +45,6 @@ func (s *Store) Requeue(table, id string) error {
 	return err
 }
 
-// requeueRow queues a row to go up whole, unless a change of some of its
-// columns is still queued (ChangedKey): that change stays one of only
-// those columns, as stored now. Sent whole, it would go as newer than
-// every change to the row this device has seen, and undo one another
-// device made to its other columns, as a move held here while this
-// device's rename waits (sync's iCloud batches). Those columns went with
-// an earlier entry, or come with the row the server or the other devices
-// have. old is the row as stored before the requeue changed it, or nil:
-// the columns it changed go with that change too.
 func requeueRow(tx *sql.Tx, entity, id string, old, row map[string]any, label, pageID string) error {
 	cols, _, err := queuedCols(tx, entity, id)
 	if err != nil {
@@ -75,10 +60,6 @@ func requeueRow(tx *sql.Tx, entity, id string, old, row map[string]any, label, p
 	return queue(tx, entity, id, row, label, pageID)
 }
 
-// RequeueFile queues a file to go up whole in space spaceID, as stored
-// now, as Requeue does a page, with its contents when this device has
-// them (a deleted file's row goes alone). A change of some of its columns
-// still queued stays one of those, as in requeueRow, and of the space.
 func (s *Store) RequeueFile(id, spaceID string) error {
 	var f File
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -104,7 +85,6 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 	if err != nil || f.ID == "" {
 		return err
 	}
-	// Deleted meanwhile: the copy brought here to send goes too.
 	if !f.DeletedAt.IsZero() {
 		s.removeCopy(f.ID)
 	}
@@ -112,10 +92,6 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 	return nil
 }
 
-// requeuedKey is the key of a file sent again in space spaceID. One that
-// goes up from here gets a key Storage takes; any other stays by the name
-// it is stored under, which is where the devices find it, as a file in
-// iCloud Drive this device has not brought here.
 func requeuedKey(f File, spaceID string) string {
 	if f.StoragePath == "" || f.DeletedAt.IsZero() && OnDevice(f.LocalPath) {
 		return StorageKey(spaceID, f.ID, f.Name)
@@ -123,11 +99,6 @@ func requeuedKey(f File, spaceID string) string {
 	return spaceID + "/" + f.ID + "/" + path.Base(f.StoragePath)
 }
 
-// RequeueRecording queues a finished recording to go up whole, as stored
-// now, as Requeue does a page, with its audio when this device has it. It
-// goes marked with when it last changed here (AdoptKey), so it goes over
-// the server's only when it changed here later: the server may have
-// transcribed it since, as for another device.
 func (s *Store) RequeueRecording(id string) error {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {

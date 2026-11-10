@@ -3,16 +3,11 @@ import AVKit
 import LeafletCore
 import SwiftUI
 
-/// PlayerSettings are how audio plays, kept for next time. Views watch them
-/// here: AppStorage misses a change to a key with a dot in it made through
-/// UserDefaults.
 @MainActor
 @Observable
 final class PlayerSettings {
     static let shared = PlayerSettings()
-    /// speed is how fast audio plays, files' and recordings' alike.
     private(set) var speed: Double
-    /// following says transcripts follow the audio.
     private(set) var following: Bool
 
     private init() {
@@ -33,21 +28,16 @@ final class PlayerSettings {
     }
 }
 
-/// PlaySpeed is the speeds audio plays at, a stored one that isn't offered
-/// reading as normal, and how far a skip goes.
 @MainActor
 enum PlaySpeed {
     static let defaultsKey = "player.speed"
     static let all: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2]
     static let skip: Double = 15
 
-    /// current is the speed to play at.
     static var current: Float { Float(PlayerSettings.shared.speed) }
 
-    /// label is a speed as its button says it: 1.5×.
     static func label(_ speed: Double) -> String { String(format: "%g×", speed) }
 
-    /// set has audio play at speed, what plays now and what plays next.
     static func set(_ speed: Double) {
         PlayerSettings.shared.setSpeed(speed)
         FilePlayback.shared.speedChanged()
@@ -55,7 +45,6 @@ enum PlaySpeed {
     }
 }
 
-/// SkipButton goes seconds on or, below 0, back.
 struct SkipButton: View {
     let seconds: Double
     let run: () -> Void
@@ -73,7 +62,6 @@ struct SkipButton: View {
     }
 }
 
-/// SpeedMenu says how fast audio plays, and changes it.
 struct SpeedMenu: View {
     var body: some View {
         let settings = PlayerSettings.shared
@@ -99,42 +87,23 @@ struct SpeedMenu: View {
     }
 }
 
-/// FilePlayback plays the audio and video files of a page, in their blocks:
-/// one at a time, as one person listens to one, so one starting here pauses
-/// the videos and the recording playing, and they pause it.
 @MainActor
 @Observable
 final class FilePlayback {
     static let shared = FilePlayback()
-    /// block is the file block playing, or paused where it was.
     private(set) var block: String?
-    /// player plays block's file.
     private(set) var player: AVPlayer?
-    /// loading is the block whose file is on its way.
     private(set) var loading: String?
-    /// playing says the player plays, paused or at its end otherwise.
     private(set) var playing = false
-    /// cover is the picture in the file, if it has one.
     private(set) var cover: UIImage?
-    /// failed is a block whose file the player can't read.
     private(set) var failed: Set<String> = []
     @ObservationIgnored private var watching: NSKeyValueObservation?
-    /// fetching brings loading's file and readies its player; stop cancels
-    /// it, so a file asked for on a page that has closed, or of a block
-    /// gone, never starts.
     @ObservationIgnored private var fetching: Task<Void, Never>?
-    /// fetch tells the fetching of now from one stopped before it, which
-    /// may still be finishing an await it can't be cancelled out of.
     @ObservationIgnored private var fetch = 0
 
     private init() {}
 
-    /// play starts file fileID of block from at seconds in, or from where
-    /// it was; playing with no time asked, it pauses it. A file that isn't
-    /// here comes first.
     func play(block id: String, file fileID: String, at: Int? = nil, client: CoreClient?) {
-        // Not while a recording runs, as a recording's own audio: playing
-        // takes the audio session, and the microphone with it.
         guard !Recorder.shared.state.recording else { return }
         if block == id, let player {
             if let at { player.seek(to: CMTime(seconds: Double(at), preferredTimescale: 600)) }
@@ -193,11 +162,8 @@ final class FilePlayback {
         }
     }
 
-    /// current says fetching this is still the one asked for: checked after
-    /// each of its awaits, as stop may have come while it waited.
     private func current(_ this: Int) -> Bool { !Task.isCancelled && fetch == this }
 
-    /// cover is the picture asset holds: an album's or an episode's.
     private static func cover(of asset: AVURLAsset) async -> UIImage? {
         guard let items = try? await asset.load(.commonMetadata),
             let art = AVMetadataItem.metadataItems(
@@ -212,8 +178,6 @@ final class FilePlayback {
         guard !Recorder.shared.state.recording else { return }
         VideoPlayback.shared.pauseAll()
         Recorder.shared.pausePlaying()
-        // A file played to its end starts over, as a recording does: a
-        // player at its end plays nothing.
         if let length = player.currentItem?.duration.seconds, length.isFinite,
             player.currentTime().seconds >= length - 0.05
         {
@@ -222,21 +186,17 @@ final class FilePlayback {
         player.play()
     }
 
-    /// toggle plays the file there is, or pauses it.
     func toggle() {
         guard let player else { return }
         if playing { player.pause() } else { resume(player) }
     }
 
-    /// pause pauses the file playing, as something else starts.
     func pause() { player?.pause() }
 
-    /// seek takes the file to at seconds in, playing or not as it was.
     func seek(to at: Double) {
         player?.seek(to: CMTime(seconds: at, preferredTimescale: 600))
     }
 
-    /// skip moves the file by seconds, within it.
     func skip(by seconds: Double) {
         guard let player else { return }
         let now = player.currentTime().seconds
@@ -245,14 +205,11 @@ final class FilePlayback {
         seek(to: min(max(now + seconds, 0), length.isFinite ? length : .infinity))
     }
 
-    /// speedChanged plays the file at the speed now asked for.
     func speedChanged() {
         player?.defaultRate = PlaySpeed.current
         if playing { player?.rate = PlaySpeed.current }
     }
 
-    /// stop lets the file playing go, as its page closes, and one on its
-    /// way.
     func stop() {
         fetching?.cancel()
         fetching = nil
@@ -266,22 +223,14 @@ final class FilePlayback {
         playing = false
     }
 
-    /// stop lets the file playing, or on its way, go if it is of blocks.
     func stop(_ blocks: Set<String>) {
         if let playing = block ?? loading, blocks.contains(playing) { stop() }
         failed.subtract(blocks)
     }
 }
 
-/// NowPlayingBar is a small player over the top of the page, for audio
-/// whose own has scrolled away: a transcript is read below it, and a block
-/// may still show when its player no longer does. A video has none, as it
-/// has picture in picture, but shows in the system's media controls from
-/// here as audio does.
 struct NowPlayingBar: View {
-    /// editor is the page's, whose audio it plays.
     weak var editor: EditorController?
-    /// Playing is what the bar is for: a file's block, or a recording's.
     private enum Playing: Equatable {
         case file(String)
         case recording(String)
@@ -295,11 +244,8 @@ struct NowPlayingBar: View {
     @State private var dragging = false
     @State private var on = false
     private var following: Bool { PlayerSettings.shared.following }
-    /// horizontalSizeClass leaves a narrow screen the controls alone.
     @Environment(\.horizontalSizeClass) private var width
 
-    /// playing is the audio that started last: the one that plays, or the
-    /// one left paused.
     private var playing: Playing? {
         let (files, recorder) = (FilePlayback.shared, Recorder.shared)
         _ = recorder.changes
@@ -402,13 +348,11 @@ struct NowPlayingBar: View {
         }
     }
 
-    /// cover is what plays's own picture.
     private static func cover(_ playing: Playing) -> UIImage? {
         if case .file = playing { return FilePlayback.shared.cover }
         return nil
     }
 
-    /// controls are what the system's media controls do to what plays.
     private static func controls(_ playing: Playing) -> NowPlaying.Controls {
         switch playing {
         case .file:
@@ -424,8 +368,6 @@ struct NowPlayingBar: View {
         }
     }
 
-    /// find is the block of what plays, in this page, its name, and whether
-    /// it is audio; nil for what plays in another page.
     private func find(_ playing: Playing) -> (id: String, title: String, audio: Bool)? {
         switch playing {
         case .file(let id):
@@ -485,7 +427,6 @@ struct NowPlayingBar: View {
     }
 }
 
-/// FileBar is the bar of a file playing: where it has got to, to drag.
 struct FileBar: View {
     let player: AVPlayer
     @State private var at: Double = 0
@@ -525,8 +466,6 @@ struct FileBar: View {
     }
 }
 
-/// FileVideo shows a video file's picture, with the system's controls. What
-/// it plays shows in the media controls from NowPlaying, with its name.
 struct FileVideo: UIViewControllerRepresentable {
     let player: AVPlayer
 

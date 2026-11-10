@@ -1,8 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// SidebarTab is the sidebar's view: the page tree, the tags, or the
-/// to-dos of every page.
 enum SidebarTab: String, CaseIterable, Identifiable {
     case pages, tags, todos
     var id: String { rawValue }
@@ -24,11 +22,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// SidebarView is the library: the pages, the tags or the to-dos, and
-/// search over them all.
 struct SidebarView: View {
-    /// stacked says the sidebar stacks over the page, as on iPhone, rather
-    /// than standing beside it.
     var stacked = false
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
@@ -36,28 +30,18 @@ struct SidebarView: View {
     @Environment(SceneModel.self) private var scene
     @FocusState private var searchFocused: Bool
     @SceneStorage("sidebar.tab") private var tab = SidebarTab.pages
-    /// collapsed are the tags and the to-do groups folded in the Tags and
-    /// To-dos tabs, a tag as "tag:" and its name, a to-do group as "todo:"
-    /// and its own, one a line.
     @SceneStorage("sidebar.collapsed") private var collapsed = ""
     @State private var query = ""
     @State private var hits: [SearchHit] = []
-    /// searching says the hits shown are not yet the query's.
     @State private var searching = false
     @State private var renaming: Renaming?
     @State private var newName = ""
-    /// renamingTag is the tag being renamed, from its menu in the Tags tab.
     @State private var renamingTag: String?
-    /// id is this sidebar's, by which it tells the app it shows the to-dos.
     @State private var id = UUID()
-    /// open are the pages whose subpages show, by ID.
     @State private var open: Set<String> = []
 
-    /// showsTodos says the sidebar shows the To-dos tab, which the app then
-    /// keeps current (AppModel.showsTodos).
     private var showsTodos: Bool { tab == .todos && query.isEmpty }
 
-    /// Renaming is the page or folder being renamed.
     enum Renaming: Identifiable {
         case page(PageRow)
         case folder(FolderRow)
@@ -68,8 +52,6 @@ struct SidebarView: View {
             }
         }
 
-        /// title and placeholder word the alert, as the desktop's Rename
-        /// folder dialog does a folder's.
         var title: String {
             switch self {
             case .page: L.commonRename
@@ -85,8 +67,6 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        // Only a page opens: the list tags each folder's row with its ID
-        // too, which no page has.
         List(
             selection: Binding(
                 get: { scene.selection },
@@ -104,14 +84,8 @@ struct SidebarView: View {
                 }
             }
         }
-        // Stacked, the sidebar's style sets its sections in cards, with
-        // room above them: a plain list has the rows reach the edges right
-        // under the tabs, as the desktop's sidebar has them.
         .modifier(LibraryListStyle(stacked: stacked))
         .scrollDismissesKeyboard(.interactively)
-        // The bar has the desktop's buttons and no title, which they leave
-        // no room for: search sits right under it, on iPhone too, with
-        // no empty row of large title between.
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(
@@ -121,7 +95,6 @@ struct SidebarView: View {
         .searchFocused($searchFocused)
         .onChange(of: scene.searchRequested) { searchFocused = true }
         .task(id: query) { await search() }
-        // Its agents, for search to offer one where nothing matches.
         .task { scene.workspace.start(app) }
         .onAppear { app.showsTodos(id, showsTodos) }
         .onDisappear { app.showsTodos(id, false) }
@@ -138,12 +111,7 @@ struct SidebarView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { SyncStatusBar() }
         .toolbar {
-            // A new page and a new folder, each a button of its own, as
-            // the desktop's sidebar has them; plain, as the sidebar's own
-            // button.
             ToolbarItemGroup(placement: .primaryAction) {
-                // Stacked, as on iPhone, no screen of no page open has Ask
-                // the agent beside it: the list of pages does.
                 if stacked {
                     Button(L.shellAskAgent, systemImage: "sparkles") {
                         scene.askWorkspace(sheet: true)
@@ -158,8 +126,6 @@ struct SidebarView: View {
                 .tint(Color.primary)
             }
         }
-        // As the desktop's Rename tag dialog: the name, chosen to type
-        // over, and Rename.
         .alert(
             L.dialogTagRename,
             isPresented: Binding(
@@ -173,7 +139,6 @@ struct SidebarView: View {
             Button(L.commonRename) {
                 let name = newName
                 Task {
-                    // The tag opens under its new name.
                     if let kept = await app.renameTag(tag, to: name) {
                         expanded("tag:" + kept).wrappedValue = true
                     }
@@ -211,8 +176,6 @@ struct SidebarView: View {
         }
     }
 
-    // MARK: Pages
-
     @ViewBuilder private var pagesTab: some View {
         let lib = app.library
         Section {
@@ -249,11 +212,7 @@ struct SidebarView: View {
             openInNewWindow: { openWindow(value: $0) })
     }
 
-    // MARK: Tags
-
     @ViewBuilder private var tagsTab: some View {
-        // Each tag a row of the one section, its pages under it: sections
-        // of their own would leave a section's room between the tags.
         Section {
             if app.library.tags.isEmpty {
                 Text(L.sidebarNoTags).foregroundStyle(.secondary)
@@ -271,11 +230,6 @@ struct SidebarView: View {
         .withoutTopLine()
     }
 
-    /// tagHeader is a tag's row, heading its pages as the desktop's Tags
-    /// tab does: the tag's name in its color, its actions' button,
-    /// renaming it or taking it off every page, how many pages have it,
-    /// and its own arrow, on a band of the tag's color that stands it
-    /// apart from the pages. A tap folds it.
     private func tagHeader(_ tag: TagRow, open: Binding<Bool>) -> some View {
         let fold = { withAnimation(.snappy) { open.wrappedValue.toggle() } }
         let band = Color(TagChip<EmptyView>.color(tag.tag).withAlphaComponent(0.1))
@@ -316,9 +270,6 @@ struct SidebarView: View {
             .accessibilityLabel(open.wrappedValue ? LI.hideTaggedPages : LI.showTaggedPages)
         }
         .padding(.vertical, 8)
-        // The band reaches past the name and the arrow, which stay in line
-        // with the pages' rows, and fills the row: one tag's band meets the
-        // next.
         .padding(.horizontal, 8)
         .background(band, in: .rect(cornerRadius: 10))
         .padding(.horizontal, -8)
@@ -329,9 +280,6 @@ struct SidebarView: View {
         .selectionDisabled()
     }
 
-    /// foldHeader heads a section that folds away, as the sidebar's style
-    /// folds its own on iPad, where a plain list does not: its title and
-    /// an arrow, which a tap turns.
     private func foldHeader(_ title: String, open: Binding<Bool>) -> some View {
         Button {
             withAnimation(.snappy) { open.wrappedValue.toggle() }
@@ -349,8 +297,6 @@ struct SidebarView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    /// expanded is whether a tag or a to-do group is open, kept with the
-    /// window.
     private func expanded(_ key: String) -> Binding<Bool> {
         Binding(
             get: { !collapsed.split(separator: "\n").contains(Substring(key)) },
@@ -361,18 +307,12 @@ struct SidebarView: View {
             })
     }
 
-    // MARK: To-dos
-
     @ViewBuilder private var todosTab: some View {
-        // The core's sections, in its order, each by date, as the desktop's.
         let groups = app.todos
         if groups.isEmpty {
             ContentUnavailableView(
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
-        // A group alone has no header, which would only say what the
-        // to-dos' dates do, nor a fold to hide them all; but Overdue, which
-        // their dates say only in red.
         if groups.count == 1, !groups[0].overdue {
             Section {
                 todoRows(groups[0])
@@ -401,16 +341,12 @@ struct SidebarView: View {
         }
     }
 
-    // MARK: Search
-
     private var searchResults: some View {
         Section {
             if searching && hits.isEmpty {
                 ProgressView().frame(maxWidth: .infinity)
             } else if hits.isEmpty {
                 ContentUnavailableView.search(text: query)
-                // As the desktop's search: what nothing matches, an agent
-                // may find in the pages, or make of them.
                 if scene.workspace.agents.available {
                     Button(L.dialogSearchAskAgent, systemImage: "sparkles") { askAgent() }
                         .frame(maxWidth: .infinity)
@@ -450,10 +386,6 @@ struct SidebarView: View {
         }
     }
 
-    /// askAgent asks an agent what was searched for, as the desktop's search
-    /// does: the page's beside it, or with none beside the list, the
-    /// workspace agent, as a sheet, stacked. While the agent works, which
-    /// takes one request at a time, the question waits in its composer.
     private func askAgent() {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, let client = app.client else { return }
@@ -479,9 +411,6 @@ struct SidebarView: View {
         }
     }
 
-    /// search finds the query's hits as it is typed. Each change of the
-    /// query cancels the search before: one that answers after it would
-    /// show the hits of what was typed before.
     private func search() async {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
@@ -490,7 +419,6 @@ struct SidebarView: View {
             return
         }
         searching = true
-        // Typing on waits a moment before searching.
         try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled else { return }
         let found = (try? await app.client?.search(q)) ?? []
@@ -500,9 +428,6 @@ struct SidebarView: View {
     }
 }
 
-/// LibraryListStyle is the library's list: the sidebar's style beside the
-/// page, a plain list stacked over it, as on iPhone, with a little more
-/// room at its sides than a plain list has.
 private struct LibraryListStyle: ViewModifier {
     let stacked: Bool
 
@@ -517,15 +442,11 @@ private struct LibraryListStyle: ViewModifier {
 }
 
 extension View {
-    /// withoutTopLine leaves out the line a plain list draws over a
-    /// section's first row: under the tabs, or a section's title, it parts
-    /// nothing.
     fileprivate func withoutTopLine() -> some View {
         listSectionSeparator(.hidden, edges: .top)
     }
 }
 
-/// RowActions are what a row's menu does that the sidebar handles.
 struct RowActions {
     var newSubpage: (PageRow) -> Void
     var newPageInFolder: (FolderRow) -> Void
@@ -534,15 +455,9 @@ struct RowActions {
     var openInNewWindow: (String) -> Void
 }
 
-/// PageRows are pages and the pages nested in them, which fold away: each
-/// a row of the list, those inside indented by depth. They are one run of
-/// rows, made anew as a page opens or closes, so the list only ever gains
-/// and loses rows: rows a page's own view added and took away could stay
-/// behind, drawn over the row that took their place.
 struct PageRows: View {
     let pages: [PageRow]
     let actions: RowActions
-    /// open are the pages whose subpages show, by ID.
     @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
 
@@ -552,7 +467,6 @@ struct PageRows: View {
                 page: row.page, actions: actions, depth: row.depth,
                 expanded: row.folds ? expanded(row.page.id) : nil
             )
-            // Pages are in order here: a tag's are by title.
             .modifier(PageDrops(page: row.page))
         }
     }
@@ -566,16 +480,13 @@ struct PageRows: View {
     }
 }
 
-/// PageLink is a page's row: its title, which opens it, and its menu.
 struct PageLink: View {
     let page: PageRow
     let actions: RowActions
     var depth = 0
-    /// expanded shows or hides the page's subpages, nil for one with none.
     var expanded: Binding<Bool>?
     @Environment(AppModel.self) private var app
 
-    /// indent is how far each level of subpages goes in.
     static let indent: CGFloat = 20
 
     var body: some View {
@@ -590,9 +501,6 @@ struct PageLink: View {
                 }
             }
             Spacer(minLength: 0)
-            // Its own chevron rather than a disclosure group's: that one
-            // keeps its color on the selected row, where this one, as the
-            // title, turns light.
             if let expanded {
                 Button {
                     withAnimation(.snappy) { expanded.wrappedValue.toggle() }
@@ -622,7 +530,6 @@ struct PageLink: View {
                 Button(L.commonDelete, systemImage: "trash", role: .destructive) {
                     Task { await app.delete(page) }
                 }
-                // Red as deleting is everywhere, over the app's accent.
                 .tint(.red)
             }
         }
@@ -635,11 +542,9 @@ struct PageLink: View {
     }
 }
 
-/// FolderRowView is a folder and its pages, which fold away.
 struct FolderRowView: View {
     let folder: FolderRow
     let actions: RowActions
-    /// open are the pages whose subpages show, by ID.
     @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
     @State private var expanded = true
@@ -651,8 +556,6 @@ struct FolderRowView: View {
             ForEach(app.library.files(in: folder)) { FileRowView(file: $0) }
         } label: {
             Label(folder.name, systemImage: "folder")
-                // A tap opens or closes the folder, which is no page to
-                // open: the list leaves the page open selected.
                 .selectionDisabled()
                 .contentShape(.rect)
                 .onTapGesture { withAnimation { expanded.toggle() } }
@@ -676,7 +579,6 @@ struct FolderRowView: View {
                         Task { await app.deleteFolder(folder) }
                     }
                 }
-                // A page dropped on a folder goes last in it.
                 .dropDestination(for: String.self) { ids, _ in
                     guard let id = ids.first, let page = app.library.page(id), page.canEdit,
                         !page.template, app.library.own(page)
@@ -696,8 +598,6 @@ struct FolderRowView: View {
     }
 }
 
-/// TodoRowView is an open to-do: its text, its page, and when it is due,
-/// in red when that has passed.
 struct TodoRowView: View {
     let todo: Todo
     let overdue: Bool
@@ -726,7 +626,6 @@ struct TodoRowView: View {
     }
 }
 
-/// SyncStatusBar says how sync stands, at the foot of the sidebar.
 struct SyncStatusBar: View {
     @Environment(AppModel.self) private var app
 
@@ -756,8 +655,6 @@ struct SyncStatusBar: View {
 
     private var pending: Int { app.status?.pending ?? 0 }
 
-    /// text says how sync stands, as the desktop's account line does:
-    /// working offline, or a pass that failed, before what waits to go.
     private var text: String {
         if app.syncing { return L.sidebarSyncing }
         if !signedIn { return L.sidebarOnDevice }
@@ -777,7 +674,6 @@ struct SyncStatusBar: View {
     }
 }
 
-/// PagePreview is a page as a long press on its row previews it.
 struct PagePreview: View {
     let page: PageRow
 

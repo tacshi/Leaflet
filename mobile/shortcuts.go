@@ -8,13 +8,6 @@ import (
 	"leaflet/internal/shortcut"
 )
 
-// Markdown typed in a page, as the desktop's editor takes it
-// (internal/shortcut). The app makes the change in its own text, its
-// offsets in UTF-16 units, as UIKit counts them.
-
-// MarkdownShortcut returns the block a block of type typ becomes as a
-// space is typed after prefix, its text before the caret with the space,
-// as JSON {"type", "data"}; "" for text that is no shortcut.
 func MarkdownShortcut(typ, prefix string) string {
 	defer catch(nil)
 	t, data, ok := shortcut.Block(typ, prefix)
@@ -25,17 +18,11 @@ func MarkdownShortcut(typ, prefix string) string {
 	return raw
 }
 
-// DividerShortcut reports whether a block of type typ whose text is text,
-// as its last "-" is typed, becomes a divider.
 func DividerShortcut(typ, text string) bool {
 	defer catch(nil)
 	return shortcut.Divider(typ, text)
 }
 
-// Menu returns the menu typed opens, "/" or "@", typed after before, the
-// character before it, or "" at a block's start, as the desktop's editor
-// opens them (shortcut.Menu): "/" and "@" in full width too, and "、" at
-// a block's start or after a space. It returns "" for none.
 func Menu(typed, before string) string {
 	defer catch(nil)
 	r, n := utf8.DecodeRuneInString(typed)
@@ -52,8 +39,6 @@ func Menu(typed, before string) string {
 	return ""
 }
 
-// MenuKind returns the menu a character stands for, "/" or "@", as one
-// that opened it does (shortcut.MenuKind), or "".
 func MenuKind(char string) string {
 	defer catch(nil)
 	r, n := utf8.DecodeRuneInString(char)
@@ -66,10 +51,6 @@ func MenuKind(char string) string {
 	return ""
 }
 
-// InlineShortcut returns the marker pair typing text's last character
-// closes, text being a block's up to the caret, as JSON {"open", "inner",
-// "close", "end", "format"} in UTF-16 offsets; "" for none. mentions are
-// the runs of text that are mentions, a JSON array of [from, to].
 func InlineShortcut(text, mentions string) string {
 	defer catch(nil)
 	var runs [][2]int

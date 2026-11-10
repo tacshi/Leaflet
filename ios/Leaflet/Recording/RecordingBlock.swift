@@ -3,26 +3,13 @@ import LeafletCore
 import SwiftUI
 import UIKit
 
-/// RecordingBlock is a recording in the page, as the desktop draws it: its
-/// title and state, Play and its menu, and its transcript, a time on each
-/// line that plays from there, a long one folded to its first lines. While
-/// it records, it shows what the microphone hears, and the last two lines
-/// of the words as they come. It is as tall as it needs, which it tells
-/// onHeight.
 struct RecordingBlock: View {
     let node: DocNode
-    /// canEdit says the page can be changed: the transcript only copies
-    /// otherwise.
     let canEdit: Bool
-    /// editor is the page's, which puts the transcript in.
     weak var editor: EditorController?
     var onHeight: (@MainActor (CGSize) -> Void)?
-    /// control is the size of Play and the menu's button, as the text
-    /// size scales them.
     @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 32
-    /// open shows a long transcript whole.
     @State private var open = false
-    /// clock says what is being said while the recording plays.
     @State private var clock = LineClock()
 
     private var id: String { node.data?["recording_id"]?.string ?? "" }
@@ -45,8 +32,6 @@ struct RecordingBlock: View {
                 if recorder.playing == id, let player = recorder.player {
                     Scrubber(player: player, id: id)
                 }
-                // What went wrong, until it is read and closed: a failure,
-                // or a warning over a transcript that may be short.
                 if !row.error.isEmpty {
                     notice(row)
                 }
@@ -104,8 +89,6 @@ struct RecordingBlock: View {
         }
     }
 
-    /// title is the block's title as the core names it: an older one's in
-    /// the app's language, or Recording on a page of the same title.
     private func title(_ row: RecordingRow?) -> String {
         Self.title(node, row)
     }
@@ -115,8 +98,6 @@ struct RecordingBlock: View {
             node.data?["title"]?.string ?? "", row?.createdMs ?? 0, row?.pageTitle ?? "")
     }
 
-    /// status is the line under the title: what runs for the recording
-    /// here, else what the core says of it.
     private func status(_ recorder: Recorder, _ row: RecordingRow?, live: Bool) -> String {
         let state = recorder.state
         if live { return state.engine }
@@ -126,9 +107,6 @@ struct RecordingBlock: View {
         return row.label
     }
 
-    /// actions are what block, of recording id, offers now, for VoiceOver
-    /// at the caret, which can't reach the block in the text: Play or
-    /// Pause, and its menu's items.
     static func actions(_ id: String, block: DocNode, canEdit: Bool, editor: EditorController?)
         -> [BlockAction]
     {
@@ -147,8 +125,6 @@ struct RecordingBlock: View {
             + menuItems(id, block: block, row, canEdit: canEdit, editor: editor).filter(\.enabled)
     }
 
-    /// menuItems are the items of the menu of block, of recording id, in
-    /// editor's page.
     private static func menuItems(
         _ id: String, block: DocNode, _ row: RecordingRow, canEdit: Bool, editor: EditorController?
     ) -> [BlockAction] {
@@ -180,19 +156,15 @@ struct RecordingBlock: View {
                         id, title: title(block, row), format: format, in: editor)
                 }
             } + [
-                // The agent reads the transcript with the block.
                 BlockAction(title: L.recSummarize, symbol: "sparkles", enabled: !empty && canEdit) {
                     editor?.onSummarize?(block, L.recSummarizePrompt(title: title(block, row)))
                 },
-                // Not while a transcription runs, which the new one would race.
                 .transcribe(
                     empty ? L.recTranscribe : L.recTranscribeAgain, page: editor?.pageID,
                     enabled: canEdit && !recorder.state.transcribing.contains(id)
                 ) { provider in
                     recorder.retranscribe(id, page: editor?.pageID, provider: provider)
                 },
-                // The block goes as one step to undo; its recording stays, for
-                // the undo to bring back.
                 BlockAction(
                     title: L.commonDelete, symbol: "trash", enabled: canEdit, destructive: true
                 ) {
@@ -238,8 +210,6 @@ struct RecordingBlock: View {
         .foregroundStyle(palette.icon)
     }
 
-    /// transcript is the recording's lines, each after its time: a tap on
-    /// either plays from it.
     private func transcript(_ row: RecordingRow) -> some View {
         let widest = row.durationMs >= 3_600_000 ? "0:00:00" : "00:00"
         let folds = row.folded > 0 && row.folded < row.transcript.count
@@ -277,8 +247,6 @@ struct RecordingBlock: View {
             play: { Recorder.shared.play(id, from: TimeInterval(line.startMs) / 1000) })
     }
 
-    /// notice is what went wrong with the recording, in red when it failed:
-    /// its × lets it go, on a page that can be changed.
     private func notice(_ row: RecordingRow) -> some View {
         let palette = BlockLook.palette
         let failed = row.status == "failed"
@@ -305,7 +273,6 @@ struct RecordingBlock: View {
     }
 }
 
-/// RecordingLine is a line of a recording's transcript.
 private struct RecordingLine: View {
     let line: Segment
     let index: Int
@@ -350,9 +317,6 @@ private struct RecordingLine: View {
     }
 }
 
-/// LiveTail is the last two lines of the words heard while recording, so
-/// the block keeps its height as they come, as on the desktop: as tall as
-/// the words up to two lines, which show from the bottom up.
 private struct LiveTail: View {
     let text: String
     let color: Color
@@ -369,7 +333,6 @@ private struct LiveTail: View {
     }
 }
 
-/// Scrubber is where a recording playing is, which a drag moves.
 private struct Scrubber: View {
     let player: AVAudioPlayer
     let id: String
@@ -399,8 +362,6 @@ private struct Scrubber: View {
     }
 }
 
-/// LevelMeter is what the microphone hears: a thin bar each 50 ms, the
-/// newest at the right, as on the desktop.
 private struct LevelMeter: View {
     let levels: [Double]
     let color: Color

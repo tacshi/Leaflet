@@ -1,10 +1,7 @@
-# Shared by the Windows build scripts; dot-source it. The PowerShell
-# counterpart of release.sh, without python3.
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# The script that dot-sourced this one, which names its errors.
 $ScriptName = if ($MyInvocation.PSCommandPath) { Split-Path -Leaf $MyInvocation.PSCommandPath } else { 'release.ps1' }
 
 function Fail([string]$Message) {
@@ -15,43 +12,29 @@ function Info([string]$Message) { Write-Host "==> $Message" }
 function Warn([string]$Message) { [Console]::Error.WriteLine("warning: $Message") }
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-# The directory the script was run from, which the paths it is given are
-# relative to, though it then works in $RootDir.
 $CallerDir = (Get-Location -PSProvider FileSystem).ProviderPath
 $ConfigPath = Join-Path $RootDir 'mygo.json'
-# ConfigLock names the build of this checkout that has mygo.json changed,
-# by its process, while it does; ConfigKept keeps the committed file
-# meanwhile, which Restore-Config puts back. ConfigRecover is held while a
-# build puts back what one that is gone left changed. release.sh holds
-# mygo.json by the same files.
 $ConfigLock = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.lock')
 $ConfigKept = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.committed')
 $ConfigRecover = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.recover')
 $ConfigHeld = $false
 
-# Need fails unless each command is on PATH.
 function Need([string[]]$Tools) {
 	foreach ($tool in $Tools) {
 		if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { Fail "needs $tool" }
 	}
 }
 
-# Check-Version fails unless $Version looks like 1.2.3.
 function Check-Version([string]$Version) {
 	if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "the version must look like 1.2.3, not $Version" }
 }
 
-# Read-Config returns the value in the mygo.json at $Path at the dotted
-# keys $Key.
 function Read-Config([string]$Path, [string]$Key) {
 	$value = Get-Content -Raw $Path | ConvertFrom-Json
 	foreach ($part in $Key.Split('.')) { $value = $value.$part }
 	$value
 }
 
-# Get-ConfigValue returns the value in mygo.json at the dotted keys $Key,
-# as in "version" or "updates.github": as this build has it changed, or as
-# it is committed while another build has it changed.
 function Get-ConfigValue([string]$Key) {
 	if (-not $script:ConfigHeld -and (Test-Path -PathType Leaf $ConfigKept)) {
 		try { return Read-Config $ConfigKept $Key } catch { }
@@ -59,8 +42,6 @@ function Get-ConfigValue([string]$Key) {
 	Read-Config $ConfigPath $Key
 }
 
-# New-Exclusive makes the file $Path, with $Text in it, and says whether it
-# did: it fails when the file is there, as another process made it.
 function New-Exclusive([string]$Path, [string]$Text) {
 	try {
 		$stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
@@ -76,16 +57,10 @@ function New-Exclusive([string]$Path, [string]$Text) {
 	$true
 }
 
-# Read-Holder returns the process in the file $Path, or nothing.
 function Read-Holder([string]$Path) {
 	try { "$(Get-Content -Raw -ErrorAction Stop $Path)".Trim() } catch { '' }
 }
 
-# Hold-Config waits until no other build of this checkout has mygo.json
-# changed, and then holds it for this one, with the committed file kept in
-# ConfigKept, until Restore-Config: builds that overlapped would read each
-# other's changes, and one could put back another's as the committed file.
-# What a build that is gone, killed, left changed is put back first.
 function Hold-Config {
 	New-Item -ItemType Directory -Force (Split-Path $ConfigLock) | Out-Null
 	$said = $false
@@ -100,16 +75,10 @@ function Hold-Config {
 		Start-Sleep -Seconds 1
 	}
 	$script:ConfigHeld = $true
-	# Kept whole or not at all: a build killed as it copies has nothing
-	# changed yet to put back.
 	Copy-Item $ConfigPath "$ConfigKept.$PID"
 	Move-Item -Force "$ConfigKept.$PID" $ConfigKept
 }
 
-# Repair-Config puts back the committed mygo.json that the build $Holder,
-# by its process, which is gone, left changed, and lets go of its hold.
-# One build at a time does, and only while that build still holds it; it
-# fails when another is at it.
 function Repair-Config([string]$Holder) {
 	if (-not (New-Exclusive $ConfigRecover '')) { return $false }
 	try {
@@ -126,11 +95,6 @@ function Repair-Config([string]$Holder) {
 	$true
 }
 
-# Set-Config changes mygo.json for this run only: each argument is
-# <dotted key>=<value>, which sets the value, or -<dotted key>, which
-# removes the key. The first call holds mygo.json for this build
-# (Hold-Config), and Restore-Config puts the committed file back; call it
-# from a finally block.
 function Set-Config([string[]]$Pairs) {
 	if (-not $script:ConfigHeld) { Hold-Config }
 	$config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
@@ -158,8 +122,6 @@ function Set-Config([string[]]$Pairs) {
 	[IO.File]::WriteAllText($ConfigPath, $json, [Text.UTF8Encoding]::new($false))
 }
 
-# Restore-Config puts back the mygo.json that Set-Config changed, and lets
-# another build change it.
 function Restore-Config {
 	if ($script:ConfigHeld) {
 		if (Test-Path -PathType Leaf $ConfigKept) { Move-Item -Force $ConfigKept $ConfigPath }
@@ -168,11 +130,8 @@ function Restore-Config {
 	}
 }
 
-# Get-FullPath returns $Path in full: as it is when it is, else from the
-# directory the script was run from.
 function Get-FullPath([string]$Path) { [IO.Path]::GetFullPath($Path, $CallerDir) }
 
-# Get-GoArch maps arm64 and x64 to Go's names.
 function Get-GoArch([string]$Arch) {
 	switch ($Arch) {
 		'arm64' { 'arm64' }
@@ -181,16 +140,9 @@ function Get-GoArch([string]$Arch) {
 	}
 }
 
-# Build-Cli builds the command line for the app named $Name, version
-# $Version, on Go's architecture $GoArch (cmd/leaflet), into what the app
-# ships as bin\<command>.exe: the app is a GUI program, which a terminal
-# neither waits for nor shows the output of. Its name is the app's, in
-# lower case with dashes, as cli.CommandName has it: leaflet, or
-# leaflet-debug beside it. MyGo signs it with the app.
 function Build-Cli([string]$Name, [string]$Version, [string]$GoArch) {
 	$bin = Join-Path $RootDir "resources\windows-$GoArch\bin"
 	$cmd = ($Name.Trim().ToLowerInvariant() -split '\s+') -join '-'
-	# The other build's command must not ship in this one.
 	if (Test-Path $bin) { Remove-Item -Recurse -Force $bin }
 	Info "building $cmd.exe for windows/$GoArch"
 	$saved = @{ GOOS = $env:GOOS; GOARCH = $env:GOARCH; CGO_ENABLED = $env:CGO_ENABLED }
@@ -203,7 +155,6 @@ function Build-Cli([string]$Name, [string]$Version, [string]$GoArch) {
 	}
 }
 
-# Get-HostArch returns this machine's architecture, arm64 or x64.
 function Get-HostArch {
 	switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
 		'Arm64' { 'arm64' }
@@ -212,8 +163,6 @@ function Get-HostArch {
 	}
 }
 
-# Find-Signtool returns signtool.exe as MyGo finds it: on PATH, else in the
-# newest Windows SDK; or nothing.
 function Find-Signtool {
 	$found = Get-Command signtool -ErrorAction SilentlyContinue
 	if ($found) { return $found.Source }
@@ -223,9 +172,6 @@ function Find-Signtool {
 		Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
 }
 
-# Get-WindowsCertificate returns LEAFLET_WINDOWS_CERTIFICATE, the .pfx that
-# signs Windows builds, as a full path, or nothing when it is not set, and
-# fails when it is set but cannot sign: the file is missing, or signtool is.
 function Get-WindowsCertificate {
 	$cert = $env:LEAFLET_WINDOWS_CERTIFICATE
 	if (-not $cert) { return }
@@ -238,9 +184,6 @@ function Get-WindowsCertificate {
 	$cert
 }
 
-# Test-Signed fails unless each of the Windows programs $Paths carries a
-# signature: a certificate that signed some of a build should leave none of
-# it to go out unsigned.
 function Test-Signed([string[]]$Paths) {
 	foreach ($program in $Paths) {
 		if (-not (Get-AuthenticodeSignature -LiteralPath $program).SignerCertificate) {
@@ -249,13 +192,6 @@ function Test-Signed([string[]]$Paths) {
 	}
 }
 
-# Get-UpdateKeyFile returns the file of the key that signs updates, the one
-# LEAFLET_UPDATE_KEY names (by default the one
-# `go tool mygo keygen -o $env:APPDATA\mygo\update-keys\Leaflet` wrote), for
-# updates.privateKey: read there, the key stays out of what every program
-# the release runs inherits. It returns nothing when
-# MYGO_UPDATER_PRIVATE_KEY, which MyGo takes first, is set, and fails when
-# there is neither.
 function Get-UpdateKeyFile {
 	if ($env:MYGO_UPDATER_PRIVATE_KEY) { return }
 	$file = $env:LEAFLET_UPDATE_KEY
@@ -267,7 +203,6 @@ function Get-UpdateKeyFile {
 	$file
 }
 
-# Test-Gh fails unless the GitHub CLI is there to upload with, signed in.
 function Test-Gh {
 	Need gh
 	& gh auth status *> $null
@@ -276,9 +211,6 @@ function Test-Gh {
 	}
 }
 
-# Test-Draft fails when the GitHub release v$Version of updates.github is
-# published: an upload to it would replace, under the same version, the
-# files installed copies have taken. A draft, or no release yet, passes.
 function Test-Draft([string]$Version) {
 	$repo = Get-ConfigValue updates.github
 	$draft = & gh release view "v$Version" --repo $repo --json isDraft --jq .isDraft 2>$null
@@ -287,10 +219,6 @@ function Test-Draft([string]$Version) {
 	}
 }
 
-# Test-DraftCommit fails when the draft release v$Version of updates.github
-# holds a build of another commit than $Commit, which Send-Release records
-# on it as it makes it (--target): a release tags one commit, and a build of
-# another would go out under it. No release yet passes.
 function Test-DraftCommit([string]$Version, [string]$Commit) {
 	$repo = Get-ConfigValue updates.github
 	$target = & gh release view "v$Version" --repo $repo --json targetCommitish --jq .targetCommitish 2>$null
@@ -299,8 +227,6 @@ function Test-DraftCommit([string]$Version, [string]$Commit) {
 	}
 }
 
-# Test-Pushed fails unless updates.github has the commit $Commit, which a
-# draft can record only then: found out before the long build, not after it.
 function Test-Pushed([string]$Commit) {
 	$repo = Get-ConfigValue updates.github
 	& gh api "repos/$repo/commits/$Commit" --silent *> $null
@@ -309,21 +235,16 @@ function Test-Pushed([string]$Commit) {
 	}
 }
 
-# Invoke-Mygo runs go tool mygo with $Arguments and fails when it does.
 function Invoke-Mygo([string[]]$Arguments) {
 	& go tool mygo @Arguments
 	if ($LASTEXITCODE -ne 0) { Fail "go tool mygo $($Arguments[0]) failed" }
 }
 
-# Invoke-Gh runs gh with its arguments and fails when it does.
 function Invoke-Gh {
 	& gh @args
 	if ($LASTEXITCODE -ne 0) { Fail "gh $($args[0]) $($args[1]) failed" }
 }
 
-# Get-ChangelogNotes returns the section of the changelog $Path under
-# "## <version>" (or "## [<version>]") for $Version, as MyGo reads it, or
-# nothing.
 function Get-ChangelogNotes([string]$Path, [string]$Version) {
 	if (-not (Test-Path -PathType Leaf $Path)) { return '' }
 	$section = @()
@@ -342,8 +263,6 @@ function Get-ChangelogNotes([string]$Path, [string]$Version) {
 	($section -join "`n").Trim()
 }
 
-# Read-Checksums returns the lines of the SHA256SUMS $Path, each file's sum
-# by its name.
 function Read-Checksums([string]$Path) {
 	$sums = @{}
 	foreach ($line in [IO.File]::ReadAllLines($Path)) {
@@ -352,9 +271,6 @@ function Read-Checksums([string]$Path) {
 	$sums
 }
 
-# Merge-Checksums adds to the SHA256SUMS $Path the lines of the SHA256SUMS
-# $Earlier, an earlier upload's to the same release, for the files $Path
-# doesn't list, keeping the lines sorted by name, as MyGo writes them.
 function Merge-Checksums([string]$Path, [string]$Earlier) {
 	$sums = Read-Checksums $Path
 	$before = Read-Checksums $Earlier
@@ -367,17 +283,6 @@ function Merge-Checksums([string]$Path, [string]$Earlier) {
 	[IO.File]::WriteAllText($Path, $text, [Text.UTF8Encoding]::new($false))
 }
 
-# Send-Release puts what go tool mygo build wrote in the output directory
-# $Out, built from the commit $Commit, for the platform folders $Dirs, on the
-# GitHub release v$Version of updates.github, with gh, as mygo build -upload
-# does: the files the build's SHA256SUMS lists, which MyGo writes for the
-# files it would upload (the installers, update archives, deltas and install
-# scripts), and SHA256SUMS, first, then the update manifests, so that none
-# ever names a file not there yet. They keep MyGo's names, by which
-# SHA256SUMS lists them and install.ps1 finds its installer. A release there
-# already must be a draft of that commit, and keeps the checksums of the
-# files other builds put on it; else it is made, as a draft of it, with the
-# notes in the file $Notes.
 function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$Commit, [string[]]$Dirs) {
 	$repo = Get-ConfigValue updates.github
 	$tag = "v$Version"
@@ -385,9 +290,6 @@ function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$C
 	if (-not (Test-Path -PathType Leaf $sumsFile)) {
 		Fail "no SHA256SUMS in $Out, which lists what the build made to upload"
 	}
-	# By MyGo's own list, a kind of file it starts to make goes up too,
-	# rather than being left out. One install script serves every
-	# architecture of a system, so the first folder's goes.
 	$files = @()
 	foreach ($name in (Read-Checksums $sumsFile).Keys) {
 		$found = $null

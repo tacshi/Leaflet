@@ -1,14 +1,8 @@
 import AuthenticationServices
 import SwiftUI
 
-/// ProvidersSection is Settings › Agent providers: the services agents run
-/// on, adding one from the desktop's presets from its header, and under
-/// them how agents run.
 struct ProvidersSection: View {
-    /// editing is the provider Settings shows the form of, pushed on its
-    /// navigation: a sheet from a row of the settings' form doesn't stay.
     @Binding var editing: ProviderForm.Draft?
-    /// version changes as a provider is saved, to read them again.
     let version: Int
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
@@ -41,16 +35,10 @@ struct ProvidersSection: View {
                         .tint(.red)
                 }
             }
-            // How agents run, under the providers they run on, as the
-            // desktop has them.
             if !providers.isEmpty { defaults }
         } header: {
-            // On the header, a view of its own: on the section, it would go
-            // on each of its rows, a read of the providers each.
             HeaderWithAction(title: L.settingsSectionProviders) { addMenu }
                 .task(id: version) { await load() }
-                // Signed in or out here, or a provider changed on another
-                // device: signing out takes the account's providers away.
                 .task {
                     for await _ in app.changes(of: ["model_providers", "session", "*"]) {
                         await load()
@@ -65,10 +53,8 @@ struct ProvidersSection: View {
         }
     }
 
-    /// addMenu adds a provider from the desktop's presets.
     private var addMenu: some View {
         Menu {
-            // The groups apart, unnamed, as the desktop's menu has them.
             ForEach(groups, id: \.self) { group in
                 Section {
                     ForEach(addable.filter { $0.group == group }) { preset in
@@ -86,9 +72,6 @@ struct ProvidersSection: View {
         }
     }
 
-    /// defaults are how agents run. There is no default agent: each page's
-    /// chat picks its own, and the one last picked is the one a page not
-    /// picked for yet asks.
     @ViewBuilder
     private var defaults: some View {
         @Bindable var app = app
@@ -108,7 +91,6 @@ struct ProvidersSection: View {
         }
     }
 
-    /// place says where a provider runs, as the desktop's list does.
     static func place(of p: AgentProvider) -> String {
         var place = L.settingsProviderCloud
         if p.isAccount {
@@ -117,9 +99,9 @@ struct ProvidersSection: View {
                 ? L.settingsProviderPlan : L.settingsProviderPlanEmail(email: p.email ?? "")
         } else if p.isLocal {
             place = L.settingsProviderLocal(url: p.baseURL)
+        } else if !p.hasKey {
+            place = L.settingsProviderNeedsKey
         }
-        // Agents always use tools on a ChatGPT plan, whatever an older
-        // test found.
         if p.supportsTools == false, !p.isAccount {
             place = L.settingsProviderChatOnly(where: place)
         }
@@ -127,13 +109,9 @@ struct ProvidersSection: View {
     }
 
     static func removeMessage(for p: AgentProvider) -> String {
-        if p.isAccount { return L.settingsRemoveProviderAccount }
-        if p.isLocal { return L.settingsRemoveProviderLocal }
-        return L.settingsRemoveProviderCloud
+        p.isAccount ? L.settingsRemoveProviderAccount : L.settingsRemoveProviderLocal
     }
 
-    /// addable are the presets to add: one ChatGPT sign-in is enough, and
-    /// its row edits it.
     private var addable: [ProviderPreset] {
         let signedIn = providers.contains(where: \.isAccount)
         return presets.filter { $0.auth != "account" || !signedIn }
@@ -151,7 +129,6 @@ struct ProvidersSection: View {
         if presets.isEmpty { presets = (try? await client.presets()) ?? [] }
     }
 
-    /// askRemove asks before removing p, as the desktop does.
     private func askRemove(_ p: AgentProvider) {
         prompt.ask(
             SettingsPrompt.Ask(
@@ -172,8 +149,6 @@ struct ProvidersSection: View {
 }
 
 extension AppModel {
-    /// changes yields as the core says one of tables changed, until the
-    /// task reading it ends: Settings reads again what it shows of them.
     func changes(of tables: Set<String>) -> AsyncStream<Void> {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { changed in
             let token = listen { event in
@@ -188,8 +163,6 @@ extension AppModel {
     }
 }
 
-/// ProviderForm adds or changes a provider: its name, address, key and
-/// model, or for ChatGPT, the sign-in.
 struct ProviderForm: View {
     struct Draft: Identifiable, Hashable {
         let id = UUID()
@@ -216,54 +189,34 @@ struct ProviderForm: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
-    @State private var key = ""  // mobsf-ignore: ios_hardcoded_secret -- the key typed in.
+    @State private var key = ""
     @State private var failure: String?
     @State private var saving = false
     @State private var testing = false
     @State private var test: ProviderTest?
     @State private var removing = false
-    /// signingIn is set while OpenAI's page is open; signedIn, once a
-    /// ChatGPT sign-in is made here, to save.
     @State private var signingIn = false
     @State private var signedIn = false
     @State private var webSession: ChatGPTWebSession?
-    /// pageClosed is set as the person closes OpenAI's page.
     @State private var pageClosed = false
-    /// attempt numbers the sign-in begun here last, to give up or forget
-    /// that one only.
     @State private var attempt: Int64?
 
     private var isAccount: Bool { draft.provider.isAccount }
 
-    /// account says the form has a ChatGPT sign-in: made here, or the
-    /// provider's own.
     private var hasAccount: Bool { signedIn || (!draft.provider.id.isEmpty && isAccount) }
 
-    /// description says where the provider runs: a plan signed in to, a
-    /// model server, a cloud one kept on this device, as one is signed
-    /// out, or on the server.
     private var description: String {
         if isAccount { return L.settingsProviderDescAccount }
-        var desc = L.settingsProviderDescCloud
-        let signedIn = app.status?.signedIn ?? false
-        if draft.preset?.local ?? false {
-            desc = L.settingsProviderDescLocal
-        } else if draft.provider.isLocal || (draft.provider.id.isEmpty && !signedIn) {
-            desc = L.settingsProviderDescDevice
-        }
+        var desc = L.settingsProviderDescDevice
+        if draft.preset?.local ?? false { desc = L.settingsProviderDescLocal }
         if draft.preset?.id == "claude" { desc = L.settingsProviderClaudeNote(desc: desc) }
         return desc
     }
 
-    /// takesKey says the form asks for an API key: a model server takes
-    /// none, but for one that keeps a key, which the core has typed again
-    /// as the server moves to another address.
     static func takesKey(_ draft: Draft) -> Bool {
         draft.preset?.auth != "none" || draft.provider.hasKey
     }
 
-    /// models are the ones to pick from: the provider's own once a test
-    /// has listed them, else the preset's suggestions.
     private var models: [String] {
         if let m = draft.provider.models, !m.isEmpty { return m }
         return draft.preset?.suggested ?? []
@@ -277,8 +230,6 @@ struct ProviderForm: View {
                 } else {
                     Section {
                         TextField(L.settingsName, text: $draft.provider.name)
-                        // A preset's placeholder is the address to fill in,
-                        // as Custom endpoint's.
                         TextField(
                             draft.preset.map {
                                 $0.placeholder.isEmpty ? L.settingsBaseURL : $0.placeholder
@@ -299,8 +250,6 @@ struct ProviderForm: View {
                         Text(description)
                     }
                 }
-                // What a test or a save found shows above the models, which
-                // may run past the bottom of the form.
                 if let test {
                     Section {
                         Label(
@@ -376,14 +325,11 @@ struct ProviderForm: View {
             Text(ProvidersSection.removeMessage(for: draft.provider))
         }
         .onDisappear {
-            // A sign-in made here and not saved is given up.
             webSession?.close()
             if !saving, let attempt { app.client?.forgetChatGPTSignIn(attempt) }
         }
     }
 
-    /// accountSection signs in with ChatGPT, or shows who is signed in, as
-    /// the desktop's dialog does.
     @ViewBuilder private var accountSection: some View {
         Section {
             if hasAccount {
@@ -419,9 +365,6 @@ struct ProviderForm: View {
         }
     }
 
-    /// signIn signs in with ChatGPT: OpenAI's page opens in a web session
-    /// while the core waits on its loopback for the answer, and closes as
-    /// it comes.
     private func signIn() {
         guard let client = app.client else { return }
         signingIn = true
@@ -436,17 +379,12 @@ struct ProviderForm: View {
                 let session = ChatGPTWebSession()
                 webSession = session
                 let shown = session.open(begun.url) {
-                    // Closed before OpenAI answered, the sign-in is given
-                    // up, and that is no failure. Its page says to close it
-                    // once OpenAI has answered: the sign-in then has a
-                    // moment to finish first, and the core keeps one made.
                     pageClosed = true
                     Task {
                         try? await Task.sleep(for: .seconds(5))
                         client.cancelChatGPTSignIn(begun.attempt)
                     }
                 }
-                // A page that can't show leaves nothing to sign in with.
                 guard shown else {
                     client.cancelChatGPTSignIn(begun.attempt)
                     webSession = nil
@@ -459,7 +397,6 @@ struct ProviderForm: View {
                 signedIn = true
                 draft.provider.email = account.email
                 draft.provider.name = "ChatGPT"
-                // The plan's models, once its page is away.
                 if let models = try? await client.chatGPTModels(), !models.isEmpty {
                     draft.provider.models = models
                     if !models.contains(draft.provider.defaultModel) {
@@ -474,8 +411,6 @@ struct ProviderForm: View {
         }
     }
 
-    /// runTest tries the provider as the form has it, and offers the
-    /// models it serves.
     private func runTest() {
         guard let client = app.client else { return }
         var p = draft.provider
@@ -536,19 +471,12 @@ struct ProviderForm: View {
     }
 }
 
-/// ChatGPTWebSession shows OpenAI's sign-in page over the app. The page
-/// ends at the core's loopback, not at a scheme the session waits for, so
-/// the app closes the session as the core hears the answer.
 @MainActor
 final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
-    /// anchor is the window the page opens over.
     private var anchor: ASPresentationAnchor?
 
-    /// open shows url, and reports whether it could; closed runs if the
-    /// person closes the page.
     func open(_ url: URL, closed: @escaping @MainActor () -> Void) -> Bool {
-        // The settings' window, which the page opens over.
         let windows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
@@ -563,7 +491,6 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
                 error.code == .canceledLogin
             else { return }
             Task { @MainActor in
-                // Not when close took it away.
                 if self?.session != nil { closed() }
             }
         }
@@ -576,7 +503,6 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
         return true
     }
 
-    /// close takes the page away, as the sign-in is done.
     func close() {
         let session = self.session
         self.session = nil
@@ -587,15 +513,12 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
         -> ASPresentationAnchor
     {
         MainActor.assumeIsolated {
-            // open found it before it started the session, which asks.
             guard let anchor else { fatalError("ChatGPTWebSession asked for a window before open") }
             return anchor
         }
     }
 }
 
-/// HeaderWithAction is a settings section's header with an action at its
-/// right, as Add a provider is.
 struct HeaderWithAction<Action: View>: View {
     let title: String
     @ViewBuilder let action: () -> Action

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -25,7 +24,6 @@ import (
 	"leaflet/locales"
 )
 
-// settingsSections are Settings' sections, said in the language shown.
 func settingsSections() []struct{ id, icon, label string } {
 	return []struct{ id, icon, label string }{
 		{"account", "user", locales.SettingsSectionAccount()},
@@ -37,7 +35,6 @@ func settingsSections() []struct{ id, icon, label string } {
 	}
 }
 
-// settingsNav is MyGo's sidebar of the sections, the route's chosen.
 func (a *App) settingsNav(c *ui.Context) ui.Element {
 	pal := theme.Of(c)
 	return ui.Sidebar(c.Key("settings-nav"), &a.settingsSection, func() {
@@ -47,8 +44,6 @@ func (a *App) settingsNav(c *ui.Context) ui.Element {
 	}).Width(settingsNavW).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label(locales.SettingsTitle())
 }
 
-// The settings dialog's room: its section list, its padding beside a
-// section, and its size, kept as the window allows.
 const settingsNavW, settingsPadX = 200, 28
 
 func settingsSize(c *ui.Context) (w, h float32) {
@@ -56,15 +51,11 @@ func settingsSize(c *ui.Context) (w, h float32) {
 	return max(min(880, ww-64), 320), max(min(640, wh*0.86), 240)
 }
 
-// settingsDialog is Settings over the window: the sections' list beside
-// the section chosen, closed by Escape, a click outside or its button.
 func (a *App) settingsDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	w, h := settingsSize(c)
 	dialog(c, &a.settingsOpen, w, func() {
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			// Focused as it opens, its section chosen shows in the accent
-			// and the arrows move through the sections.
 			a.settingsNav(c).FillHeight().AutoFocus()
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
 				ui.Row(c).Padding(14, 14, 10, settingsPadX).Gap(12).AlignItems(ui.Center).
@@ -105,8 +96,6 @@ func (a *App) settingsBody(c *ui.Context) {
 	})
 }
 
-// settingsWidth is the width of a settings section: up to 640, within
-// the dialog beside the section list, less its padding.
 func (a *App) settingsWidth(c *ui.Context) float32 {
 	w, _ := settingsSize(c)
 	return max(min(w-settingsNavW-1-2*settingsPadX, 640), 200)
@@ -116,7 +105,6 @@ func heading(c *ui.Context, title, desc string) {
 	headingWith(c, title, desc, nil)
 }
 
-// headingWith is heading with action, as a button, at its right.
 func headingWith(c *ui.Context, title, desc string, action func()) {
 	pal := theme.Of(c)
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
@@ -132,40 +120,23 @@ func headingWith(c *ui.Context, title, desc string, action func()) {
 	})
 }
 
-// Account ---------------------------------------------------------------
-
 type accountState struct {
-	name string
-	// renewing is set while the person signs in to Supabase again and the
-	// project is brought up to date (renewProject).
-	renewing bool
-	// nameEdited is set once the user changes the name field: until then
-	// it shows the account's name as it is now, and nothing saves from it.
-	// nameShown is set in a frame that showed the field, the section, and
-	// shownBefore in the frame before.
-	nameEdited  bool
-	nameShown   bool
-	shownBefore bool
-	// devices are the devices of the account devicesOf names, once
-	// loaded (devicesLoaded); loadingFor is the account whose devices are
-	// loading, and devicesErr why they could not be, to try again.
+	name          string
+	renewing      bool
+	nameEdited    bool
+	nameShown     bool
+	shownBefore   bool
 	devices       []core.Device
 	devicesOf     string
 	devicesLoaded bool
 	loadingFor    string
 	devicesErr    string
-	// deleteOpen shows the dialog deleting the account, confirm is what
-	// is typed in it, and busy is set while the server deletes it.
-	deleteOpen bool
-	confirm    string
-	busy       bool
-	// signingOut is set while waiting changes go up before signing out;
-	// unsynced counts those that could not, to ask about.
-	signingOut bool
-	unsynced   int
+	deleteOpen    bool
+	confirm       string
+	busy          bool
+	signingOut    bool
+	unsynced      int
 }
-
-// Appearance ------------------------------------------------------------
 
 func (a *App) appearanceSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionAppearance(), locales.SettingsAppearanceDesc())
@@ -219,15 +190,11 @@ func (a *App) appearanceSettings(c *ui.Context) {
 	})
 }
 
-// fontFamilies are the names of the families text can use, all of them
-// and the monospaced ones, read once.
 var fontFamilies struct {
 	once      sync.Once
 	all, mono []string
 }
 
-// fontRow is a row choosing *family among the system's fonts, the
-// monospaced ones for mono, or Leaflet's own for "".
 func (a *App) fontRow(c *ui.Context, key, title string, family *string, mono, first bool) {
 	fontFamilies.once.Do(func() {
 		for _, f := range ui.FontFamilies() {
@@ -259,8 +226,6 @@ func (a *App) fontRow(c *ui.Context, key, title string, family *string, mono, fi
 	})
 }
 
-// accentDots is a row of dots choosing the accent: the desktop's, where
-// it has one, then Leaflet's. None chosen is the desktop's, or Blue.
 func (a *App) accentDots(c *ui.Context) {
 	pal := theme.Of(c)
 	isDark := c.Theme().Dark
@@ -297,9 +262,6 @@ func (a *App) accentDots(c *ui.Context) {
 	})
 }
 
-// renewProject signs in to Supabase again in the browser and brings the
-// project up to this version of Leaflet with that sign-in, kept from then
-// on in place of the one that ended.
 func (a *App) renewProject() {
 	s := &a.account
 	if s.renewing {
@@ -340,14 +302,11 @@ func (a *App) accountSettings(c *ui.Context) {
 			if in.Changed() {
 				s.nameEdited = true
 			}
-			// Return, or leaving the field, saves what was typed; the
-			// field then shows the account's name again, as saved.
 			if s.nameEdited && (in.Submitted() || !in.Focused()) {
 				a.saveName(s.name)
 				s.nameEdited = false
 			}
 		})
-		// A build without a server says so once, in Sync and storage.
 		if !a.hasServer() {
 			return
 		}
@@ -374,8 +333,6 @@ func (a *App) accountSettings(c *ui.Context) {
 				a.signInButton(c)
 			}
 		})
-		// The sign-in that brings the project up to a new version of
-		// Leaflet ended: only signing in to Supabase again does it now.
 		if a.session.SignedIn && (s.renewing || a.core().ProjectNeedsSignIn()) {
 			settingRow(c, "project", locales.SettingsProjectSignIn(), locales.SettingsProjectSignInDesc(), false, func() {
 				label := locales.CommonSignIn()
@@ -390,8 +347,6 @@ func (a *App) accountSettings(c *ui.Context) {
 	})
 	if a.session.SignedIn {
 		label(c, locales.SettingsDevices())
-		// They load as the section opens, and for another account, as one
-		// signed out elsewhere and then another signed in.
 		if !s.shownBefore || s.devicesOf != a.session.UserID {
 			a.loadDevices()
 		}
@@ -446,9 +401,6 @@ func (a *App) accountSettings(c *ui.Context) {
 	}
 }
 
-// deleteAccountDialog asks before deleting the account: the button works
-// once DELETE is typed, and Return too then, and the dialog waits while
-// the server deletes it.
 func (a *App) deleteAccountDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &a.account
@@ -477,8 +429,6 @@ func (a *App) deleteAccountDialog(c *ui.Context) {
 	})
 }
 
-// deleteAccount deletes the account on the server, then everything of it
-// on this device.
 func (a *App) deleteAccount() {
 	s := &a.account
 	s.busy = true
@@ -496,9 +446,6 @@ func (a *App) deleteAccount() {
 	})
 }
 
-// signOutAlert asks before signing out removes changes not uploaded yet.
-// The window shows it over whatever it shows, as the upload before it may
-// finish after Settings has closed.
 func (a *App) signOutAlert(c *ui.Context) {
 	s := &a.account
 	if s.unsynced == 0 {
@@ -514,11 +461,6 @@ func (a *App) signOutAlert(c *ui.Context) {
 	}
 }
 
-// keepName saves the name typed in Account once a frame no longer shows
-// its field, as Settings closed or went to another section, which the
-// field leaving its focus never says then; and notes whether the frame
-// showed it, for the section to know it opens. Call it after Settings
-// builds.
 func (a *App) keepName() {
 	s := &a.account
 	if s.nameEdited && !s.nameShown {
@@ -528,7 +470,6 @@ func (a *App) keepName() {
 	s.shownBefore, s.nameShown = s.nameShown, false
 }
 
-// saveName keeps the name typed, here and then on the server.
 func (a *App) saveName(name string) {
 	c := a.core()
 	changed, err := c.SetDisplayName(name)
@@ -548,8 +489,6 @@ func (a *App) saveName(name string) {
 	}()
 }
 
-// loadDevices loads the devices of the account signed in, off the main
-// thread, unless they are loading; those of another account go first.
 func (a *App) loadDevices() {
 	s := &a.account
 	user := a.session.UserID
@@ -567,7 +506,6 @@ func (a *App) loadDevices() {
 		if s.loadingFor == user {
 			s.loadingFor = ""
 		}
-		// Another account's, signed in meanwhile, load on their own.
 		if s.devicesOf != user {
 			return
 		}
@@ -579,7 +517,6 @@ func (a *App) loadDevices() {
 	})
 }
 
-// revokeDevice signs out another device of the account.
 func (a *App) revokeDevice(id string) {
 	c := a.core()
 	var err error
@@ -593,8 +530,6 @@ func (a *App) revokeDevice(id string) {
 }
 
 func (a *App) exportAll() {
-	// An export without the edits waiting would miss them; the save said
-	// why.
 	if !a.flush() {
 		return
 	}
@@ -609,9 +544,6 @@ func (a *App) exportAll() {
 	}()
 }
 
-// exported says how an export of every page to path went: the pages it
-// left out, and apart, those that went as this device last had them, as
-// they could not be brought up to date.
 func (a *App) exported(path string, report export.Report, err error) {
 	switch {
 	case err != nil:
@@ -627,9 +559,6 @@ func (a *App) exported(path string, report export.Report, err error) {
 	}
 }
 
-// signOut uploads the changes waiting, then signs out and removes the
-// account's pages from this device. Changes that could not go up are
-// asked about first, and an open page that could not be saved stops it.
 func (a *App) signOut() {
 	if !a.flush() {
 		return
@@ -644,16 +573,10 @@ func (a *App) signOut() {
 	}()
 }
 
-// leave signs out and clears this device with clear, between sync passes.
-// With synced, it does neither while a change waits to go up, or the open
-// page cannot be saved, and asks about the changes instead; clear checks
-// again as it removes, for a change that leaflet mcp stores meanwhile.
 func (a *App) leave(clear func() error, synced bool) {
 	if !a.flush() && synced {
 		return
 	}
-	// The open page, saved, takes no more typing until the pages are
-	// cleared: what was typed meanwhile would go with them unsaved.
 	a.leaving = true
 	a.pageEditable()
 	c := a.core()
@@ -672,8 +595,6 @@ func (a *App) leave(clear func() error, synced bool) {
 			if _, err := a.st.LoadSession(nil); err != nil {
 				a.toast(err.Error())
 			}
-			// Wiping the device removes the settings too: those shown, and
-			// saved with the next change, are the ones a new device has.
 			if _, kept := a.st.Value("settings"); !kept {
 				was := a.settings
 				a.settings = a.st.Settings()
@@ -681,14 +602,11 @@ func (a *App) leave(clear func() error, synced bool) {
 				if a.settings.Theme != was.Theme || a.settings.Accent != was.Accent || a.settings.Fonts != was.Fonts {
 					a.applyTheme()
 				}
-				// MyGo keeps the language it was set to apart.
 				if a.settings.Language != was.Language {
 					mygo.App.SetLocale(a.settings.Language)
 				}
 			}
 			a.session = a.st.Session()
-			// What was typed to the workspace agent, of no page, goes with
-			// the account, as what was typed on its pages goes with them.
 			delete(a.drafts, agents.WorkspaceID)
 			s := &a.account
 			s.devices, s.devicesOf, s.devicesLoaded, s.devicesErr, s.nameEdited = nil, "", false, "", false
@@ -696,50 +614,36 @@ func (a *App) leave(clear func() error, synced bool) {
 	}()
 }
 
-// Agent providers -------------------------------------------------------
-
 type providerForm struct {
-	open      bool
-	id        string
-	preset    string
-	name      string
-	baseURL   string
-	apiKey    string
-	model     string
-	models    []string
-	custom    bool
-	tools     *bool
-	fetching  bool
-	fetchedAt string
-	testing   bool
-	result    string
-	resultOK  bool
-	saving    bool
-	errorText string
-	// confirmRemove asks before removing the provider; removing is set
-	// while the server deletes it.
+	open                    bool
+	id                      string
+	preset                  string
+	name                    string
+	baseURL                 string
+	apiKey                  string
+	model                   string
+	models                  []string
+	custom                  bool
+	tools                   *bool
+	fetching                bool
+	fetchedAt               string
+	testing                 bool
+	result                  string
+	resultOK                bool
+	saving                  bool
+	errorText               string
 	confirmRemove, removing bool
-	// A ChatGPT sign-in, before it is saved; stopSignIn stops the one
-	// under way, as the dialog closes or another opens in its place.
-	signingIn  bool
-	stopSignIn context.CancelFunc
-	chatgpt    *agents.ChatGPT
-	email      string
-	keyTimer   *time.Timer
-	// reading is set while the key or sign-in kept here of the provider
-	// edited is read (editProvider): saving waits, not to drop it.
-	reading bool
-	// keptKey is the key read of the provider edited, for its address
-	// keptURL alone (keyFollowsAddress); keyTyped is a key the user wrote
-	// in the dialog in its place.
-	keptKey, keptURL string
-	keyTyped         bool
-	// gen tells this dialog from the ones opened before it: what a test,
-	// sign-in or save started in one of those finds goes nowhere.
-	gen int
+	signingIn               bool
+	stopSignIn              context.CancelFunc
+	chatgpt                 *agents.ChatGPT
+	email                   string
+	keyTimer                *time.Timer
+	reading                 bool
+	keptKey, keptURL        string
+	keyTyped                bool
+	gen                     int
 }
 
-// openForm opens the provider dialog on f, in place of the one open.
 func (a *App) openForm(f providerForm) {
 	a.form.cancelSignIn()
 	a.formGen++
@@ -747,12 +651,8 @@ func (a *App) openForm(f providerForm) {
 	a.form = f
 }
 
-// formIs reports whether the provider dialog is still the one opened as
-// gen, for work started in it that finishes later.
 func (a *App) formIs(gen int) bool { return a.form.open && a.form.gen == gen }
 
-// cancelSignIn stops the dialog's ChatGPT sign-in under way, if one is:
-// its page in the browser signs in to nothing then, and its port is free.
 func (f *providerForm) cancelSignIn() {
 	if f.stopSignIn != nil {
 		f.stopSignIn()
@@ -765,7 +665,6 @@ func (a *App) modelsSettings(c *ui.Context) {
 	headingWith(c, locales.SettingsSectionProviders(), locales.SettingsProvidersDesc(), func() {
 		add := primary(c, "add", "plus", locales.SettingsAddProvider())
 		add.Menu(func(m *ui.Menu) {
-			// One ChatGPT sign-in is enough: its row edits it.
 			signedIn := false
 			for _, p := range a.providers {
 				signedIn = signedIn || p.AuthKind == "account"
@@ -803,11 +702,9 @@ func (a *App) modelsSettings(c *ui.Context) {
 				if g := a.chatgptOf(p.ID); g != nil && g.Account().Email != "" {
 					where = locales.SettingsProviderPlanEmail(g.Account().Email)
 				}
-			case p.IsLocal:
+			case (agents.Option{Provider: p}).Offline():
 				where = locales.SettingsProviderLocal(p.BaseURL)
 			}
-			// Agents always use tools on a ChatGPT plan (hub.go), whatever
-			// an older test left in supports_tools.
 			if p.SupportsTools != nil && !*p.SupportsTools && p.AuthKind != "account" {
 				where = locales.SettingsProviderChatOnly(where)
 			}
@@ -827,9 +724,6 @@ func (a *App) modelsSettings(c *ui.Context) {
 				a.editProvider(&p)
 			}
 		}
-		// How agents run, under the providers they run on. There is no
-		// default agent: each page's chat picks its own, and the one last
-		// picked is the one a page not picked for yet asks.
 		if len(a.providers) > 0 {
 			r := a.settings.AgentsReadOtherPages
 			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), false, func() {
@@ -862,7 +756,6 @@ func (a *App) newProvider(p agents.Preset) {
 		a.form.model = p.Suggested[0]
 	}
 	if p.Auth == "none" {
-		// A server on this machine lists its models without a key.
 		a.fetchModels()
 	}
 }
@@ -870,11 +763,8 @@ func (a *App) newProvider(p agents.Preset) {
 func (a *App) editProvider(p *store.Provider) {
 	a.openForm(providerForm{open: true, id: p.ID, preset: p.Preset, name: p.Name, baseURL: p.BaseURL, model: p.DefaultModel,
 		models: agents.Models(*p), tools: p.SupportsTools, reading: true})
-	// Its key or sign-in kept here is read off the main thread, as the
-	// keychain can take a while, or ask first; its models are listed
-	// with it, and it saves only once it has come.
 	id, base, gen := p.ID, p.BaseURL, a.form.gen
-	local, account := p.IsLocal && p.AuthKind != "account", p.AuthKind == "account"
+	local, account := p.AuthKind != "account", p.AuthKind == "account"
 	var key string
 	var g *agents.ChatGPT
 	a.offMain(func() {
@@ -889,9 +779,6 @@ func (a *App) editProvider(p *store.Provider) {
 			return
 		}
 		a.form.reading = false
-		// The key kept fills the field only through keyFollowsAddress:
-		// not over a key typed (or cleared) meanwhile, and only while the
-		// address is still at its origin, so it goes to no other server.
 		a.form.keptKey, a.form.keptURL = key, base
 		a.keyFollowsAddress()
 		if g != nil && a.form.chatgpt == nil {
@@ -901,12 +788,6 @@ func (a *App) editProvider(p *store.Provider) {
 	})
 }
 
-// keyFollowsAddress keeps the key kept for the provider edited to the
-// address it was saved for: the dialog holds it only while its address is
-// at that origin, as saving and testing send what the dialog holds, and a
-// pause in typing lists the address's models with it. Moved to another
-// server, the provider takes a key typed for it, as the server's do
-// (keyStaysWith).
 func (a *App) keyFollowsAddress() {
 	f := &a.form
 	if f.keptKey == "" || f.keyTyped {
@@ -918,9 +799,6 @@ func (a *App) keyFollowsAddress() {
 	}
 }
 
-// chatgptOf is the provider's ChatGPT sign-in, for what is drawn: nil
-// until it has been read, once, off the main thread, as the keychain can
-// take a while, or ask first.
 func (a *App) chatgptOf(id string) *agents.ChatGPT {
 	if g := a.hub.KnownChatGPT(id); g != nil {
 		return g
@@ -939,19 +817,16 @@ func (a *App) providerDialog(c *ui.Context) {
 	preset := agents.PresetByID(a.form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
-	here := a.hub.KeptHere(a.providerForm())
 	title := locales.SettingsConnectProvider(preset.Name)
 	if a.form.id != "" {
 		title = locales.SettingsProviderEdit(a.form.name)
 	}
-	desc := locales.SettingsProviderDescCloud()
+	desc := locales.SettingsProviderDescDevice()
 	switch {
 	case account:
 		desc = locales.SettingsProviderDescAccount()
 	case local:
 		desc = locales.SettingsProviderDescLocal()
-	case here:
-		desc = locales.SettingsProviderDescDevice()
 	}
 	if preset.ID == "claude" {
 		desc = locales.SettingsProviderClaudeNote(desc)
@@ -968,7 +843,6 @@ func (a *App) providerDialog(c *ui.Context) {
 					if ph == "" {
 						ph = preset.BaseURL
 					}
-					// Another address has other models.
 					if field(c, "url", &a.form.baseURL, ph).Changed() {
 						a.keyFollowsAddress()
 						a.fetchModelsSoon()
@@ -987,9 +861,6 @@ func (a *App) providerDialog(c *ui.Context) {
 			if !account {
 				ui.Field(c, locales.SettingsAPIKey(), func() {
 					ph := locales.SettingsPasteKey()
-					if a.form.id != "" && !local {
-						ph = locales.SettingsKeySaved()
-					}
 					if local {
 						ph = locales.SettingsOptional()
 					}
@@ -1011,8 +882,6 @@ func (a *App) providerDialog(c *ui.Context) {
 				}
 				notice(c, kind, map[bool]string{true: "check", false: "circle-alert"}[a.form.resultOK], a.form.result, nil)
 			}
-			// What saving or removing found wrong shows below the model,
-			// the last field.
 			if !account || a.form.chatgpt != nil {
 				ui.Field(c, locales.CommonModel(), func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -1023,8 +892,6 @@ func (a *App) providerDialog(c *ui.Context) {
 					})
 				}).Error(a.form.errorText)
 			}
-			// Nothing to save before signing in: an existing sign-in can
-			// only be removed.
 			signedOut := account && a.form.chatgpt == nil
 			if signedOut && a.form.id == "" {
 				return
@@ -1037,9 +904,7 @@ func (a *App) providerDialog(c *ui.Context) {
 				if signedOut {
 					return
 				}
-				// Only a provider kept on the server needs the account to
-				// save it; one kept here saves signed out too.
-				cannot := a.form.saving || a.form.reading || (!local && !here && !a.session.SignedIn) || (account && a.form.chatgpt == nil) || strings.TrimSpace(a.form.model) == ""
+				cannot := a.form.saving || a.form.reading || (account && a.form.chatgpt == nil) || strings.TrimSpace(a.form.model) == ""
 				if primary(c, "save", "", locales.CommonSave()).Disabled(cannot).Clicked() {
 					a.saveProvider()
 				}
@@ -1048,7 +913,6 @@ func (a *App) providerDialog(c *ui.Context) {
 	})
 }
 
-// chatgptRow signs in with ChatGPT, or shows who is signed in.
 func (a *App) chatgptRow(c *ui.Context) {
 	pal := theme.Of(c)
 	if a.form.chatgpt != nil {
@@ -1104,7 +968,6 @@ func (a *App) chatgptSignIn() {
 	}()
 }
 
-// modelPicker chooses a model from the provider's list, or takes any ID.
 func (a *App) modelPicker(c *ui.Context) {
 	const other = "\x00other"
 	ui.Box(c).Grow(1).Children(func() {
@@ -1148,8 +1011,6 @@ func (a *App) modelPicker(c *ui.Context) {
 	}
 }
 
-// fetchModelsSoon lists the models once a pasted key or the address
-// settles.
 func (a *App) fetchModelsSoon() {
 	if a.form.keyTimer != nil {
 		a.form.keyTimer.Stop()
@@ -1157,16 +1018,13 @@ func (a *App) fetchModelsSoon() {
 	a.form.keyTimer = a.later(700*time.Millisecond, a.fetchModels)
 }
 
-// fetchModels lists the provider's models for the dropdown: from its
-// server with the key typed here, from Leaflet's server for a saved cloud
-// provider, or from the ChatGPT plan.
 func (a *App) fetchModels() {
 	preset := agents.PresetByID(a.form.preset)
-	base, key, id, g := a.form.baseURL, strings.TrimSpace(a.form.apiKey), a.form.id, a.form.chatgpt
+	base, key, g := a.form.baseURL, strings.TrimSpace(a.form.apiKey), a.form.chatgpt
 	switch {
 	case preset.Auth == "account" && g == nil:
 		return
-	case preset.Auth == "key" && key == "" && (id == "" || !a.backend.SignedIn() || a.form.keptKey != ""):
+	case preset.Auth == "key" && key == "":
 		return
 	}
 	at, gen := base+"|"+key, a.form.gen
@@ -1179,22 +1037,16 @@ func (a *App) fetchModels() {
 		switch {
 		case g != nil:
 			models, err = g.ListModels(ctx)
-		case key != "" || preset.Local:
-			models, err = agents.NewClient(base, key).ListModels(ctx)
 		default:
-			var res map[string]any
-			res, err = a.backend.Invoke(ctx, "providers", map[string]any{"action": "models", "provider_id": id})
-			for _, m := range listAny(res["models"]) {
-				models = append(models, fmt.Sprint(m))
-			}
+			models, err = agents.NewClient(base, key).ListModels(ctx)
 		}
 		a.update(func() {
 			if !a.formIs(gen) || a.form.fetchedAt != at {
-				return // another dialog, or another fetch since
+				return
 			}
 			a.form.fetching = false
 			if a.form.baseURL+"|"+strings.TrimSpace(a.form.apiKey) != at {
-				return // the key or address changed since, not yet fetched for
+				return
 			}
 			if err != nil {
 				if !preset.Local || a.form.id != "" {
@@ -1217,17 +1069,9 @@ func (a *App) fetchModels() {
 	}()
 }
 
-func listAny(v any) []any {
-	l, _ := v.([]any)
-	return l
-}
-
-// providerForm is the provider of the dialog, to test or save.
 func (a *App) providerForm() agents.Form {
 	f := &a.form
 	return agents.Form{
-		// A key kept that the dialog took out for another address shows
-		// gone, as saving leaves it.
 		ID: f.id, Preset: f.preset, Name: f.name, BaseURL: f.baseURL, APIKey: f.apiKey, KeyTyped: f.keyTyped || f.keptKey != "" && f.apiKey == "", Model: f.model,
 		Models: f.models, SupportsTools: f.tools, ChatGPT: f.chatgpt,
 	}
@@ -1256,8 +1100,6 @@ func (a *App) testProvider() {
 	}()
 }
 
-// saveProvider saves the dialog's provider, off the main thread: to the
-// keychain, or the server. The first is the default agent.
 func (a *App) saveProvider() {
 	f := a.providerForm()
 	a.form.saving, a.form.errorText = true, ""
@@ -1265,8 +1107,6 @@ func (a *App) saveProvider() {
 	var p store.Provider
 	var err error
 	a.offMain(func() { p, err = hub.SaveProvider(f) }, func() {
-		// Only the dialog it was saved from shows how it went, or closes:
-		// one opened since is another provider's.
 		if err != nil {
 			if a.formIs(gen) {
 				a.form.saving, a.form.errorText = false, err.Error()
@@ -1283,7 +1123,6 @@ func (a *App) saveProvider() {
 	})
 }
 
-// removeAlert asks before the provider of the dialog goes, with its key.
 func (a *App) removeAlert(c *ui.Context) {
 	if !a.form.confirmRemove {
 		return
@@ -1293,12 +1132,9 @@ func (a *App) removeAlert(c *ui.Context) {
 		a.form.confirmRemove = false
 		return
 	}
-	msg := locales.SettingsRemoveProviderCloud()
-	switch {
-	case p.AuthKind == "account":
+	msg := locales.SettingsRemoveProviderLocal()
+	if p.AuthKind == "account" {
 		msg = locales.SettingsRemoveProviderAccount()
-	case p.IsLocal:
-		msg = locales.SettingsRemoveProviderLocal()
 	}
 	if ui.AlertDialog(c, &a.form.confirmRemove, locales.SettingsRemoveProviderTitle(p.Name), msg,
 		locales.CommonCancel(), locales.CommonRemove()) == 1 {
@@ -1306,9 +1142,6 @@ func (a *App) removeAlert(c *ui.Context) {
 	}
 }
 
-// removeProvider removes a provider and its key, off the main thread.
-// One kept on the server goes there first, and until the server has
-// deleted it, it stays, and the dialog says why.
 func (a *App) removeProvider(id string) {
 	a.form.removing, a.form.errorText = true, ""
 	hub, gen := a.hub, a.form.gen
@@ -1335,8 +1168,6 @@ func (a *App) removeProvider(id string) {
 	})
 }
 
-// Sync and storage ---------------------------------------------------
-
 func (a *App) offlineSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionOffline(), locales.SettingsOfflineDesc())
 	if a.hasServer() || a.session.SignedIn || icloud.Available() || a.settings.ICloudSync {
@@ -1351,8 +1182,6 @@ func (a *App) offlineSettings(c *ui.Context) {
 		card(c, "conflicts", func() {
 			for i, cf := range a.conflicts {
 				s := core.SidesOf(cf)
-				// A block one side deleted and the other edited was kept,
-				// and can be deleted again.
 				deleted := s.Deleted != ""
 				var desc string
 				switch s.Deleted {
@@ -1373,8 +1202,6 @@ func (a *App) offlineSettings(c *ui.Context) {
 								a.resolveConflict(cf.ID, core.KeepMerged)
 							}
 						}
-						// The version the merge did not keep can come back,
-						// whichever device's it is.
 						if !deleted && !s.KeptHere && m.Item(locales.SettingsUseThisDevice()).Chosen() {
 							a.resolveConflict(cf.ID, core.UseThisDevice)
 						}
@@ -1409,8 +1236,6 @@ func (a *App) offlineSettings(c *ui.Context) {
 	})
 }
 
-// syncSettings are the parts of Sync and storage about syncing: through
-// the server, or through iCloud Drive.
 func (a *App) syncSettings(c *ui.Context) {
 	card(c, "status", func() {
 		first := true
@@ -1421,7 +1246,6 @@ func (a *App) syncSettings(c *ui.Context) {
 				desc = locales.SettingsICloudOnDesc()
 			}
 			settingRow(c, "icloud", locales.SettingsICloud(), desc, true, func() {
-				// One way of syncing at a time: Supabase's, signed in.
 				tip := ""
 				if a.session.SignedIn {
 					tip = locales.SettingsICloudSupabaseOn()
@@ -1454,8 +1278,6 @@ func (a *App) syncSettings(c *ui.Context) {
 			status = locales.SettingsSyncFailed(a.syncError)
 		}
 		title := locales.SettingsSynced()
-		// As counted as the outbox changes: reading it here, at every
-		// frame, read every change's whole payload.
 		if n := a.pending; n > 0 {
 			title = locales.SettingsChangesWaiting(n)
 		}
@@ -1497,8 +1319,6 @@ func (a *App) syncSettings(c *ui.Context) {
 	})
 }
 
-// resolveConflict settles conflict id as how says
-// (core.Pages.ResolveConflict), saying why when it can't.
 func (a *App) resolveConflict(id string, how core.Resolution) {
 	if err := a.pageCore().ResolveConflict(id, how); err != nil {
 		a.toast(locales.SettingsResolveFailed(err.Error()))

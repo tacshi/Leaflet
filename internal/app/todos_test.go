@@ -35,7 +35,6 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	if s := fmt.Sprint(got); s != want {
 		t.Errorf("rows %s, want %s", s, want)
 	}
-	// One section alone has no header: the to-dos' dates say as much.
 	if rows := todoRows(todos[:1], now); len(rows) != 1 || rows[0].header != "" {
 		t.Errorf("one section's rows %+v", rows)
 	}
@@ -47,13 +46,10 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	if fmt.Sprint(due) != "[today]" {
 		t.Errorf("reminders %v", due)
 	}
-	// Before 9:00, today's waits, and one two days late is past being
-	// reminded of: it is among the overdue.
 	early := time.Date(2026, 10, 26, 8, 0, 0, 0, time.Local)
 	if r := core.DueReminders(todos, early, func(store.PageTodo) bool { return false }); len(r) != 0 {
 		t.Errorf("early reminders %+v", r)
 	}
-	// Yesterday's, from 9:00, is reminded of until 9:00 today.
 	yesterday := []store.PageTodo{todo("yesterday", day(-1))}
 	if r := core.DueReminders(yesterday, early, func(store.PageTodo) bool { return false }); len(r) != 1 {
 		t.Errorf("reminders of yesterday's at 8:00 %+v", r)
@@ -63,7 +59,6 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	}
 }
 
-// A to-do with a time of day is overdue, and reminded of, from its time.
 func TestTimedTodos(t *testing.T) {
 	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, time.Local) }
 	todo := func(id string, due time.Time) store.PageTodo {
@@ -86,8 +81,6 @@ func TestTimedTodos(t *testing.T) {
 	}
 }
 
-// The To-dos tab lists to-dos from every page; checking one off checks
-// it in its page.
 func TestTodosView(t *testing.T) {
 	a := templatesApp(t)
 	n := &doc.Node{ID: "t1", Type: "todo_list"}
@@ -125,8 +118,6 @@ func TestTodosView(t *testing.T) {
 	}
 }
 
-// A section's header stays at the top on a sidebar it can match, and
-// scrolls away over the window's vibrancy, which no fill matches.
 func TestTodoHeaderStaysOnAnOpaqueSidebar(t *testing.T) {
 	a := templatesApp(t)
 	n := &doc.Node{ID: "t1", Type: "todo_list"}
@@ -159,8 +150,6 @@ func TestTodoHeaderStaysOnAnOpaqueSidebar(t *testing.T) {
 	}
 }
 
-// A click on a to-do of another page opens that page scrolled to it, as
-// one far below its fold, never drawn yet.
 func TestTodoClickScrollsItsPageToIt(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -208,8 +197,6 @@ func TestTodoClickScrollsItsPageToIt(t *testing.T) {
 	}
 }
 
-// A to-do of a page shared with the user to view is listed, but only its
-// editors check it off.
 func TestTodosOfAPageToView(t *testing.T) {
 	a := templatesApp(t)
 	const id = "00000000-0000-0000-0000-0000000000bb"
@@ -246,9 +233,6 @@ func TestTodosOfAPageToView(t *testing.T) {
 	}
 }
 
-// A click on a reminder before the app has its window, as one that
-// launched it, opens the to-do once it has; another kind of notification
-// opens nothing.
 func TestReminderClickBeforeTheWindow(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Pack")})})
@@ -268,10 +252,6 @@ func TestReminderClickBeforeTheWindow(t *testing.T) {
 	}
 }
 
-// The user is reminded of to-dos given to them, on any page, and of those
-// given to no one on their own pages, not of another's nor of one on a
-// page shared with them that names no one; nor again once reminded, nor
-// of one overdue for days, as on a device new to the library.
 func TestRemindersOfTheUsersOwnTodos(t *testing.T) {
 	a := templatesApp(t)
 	now := time.Now()

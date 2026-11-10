@@ -14,24 +14,16 @@ import (
 	"github.com/coder/websocket"
 )
 
-// RealtimeForTest stands in for a project's Realtime in tests, served at
-// /realtime/v1/websocket: it answers joins, refusing those in Refused,
-// heartbeats and leaves, keeps what the clients sent, and broadcasts to
-// the clients joined to a topic.
 type RealtimeForTest struct {
-	mu sync.Mutex
-	// Refused are the topics it refuses a join of, with the reason.
+	mu      sync.Mutex
 	Refused map[string]string
-	// Silent has it answer no heartbeat.
-	Silent bool
-	// Queries are the dials' query strings, as apikey and vsn.
+	Silent  bool
 	Queries []url.Values
 	conns   map[*websocket.Conn]map[string]string
 	sent    []RealtimeSent
 	changed chan struct{}
 }
 
-// RealtimeSent is a message a client sent, its topic without "realtime:".
 type RealtimeSent struct {
 	Topic   string
 	Event   string
@@ -94,7 +86,6 @@ func (f *RealtimeForTest) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Broadcast sends event with payload on topic to the clients joined to it.
 func (f *RealtimeForTest) Broadcast(topic, event string, payload any) {
 	body := mustJSON(map[string]any{"type": "broadcast", "event": event, "payload": payload})
 	for conn, joinRef := range f.joinedTo(topic) {
@@ -102,8 +93,6 @@ func (f *RealtimeForTest) Broadcast(topic, event string, payload any) {
 	}
 }
 
-// CloseChannel closes topic's channel for the clients joined to it, as
-// Realtime does for one whose access token ran out.
 func (f *RealtimeForTest) CloseChannel(topic string) {
 	for conn, joinRef := range f.joinedTo(topic) {
 		f.mu.Lock()
@@ -114,7 +103,6 @@ func (f *RealtimeForTest) CloseChannel(topic string) {
 	f.touch()
 }
 
-// Drop ends every client's connection, as a network that went away does.
 func (f *RealtimeForTest) Drop() {
 	f.mu.Lock()
 	conns := slices.Collect(maps.Keys(f.conns))
@@ -124,7 +112,6 @@ func (f *RealtimeForTest) Drop() {
 	}
 }
 
-// Joined are the topics the clients are joined to, sorted, once each.
 func (f *RealtimeForTest) Joined() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -140,14 +127,12 @@ func (f *RealtimeForTest) Joined() []string {
 	return out
 }
 
-// Connected is how many clients are connected.
 func (f *RealtimeForTest) Connected() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.conns)
 }
 
-// Sent are the messages the clients sent of event.
 func (f *RealtimeForTest) Sent(event string) []RealtimeSent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -160,8 +145,6 @@ func (f *RealtimeForTest) Sent(event string) []RealtimeSent {
 	return out
 }
 
-// Await waits up to d for ok to hold, looking again as clients connect,
-// send or leave, and reports whether it held.
 func (f *RealtimeForTest) Await(d time.Duration, ok func() bool) bool {
 	deadline := time.After(d)
 	for {

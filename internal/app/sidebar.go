@@ -11,7 +11,6 @@ import (
 	"leaflet/locales"
 )
 
-// Sidebar tabs, as Settings keeps the one shown.
 const (
 	tabPages = iota
 	tabTags
@@ -21,7 +20,6 @@ const (
 func (a *App) sidebar(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
-	// The window controls sit at the top left.
 	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, headerHeight)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		ui.Spacer(c)
 		tools(c, func() {
@@ -39,7 +37,6 @@ func (a *App) sidebar(c *ui.Context) {
 			}
 		})
 	})
-	// Room under the tabs, before the list they show.
 	ui.Row(c.Key("sidebar-tabs")).Padding(0, 12).Margin(0, 0, 10).Shrink(0).Children(func() {
 		tab := a.settings.SidebarTab
 		if ui.Tabs(c.Key("sidebar-tab"), &tab, locales.SidebarTabPages(), locales.SidebarTabTags(), locales.TodosTitle()).
@@ -62,7 +59,6 @@ func (a *App) sidebar(c *ui.Context) {
 	a.deleteFileAlert(c)
 }
 
-// sidebarTab shows a tab of the sidebar, which Settings keeps.
 func (a *App) sidebarTab(tab int) {
 	if a.settings.SidebarTab != tab {
 		a.settings.SidebarTab = tab
@@ -70,8 +66,6 @@ func (a *App) sidebarTab(tab int) {
 	}
 }
 
-// showSidebar shows a tab of the sidebar, and the sidebar when it is
-// hidden, for what an action opens in it to be seen.
 func (a *App) showSidebar(tab int) {
 	a.sidebarTab(tab)
 	if !a.settings.SidebarOpen {
@@ -81,8 +75,6 @@ func (a *App) showSidebar(tab int) {
 
 func (a *App) sectionHeader(c *ui.Context, key, title string) {
 	pal := theme.Of(c)
-	// In the tree, a header starts where the rows' arrows do: back over
-	// the slot the Outline keeps for an arrow, and the gap after it.
 	t := c.Theme()
 	ui.Row(c.Key("section:"+key)).Height(28).Padding(0, 4, 0, 0).Margin(10, 0, 2).
 		MarginStart(-(t.Space(4) + t.Space(1))).Grow(1).AlignItems(ui.Center).Children(func() {
@@ -115,23 +107,13 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 	}
 }
 
-// The sidebar's tree is MyGo's Outline. Its items are keys: "section:" a
-// section's header ("shared"), "folder:", "page:" or "file:" and the ID.
-
-// treeOpen opens an item of the tree, as a page's ancestors to show it.
 func (a *App) treeOpen(kind, id string) { a.treeState.Open.Add(kind + ":" + id) }
 
-// showInTree opens an item of the tree and shows it there: in the Pages
-// tab, the sidebar shown.
 func (a *App) showInTree(kind, id string) {
 	a.treeOpen(kind, id)
 	a.showSidebar(tabPages)
 }
 
-// tree builds the sidebar's tree: the folders of the user's space, with
-// their pages and files, and its pages, then the pages shared with the
-// user, pages with their subpages. The open page is its row chosen; choosing a page
-// opens it, a file opens the file, and a folder opens or closes.
 func (a *App) tree(c *ui.Context) {
 	var roots []string
 	lib := a.library()
@@ -141,7 +123,6 @@ func (a *App) tree(c *ui.Context) {
 	for _, p := range lib.Top {
 		roots = append(roots, "page:"+p.ID)
 	}
-	// Files of a folder that was deleted are at the top level.
 	for _, f := range a.files {
 		if !lib.HasFolder(f.FolderID) && f.PageID == "" {
 			roots = append(roots, "file:"+f.ID)
@@ -157,7 +138,7 @@ func (a *App) tree(c *ui.Context) {
 		kind, id, _ := strings.Cut(key, ":")
 		switch kind {
 		case "folder":
-			out := []string{} // a folder opens, empty or not
+			out := []string{}
 			for _, p := range lib.InFolder[id] {
 				out = append(out, "page:"+p.ID)
 			}
@@ -196,8 +177,6 @@ func (a *App) tree(c *ui.Context) {
 	list := ui.Outline(c, s, roots, children, func(key string) { a.treeItem(c, key) }).Grow(1).Padding(0, 8, 12)
 	a.treeDrop(c, list)
 	pressed, submitted := a.treeIn.after(list), list.Submitted()
-	// An arrow closing an item over the open page chooses the item,
-	// which it has closed already: that is no click on it.
 	if (list.Changed() || submitted) && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
 		kind, id, _ := strings.Cut(key, ":")
@@ -205,7 +184,6 @@ func (a *App) tree(c *ui.Context) {
 		case "page":
 			a.openPage(id)
 		case "folder":
-			// A click or Enter opens or closes it; the arrows only go by.
 			if !pressed && !submitted {
 				break
 			}
@@ -224,12 +202,6 @@ func (a *App) tree(c *ui.Context) {
 	}
 }
 
-// treeInput follows a sidebar tree's input: whether it had the keyboard
-// as it last built, which keeps its row chosen where the arrows put it
-// rather than on the page open, and when the pointer was last pressed on
-// it, which tells a click from an arrow. open is the page the row chosen
-// went to last, and wait the frames it may still take for its row to
-// show, as the pages above it open.
 type treeInput struct {
 	focused   bool
 	pressedAt time.Time
@@ -237,14 +209,8 @@ type treeInput struct {
 	wait      int
 }
 
-// clickChooses is how long after a press on a tree a row it chooses is
-// taken as clicked: the list chooses as the press is let go, and a press
-// a row took itself, as a page's to open it, chooses nothing.
 const clickChooses = time.Second
 
-// follows reports whether the row chosen goes to the page open, id: while
-// the tree has the keyboard, it stays where the arrows put it, unless
-// another page is opened meanwhile.
 func (in *treeInput) follows(id string) bool {
 	if id != in.open {
 		in.open, in.wait = id, 3
@@ -256,9 +222,6 @@ func (in *treeInput) follows(id string) bool {
 	return !in.focused
 }
 
-// after takes the input of list, as it is built, and reports whether its
-// row chosen now, if it was, was chosen with the pointer: a click chooses
-// as it is let go, a frame or more after the press.
 func (in *treeInput) after(list ui.Element) bool {
 	in.focused = list.Focused()
 	list.HandleInput(func(ev ui.InputEvent) bool {
@@ -274,7 +237,6 @@ func (in *treeInput) after(list ui.Element) bool {
 	return pressed
 }
 
-// treeLabel is the text of an item of the tree.
 func (a *App) treeLabel(key string) string {
 	kind, id, _ := strings.Cut(key, ":")
 	switch kind {
@@ -302,9 +264,6 @@ func (a *App) treeLabel(key string) string {
 	return ""
 }
 
-// treeItem builds an item of the tree after its arrow: its icon and
-// name, with its menu, under the pointer its buttons, and a right-click
-// for the menu too.
 func (a *App) treeItem(c *ui.Context, key string) {
 	pal := theme.Of(c)
 	kind, id, _ := strings.Cut(key, ":")
@@ -317,13 +276,10 @@ func (a *App) treeItem(c *ui.Context, key string) {
 		a.treeRows = append(a.treeRows, treeRow{key, row.Bounds()})
 	}
 	hovered := row.Hovered()
-	// On the chosen row, the accent's, buttons are in its text's color.
 	color := pal.Icon
 	if a.route.Kind == "page" && key == "page:"+a.route.ID {
 		color = pal.OnAccent
 	}
-	// Out of sight, a button leaves the pointer and Tab to the row, whose
-	// menu the menu key opens; assistive technology still presses it.
 	button := func(name, icon, label string) ui.Element {
 		b := iconButton(c, name, icon, label).Size(22, 22).Padding(3).TextColor(color).IgnoreInput(!hovered)
 		if !hovered {
@@ -363,9 +319,6 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			if open := a.route.Kind == "page" && a.route.ID == id; p.Title == "" && !open {
 				title.TextColor(pal.TextMuted)
 			}
-			// + only while hovered, so a title has the room until then, and
-			// only on a page this account can edit; the menu button stays
-			// built for its menu to report the choice.
 			tools(c, func() {
 				if hovered && a.canEdit(p.ID) && button("add", "plus", locales.PageAddSubpage()).Clicked() {
 					a.newPage(p.ID, "")
@@ -374,8 +327,6 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			})
 		})
 		row.PopoverMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
-		// A drag source takes the press from the list, so a click on it
-		// opens the page itself.
 		if a.canEdit(id) {
 			row.Drag(pageDrag{id})
 			if row.Dragging() {
@@ -383,7 +334,6 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			}
 			if row.Clicked() {
 				a.openPage(id)
-				// The press is the row's, which chose no row of the list.
 				a.treeIn.pressedAt = time.Time{}
 			}
 		}
@@ -413,8 +363,6 @@ func (a *App) treeItem(c *ui.Context, key string) {
 	}
 }
 
-// deleteFileAlert asks before the file chosen in the sidebar goes, from
-// every device, with no undo.
 func (a *App) deleteFileAlert(c *ui.Context) {
 	f := a.fileToDelete
 	if f == nil {
@@ -432,31 +380,19 @@ func (a *App) deleteFileAlert(c *ui.Context) {
 	}
 }
 
-// pageDrag is a page dragged in the sidebar's tree, to another place.
 type pageDrag struct{ id string }
 
-// Where a page dragged over a row goes: before it, after it, or inside.
 const (
 	dropBefore = iota
 	dropAfter
 	dropInside
 )
 
-// treeRow is a row of the sidebar's tree built this frame: its item, and
-// its content's box, after its arrow, in the last frame.
 type treeRow struct {
 	key string
 	box ui.Rect
 }
 
-// dropSpot is where page d dragged goes over the row of key, at (x, y)
-// in its content's box of height h: a page's top and bottom quarter put
-// it before and after the page, and its middle inside it, last, as a
-// folder's row does. Below the last page among its siblings, x left of
-// the content puts it after a page above instead, a level out for each
-// indent; out says how many. A page cannot go inside itself, or into
-// another space, nor beside a page at the top level unless it may go
-// there, as a page shared with the user may not.
 func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (at int, target string, out int, ok bool) {
 	kind, id, _ := strings.Cut(key, ":")
 	p := a.pageByID(d.id)
@@ -471,7 +407,6 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		return 0, "", 0, false
 	}
 	top := a.canMoveInside(d.id, "")
-	// Whether a page shows under another, rather than at the top level.
 	under := func(t *store.Page) bool {
 		parent, _ := a.shownIn(*t)
 		return parent != ""
@@ -486,7 +421,6 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 				return 0, "", 0, false
 			}
 		}
-		// After a page showing its subpages is before the first of them.
 		key = "page:" + t.ID
 		first := out == 0 && a.treeState.Open.Has(key) && len(a.children(t.ID)) > 0
 		return dropAfter, key, out, t.ID != d.id && (under(t) || top || first && a.canMoveInside(d.id, key))
@@ -496,10 +430,6 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 	return 0, "", 0, false
 }
 
-// canMoveInside reports whether page id may go inside the item of key, as
-// a drag in the sidebar or Move puts it: the top level of the user's
-// space ("") or a folder, for a page of their own; a page they can edit,
-// in the page's space, but not the page itself or one under it.
 func (a *App) canMoveInside(id, key string) bool {
 	p := a.pageByID(id)
 	if p == nil {
@@ -513,7 +443,6 @@ func (a *App) canMoveInside(id, key string) bool {
 	return t != nil && target != id && t.SpaceID == p.SpaceID && !a.isUnder(target, id) && a.canEdit(target)
 }
 
-// treeIndent is how far in each level of the tree is.
 func (a *App) treeIndent(c *ui.Context) float32 {
 	if a.treeState.Indent > 0 {
 		return a.treeState.Indent
@@ -521,9 +450,6 @@ func (a *App) treeIndent(c *ui.Context) float32 {
 	return c.Theme().Space(4)
 }
 
-// pageDrop makes the row of key take pages dragged onto it, where
-// dropSpot says, and shows where they would go: a line before or after
-// it, or the row tinted for inside.
 func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
 	pal := theme.Of(c)
 	spot := func(d pageDrag) (int, string, int, bool) {
@@ -552,16 +478,12 @@ func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
 	}
 }
 
-// treeDrop makes the tree take pages dragged beside its rows' content,
-// over their arrows and indents, as dropSpot says for the row there, and
-// below its rows, to the end of the user's space's top level.
 func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 	pal := theme.Of(c)
 	spot := func(d pageDrag) (at int, target string, out int, row ui.Rect, ok bool) {
 		lb := list.Bounds()
 		lx, ly, _ := list.PointerPosition()
 		x, y := lb.X+lx, lb.Y+ly
-		// Below the rows, the line starts where the top level's do.
 		end, left := float32(0), lb.X+lb.W
 		for _, r := range a.treeRows {
 			end, left = max(end, r.box.Y+r.box.H), min(left, r.box.X)
@@ -579,7 +501,6 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 		if at, target, out, row, ok := spot(d); ok {
 			lb := list.Bounds()
 			list.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				// The row's box, from the list's in the window to its own.
 				x, y := r.X+row.X-lb.X, r.Y+row.Y-lb.Y
 				switch {
 				case target == "":
@@ -608,10 +529,6 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 	}
 }
 
-// shownIn is where page p shows in the tree, which a page dropped beside
-// it goes to: under its parent, or at the top level, in its folder or
-// none, as one of the user's whose parent is gone shows there
-// (library.Arrange).
 func (a *App) shownIn(p store.Page) (parent, folder string) {
 	if p.ParentID != "" && a.pageByID(p.ParentID) == nil && !p.Template && !a.isShared(p) {
 		return "", p.FolderID
@@ -619,9 +536,6 @@ func (a *App) shownIn(p store.Page) (parent, folder string) {
 	return p.ParentID, p.FolderID
 }
 
-// dropTint is the tint of the row of key when a page dragged would go
-// inside it, see-through, for the tree paints it over the row's text: the
-// accent's, or on the open page's row, in the accent already, its text's.
 func (a *App) dropTint(key string, pal *theme.Palette) ui.Color {
 	if a.route.Kind == "page" && key == "page:"+a.route.ID {
 		return pal.OnAccent.Alpha(0.25)
@@ -629,15 +543,11 @@ func (a *App) dropTint(key string, pal *theme.Palette) ui.Color {
 	return pal.Accent.Alpha(0.12)
 }
 
-// dropLine is where a page dragged would go: a line from x to right at
-// y, with a dot at its start.
 func dropLine(p *ui.Painter, x, y, right float32, pal *theme.Palette) {
 	p.Fill(ui.Rect{X: x + 4, Y: y - 1, W: right - x - 4, H: 2}, pal.Accent, 1)
 	p.Fill(ui.Rect{X: x, Y: y - 4, W: 8, H: 8}, pal.Accent, 4)
 }
 
-// lastSibling reports whether page p is the last of its siblings, but
-// page skip, unless that is p.
 func (a *App) lastSibling(p *store.Page, skip string) bool {
 	siblings := a.library().Siblings(*p)
 	for k := len(siblings) - 1; k >= 0; k-- {
@@ -648,10 +558,6 @@ func (a *App) lastSibling(p *store.Page, skip string) bool {
 	return false
 }
 
-// dropPage moves page id to where it dropped by the item key: before or
-// after it among its siblings, or inside it, last. After a page showing
-// its subpages is before the first of them, unless out, a level out of
-// the row it dropped on.
 func (a *App) dropPage(id, key string, at int, out bool) {
 	kind, target, _ := strings.Cut(key, ":")
 	var parent string
@@ -668,7 +574,6 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 		if t == nil {
 			return
 		}
-		// Beside the page, where it shows.
 		var folder string
 		parent, folder = a.shownIn(*t)
 		switch {
@@ -685,10 +590,6 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 	}
 }
 
-// pageMenu is a page's actions, in the sidebar and the page's header;
-// the header's leaves out Share, whose button is beside it, and the
-// sidebar's Add subpage, its rows' + button. Share and Keep on this
-// device need a server to share and sync with.
 func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	editable := a.canEdit(p.ID)
 	if header && m.Item(locales.SidebarAddSubpage()).Disabled(!editable).Chosen() {
@@ -701,14 +602,10 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	}
 	if m.Item(locales.CommonRename()).Disabled(!editable).Chosen() {
 		a.openPage(p.ID)
-		// Not when the open page's edits kept it open: its title would
-		// take the name.
 		if a.page != nil && a.page.id == p.ID {
 			a.focusTitle(true)
 		}
 	}
-	// A template stays out of the page list: it doesn't move among the
-	// pages, and starts copies from a blank page rather than here.
 	if !p.Template {
 		if m.Item(locales.SidebarMoveTo()).Disabled(!editable).Chosen() {
 			a.dialogs.openMove(p.ID)
@@ -750,7 +647,6 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 func (a *App) sidebarFooter(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Separator).Children(func() {
-		// Not signed in, the account row is the way to sign in.
 		signIn := !a.syncOn() && a.hasServer()
 		var account ui.Element
 		if signIn {
@@ -775,9 +671,6 @@ func (a *App) sidebarFooter(c *ui.Context) {
 			a.navigate(Route{Kind: "signin"})
 		}
 		tools(c, func() {
-			// Check for updates; a spinner while the check or the download
-			// is under way, then the same icon in the accent to restart into
-			// the update installed.
 			switch {
 			case a.updateReady != "":
 				tip := locales.SidebarRestartToUpdate(a.updateReady)
@@ -803,8 +696,6 @@ func (a *App) sidebarFooter(c *ui.Context) {
 	})
 }
 
-// accountStatus is the line under the user's name: where pages are kept,
-// or how syncing goes.
 func (a *App) accountStatus() string {
 	switch {
 	case !a.syncOn():

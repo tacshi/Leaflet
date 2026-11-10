@@ -20,8 +20,6 @@ func TestCalloutTones(t *testing.T) {
 	}
 }
 
-// A callout's icon gives it the next tone, the first after the last; a
-// tone not known reads as the first.
 func TestNextTone(t *testing.T) {
 	for tone, want := range map[string]string{"info": "tip", "tip": "warning", "warning": "danger", "danger": "info", " Warning ": "danger", "loud": "tip", "": "tip"} {
 		if got := NextTone(tone); got != want {
@@ -30,8 +28,6 @@ func TestNextTone(t *testing.T) {
 	}
 }
 
-// Math keeps its formula, and a diagram its Mermaid, under keys of their
-// own, which their editors write.
 func TestSourceKey(t *testing.T) {
 	for _, n := range []*Node{MathNode("x^2"), DiagramNode("graph TD")} {
 		key, source := BlockSource(n)
@@ -44,9 +40,6 @@ func TestSourceKey(t *testing.T) {
 	}
 }
 
-// The children of a block that can't hold them come out after it, in
-// order, as a merge lifts them, in a copy; a list item and a table keep
-// theirs, and a page with none stranded is itself.
 func TestLifted(t *testing.T) {
 	kid := func(id string) *Node { return &Node{ID: id, Type: "paragraph"} }
 	c := &Content{Children: []*Node{
@@ -121,9 +114,6 @@ func TestNewBlockSpecs(t *testing.T) {
 	}
 }
 
-// longPage is a page of n lines of the kinds people write: headings,
-// paragraphs some of them bold, nested bullets, to-dos, quotes and
-// numbered steps.
 func longPage(n int) *Content {
 	var lines []string
 	for i := 0; len(lines) < n; i++ {
@@ -147,8 +137,6 @@ func longPage(n int) *Content {
 	return FromBlocks(ParseLines(strings.Join(lines, "\n")))
 }
 
-// BenchmarkBlockViews reads a page of 3000 blocks as an agent's read_page
-// does.
 func BenchmarkBlockViews(b *testing.B) {
 	c := longPage(3000)
 	b.ReportAllocs()

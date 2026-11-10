@@ -7,18 +7,11 @@ import (
 	"leaflet/internal/theme"
 )
 
-// Callouts and toggles: text blocks with a control before the text, an
-// icon that changes the callout's tone and a chevron that folds the
-// toggle's children away.
-
 const (
-	// calloutMargin is the room above and below a callout's box, and
-	// calloutPad the room around its text in it.
 	calloutMargin = 6
 	calloutPad    = 12
 )
 
-// CalloutLook is the tint, border, icon color and icon of a tone.
 func CalloutLook(tone string, pal *theme.Palette) (bg, border, fg ui.Color, icon string) {
 	icon = doc.CalloutIcon(tone)
 	switch doc.CalloutTone(tone) {
@@ -32,11 +25,8 @@ func CalloutLook(tone string, pal *theme.Palette) (bg, border, fg ui.Color, icon
 	return pal.AccentSoft, pal.AccentSoftBorder, pal.AccentText, icon
 }
 
-// collapsed reports whether a block is a toggle folded shut, its children
-// hidden.
 func collapsed(n *doc.Node) bool { return n.Type == "toggle_list" && n.Bool("collapsed") }
 
-// CycleTone gives a callout the next tone.
 func (e *Editor) CycleTone(id string) {
 	n := e.node(id)
 	if n == nil || n.Type != "callout" || e.ReadOnly {
@@ -48,8 +38,6 @@ func (e *Editor) CycleTone(id string) {
 	e.changed()
 }
 
-// ToggleCollapsed folds a toggle's children away, or shows them. The
-// caret, when in what folds away, goes to the end of the toggle.
 func (e *Editor) ToggleCollapsed(id string) {
 	n := e.node(id)
 	if n == nil || n.Type != "toggle_list" {
@@ -70,13 +58,10 @@ func (e *Editor) ToggleCollapsed(id string) {
 			e.Select(Pos{id, textLen(n)}, Pos{id, textLen(n)})
 		}
 	}
-	// Folding is how the page shows, not an edit to undo, but it is kept.
 	e.keepFold(n)
 	e.changed()
 }
 
-// marker reports whether a point in the window is on the control before
-// a block's text: a to-do's box, a callout's icon or a toggle's chevron.
 func (e *Editor) marker(n *doc.Node, wx, wy float32) bool {
 	box, ok := e.box(n.ID)
 	if !ok || wy < box.Y || wy >= box.Y+box.H {

@@ -2,63 +2,34 @@ import AVFoundation
 import Foundation
 import LeafletCore
 
-/// Recorder is recording as the app's views see it: the recording in
-/// progress, the recordings the open pages' blocks show, and the one
-/// playing. One for the app, as the core records one at a time; the
-/// blocks, which TextKit hosts apart from the windows' views, reach it as
-/// Recorder.shared.
 @MainActor
 @Observable
 final class Recorder {
     static let shared = Recorder()
 
-    /// state is the recording in progress, as the core last said; at is
-    /// when it said it, which its time counts on from. Its levels and the
-    /// words heard, which change many times a second, are apart, levels
-    /// and liveText, for only the live block to read: each view that reads
-    /// state draws again as it changes.
     private(set) var state = RecordingState.idle
     private(set) var at = Date()
     private(set) var levels: [Double] = []
     private(set) var liveText = ""
-    /// rows are the recordings the blocks asked for, by ID; missing, those
-    /// not on this device, as one made on another not synced yet.
     private(set) var rows: [String: RecordingRow] = [:]
     private(set) var missing: Set<String> = []
-    /// playing is the recording the player plays, or nil; loading, the one
-    /// whose audio is coming.
     private(set) var playing: String?
     private(set) var loading: String?
     private(set) var player: AVAudioPlayer?
-    /// changes counts the player's plays and pauses, which it doesn't
-    /// tell, for the views to read it again.
     private(set) var changes = 0
 
-    /// speech are the speech providers a transcription on each page asked
-    /// for can be picked from, and the one marked, by page.
     private(set) var speech: [String: SpeechChoices] = [:]
 
     @ObservationIgnored private var client: CoreClient?
-    /// attaching gives the core the microphone, which a recording needs.
     @ObservationIgnored private var attaching: Task<Void, Never>?
     @ObservationIgnored private var speechAsked: Set<String> = []
     @ObservationIgnored private var toast: ((String) -> Void)?
     @ObservationIgnored private var asked: Set<String> = []
-    /// reads numbers the reads of each recording, as a stop and the end of
-    /// its transcription each read it: "transcribing" read first doesn't
-    /// replace "ready" read after.
     @ObservationIgnored private var reads = Newest()
-    /// fetching brings loading's audio and starts it; stopPlaying cancels
-    /// it, so a recording asked for whose block has gone never starts, and
-    /// fetch tells it from one stopped before it, which may still be
-    /// finishing an await it can't be cancelled out of.
     @ObservationIgnored private var fetching: Task<Void, Never>?
     @ObservationIgnored private var fetch = 0
     @ObservationIgnored private let microphone = Microphone()
-    /// finishing is the time iOS gives the app in the background while
-    /// recordings transcribe, as one stopped from the Live Activity does.
     @ObservationIgnored private let finishing = BackgroundTask()
-    /// ended hears the player reach the end, which it holds weakly.
     @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
         self?.changes += 1
         self?.letAudioGo()
@@ -66,8 +37,6 @@ final class Recorder {
 
     private init() {}
 
-    /// attach gives the recorder the core, and the core the microphone;
-    /// toast tells the user what went wrong.
     func attach(_ client: CoreClient, toast: @escaping (String) -> Void) {
         self.client = client
         self.toast = toast
@@ -80,30 +49,23 @@ final class Recorder {
                 update(s)
                 update(levels: s.levels)
             }
-            // A Live Activity an earlier launch left, ended as it
-            // recorded, goes: update tells it nothing while none records.
             if !state.recording { RecordingActivity.shared.end() }
         }
     }
 
-    /// ready waits for the core to have the microphone, as an intent run
-    /// as the app launches records at once.
     func ready() async { await attaching?.value }
 
-    /// elapsed is how long the recording in progress has run, now.
     func elapsed(at now: Date) -> TimeInterval {
         let base = TimeInterval(state.elapsedMs) / 1000
         return state.active && !state.paused ? base + now.timeIntervalSince(at) : base
     }
 
-    /// update takes the core's state of the recording.
     func update(_ s: RecordingState) {
         if s.liveText != liveText { liveText = s.liveText }
         var s = s
         s.levels = []
         s.liveText = ""
         let old = state
-        // As only its time goes on, which elapsed counts on, it stays.
         var same = s
         same.elapsedMs = old.elapsedMs
         guard same != old else { return }
@@ -112,15 +74,10 @@ final class Recorder {
         RecordingActivity.shared.sync(s, at: at)
         holdOn(s)
         if !s.error.isEmpty, s.error != old.error { toast?(s.error) }
-        // A recording stopped, or a transcription ended: their rows change.
         let done = Set(old.transcribing + [old.id]).subtracting(s.transcribing + [s.id])
         for id in done where !id.isEmpty { Task { await load(id) } }
     }
 
-    /// holdOn keeps the app running in the background while recordings
-    /// transcribe, for as long as iOS lets it: one stopped from the Live
-    /// Activity, with the app away, stops the microphone that kept it
-    /// running. One cut short goes on as the app comes back.
     private func holdOn(_ s: RecordingState) {
         let busy = !s.transcribing.isEmpty || !s.finishing.isEmpty
         if busy, !finishing.running {
@@ -130,16 +87,10 @@ final class Recorder {
         }
     }
 
-    /// update takes the latest levels of the recording in progress.
     func update(levels: [Double]) {
         if levels != self.levels { self.levels = levels }
     }
 
-    // MARK: Recording
-
-    /// start records into the page, putting its block at the editor's
-    /// caret, transcribed by provider, or the one marked for the page when
-    /// it is "".
     func start(pageID: String, editor: EditorController?, provider: String = "") {
         guard let client, !state.recording else { return }
         quiet()
@@ -154,18 +105,11 @@ final class Recorder {
         }
     }
 
-    // MARK: Speech providers
-
-    /// choices returns the speech providers a transcription on page can be
-    /// picked from, and the one marked, reading them the first time: there
-    /// is no default, so with more than one, each transcription asks.
     func choices(for page: String) -> SpeechChoices? {
         if speechAsked.insert(page).inserted { Task { await loadChoices(page) } }
         return speech[page]
     }
 
-    /// reloadChoices reads the choices again, as the settings or the
-    /// session change: a key saved or removed changes them.
     func reloadChoices() {
         for page in speechAsked { Task { await loadChoices(page) } }
     }
@@ -179,11 +123,6 @@ final class Recorder {
         Task { await stopRecording() }
     }
 
-    /// stopRecording ends the recording, the time to transcribe it in the
-    /// background asked for first: stopped with the app away, as from the
-    /// Live Activity, it lets go of the microphone that kept the app
-    /// running, and iOS could put the app away before the core says the
-    /// recording transcribes.
     func stopRecording() async {
         guard let client else { return }
         if !finishing.running { finishing.begin("Transcribe") }
@@ -208,10 +147,6 @@ final class Recorder {
         }
     }
 
-    // MARK: Recordings
-
-    /// row returns a recording a block shows, reading it the first time,
-    /// and again while it is missing.
     func row(_ id: String) -> RecordingRow? {
         if asked.insert(id).inserted || missing.contains(id) {
             Task { await load(id) }
@@ -219,8 +154,6 @@ final class Recorder {
         return rows[id]
     }
 
-    /// reload reads again the recordings the blocks show, as the core
-    /// says they changed.
     func reload() {
         for id in asked { Task { await load(id) } }
     }
@@ -234,16 +167,12 @@ final class Recorder {
             if rows[id] != row { rows[id] = row }
             if missing.contains(id) { missing.remove(id) }
         } catch {
-            // Its block says so, as the desktop's does; it is read again as
-            // the recordings change, or the block shows again.
             guard reads.answered(n, id) else { return }
             rows[id] = nil
             if !missing.contains(id) { missing.insert(id) }
         }
     }
 
-    /// retranscribe transcribes recording id, on page, again, with
-    /// provider, or the one marked for the page when it is "".
     func retranscribe(_ id: String, page: String?, provider: String) {
         guard let client else { return }
         Task {
@@ -257,8 +186,6 @@ final class Recorder {
         }
     }
 
-    /// transcribeFile transcribes audio file block of page into its notes,
-    /// with provider, or the one marked for the page when it is "".
     func transcribeFile(page: String, block: String, provider: String = "") {
         guard let client else { return }
         Task {
@@ -271,8 +198,6 @@ final class Recorder {
         }
     }
 
-    /// shareAudio shares recording id's audio, named for title, through
-    /// editor's page: downloaded first when it is not on this device.
     func shareAudio(_ id: String, title: String, in editor: EditorController?) {
         guard let client else { return }
         Task {
@@ -285,8 +210,6 @@ final class Recorder {
         }
     }
 
-    /// shareTranscript shares recording id's transcript as a file of format,
-    /// named for title, through editor's page.
     func shareTranscript(
         _ id: String, title: String, format: String, in editor: EditorController?
     ) {
@@ -302,7 +225,6 @@ final class Recorder {
         }
     }
 
-    /// dismissError closes the notice of what went wrong with recording id.
     func dismissError(_ id: String) {
         guard let client else { return }
         Task {
@@ -315,9 +237,6 @@ final class Recorder {
         }
     }
 
-    /// insertTranscript has editor, its page's, put recording id's
-    /// transcript after block, the recording's block it was asked from, as
-    /// one step to undo.
     func insertTranscript(_ id: String, after block: String, into editor: EditorController?) {
         guard let client else { return }
         Task {
@@ -329,20 +248,12 @@ final class Recorder {
         }
     }
 
-    /// put puts a transcript in editor's page after block, the recording's
-    /// block it was asked from, as the desktop does: the block a recording
-    /// was made in may be another, as a copied page's has an ID of its own.
     static func put(_ transcript: Transcript, after block: String, in editor: EditorController?) {
         editor?.insertBlocks(transcript.blocks, after: block)
     }
 
-    // MARK: Playing
-
-    /// play plays a recording from where it was, or from at seconds;
-    /// playing, it pauses it.
     func play(_ id: String, from at: TimeInterval? = nil) {
         if playing == id, let player {
-            // Played to its end, the player let the session go.
             if at != nil || !player.isPlaying {
                 try? AVAudioSession.sharedInstance().setActive(true)
             }
@@ -397,7 +308,6 @@ final class Recorder {
         }
     }
 
-    /// pausePlaying pauses the recording playing, as a video starts.
     func pausePlaying() {
         guard let player, player.isPlaying else { return }
         player.pause()
@@ -409,24 +319,19 @@ final class Recorder {
         player.currentTime = at
     }
 
-    /// skip moves the recording playing by seconds, within it.
     func skip(_ id: String, by seconds: TimeInterval) {
         guard playing == id, let player else { return }
         player.currentTime = min(max(player.currentTime + seconds, 0), player.duration)
     }
 
-    /// speedChanged plays the recording at the speed now asked for.
     func speedChanged() { player?.rate = PlaySpeed.current }
 
-    /// quiet stops what plays as a recording starts: a recording's audio,
-    /// and the files and videos, which would play on into it.
     func quiet() {
         stopPlaying()
         FilePlayback.shared.pause()
         VideoPlayback.shared.pauseAll()
     }
 
-    /// stopPlaying stops the recording playing, and one on its way.
     func stopPlaying() {
         fetching?.cancel()
         fetching = nil
@@ -439,16 +344,12 @@ final class Recorder {
         if was != nil { letAudioGo() }
     }
 
-    /// letAudioGo gives up the audio session once playing is done, for the
-    /// music or podcast it interrupted to go on.
     private func letAudioGo() {
         try? AVAudioSession.sharedInstance().setActive(
             false, options: .notifyOthersOnDeactivation)
     }
 }
 
-/// PlayerEnded tells the recorder a recording played to its end, for its
-/// block to show Play again.
 private final class PlayerEnded: NSObject, AVAudioPlayerDelegate {
     private let done: @MainActor @Sendable () -> Void
 

@@ -64,8 +64,6 @@ if ($Upload -and -not $Version) { Fail '-Upload needs the version to release, as
 if (-not $Version) { $Version = Get-ConfigValue version }
 $Version = $Version.TrimStart('v')
 Check-Version $Version
-# The paths given are from where this was run; the default -Out is in the
-# repository.
 $Out = if ($PSBoundParameters.ContainsKey('Out')) { Get-FullPath $Out } else { [IO.Path]::GetFullPath($Out, $RootDir) }
 if ($Changelog) {
 	$Changelog = Get-FullPath $Changelog
@@ -87,10 +85,6 @@ if ($Certificate) {
 $UpdateKey = Get-UpdateKeyFile
 if ($UpdateKey) { $Config += "updates.privateKey=$UpdateKey" }
 $BuildArgs = @('build', '-platform', ($Platforms -join ','), '-o', $Out)
-# Uploaded here after the checks below, not by mygo build -upload, which
-# uploads as it finishes, to a release that it does not check is a draft. A
-# published release is refused before the long build, and again as it is
-# uploaded.
 if ($Upload) {
 	Test-Gh
 	Test-Draft $Version
@@ -102,10 +96,7 @@ if ($Upload) {
 }
 
 try {
-	# The version, the changelog, the update key's file and the certificate
-	# go into mygo.json for this build only.
 	Set-Config $Config
-	# The command line, which the apps ship beside them.
 	foreach ($a in $Arches) { Build-Cli (Get-ConfigValue name) $Version (Get-GoArch $a) }
 	Info "building Leaflet $Version for $($Platforms -join ' ')"
 	Invoke-Mygo $BuildArgs
@@ -113,9 +104,6 @@ try {
 	Restore-Config
 }
 
-# MyGo names installers "leaflet-setup-<version>-<arch>.exe", in a folder
-# per platform. Each is checked, and uploaded under that name, before it is
-# moved out beside those folders under the usual name.
 foreach ($a in $Arches) {
 	$goArch = Get-GoArch $a
 	$folder = Join-Path $Out "windows-$goArch"

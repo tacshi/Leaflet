@@ -16,8 +16,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// Signing in uploads the audio of recordings made before, once they are
-// done, and none whose audio is gone.
 func TestSignInUploadsEarlierRecordings(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Standup"})
@@ -65,20 +63,10 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 	}
 }
 
-// Signing in to an account whose library other devices made leaves this
-// device's starter pages out of it; signing in to one with no pages yet
-// keeps them as its own, though the server made its space at sign-up,
-// unless another device signing in at the same time claimed it first. A
-// space another device made meanwhile is joined. The device's other pages
-// go up either way.
 func TestSignInSettlesStarterPages(t *testing.T) {
 	const remoteID = "00000000-0000-0000-0000-0000000000aa"
 	for _, c := range []struct {
-		name string
-		// made says the server has the space from the start, else it has
-		// none until the insert, which another device's beats; claim is
-		// what the server answers this device's claim, "" when it must
-		// not be asked.
+		name              string
 		made, pages, kept bool
 		claim             string
 	}{
@@ -136,8 +124,6 @@ func TestSignInSettlesStarterPages(t *testing.T) {
 	}
 }
 
-// A device whose starter pages are settled, as when it joined a library
-// before, claims no new library for them: the device that has some does.
 func TestSignInWithoutStarterPagesClaimsNothing(t *testing.T) {
 	st := openStore(t)
 	claimed := false
@@ -162,10 +148,6 @@ func TestSignInWithoutStarterPagesClaimsNothing(t *testing.T) {
 	}
 }
 
-// Signing in adopts the device's space only once everything in it is
-// queued: a pass that could not queue it all leaves the space to adopt
-// again, and what was not queued is queued before the next pass. What
-// is made meanwhile goes into the account's space.
 func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -182,7 +164,6 @@ func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The disk refuses the folder's entry, as one that is full would.
 	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON outbox WHEN NEW.entity = 'folders'
 		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
 		t.Fatal(err)
@@ -235,14 +216,9 @@ func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 	}
 }
 
-// A device whose account's session ended, and that syncs through iCloud
-// Drive since, sends everything again as it signs in to the account again:
-// what went through the folder meanwhile left the queue without reaching
-// the server.
 func TestSignInAgainAfterICloudSendsAllAgain(t *testing.T) {
 	d := newCloudDevice(t, cloudRoot(t))
 	space := d.st.Session().SpaceID
-	// Adopted by the account, as the sign-in before left it.
 	for k, v := range map[string]string{"account": "u1", "space.u1": space} {
 		if err := d.st.SetValue(k, v); err != nil {
 			t.Fatal(err)
@@ -274,9 +250,6 @@ func TestSignInAgainAfterICloudSendsAllAgain(t *testing.T) {
 	}
 }
 
-// Sending everything again sends a deleted file's row, so its deletion
-// still reaches the other devices, but none of its contents, and a deleted
-// folder's.
 func TestRequeueSendsDeletedFilesAndFolders(t *testing.T) {
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
@@ -322,9 +295,6 @@ func TestRequeueSendsDeletedFilesAndFolders(t *testing.T) {
 	}
 }
 
-// The files and recordings waiting to go up stay waiting when their table
-// cannot be read, rather than being let go with it; a deleted file's goes
-// up, as requeueAll sends it, and an entry whose row is gone is let go.
 func TestRetryMovesKeepsWhatItCannotRead(t *testing.T) {
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"

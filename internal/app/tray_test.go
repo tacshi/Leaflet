@@ -9,9 +9,6 @@ import (
 	"leaflet/locales"
 )
 
-// standInForUpdates gives an app that can update itself look to answer its
-// looks for a newer version, and posted, which holds what goes to the main
-// thread for the test to run.
 func standInForUpdates(t *testing.T, look func(context.Context) (*newerVersion, error)) (a *App, posted chan func()) {
 	t.Helper()
 	old, every := lookForUpdate, updateEvery
@@ -23,8 +20,6 @@ func standInForUpdates(t *testing.T, look func(context.Context) (*newerVersion, 
 	return a, posted
 }
 
-// While the app runs it looks for a newer version again, as quietly as it
-// does as it starts: with the menu bar icon it can run for weeks.
 func TestLooksForUpdatesWhileRunning(t *testing.T) {
 	looks := make(chan struct{}, 8)
 	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
@@ -49,15 +44,10 @@ func TestLooksForUpdatesWhileRunning(t *testing.T) {
 	}
 }
 
-// A build that cannot update itself sets no timer: with no window, later
-// runs at once, and looking again would never end.
 func TestNoUpdatesNoTimer(t *testing.T) {
 	(&App{}).keepLookingForUpdates()
 }
 
-// An update that will not install says so though no one asked, once for
-// each version: otherwise only the log would know why the app stays as it
-// is. Asked, it says so each time.
 func TestUpdateThatFailsToInstallSaysSo(t *testing.T) {
 	version := "2.0.0"
 	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
@@ -89,8 +79,6 @@ func TestUpdateThatFailsToInstallSaysSo(t *testing.T) {
 	look(false, failed("2.0.1"))
 }
 
-// A check that fails, as one made offline, is only logged unless the user
-// asked: it would otherwise say so every few hours.
 func TestCheckThatFailsSaysSoOnlyAsked(t *testing.T) {
 	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
 		return nil, errors.New("offline")

@@ -7,16 +7,10 @@ import (
 	"leaflet/internal/store"
 )
 
-// viewDelay is how long the view rests before it is published: a write a
-// keystroke would be too many.
 const viewDelay = 200 * time.Millisecond
 
-// maxViewText is how much of the selected text is published, in
-// characters: selecting all of a long page writes it each time it changes.
 const maxViewText = 20_000
 
-// viewChanged publishes the open page and its selection, shortly after
-// they last changed.
 func (a *App) viewChanged() {
 	if a.viewTimer != nil {
 		a.viewTimer.Stop()
@@ -24,8 +18,6 @@ func (a *App) viewChanged() {
 	a.viewTimer = a.later(viewDelay, a.publishView)
 }
 
-// publishView stores the open page and its selection for those outside
-// the app (store.OpenView), when they changed.
 func (a *App) publishView() {
 	var v store.OpenView
 	if a.page != nil {
@@ -56,7 +48,6 @@ func (a *App) publishView() {
 	}
 }
 
-// endView takes the view away as the app ends.
 func (a *App) endView() {
 	if a.viewTimer != nil {
 		a.viewTimer.Stop()

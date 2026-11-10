@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// Links from shared pages reach only the web: not files on this device,
-// nor services on it or its network.
 func TestFetchOnlyThePublicWeb(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("<title>secret</title>"))
@@ -31,14 +29,10 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 		"93.184.216.34": true, "2606:4700::1111": true,
 		"127.0.0.1": false, "10.0.0.1": false, "192.168.1.1": false, "172.16.0.1": false, "169.254.169.254": false,
 		"100.100.1.1": false, "0.0.0.0": false, "::1": false, "fe80::1": false, "fd00::1": false, "::ffff:127.0.0.1": false,
-		// IPv6 addresses standing for IPv4 ones are as those are.
 		"64:ff9b::7f00:1": false, "64:ff9b::a9fe:a9fe": false, "64:ff9b::5db8:d822": true, "64:ff9b:1::a00:1": false,
 		"2002:7f00:1::1": false, "2002:c0a8:101::1": false, "2002:5db8:d822::1": true,
 		"::127.0.0.1": false, "::10.0.0.1": false, "fec0::1": false,
 		"::ffff:0:127.0.0.1": false, "::ffff:0:a9fe:a9fe": false, "::ffff:0:5db8:d822": true,
-		// Ranges kept for protocols, for later, and for a network's
-		// broadcast; but the benchmarks' range, which fake-IP proxies
-		// answer every name with.
 		"192.0.0.1": false, "192.0.0.170": false, "240.0.0.1": false, "250.1.2.3": false, "255.255.255.255": false,
 		"::ffff:240.0.0.1": false, "64:ff9b::c000:aa": false, "2002:f000:1::1": false, "192.0.1.1": true,
 		"198.18.0.1": true, "198.19.255.254": true, "239.255.255.255": false,
@@ -49,14 +43,7 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 	}
 }
 
-// Pictures load from files in the data folder only, links followed.
-
-// Through a proxy, which looks names up itself, a fetch asks the proxy for
-// the address it checked, not the name, which may resolve to this machine
-// or its network the second time; a name that does already goes nowhere.
 func TestFetchThroughAProxyAsksForTheCheckedAddress(t *testing.T) {
-	// The site, where the proxy tunnels to the address it is asked for on
-	// port 80, and the host it is asked for.
 	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("hello from " + r.Host))
 	}))
@@ -117,8 +104,6 @@ func TestFetchThroughAProxyAsksForTheCheckedAddress(t *testing.T) {
 	}
 }
 
-// A page read through a proxy is at its link, not at the address the proxy
-// was asked for: where it says it is, and what its relative links lead to.
 func TestReadThroughAProxyKeepsThePagesLink(t *testing.T) {
 	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -158,8 +143,6 @@ func TestReadThroughAProxyKeepsThePagesLink(t *testing.T) {
 	}
 }
 
-// A fetch ends as its context does, as when the app gives up on a
-// picture whose page closed, though the site never answers.
 func TestFetchEndsWithItsContext(t *testing.T) {
 	useServer(t)
 	release := make(chan struct{})

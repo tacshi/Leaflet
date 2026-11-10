@@ -32,3 +32,5 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 /ios/Leaflet/Generated/
+
+__pycache__/

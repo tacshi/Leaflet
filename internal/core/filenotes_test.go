@@ -14,8 +14,6 @@ import (
 	"leaflet/locales"
 )
 
-// wordsEngine is a device's engine that hears the same words in every
-// file, after meanwhile runs, as what happens while it transcribes.
 type wordsEngine struct{ meanwhile func() }
 
 func (wordsEngine) Stream(string, func(string)) (recording.Stream, error) {
@@ -29,7 +27,6 @@ func (e wordsEngine) File(string, string) ([]store.Segment, error) {
 	return []store.Segment{{StartMs: 5000, Text: "We ship on Friday."}}, nil
 }
 
-// audioPage makes a page with an audio file of its own in file block a.
 func (f *pagesFixture) audioPage(t *testing.T, title string) (store.Page, store.File) {
 	t.Helper()
 	p := f.page(t, title, "")
@@ -45,8 +42,6 @@ func (f *pagesFixture) audioPage(t *testing.T, title string) (store.Page, store.
 	return p, file
 }
 
-// fileIn makes page id's content file block a, of file fileID. It may run
-// as a transcript is made, off the test's goroutine.
 func (f *pagesFixture) fileIn(t *testing.T, id, fileID string) {
 	t.Helper()
 	n := &doc.Node{ID: "a", Type: "file", Data: map[string]any{"name": "call.m4a", "file_id": fileID}}
@@ -55,9 +50,6 @@ func (f *pagesFixture) fileIn(t *testing.T, id, fileID string) {
 	}
 }
 
-// transcribe transcribes file block a of page id on the device's engine,
-// with meanwhile run as it does, and waits for the transcript to be done
-// with.
 func (f *pagesFixture) transcribe(t *testing.T, id string, meanwhile func()) error {
 	t.Helper()
 	done := make(chan struct{}, 1)
@@ -75,9 +67,6 @@ func (f *pagesFixture) transcribe(t *testing.T, id string, meanwhile func()) err
 	return nil
 }
 
-// A page's own audio file is transcribed into its notes; a file of
-// another page a block names is not read at all, nor are its words put in
-// this page.
 func TestTranscribeFileOnlyOfThePage(t *testing.T) {
 	f := newPagesFixture(t)
 	p, file := f.audioPage(t, "Meeting")
@@ -103,9 +92,6 @@ func TestTranscribeFileOnlyOfThePage(t *testing.T) {
 	}
 }
 
-// A transcript is said to be done only once it is stored: one whose block
-// went meanwhile says only that, and one that could not be stored says
-// why.
 func TestTranscribeFileToldOnlyWhenSaved(t *testing.T) {
 	f := newPagesFixture(t)
 	p, file := f.audioPage(t, "Meeting")

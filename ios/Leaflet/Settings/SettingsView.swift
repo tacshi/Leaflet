@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// SettingsView is Settings: how Leaflet looks, and how sync stands.
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
@@ -13,8 +12,6 @@ struct SettingsView: View {
         @Bindable var app = app
         @Bindable var prompt = prompt
         @Bindable var iCloud = app.iCloud
-        // Read here, for the body to follow it as it is typed: the alert's
-        // actions aren't drawn where a read of it would be.
         let wordTyped = prompt.question?.typed.map { prompt.typed == $0 } ?? true
         NavigationStack {
             Form {
@@ -25,8 +22,6 @@ struct SettingsView: View {
                         Picker(L.settingsTheme, selection: $app.theme) {
                             ForEach(ThemeMode.allCases) { Text($0.label).tag($0) }
                         }
-                        // As the desktop's: the system's language, then each of
-                        // the catalogs' by its name in itself.
                         Picker(
                             L.settingsLanguage,
                             selection: Binding(
@@ -40,20 +35,14 @@ struct SettingsView: View {
                                 Label {
                                     Text(L.settingsAccentName(name: name))
                                 } icon: {
-                                    // Drawn in its own color: a picker tints
-                                    // its rows' symbols with the app's accent.
                                     Image(
                                         uiImage: AccentDot.image(
                                             Palette.palettes[name]!["light"]!.accent))
                                 }
-                                // Blue, the system's, is the default.
                                 .tag(name == "Blue" ? "" : name)
                             }
                         }
                         .pickerStyle(.navigationLink)
-                        // Its separator under the row's start, as the
-                        // others': the chosen accent's label would set it
-                        // under its own text.
                         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         Picker(L.settingsTextSize, selection: $app.textSize) {
                             Text(L.settingsTextSizeSmall).tag(15.0)
@@ -88,8 +77,6 @@ struct SettingsView: View {
                 .listRowBackground(palette.surface)
             }
             .themedForm(palette)
-            // The sections' questions and files, on the form: on a row, or
-            // a section's header, they would go as the list scrolls it away.
             .alert(
                 prompt.question?.title ?? "", isPresented: $prompt.asking,
                 presenting: prompt.question
@@ -127,19 +114,13 @@ struct SettingsView: View {
             .onChange(of: app.textSize) { app.saveLook() }
         }
         .environment(prompt)
-        // Drawn again in a language chosen here.
         .id(app.shown)
     }
 }
 
-/// SettingsPrompt is what a section of Settings asks, or a file it offers
-/// to move, which the form shows: a section's rows come and go as the
-/// list scrolls, and what they present would go with them.
 @MainActor
 @Observable
 final class SettingsPrompt {
-    /// Ask is a question with an action besides Cancel, which typed, when
-    /// set, is a word to type for, as DELETE.
     struct Ask {
         var title: String
         var message: String
@@ -148,8 +129,6 @@ final class SettingsPrompt {
         var confirm: @MainActor () async -> Void
     }
 
-    /// Move offers a file the app made, to move where the user picks; done
-    /// hears where it went, or why it didn't, and cancelled that it stays.
     struct Move {
         var file: URL
         var done: @MainActor (Result<URL, any Error>) -> Void
@@ -158,7 +137,6 @@ final class SettingsPrompt {
 
     var asking = false
     private(set) var question: Ask?
-    /// typed is what is typed for the question's word.
     var typed = ""
     var moving = false
     private(set) var move: Move?
@@ -174,8 +152,6 @@ final class SettingsPrompt {
         moving = true
     }
 
-    /// moved tells the move's section how it ended, once: nil if the user
-    /// kept the file where it was.
     func moved(_ result: Result<URL, any Error>?) {
         let m = move
         move = nil
@@ -183,9 +159,6 @@ final class SettingsPrompt {
     }
 }
 
-/// SyncSection is Settings › Sync and storage, in one section as on the
-/// desktop: iCloud sync, then while pages sync, how sync stands, and
-/// working offline.
 private struct SyncSection: View {
     @Environment(AppModel.self) private var app
 
@@ -194,7 +167,6 @@ private struct SyncSection: View {
         Section(L.settingsSectionOffline) {
             ICloudRows()
             if app.syncs {
-                // How sync stands, with Sync Now beside it, as the desktop's.
                 ActionRow(label: title, desc: status) {
                     Button(L.settingsSyncNow) { Task { await app.syncNow() } }
                         .disabled(app.syncing || app.workOffline)
@@ -231,9 +203,6 @@ private struct SyncSection: View {
     }
 }
 
-/// ConflictsSection is Settings › Sync and storage › Conflicts, as on the
-/// desktop: each block two devices changed at once, its page and what was
-/// kept, with a menu to settle it another way, or to open its page.
 private struct ConflictsSection: View {
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
@@ -251,16 +220,12 @@ private struct ConflictsSection: View {
                     }
                     Spacer()
                     Menu(L.settingsResolve) {
-                        // A block one side deleted and the other edited was
-                        // kept, and can be deleted again.
                         if cf.deleted != nil {
                             Button(L.settingsDeleteIt, role: .destructive) {
                                 resolve(cf, .delete)
                             }
                             Button(L.settingsKeepIt) { resolve(cf, .keep) }
                         } else {
-                            // The version the merge did not keep can come
-                            // back, whichever device's it is.
                             if cf.keptHere {
                                 Button(L.settingsUseOtherDevice) { resolve(cf, .otherDevice) }
                             } else {
@@ -284,7 +249,6 @@ private struct ConflictsSection: View {
         }
     }
 
-    /// desc says what was kept, as the desktop's row does.
     static func desc(_ cf: Conflict) -> String {
         switch cf.deleted {
         case "here": L.settingsConflictDeletedHere(text: cf.kept)
@@ -306,8 +270,6 @@ private struct ConflictsSection: View {
     }
 }
 
-/// SettingLabel is a setting's name, and what it does if any, as
-/// LabeledContent's label shows them.
 struct SettingLabel: View {
     let label: String
     var desc: String?
@@ -320,13 +282,6 @@ struct SettingLabel: View {
     }
 }
 
-// LabeledContent puts what is too wide to fit beside its label on a line of
-// its own, as on a phone: a field's text, aligned to the end, then stands
-// loose in the row, and a button under the label's start. These rows keep
-// it beside the label, which wraps.
-
-/// FieldRow is a setting typed in, the field beside its label, narrowing
-/// down to minWidth to keep there.
 struct FieldRow<Field: View>: View {
     let label: String
     var desc: String?
@@ -340,15 +295,11 @@ struct FieldRow<Field: View>: View {
             field
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: minWidth, maxWidth: maxWidth)
-                // At the row's end, as wide as the row is: narrower than
-                // the room left, it would stop short of it.
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
 
-/// ActionRow is a setting done with a button, or what shows in its place,
-/// at the row's end.
 struct ActionRow<Action: View>: View {
     let label: String
     var desc: String?
@@ -358,15 +309,11 @@ struct ActionRow<Action: View>: View {
         HStack {
             SettingLabel(label: label, desc: desc)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            // Borderless, for a tap on the row away from the button to
-            // leave it be.
             action.buttonStyle(.borderless).fixedSize()
         }
     }
 }
 
-/// AccentDot draws an accent's swatch as a bitmap of its own color: a
-/// picker shows symbols, and images it may template, in one color.
 enum AccentDot {
     static func image(_ color: Color) -> UIImage {
         let side: CGFloat = 18

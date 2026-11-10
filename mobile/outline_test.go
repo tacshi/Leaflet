@@ -7,8 +7,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// A page's headings come back nested as the desktop's outline nests them,
-// with their text and levels, in their order.
 func TestOutline(t *testing.T) {
 	h := func(id, text string, level int) *doc.Node {
 		n := &doc.Node{ID: id, Type: "heading"}

@@ -11,10 +11,6 @@ import (
 	"leaflet/internal/icloud"
 )
 
-// A device that synced through iCloud Drive signed in, which moved its
-// pages into the account's space, and its session ended without its pages
-// going. With iCloud sync on again, its pages join the folder's space
-// again: left in the account's, no device would store the other's rows.
 func TestICloudJoinsAgainAfterAnAccountsSpace(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -56,8 +52,6 @@ func TestICloudJoinsAgainAfterAnAccountsSpace(t *testing.T) {
 	}
 }
 
-// Another device's file of a page that has no content, as one damaged, is
-// not read as the page emptied.
 func TestAPageFileWithoutContentEmptiesNoPage(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)

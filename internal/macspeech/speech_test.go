@@ -14,10 +14,6 @@ import (
 	"leaflet/internal/recording"
 )
 
-// fake is a helper that answers as leaflet-speech does: a stream's words
-// say how many bytes it was sent, a file's are its path, and language "xx"
-// is one it cannot transcribe. In language "stuck" it never answers, and
-// in "dies" it ends at once.
 const fake = `#!/bin/sh
 if [ "$2" = stuck ]; then
 	cat >/dev/null
@@ -48,7 +44,7 @@ func helper(t *testing.T) *Helper {
 		t.Skip("the fake helper is a shell script")
 	}
 	path := filepath.Join(t.TempDir(), Name)
-	if err := os.WriteFile(path, []byte(fake), 0o700); err != nil { // #nosec G306 -- a test's own script.
+	if err := os.WriteFile(path, []byte(fake), 0o700); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	return &Helper{path: path}
@@ -104,9 +100,6 @@ func TestFileAndAnUnknownLanguage(t *testing.T) {
 	}
 }
 
-// The helper scripts/build-speech.sh built transcribes speech macOS says,
-// as it streams and from its file. It is skipped where there is none, or
-// the Mac cannot transcribe.
 func TestTheMacTranscribes(t *testing.T) {
 	dir, err := filepath.Abs(filepath.Join("..", "..", "resources", "darwin-"+runtime.GOARCH))
 	if err != nil {
@@ -117,18 +110,15 @@ func TestTheMacTranscribes(t *testing.T) {
 		t.Skip("no leaflet-speech here that can transcribe; scripts/build-speech.sh builds it")
 	}
 	wav := filepath.Join(t.TempDir(), "say.wav")
-	say := exec.Command("say", "-o", wav, "--data-format=LEI16@16000", "Leaflet keeps your notes.") // #nosec G204 -- fixed arguments.
+	say := exec.Command("say", "-o", wav, "--data-format=LEI16@16000", "Leaflet keeps your notes.") // #nosec G204
 	if out, err := say.CombinedOutput(); err != nil {
 		t.Skipf("say: %v %s", err, out)
 	}
-	audio, err := os.ReadFile(wav) // #nosec G304 -- the test's own file.
+	audio, err := os.ReadFile(wav) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
 	var streamed string
-	// The WAV file's samples, in the microphone's chunks of 100 ms;
-	// then as it comes, in chunks that end inside a sample, as a pipe may
-	// split what is written, which the helper reads one at a time.
 	for _, chunk := range []struct {
 		size int
 		pace time.Duration
@@ -151,8 +141,6 @@ func TestTheMacTranscribes(t *testing.T) {
 		if len(segs) == 0 || !strings.Contains(strings.ToLower(segs[0].Text), "notes") {
 			t.Fatalf("streamed in chunks of %d bytes: %+v", chunk.size, segs)
 		}
-		// A sample split between chunks keeps its bytes together: the
-		// words are the same however the audio came.
 		if text := segs[0].Text; streamed == "" {
 			streamed = text
 		} else if text != streamed {
@@ -165,8 +153,6 @@ func TestTheMacTranscribes(t *testing.T) {
 	}
 }
 
-// samples are the samples of a WAV file: its data chunk, wherever it is,
-// as say may put another chunk before it.
 func samples(t *testing.T, wav []byte) []byte {
 	t.Helper()
 	for off := 12; off+8 <= len(wav); {
@@ -180,8 +166,6 @@ func samples(t *testing.T, wav []byte) []byte {
 	return nil
 }
 
-// A helper that never answers is ended once Finish has waited longer than
-// the audio lasts, rather than waited for forever.
 func TestFinishEndsAStuckHelper(t *testing.T) {
 	was := finishSlack
 	finishSlack = 100 * time.Millisecond
@@ -206,7 +190,6 @@ func TestFinishEndsAStuckHelper(t *testing.T) {
 	}
 }
 
-// Audio sent to a helper that ended is not kept for it.
 func TestSendToAnEndedHelperKeepsNothing(t *testing.T) {
 	rs, err := helper(t).Stream("dies", func(string) {})
 	if err != nil {
@@ -225,8 +208,6 @@ func TestSendToAnEndedHelperKeepsNothing(t *testing.T) {
 	}
 }
 
-// A file is given as long as its audio lasts, and more: a WAV by its
-// length, however long, as other files, whose length isn't read, are.
 func TestFileWaitFollowsTheAudio(t *testing.T) {
 	dir := t.TempDir()
 	wav := func(name string, data int64) string {
@@ -247,7 +228,6 @@ func TestFileWaitFollowsTheAudio(t *testing.T) {
 	if short < time.Minute || short > 30*time.Minute {
 		t.Errorf("a second of WAV given %v", short)
 	}
-	// A WAV whose format can't be read is given what other files are.
 	broken := filepath.Join(dir, "broken.wav")
 	if err := os.WriteFile(broken, []byte("not a wav"), 0o600); err != nil {
 		t.Fatal(err)

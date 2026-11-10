@@ -26,7 +26,6 @@ func TestSlashFindsByKeywordAndTemplates(t *testing.T) {
 	if got := keys(Filter(all, "Meet")); !slices.Equal(got, []string{"starter:meeting"}) {
 		t.Errorf(`"Meet" finds %v, want the template`, got)
 	}
-	// Every template, for "template" or the start of it.
 	if got := keys(Filter(all, "temp")); !slices.Contains(got, "starter:meeting") {
 		t.Errorf(`"temp" finds %v, want the template among them`, got)
 	}
@@ -66,8 +65,6 @@ func TestMention(t *testing.T) {
 	}
 }
 
-// A page the @ menu offers says where it is: in its parent page, else its
-// folder, else nothing at the top of the space.
 func TestMentionPlace(t *testing.T) {
 	m := Mentions{
 		Pages: []store.Page{
@@ -105,9 +102,6 @@ func TestTurnAndBlock(t *testing.T) {
 	}
 }
 
-// What is typed finds the items whose labels start with it first, for
-// Enter to take, each group whole; full-width letters find what ASCII
-// does.
 func TestFilterRanks(t *testing.T) {
 	all := Slash(nil)
 	for q, want := range map[string]string{"h": "h1", "c": "callout", "chec": "todo_list", "pla": "paragraph", "ｈ２": "h2"} {
@@ -115,7 +109,6 @@ func TestFilterRanks(t *testing.T) {
 			t.Errorf("%q first finds %v, want %s", q, keys(got), want)
 		}
 	}
-	// The groups stay whole.
 	got := Filter(all, "l")
 	seen := map[string]bool{}
 	for i, it := range got {
@@ -126,8 +119,6 @@ func TestFilterRanks(t *testing.T) {
 	}
 }
 
-// A video's share link not followed to its video, as when offline, says
-// so, not that it is no video's link; its video's own link makes one.
 func TestLinkBlockOfAShareLink(t *testing.T) {
 	_, err := LinkBlock("video", "https://b23.tv/xuajGqj")
 	if err == nil || err.Error() != locales.DialogLinkNotFollowed() {
@@ -138,8 +129,6 @@ func TestLinkBlockOfAShareLink(t *testing.T) {
 	}
 }
 
-// Items folded once filter as Filter does, query after query, full-width
-// letters too, their labels folded only once a query needs them.
 func TestFoldedFiltersAsFilterDoes(t *testing.T) {
 	var pages []store.Page
 	now := time.Now()
@@ -158,7 +147,6 @@ func TestFoldedFiltersAsFilterDoes(t *testing.T) {
 	}
 }
 
-// Filtering a long @ menu again folds no label again.
 func BenchmarkFoldedMention(b *testing.B) {
 	var pages []store.Page
 	now := time.Now()

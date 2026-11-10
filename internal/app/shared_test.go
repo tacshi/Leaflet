@@ -13,8 +13,6 @@ import (
 	"leaflet/locales"
 )
 
-// A page shared with the user opens read-only until its members say
-// they may edit it, and follows their role as it changes.
 func TestSharedPageFollowsTheUsersRole(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -54,8 +52,6 @@ func TestSharedPageFollowsTheUsersRole(t *testing.T) {
 	}
 }
 
-// What a page is shows after its breadcrumbs as icons, named by their
-// tooltips; that it is shared with the user is in its byline.
 func TestPageMarks(t *testing.T) {
 	a := templatesApp(t)
 	const id = "00000000-0000-0000-0000-0000000000bb"
@@ -85,8 +81,6 @@ func TestPageMarks(t *testing.T) {
 	}
 }
 
-// A page shared through the page it is under can be edited while it is
-// there, and only viewed once it moves under one shared for viewing.
 func TestReadOnlyFollowsWhereThePageIs(t *testing.T) {
 	a := templatesApp(t)
 	const space = "00000000-0000-0000-0000-0000000000cc"
@@ -122,8 +116,6 @@ func TestReadOnlyFollowsWhereThePageIs(t *testing.T) {
 	}
 }
 
-// The byline says who created the page, which is all a page keeps, and
-// apart from it when the page was edited.
 func TestBylineSaysWhoCreated(t *testing.T) {
 	a := templatesApp(t)
 	const id = "00000000-0000-0000-0000-0000000000bd"
@@ -141,8 +133,6 @@ func TestBylineSaysWhoCreated(t *testing.T) {
 	}
 }
 
-// Someone invited to a page who has not accepted yet is no account: the
-// @ menu does not offer to mention them.
 func TestMentionsLeaveOutInvites(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -161,8 +151,6 @@ func TestMentionsLeaveOutInvites(t *testing.T) {
 	}
 }
 
-// A viewer is offered no Resolve on someone else's thread, which the
-// server would refuse, and keeps it on their own.
 func TestViewerResolvesOnlyTheirOwnThreads(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -200,9 +188,6 @@ func TestViewerResolvesOnlyTheirOwnThreads(t *testing.T) {
 	}
 }
 
-// The user is a member of their own page, as its owner: a page that only
-// syncs between their devices is not shared, and one shared with Ann is
-// shared with 1.
 func TestBylineCountsOthers(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Mine"})

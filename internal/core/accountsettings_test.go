@@ -18,14 +18,11 @@ import (
 	"leaflet/locales"
 )
 
-// request is a call the server heard: its method and path, and its body.
 type request struct {
 	method, path string
 	body         map[string]any
 }
 
-// accountServer is a server that keeps the calls it hears and answers
-// them with answer, or refuses them all while down.
 type accountServer struct {
 	mu     sync.Mutex
 	heard  []request
@@ -47,7 +44,6 @@ func (s *accountServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(s.answer))
 }
 
-// calls returns the calls heard, and forgets them.
 func (s *accountServer) calls() []request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,7 +52,6 @@ func (s *accountServer) calls() []request {
 	return out
 }
 
-// signedInCore is a Core signed in as u1 to the server s.
 func signedInCore(t *testing.T, s *accountServer) *Core {
 	t.Helper()
 	hs := httptest.NewServer(s)
@@ -72,9 +67,6 @@ func signedInCore(t *testing.T, s *accountServer) *Core {
 	return &Core{Store: st, Remote: remote.SignedInForTest(hs.URL, st, "u1")}
 }
 
-// The name is kept here without the spaces around it, and none, or the
-// same, changes nothing; then it goes to the account and its profile, and
-// what the server refused says so.
 func TestDisplayName(t *testing.T) {
 	s := &accountServer{answer: "[]"}
 	c := signedInCore(t, s)
@@ -103,8 +95,6 @@ func TestDisplayName(t *testing.T) {
 	}
 }
 
-// The devices list this one and those signed out from another; signing
-// one out asks the server to, which revokes it and ends its session.
 func TestDevices(t *testing.T) {
 	s := &accountServer{}
 	c := signedInCore(t, s)
@@ -137,9 +127,6 @@ func TestDevices(t *testing.T) {
 	}
 }
 
-// Deleting the account asks the server to, and says why it could not.
-// Only once it did do the keys of agents and speech go from the keychain:
-// Store.Wipe after it leaves nothing to name them.
 func TestDeleteAccount(t *testing.T) {
 	keys := memSecrets{}
 	keychain.Use(keys)
@@ -147,13 +134,13 @@ func TestDeleteAccount(t *testing.T) {
 	s := &accountServer{answer: "{}", down: true}
 	c := signedInCore(t, s)
 	c.Hub = agents.NewHub(c.Store, c.Remote, nil)
-	if err := c.Store.PutProvider(store.Provider{ID: "here", Preset: "openai", IsLocal: true, AuthKind: "api_key"}); err != nil {
+	if err := c.Store.PutProvider(store.Provider{ID: "here", Preset: "openai", AuthKind: "api_key"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := agents.SetLocalKey("here", "sk-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := recording.SetEndpointKey("sk-2"); err != nil {
+	if err := recording.SetEndpointKey("https://api.example.com/v1", "sk-2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := recording.SetLocalSonioxKey("sk-3"); err != nil {
@@ -178,7 +165,6 @@ func TestDeleteAccount(t *testing.T) {
 	}
 }
 
-// memSecrets is a keychain in memory.
 type memSecrets map[string][]byte
 
 func (m memSecrets) Get(name string) ([]byte, error) {
@@ -198,9 +184,6 @@ func (m memSecrets) Delete(name string) error {
 	return nil
 }
 
-// Leaving revokes this device's row, under the ID it then forgets, before
-// its session ends: left, each sign-in here would count as one more of the
-// devices an account may have. The server failing does not stop it.
 func TestLeavingRevokesThisDevicesRow(t *testing.T) {
 	for _, down := range []bool{false, true} {
 		s := &accountServer{answer: "null", down: down}
@@ -220,7 +203,6 @@ func TestLeavingRevokesThisDevicesRow(t *testing.T) {
 	}
 }
 
-// Without an ID there is no row to revoke.
 func TestLeavingWithNoDeviceAsksNothing(t *testing.T) {
 	s := &accountServer{answer: "null"}
 	c := signedInCore(t, s)

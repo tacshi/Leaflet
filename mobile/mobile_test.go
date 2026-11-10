@@ -14,13 +14,11 @@ import (
 	"leaflet/locales"
 )
 
-// fakePlatform is the app, offline, with its keychain in memory.
 type fakePlatform struct {
 	t       *testing.T
 	mu      sync.Mutex
 	secrets map[string][]byte
-	// ended says the test is over, which Log then no longer logs to.
-	ended bool
+	ended   bool
 }
 
 func (p *fakePlatform) SecretGet(name string) ([]byte, error) {
@@ -49,8 +47,6 @@ func (p *fakePlatform) OpenURL(string)                  {}
 func (p *fakePlatform) WatchICloud(bool)                {}
 func (p *fakePlatform) StartDownload(path string) error { return nil }
 
-// Log logs to the test while it runs: the core's goroutines can log after
-// it ended, which t.Log would panic on.
 func (p *fakePlatform) Log(line string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -59,8 +55,6 @@ func (p *fakePlatform) Log(line string) {
 	}
 }
 
-// logUntilEnd has Log stop logging as the test ends, once the cleanups
-// registered after it have run, and a Log under way is done.
 func (p *fakePlatform) logUntilEnd() {
 	p.t.Cleanup(func() {
 		p.mu.Lock()
@@ -69,15 +63,12 @@ func (p *fakePlatform) logUntilEnd() {
 	})
 }
 
-// update is a PageUpdated event, and when it came.
 type update struct {
 	pageID, content, reason string
 	rev                     int64
 	at                      time.Time
 }
 
-// fakeEvents keeps the pages' updates, and what PageSaving and
-// PageReadOnly said, for the test to wait on.
 type fakeEvents struct {
 	updates  chan update
 	saving   chan bool
@@ -92,8 +83,6 @@ func (e *fakeEvents) AgentsChanged(string)                   {}
 func (e *fakeEvents) RecordingChanged(string)                {}
 func (e *fakeEvents) RecordingLevels(string)                 {}
 
-// PageSaving drops what a test without a channel for it, or not waiting
-// on it, says.
 func (e *fakeEvents) PageSaving(_ string, saving bool) {
 	select {
 	case e.saving <- saving:
@@ -101,7 +90,6 @@ func (e *fakeEvents) PageSaving(_ string, saving bool) {
 	}
 }
 
-// Notice drops what a test not waiting on it says.
 func (e *fakeEvents) Notice(message string) {
 	select {
 	case e.notices <- message:
@@ -109,7 +97,6 @@ func (e *fakeEvents) Notice(message string) {
 	}
 }
 
-// PageReadOnly drops what a test not waiting on it says.
 func (e *fakeEvents) PageReadOnly(_ string, readOnly bool) {
 	select {
 	case e.readOnly <- readOnly:
@@ -216,8 +203,6 @@ func TestEditSavesAndReopens(t *testing.T) {
 	}
 }
 
-// An agent's change and the app's edit, made over the content before it,
-// both stay: the edit merges, and the merge goes back to the app.
 func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	c, ev := open(t)
 	raw, _ := c.CreatePage(`{"title":"Plan"}`)
@@ -231,7 +216,6 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The agent adds a block at the end.
 	var err error
 	c.q.do(func() {
 		err = host{c}.Live(row.ID).ApplyOps([]doc.Op{doc.InsertOp(doc.Position{At: "end"}, paragraph("b", "Two"))})
@@ -241,7 +225,6 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	}
 	agent := wait(t, ev, "agent")
 
-	// Meanwhile the app, not having heard of it, changes the first block.
 	edit := doc.FromBlocks([]*doc.Node{paragraph("a", "One!")})
 	if _, err := c.EditPage(row.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
@@ -254,7 +237,6 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 		t.Fatalf("merged %q", got)
 	}
 
-	// The app, now at the merge's rev, edits on without another merge.
 	edit = doc.MustDecode(merge.content)
 	edit.Find("b").SetDelta(doc.Delta{{Text: "Two!"}})
 	if _, err := c.EditPage(row.ID, pg.Editor, edit.Encode(), merge.rev); err != nil {
@@ -268,9 +250,6 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	}
 }
 
-// An agent's edits streaming in reach the app spaced, agentEvery apart
-// rather than one whole page each, and an edit the app makes over a rev
-// before them merges with all of them.
 func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
@@ -278,7 +257,6 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
-	// The blocks of a call stream in every few hundredths of a second.
 	const n = 30
 	for i := range n {
 		var err error
@@ -290,9 +268,7 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// The last of them reach the app too.
 	time.Sleep(2 * agentEvery)
-	// The app, not having heard of them, changes the first block.
 	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One!")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +293,6 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	if len(shown) < 2 || len(shown) > n/4 {
 		t.Fatalf("%d updates for %d edits over %v", len(shown), n, n*10*time.Millisecond)
 	}
-	// Some slack for the events' own goroutine.
 	for i := 1; i < len(shown); i++ {
 		if gap := shown[i].Sub(shown[i-1]); gap < agentEvery*2/3 {
 			t.Errorf("updates %d and %d %v apart, want %v", i-1, i, gap, agentEvery)
@@ -325,8 +300,6 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	}
 }
 
-// An edit over a rev the editor no longer keeps merges from the newest it
-// kept before it, not from nothing.
 func TestEditorBaseOfARevNoLongerKept(t *testing.T) {
 	old, last, newer := doc.Empty(), doc.Empty(), doc.Empty()
 	e := &pageEditor{seen: map[int64]*doc.Content{3: old, 5: last, 40: newer}, last: 5}
@@ -335,7 +308,6 @@ func TestEditorBaseOfARevNoLongerKept(t *testing.T) {
 	}
 }
 
-// openEditor opens page id in another editor, as another window does.
 func openEditor(t *testing.T, c *Core, id string) openedPage {
 	t.Helper()
 	raw, err := c.OpenPage(id)
@@ -347,10 +319,6 @@ func openEditor(t *testing.T, c *Core, id string) openedPage {
 	return pg
 }
 
-// A page open in two windows takes the edits of each: one's edit goes to
-// the other at a new rev, and the other's, made before it heard of it,
-// merges rather than replacing it. Closing one window leaves the other
-// saving.
 func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 	c, ev := open(t)
 	raw, _ := c.CreatePage(`{"title":"Plan"}`)
@@ -396,8 +364,6 @@ func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 	}
 }
 
-// Two windows' edits of one block over the same rev keep the one the
-// merge loses as a conflict, to recover.
 func TestTwoWindowsEditingOneBlockKeepTheConflict(t *testing.T) {
 	c, ev := open(t)
 	raw, _ := c.CreatePage(`{"title":"Plan"}`)
@@ -436,8 +402,6 @@ func TestTwoWindowsEditingOneBlockKeepTheConflict(t *testing.T) {
 	}
 }
 
-// Deleting an open page saves what was sent of it first, so Undo brings
-// it back with its last edits.
 func TestDeletingAnOpenPageKeepsItsEditsForUndo(t *testing.T) {
 	c, _ := open(t)
 	raw, _ := c.CreatePage(`{"title":"Notes"}`)
@@ -459,9 +423,6 @@ func TestDeletingAnOpenPageKeepsItsEditsForUndo(t *testing.T) {
 	}
 }
 
-// Deleting a page saves its subpages open in a window first, and closes
-// them, so Undo brings them back with their last edits and no edit of
-// theirs goes on saving to a deleted page.
 func TestDeletingAPageKeepsItsOpenSubpagesEdits(t *testing.T) {
 	c, _ := open(t)
 	parent := create(t, c, `{"title":"Trip"}`)
@@ -485,8 +446,6 @@ func TestDeletingAPageKeepsItsOpenSubpagesEdits(t *testing.T) {
 	}
 }
 
-// A page whose edits can't be saved as it closes stays open, and shows
-// them opened again; it closes once a later save keeps them.
 func TestPageClosedUnsavedKeepsItsEdits(t *testing.T) {
 	c, _ := open(t)
 	raw, _ := c.CreatePage(`{"title":"Notes"}`)
@@ -542,8 +501,6 @@ func wait(t *testing.T, ev *fakeEvents, reason string) update {
 	}
 }
 
-// When says a time as the desktop does, in the language asked for, and
-// nothing for none.
 func TestWhen(t *testing.T) {
 	now := time.Now()
 	if got := When("ja", now.Add(-5*time.Minute).UnixMilli(), now.UnixMilli()); got != "5 分前" {
@@ -611,7 +568,6 @@ func TestCommentsAndAgents(t *testing.T) {
 	if !threads[0].MayResolve || !threads[0].Root.MayDelete || !threads[0].Replies[0].MayDelete {
 		t.Fatalf("the user's own thread %+v", threads[0])
 	}
-	// The first comment deleted stays for its reply, without its words.
 	if err := c.DeleteComment(threads[0].Root.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +580,6 @@ func TestCommentsAndAgents(t *testing.T) {
 		t.Fatalf("after deleting the first comment %+v", threads)
 	}
 
-	// No agent until a provider is added; a local one is kept here.
 	raw, _ = c.AgentState(row.ID)
 	var st agentState
 	_ = json.Unmarshal([]byte(raw), &st)
@@ -639,8 +594,6 @@ func TestCommentsAndAgents(t *testing.T) {
 	if len(st.Options) != 1 || st.Options[0].Model != "llama3" {
 		t.Fatalf("agents after a provider %+v", st)
 	}
-	// Signed out, a cloud provider is kept on this device, with its key:
-	// without one it is not saved.
 	if err := c.SaveProvider(`{"preset":"openai","base_url":"https://api.openai.com/v1","default_model":"gpt-5"}`); err == nil || err.Error() != locales.SettingsNeedKey() {
 		t.Errorf("a cloud provider saved without its key: %v", err)
 	}
@@ -683,12 +636,9 @@ func TestTableRows(t *testing.T) {
 	}
 }
 
-// A comment runs an agent only where it shows the agent marked, not in
-// code or an address; a run that fails says why in a notice.
 func TestCommentMentionsRunAgents(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
-	// Nothing listens there.
 	if err := c.SaveProvider(`{"preset":"ollama","name":"Ollama","base_url":"http://127.0.0.1:1","default_model":"llama3"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -715,8 +665,6 @@ func TestCommentMentionsRunAgents(t *testing.T) {
 	}
 }
 
-// @agent runs the default agent, not the first, and an agent the comment
-// names runs before it.
 func TestCommentMentionsRunTheDefaultForAgent(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
@@ -750,8 +698,6 @@ func TestCommentMentionsRunTheDefaultForAgent(t *testing.T) {
 	}
 }
 
-// The zone given before a core opens is time.Local, by name or else by
-// offset; once one is open, time.Local stays as it was.
 func TestSetTimeZoneOnlyBeforeOpen(t *testing.T) {
 	zone.Lock()
 	fixed, set := zone.fixed, setLocal
@@ -776,8 +722,6 @@ func TestSetTimeZoneOnlyBeforeOpen(t *testing.T) {
 	}
 }
 
-// Copy as plain text takes the blocks the app has selected, a subpage
-// as its page's title.
 func TestPlainCopy(t *testing.T) {
 	c, _ := open(t)
 	sub := create(t, c, `{"title":"Kyoto"}`)
@@ -794,11 +738,6 @@ func TestPlainCopy(t *testing.T) {
 	}
 }
 
-// The library comes arranged as the desktop's sidebar arranges it: pages
-// in their folders and under their parents, in order, and each tag's
-// pages by title. A page whose folder is gone, as another device deleted
-// the folder while this one moved the page into it, is at the top level:
-// the sidebar shows no page with no place.
 func TestLibraryTree(t *testing.T) {
 	c, _ := open(t)
 	var f folderRow
@@ -836,8 +775,6 @@ func TestLibraryTree(t *testing.T) {
 	}
 }
 
-// Copy puts blocks on the clipboard as their Markdown, which reads back
-// as the blocks.
 func TestCopyText(t *testing.T) {
 	c, _ := open(t)
 	item := func(text string) *doc.Node {
@@ -858,8 +795,6 @@ func TestCopyText(t *testing.T) {
 	}
 }
 
-// A colored cell reaches the table sheet as its Markdown, span and all,
-// and saving the sheet keeps the color, of the cell edited too.
 func TestTableRowsKeepColors(t *testing.T) {
 	table, err := doc.TableNode([][]string{{`<span style="color:#ef4444ff">Red</span>`, "b"}}, "t")
 	if err != nil {

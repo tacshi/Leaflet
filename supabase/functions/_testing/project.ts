@@ -1,33 +1,17 @@
-// A Supabase project in memory, for the functions' tests: the REST API
-// over tables of rows, its RPCs, Auth's user lookup and Storage's objects,
-// as far as the functions use them, reached by real supabase-js clients
-// through a fetch of its own. It applies no row-level security: a test
-// says what a caller may write with a rule, where that matters.
-
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import type { Clients } from "../_shared/supabase.ts";
 
 export type Row = Record<string, unknown>;
 
-/** Who calls: a user's ID, or "service" for the service role. */
 export type Caller = string;
 
 export interface Rules {
-  /** Whether caller may update or delete row; every row when absent. */
   writes?(table: string, row: Row, caller: Caller): boolean;
-  /** Changes a row as the table's triggers would, before an update is stored. */
   onUpdate?(table: string, row: Row, old: Row): void;
-  /** Why the database refuses this update, as a check or a trigger raises; none takes it. */
   refuses?(table: string, patch: Row): string | undefined;
-  /** The most rows a read answers with, as the API's max_rows has it (supabase/config.toml); no most when absent. */
   maxRows?: number;
 }
 
-/**
- * What a function returning one value of an array type answers, as an
- * RPC's stand-in gives it: the array, whole, in one row, which no filter
- * or max_rows cuts, as one returning rows (setof) is cut.
- */
 export class Whole {
   constructor(readonly value: unknown[]) {}
 }
@@ -38,13 +22,9 @@ const SERVICE_KEY = "service-key";
 export class Project {
   readonly tables: Record<string, Row[]> = {};
   readonly rpcs: Record<string, (args: Record<string, unknown>, caller: Caller) => unknown> = {};
-  /** Storage objects by bucket, then path. */
   readonly objects: Record<string, Map<string, Uint8Array>> = {};
-  /** Users by their access token. */
   readonly users = new Map<string, { id: string; email: string }>();
-  /** Every request, as METHOD path?query. */
   readonly requests: string[] = [];
-  /** The users Auth's admin API deleted, by ID. */
   readonly deletedUsers: string[] = [];
 
   constructor(public rules: Rules = {}) {}
@@ -53,12 +33,10 @@ export class Project {
     return (this.tables[table] ??= []);
   }
 
-  /** A user signed in with token. */
   user(id: string, token: string, email = `${id}@example.com`): void {
     this.users.set(token, { id, email });
   }
 
-  /** The clients a function takes: as the request's caller, and as the service role. */
   clients(): Clients {
     const options = (headers: Record<string, string> = {}) => ({
       global: { fetch: this.fetch, headers },
@@ -73,7 +51,6 @@ export class Project {
     };
   }
 
-  /** A request to a function, by the user whose token it is. */
   request(token: string, body: unknown): Request {
     return new Request("http://function.test", {
       method: "POST",
@@ -88,8 +65,6 @@ export class Project {
     this.requests.push(`${req.method} ${url.pathname}${url.search}`);
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const caller = token === SERVICE_KEY ? "service" : this.users.get(token)?.id ?? "";
-    // A turn of the event loop, as a request over the network takes: what
-    // runs at once interleaves.
     await new Promise((r) => setTimeout(r, 0));
     try {
       if (url.pathname === "/auth/v1/user") {
@@ -107,8 +82,6 @@ export class Project {
         if (!fn) return reply({ code: "PGRST202", message: `no function ${rpc[1]}` }, 404);
         const result = await fn(await req.json().catch(() => ({})), caller);
         if (result instanceof Whole) return reply(result.value);
-        // A function's rows are read as a table's are: its filters, order
-        // and limit, and no more than max_rows.
         if (!Array.isArray(result)) return reply(result ?? null);
         let rows = (result as Row[]).filter(filters(url.searchParams, (name) => this.rows(name)));
         const order = url.searchParams.get("order");
@@ -227,11 +200,6 @@ function reply(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/**
- * A row with only the columns select names: "*" or a list, embeds left out.
- * A column may be a JSON path, alias:col->key->>key, as PostgREST reads it:
- * ->> gives text, and a key that is not there null.
- */
 function project(row: Row, select: string | null): Row {
   if (!select || select === "*") return { ...row };
   const out: Row = {};
@@ -268,7 +236,6 @@ function compare(value: unknown, against: string): number {
   return v < against ? -1 : v > against ? 1 : 0;
 }
 
-/** One PostgREST condition, col=op.value, or a not. of one. */
 function condition(col: string, expr: string): (row: Row) => boolean {
   if (expr.startsWith("not.")) {
     const inner = condition(col, expr.slice(4));
@@ -296,12 +263,6 @@ function condition(col: string, expr: string): (row: Row) => boolean {
   };
 }
 
-/**
- * The rows a query's filters keep: its conditions, an or=(…) of them, and
- * those of a table embedded with !inner, as pages.space_id=eq.x with
- * pages!inner(…) in select: the rows whose row there, by its key (page_id
- * for pages), matches.
- */
 function filters(params: URLSearchParams, tables: (name: string) => Row[]): (row: Row) => boolean {
   const all: ((row: Row) => boolean)[] = [];
   const inner = new Set([...(params.get("select") ?? "").matchAll(/(\w+)!inner\(/g)].map((m) => m[1]));

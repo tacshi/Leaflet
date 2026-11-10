@@ -18,40 +18,25 @@ import (
 	"leaflet/locales"
 )
 
-// External agents: the AI apps on this computer connected to `leaflet
-// mcp` (internal/mcp), which is this app's own executable, with a click
-// (connect.go), or by hand; and the command line, installed with a click
-// (command.go).
-
 var externalClients = []struct{ id, label string }{
 	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
 }
 
-// externalState is the section's state: the apps found on this computer,
-// what is being done to one, and the client the setup by hand shows.
 type externalState struct {
-	agents   []agentStatus
-	checked  time.Time
-	checking bool
-	// busy is the app being connected, or disconnected while
-	// disconnecting; waiting is the app asked by its install link, until
-	// its settings have Leaflet.
+	agents        []agentStatus
+	checked       time.Time
+	checking      bool
 	busy, waiting string
-	// waitUntil is when waiting gives up, in Unix nanoseconds: the link
-	// opened again waits longer, with the same watch on the settings.
 	waitUntil     atomic.Int64
 	disconnecting bool
 	byHand        bool
 	client        int
-	// command is the command line's row (command.go).
-	command commandUI
+	command       commandUI
 }
 
 func (a *App) externalSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	heading(c, locales.SettingsSectionExternal(), locales.ExternalDesc())
-	// Looked for again as the section shows, and as agents write, which
-	// wakes the app, so a connection shows once an app makes it.
 	if !a.external.checking && time.Since(a.external.checked) > 3*time.Second {
 		a.checkAgents()
 	}
@@ -84,12 +69,9 @@ func (a *App) externalSettings(c *ui.Context) {
 	a.commandSettings(c, exe, moved)
 }
 
-// agentRow is an app found: how it stands with Leaflet, said in a line
-// of its own color under its name, and what to do.
 func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, first bool) {
 	pal := theme.Of(c)
 	id := s.app.id
-	// The line is always there, so the row keeps its height as it changes.
 	icon, text, color := "", locales.ExternalNotConnected(), pal.TextMuted
 	switch {
 	case s.entry == nil && a.external.waiting == id:
@@ -100,7 +82,6 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 	case !s.seen.IsZero():
 		icon, text, color = "check", locales.ExternalLastUsed(humanTime(s.seen)), pal.OkText
 	case id == "chatgpt":
-		// Its chats run no local servers; its Codex mode does.
 		icon, text, color = "rotate-cw", locales.ExternalAddedChatGPT(), pal.WarnText
 	default:
 		icon, text, color = "rotate-cw", locales.ExternalAdded(s.app.label), pal.WarnText
@@ -147,8 +128,6 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 	})
 }
 
-// setupByHand is each client's setup to copy, for an app not found or
-// not listed.
 func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 	pal := theme.Of(c)
 	where, snippet := agentSetup(externalClients[a.external.client].id, exe, dir)
@@ -178,7 +157,6 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 	})
 }
 
-// checkAgents looks for the apps again, away from the window's thread.
 func (a *App) checkAgents() {
 	a.external.checking = true
 	go func() {
@@ -200,12 +178,8 @@ func (a *App) foundAgents(found []agentStatus) {
 	}
 }
 
-// connectAgent connects an app: by its install link, which asks in the
-// app, so the section waits to see its settings change; or here.
 func (a *App) connectAgent(s agentStatus, exe, dir string) {
 	if link := installLink(s.app.id, exe, dir); link != "" {
-		// The link opened again, as when its question in the app was
-		// closed, waits longer with the watch already on the settings.
 		again := a.external.waiting == s.app.id
 		a.external.waiting = s.app.id
 		a.external.waitUntil.Store(time.Now().Add(agentWait).UnixNano())
@@ -228,9 +202,6 @@ func (a *App) disconnectAgent(s agentStatus) {
 	a.changeAgent(s, func() error { return disconnectAgent(s.app.settingsID(), s.cli, currentAgentEnv()) }, locales.ExternalDisconnectFailed)
 }
 
-// changeAgent runs fn on an app's settings, then looks at them again
-// before the row stops being busy, so it goes straight to how the app
-// now stands.
 func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err string) string) {
 	a.external.busy = s.app.id
 	go func() {
@@ -246,15 +217,10 @@ func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err s
 	}()
 }
 
-// openInstallLink opens an install link in the app it is for.
 var openInstallLink = func(link string) error { return mygo.Shell.OpenExternal(link) }
 
-// agentWait is how long the section waits for an app's settings to change
-// after its install link opened.
 const agentWait = 3 * time.Minute
 
-// awaitAgent watches an app's settings for a few minutes after its
-// install link opened, as the window may not redraw meanwhile.
 func (a *App) awaitAgent(id string) {
 	env := currentAgentEnv()
 	for time.Now().UnixNano() < a.external.waitUntil.Load() {
@@ -268,7 +234,6 @@ func (a *App) awaitAgent(id string) {
 		switch {
 		case a.external.waiting != id:
 		case time.Now().UnixNano() < a.external.waitUntil.Load():
-			// The link opened again as the watch ended.
 			go a.awaitAgent(id)
 		default:
 			a.external.waiting = ""
@@ -276,8 +241,6 @@ func (a *App) awaitAgent(id string) {
 	})
 }
 
-// executable is the path of the app's executable, which serves MCP when
-// run as `<executable> mcp`.
 func executable() string {
 	p, err := os.Executable()
 	if err != nil {
@@ -289,9 +252,6 @@ func executable() string {
 	return p
 }
 
-// agentSetup is how to connect a client to the pages in dir: where the
-// setup goes, and the setup. The data folder is spelled out, so the
-// server opens this app's pages whatever it is started as.
 func agentSetup(client, exe, dir string) (where, snippet string) {
 	server := `"command": ` + jsonString(exe) + `,
       "args": ["mcp"],
@@ -333,7 +293,6 @@ env = { LEAFLET_DATA_DIR = ` + jsonString(dir) + ` }`
 }`
 }
 
-// jsonString is s as a JSON string, which TOML reads the same.
 func jsonString(s string) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
@@ -342,8 +301,6 @@ func jsonString(s string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// shellWord is s as one word of the shell a terminal here opens: a POSIX
-// shell, or on Windows PowerShell or cmd.exe.
 func shellWord(s string) string {
 	if runtime.GOOS == "windows" {
 		return windowsQuote(s)
@@ -351,10 +308,6 @@ func shellWord(s string) string {
 	return shellQuote(s)
 }
 
-// windowsQuote is s as one word of PowerShell and of cmd.exe, which keeps
-// single quotes as they are: in double quotes, which a Windows path never
-// has in it. No quoting keeps both shells from a $ or a % in it, which
-// paths on Windows hardly ever have.
 func windowsQuote(s string) string {
 	if s != "" && !strings.ContainsAny(s, " '\"$`&|<>()[]{}^;,=!%@#~+\t") {
 		return s
@@ -362,7 +315,6 @@ func windowsQuote(s string) string {
 	return `"` + s + `"`
 }
 
-// shellQuote is s as one word of a POSIX shell.
 func shellQuote(s string) string {
 	if s != "" && !strings.ContainsAny(s, " '\"\\$`!*?;&|<>()[]{}#~\t\n") {
 		return s

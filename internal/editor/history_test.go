@@ -13,8 +13,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// longPage is an editor of n paragraphs, built once in a window, with the
-// caret in the first.
 func longPage(t testing.TB, n int) (*Editor, *ui.Tester, []*doc.Node) {
 	t.Helper()
 	e := New(doc.Empty(), &fakeHost{})
@@ -32,7 +30,6 @@ func longPage(t testing.TB, n int) (*Editor, *ui.Tester, []*doc.Node) {
 	return e, tt, nodes
 }
 
-// layoutsOf are the blocks' layouts, as last built.
 func layoutsOf(e *Editor, nodes []*doc.Node) []*blockLayout {
 	var out []*blockLayout
 	for _, n := range nodes {
@@ -41,9 +38,6 @@ func layoutsOf(e *Editor, nodes []*doc.Node) []*blockLayout {
 	return out
 }
 
-// The steps of undo share the blocks an edit leaves: each keeps anew only
-// what changed since the step before, never a block of the page itself,
-// and going back keeps the blocks that were as they are.
 func TestStepsShareWhatEditsLeave(t *testing.T) {
 	e, _, nodes := longPage(t, 50)
 	e.PlaceCaret(nodes[10].ID, 0)
@@ -87,14 +81,11 @@ func TestStepsShareWhatEditsLeave(t *testing.T) {
 	}
 }
 
-// What a step keeps stays as it was, whatever changes the page after: its
-// blocks are its own, which no edit reaches.
 func TestStepsKeepThePageAsItWas(t *testing.T) {
 	e, _, nodes := longPage(t, 5)
 	nodes[1].Children = []*doc.Node{newText("paragraph", doc.Delta{{Text: "under"}})}
 	e.Edit(func(c *doc.Content) { c.Children[0].Set("level", 2) })
 	kept := e.undo[len(e.undo)-1].content.Encode()
-	// Changed in place, as the app's dialogs and the table's cells do.
 	e.Edit(func(c *doc.Content) {
 		c.Children[0].Set("level", 3)
 		c.Children[1].Children[0].SetDelta(doc.Delta{{Text: "changed"}})
@@ -110,8 +101,6 @@ func TestStepsKeepThePageAsItWas(t *testing.T) {
 	}
 }
 
-// The steps keep about maxHistory of their own: the oldest go first, and
-// the newest stays, whatever it holds.
 func TestStepsKeptToTheirSize(t *testing.T) {
 	was := maxHistory
 	t.Cleanup(func() { maxHistory = was })
@@ -139,9 +128,6 @@ func TestStepsKeptToTheirSize(t *testing.T) {
 	}
 }
 
-// Undo, sync, an agent's ops and menu actions lay out again only the
-// blocks they change: the others keep their layouts, though undo and sync
-// bring the page anew.
 func TestLayoutsOutliveChanges(t *testing.T) {
 	e, tt, nodes := longPage(t, 30)
 	before := layoutsOf(e, nodes)
@@ -183,8 +169,6 @@ func TestLayoutsOutliveChanges(t *testing.T) {
 	}
 }
 
-// A block given its own text again, in another slice, as sync and undo
-// make, keeps its layout and look: its text is read, not shaped again.
 func TestSameTextKeepsItsLayout(t *testing.T) {
 	e, tt, nodes := longPage(t, 3)
 	n := nodes[1]
@@ -212,9 +196,6 @@ func TestSameTextKeepsItsLayout(t *testing.T) {
 	}
 }
 
-// Each frame tells what folds hide from the page as it is, though nothing
-// says it changed: from what it worked out before while the blocks are
-// as they were.
 func TestFoldsFollowThePage(t *testing.T) {
 	e, tt, nodes := longPage(t, 6)
 	tt.Frame()
@@ -223,7 +204,6 @@ func TestFoldsFollowThePage(t *testing.T) {
 	if reflect.ValueOf(e.shaped.hid).Pointer() != reflect.ValueOf(hid).Pointer() {
 		t.Error("a frame worked the folds out again with nothing changed")
 	}
-	// Changed under the editor, which is not told.
 	nodes[1].Type = "heading"
 	nodes[1].Data["collapsed"] = true
 	tt.Frame()
@@ -250,8 +230,6 @@ func TestFoldsFollowThePage(t *testing.T) {
 	}
 }
 
-// Where a block shows is answered from what the page last built, while
-// nothing changed since, and from the page as it is after a change.
 func TestBlockTopFollowsFolds(t *testing.T) {
 	e, tt, nodes := longPage(t, 4)
 	e.Edit(func(c *doc.Content) { c.Children[0].Type, c.Children[0].Data["level"] = "heading", 1 })
@@ -272,8 +250,6 @@ func TestBlockTopFollowsFolds(t *testing.T) {
 	}
 }
 
-// shapeOf is a page written out whole, its blocks' IDs, kinds and data, to
-// tell one page from another.
 func shapeOf(c *doc.Content) string {
 	var b strings.Builder
 	c.Walk(func(n, parent *doc.Node) {
@@ -282,9 +258,6 @@ func shapeOf(c *doc.Content) string {
 	return b.String()
 }
 
-// wholePage fails the test where the editor is not whole: a block for the
-// caret, every block's ID its own, the selection in blocks of the page,
-// and each layout of the text its block holds.
 func wholePage(t *testing.T, e *Editor, after string) {
 	t.Helper()
 	if len(e.Content.Children) == 0 {
@@ -309,16 +282,13 @@ func wholePage(t *testing.T, e *Editor, after string) {
 	}
 }
 
-// Edits made at random, with changes from outside, agents' ops and
-// compositions among them, leave the page whole after each, and its steps
-// go back and forward again through the pages they kept.
 func TestRandomEditsKeepThePageWhole(t *testing.T) {
 	words := []string{"a", "hé", "👍", "👨‍👩‍👧", "日本", "**b**", "x ", " ", "/", "@", "# ", "- ", "1. ", "[] ", "> ", "```", "---", "*i*", "`c`", "é"}
 	pastes := []string{"one\ntwo", "- a\n  - b\n- c", "| a | b |\n| - | - |\n| 1 | 2 |", "```\ncode\n```\nafter", "# h\npara", "x"}
 	kinds := []string{"heading", "bulleted_list", "todo_list", "toggle_list", "code", "quote", "paragraph"}
 	for seed := range uint64(24) {
 		e, tt, _ := setup(t)
-		rng := rand.New(rand.NewPCG(seed, 7)) // #nosec G404 -- seeded, for runs a test can repeat.
+		rng := rand.New(rand.NewPCG(seed, 7)) // #nosec G404
 		pick := func(n int) int { return rng.IntN(n) }
 		var done []string
 		anyBlock := func() *doc.Node {
@@ -394,8 +364,6 @@ func TestRandomEditsKeepThePageWhole(t *testing.T) {
 					}
 				}
 			case 18:
-				// Another device changes a block's text, takes one out or
-				// puts one in.
 				next := e.Content.Copy()
 				var all []*doc.Node
 				next.Walk(func(n, _ *doc.Node) {
@@ -451,8 +419,6 @@ func TestRandomEditsKeepThePageWhole(t *testing.T) {
 			tt.Frame()
 			wholePage(t, e, fmt.Sprintf("seed %d: %s", seed, strings.Join(done, ", ")))
 		}
-		// Back through every step, then forward again through as many,
-		// each to the page it went back from.
 		pages := []string{shapeOf(e.Content)}
 		for len(e.undo) > 0 {
 			kept := len(e.redo)
@@ -473,8 +439,6 @@ func TestRandomEditsKeepThePageWhole(t *testing.T) {
 	}
 }
 
-// One step of undo on a long page keeps what it changed, not the page,
-// and costs a walk of it, not a copy.
 func BenchmarkUndoStepOnLongPage(b *testing.B) {
 	e, _, nodes := longPage(b, 6000)
 	e.PlaceCaret(nodes[100].ID, 3)
@@ -484,8 +448,6 @@ func BenchmarkUndoStepOnLongPage(b *testing.B) {
 	}
 }
 
-// Where the outline's headings show, asked of each on a long page, is a
-// look-up each.
 func BenchmarkBlockTopOfEveryHeading(b *testing.B) {
 	e, tt, nodes := longPage(b, 6000)
 	var heads []string

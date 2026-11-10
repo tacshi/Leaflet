@@ -1,7 +1,5 @@
 version: 2
 
-# The workflows pin each action to the commit of a release; Dependabot
-# moves the pins to the next release's commit, and its comment with them.
 updates:
   - package-ecosystem: github-actions
     directory: /

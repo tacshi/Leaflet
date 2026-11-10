@@ -18,30 +18,19 @@ import (
 	"leaflet/locales"
 )
 
-// MOSS, MOSI's speech to text, transcribes saved audio with speakers, from
-// this device with a key kept in its keychain: the server has none. It
-// has no stream, so a recording is transcribed once it stops.
-
-// Moss is the provider's name in the speech settings.
 const Moss = "moss"
 
-// mossAPI is MOSI's API; tests point it at their own server.
 var mossAPI = "https://api.mosi.cn/v1"
 
-// mossModel and mossVersion are the model saved audio is transcribed with.
 const (
 	mossModel   = "moss-transcribe-diarize"
 	mossVersion = "v20260410-streamparam-20260703"
 )
 
-// mossMaxBytes is the largest file MOSS takes.
 const mossMaxBytes = 512 << 20
 
-// mossPoll is how long TranscribeMoss waits between asking whether it is
-// done, when MOSS doesn't say. Tests shorten it.
 var mossPoll = 2 * time.Second
 
-// MossKey is the MOSS key kept in this device's keychain, or "".
 func MossKey() string {
 	k, err := keychain.Get("stt.moss.key")
 	if err != nil {
@@ -50,7 +39,6 @@ func MossKey() string {
 	return string(k)
 }
 
-// SetMossKey keeps a MOSS key in the keychain, or removes it.
 func SetMossKey(key string) error {
 	if key = strings.TrimSpace(key); key == "" {
 		if err := keychain.Delete("stt.moss.key"); !errors.Is(err, keychain.ErrNotFound) {
@@ -61,9 +49,6 @@ func SetMossKey(key string) error {
 	return keychain.Set("stt.moss.key", []byte(key))
 }
 
-// TestMossKey checks a MOSS key against MOSI's API: that MOSI takes it.
-// Its list of models names them otherwise than the transcription does, so
-// whether the key may transcribe is for MOSS to say when it does.
 func TestMossKey(ctx context.Context, key string) error {
 	if strings.TrimSpace(key) == "" {
 		return errors.New(locales.RecErrPasteKey())
@@ -75,10 +60,6 @@ func TestMossKey(ctx context.Context, key string) error {
 	return mossDo(req, strings.TrimSpace(key), nil)
 }
 
-// TranscribeMoss transcribes size bytes of audio from audio, named name,
-// whose extension says what it is, with MOSS and the key on this device:
-// it goes up as it is read, never all in memory, and is removed from MOSI
-// once it is transcribed. Speakers are labelled when speakers is set.
 func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64, name string, speakers bool) ([]store.Segment, error) {
 	if size > mossMaxBytes {
 		return nil, errors.New(locales.RecErrMossTooLarge())
@@ -94,8 +75,6 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 		return mossDo(req, key, out)
 	}
 
-	// The form's purpose and the file's head, then the audio, then the
-	// form's end, of a length known before the audio is read.
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
 	if err := w.WriteField("purpose", "audio"); err != nil {
@@ -129,8 +108,6 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 	if file.ID == "" {
 		return nil, errors.New(locales.RecErrMossFailed(""))
 	}
-	// MOSS keeps no transcript apart from its task: the file is all
-	// there is to remove.
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -181,7 +158,6 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 	}
 }
 
-// mossTask is a transcription task, its transcript once it succeeded.
 type mossTask struct {
 	Status     string  `json:"status"`
 	RetryAfter int     `json:"retry_after"`
@@ -196,11 +172,8 @@ type mossTask struct {
 	Error mossError `json:"error"`
 }
 
-// mossControl matches the speaker and time tags MOSS may leave in a line.
 var mossControl = regexp.MustCompile(`(?i)\[(?:S\d+|\d+(?:\.\d+)?)\]`)
 
-// segments is the task's transcript: a line of only tags, which MOSS
-// leaves where it heard no words, is none.
 func (t mossTask) segments(speakers bool) []store.Segment {
 	var segs []store.Segment
 	for _, s := range t.Segments {
@@ -220,7 +193,6 @@ func (t mossTask) segments(speakers bool) []store.Segment {
 	return segs
 }
 
-// msOf is seconds in milliseconds, none below zero.
 func msOf(seconds float64) int {
 	if seconds <= 0 {
 		return 0
@@ -228,14 +200,12 @@ func msOf(seconds float64) int {
 	return int(seconds*1000 + 0.5)
 }
 
-// mossError is what MOSS says went wrong, in a task or an answer.
 type mossError struct {
 	Message  string `json:"message"`
 	ErrorMsg string `json:"error_msg"`
 	Internal string `json:"internal_error_msg"`
 }
 
-// UnmarshalJSON reads an error as an object, or as words alone.
 func (e *mossError) UnmarshalJSON(data []byte) error {
 	var words string
 	if json.Unmarshal(data, &words) == nil {
@@ -259,8 +229,6 @@ func (e mossError) message() string {
 	return ""
 }
 
-// mossDo sends req to MOSI with key, and reads its answer into out, unless
-// out is nil.
 func mossDo(req *http.Request, key string, out any) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	res, err := http.DefaultClient.Do(req)

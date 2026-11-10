@@ -26,11 +26,6 @@ import (
 	"leaflet/locales"
 )
 
-// Sign in with ChatGPT: the user's ChatGPT Plus or Pro plan pays for agent
-// runs, through OpenAI's OAuth for open-source and personal apps
-// (developers.openai.com/siwc). The app registers itself on first sign-in
-// and gets a client ID of its own; tokens stay on this device.
-
 const (
 	chatgptIssuer   = "https://auth.openai.com"
 	chatgptResource = "https://api.openai.com/v1"
@@ -39,7 +34,6 @@ const (
 	chatgptPort     = 1455
 )
 
-// ChatGPTAccount is what is kept of a sign-in, in the keychain.
 type ChatGPTAccount struct {
 	ClientID     string `json:"client_id"`
 	Email        string `json:"email"`
@@ -85,25 +79,17 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 	return &d, nil
 }
 
-// errSignInUnreachable is a page where OpenAI's sign-in should answer
-// with JSON: a block page for the region, or the network's own page when
-// a proxy is not used.
 func errSignInUnreachable(status string) error {
 	return errors.New(locales.AgentChatgptUnreachable(status))
 }
 
-// isJSON is application/json, or a type of it such as jwk-set+json.
 func isJSON(res *http.Response) bool {
 	t, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	return t == "application/json" || strings.HasPrefix(t, "application/") && strings.HasSuffix(t, "+json")
 }
 
-// signInHTTP is the client of OpenAI's sign-in. Its answers are small, so
-// one that takes longer than this has stalled, and would otherwise keep a
-// run waiting on a token.
 var signInHTTP = &http.Client{Timeout: 30 * time.Second}
 
-// getSignInJSON reads one of the sign-in's JSON documents.
 func getSignInJSON(ctx context.Context, u string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
@@ -169,15 +155,11 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	return &t, nil
 }
 
-// SignInChatGPT signs in through the browser, which open opens. hostID
-// names this device to OpenAI and stays the same; clientID is the one an
-// earlier sign-in registered, or "".
 func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url string)) (*ChatGPT, error) {
 	d, err := discover(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// Only the port may differ.
 	lb, err := oauth.Listen("ChatGPT", chatgptPort, true)
 	if err != nil {
 		return nil, err
@@ -240,8 +222,6 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	return g, nil
 }
 
-// verifyIDToken checks the ID token's signature against OpenAI's keys, and
-// its issuer, audience, expiry and nonce.
 func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, nonce string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -271,8 +251,6 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 		if k.Kid == header.Kid && k.Kty == "RSA" {
 			n, err1 := base64.RawURLEncoding.DecodeString(k.N)
 			e, err2 := base64.RawURLEncoding.DecodeString(k.E)
-			// An exponent is small, 65537 as a rule: one that does not fit
-			// an int32 is no key's.
 			if exp := new(big.Int).SetBytes(e); err1 == nil && err2 == nil && exp.IsInt64() {
 				if v := exp.Int64(); v > 0 && v <= math.MaxInt32 {
 					key = &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(v)}
@@ -322,41 +300,28 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 	return claims, nil
 }
 
-// ChatGPT runs agent requests on a ChatGPT plan through the Responses API.
 type ChatGPT struct {
-	// mu guards acct, access and expires, never across a request:
-	// Settings reads the account on the main thread while a token renews.
-	mu      sync.Mutex
-	acct    ChatGPTAccount
-	access  string
-	expires time.Time
-	// base is the API's address; tests point it elsewhere.
-	base string
-	// OnRefresh keeps the account as its refresh token rotates.
+	mu        sync.Mutex
+	acct      ChatGPTAccount
+	access    string
+	expires   time.Time
+	base      string
 	OnRefresh func(ChatGPTAccount)
-	// renewing is held while the access token renews, so calls that need
-	// it at once wait for one renewal rather than each spend the refresh
-	// token.
-	renewing sync.Mutex
+	renewing  sync.Mutex
 }
 
-// chatgptHTTP is the client of the plan's API. Its answers stream, so
-// they may take as long as a run, given they keep coming.
 var chatgptHTTP = sync.OnceValue(func() *http.Client {
 	return &http.Client{Transport: streamTransport(), CheckRedirect: noRedirect}
 })
 
-// NewChatGPT resumes a sign-in kept from before.
 func NewChatGPT(acct ChatGPTAccount) *ChatGPT { return &ChatGPT{acct: acct} }
 
-// Account returns what to keep of the sign-in.
 func (g *ChatGPT) Account() ChatGPTAccount {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.acct
 }
 
-// fresh is the access token while it has a minute or more left.
 func (g *ChatGPT) fresh() (string, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -369,7 +334,6 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	}
 	g.renewing.Lock()
 	defer g.renewing.Unlock()
-	// Another call may have renewed it while this one waited.
 	if tok, ok := g.fresh(); ok {
 		return tok, nil
 	}
@@ -381,9 +345,6 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Not the caller's context: a run stopped while OpenAI rotates the
-	// refresh token would lose the new one, and the old no longer works.
-	// signInHTTP's timeout still applies.
 	t, err := postToken(context.WithoutCancel(ctx), d.TokenEndpoint, url.Values{
 		"grant_type": {"refresh_token"}, "client_id": {acct.ClientID},
 		"refresh_token": {acct.RefreshToken}, "resource": {chatgptResource},
@@ -401,16 +362,12 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 		acct = g.acct
 	}
 	g.mu.Unlock()
-	// Kept before the next renewal, which waits for renewing: the newest
-	// refresh token is the one kept last.
 	if t.RefreshToken != "" && g.OnRefresh != nil {
 		g.OnRefresh(acct)
 	}
 	return t.AccessToken, nil
 }
 
-// drop forgets the access token tok, which the API refused, so the next
-// call renews it.
 func (g *ChatGPT) drop(tok string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -419,7 +376,6 @@ func (g *ChatGPT) drop(tok string) {
 	}
 }
 
-// SignOut revokes the sign-in.
 func (g *ChatGPT) SignOut(ctx context.Context) {
 	d, err := discover(ctx)
 	if err != nil || d.RevocationEndpoint == "" {
@@ -442,9 +398,6 @@ func (g *ChatGPT) do(ctx context.Context, method, path string, body any, accept 
 	return g.doOnce(ctx, method, path, body, accept, true)
 }
 
-// doOnce makes a request of the API; again tries it once more, after
-// renewing the access token, when the API refuses the token: it may have
-// been revoked or expired before the time it said.
 func (g *ChatGPT) doOnce(ctx context.Context, method, path string, body any, accept string, again bool) (*http.Response, error) {
 	tok, err := g.token(ctx)
 	if err != nil {
@@ -494,7 +447,6 @@ func (g *ChatGPT) doOnce(ctx context.Context, method, path string, body any, acc
 	return res, nil
 }
 
-// ListModels lists the models the plan can use.
 func (g *ChatGPT) ListModels(ctx context.Context) ([]string, error) {
 	res, err := g.do(ctx, "GET", "/models", nil, "application/json")
 	if err != nil {
@@ -525,14 +477,10 @@ func (g *ChatGPT) ListModels(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// Chat sends a chat-completions conversation through the Responses API:
-// system messages become instructions, tool calls function_call items.
 func (g *ChatGPT) Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error) {
 	return g.ChatStream(ctx, model, messages, tools, maxTokens, nil)
 }
 
-// ChatStream is Chat with the answer told to on as it streams, when not
-// nil.
 func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error) {
 	var instructions []string
 	var input []any
@@ -582,11 +530,8 @@ func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[s
 	defer func() { _ = res.Body.Close() }()
 	sc := bufio.NewScanner(res.Body)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	// The final event may come with an empty output, the items having
-	// streamed before it, so they are kept as they arrive.
 	var items []any
 	var deltas strings.Builder
-	// The function calls as they stream, by the output item each is.
 	type streaming struct {
 		i    int
 		name string
@@ -659,8 +604,6 @@ func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[s
 	return ChatResult{}, &APIError{Message: locales.AgentChatgptCutOff()}
 }
 
-// incompleteMessage says why ChatGPT stopped before finishing, as its
-// response.incomplete event's incomplete_details give the reason.
 func incompleteMessage(ev map[string]any) string {
 	resp, _ := ev["response"].(map[string]any)
 	details, _ := resp["incomplete_details"].(map[string]any)
@@ -700,12 +643,10 @@ func parseResponse(resp map[string]any) ChatResult {
 	return out
 }
 
-// Model is a chat model the agent loop can run on.
 type Model interface {
 	Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error)
 }
 
-// StreamingModel is a model whose answers stream.
 type StreamingModel interface {
 	ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error)
 }

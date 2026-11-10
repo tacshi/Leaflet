@@ -1,9 +1,5 @@
 import UIKit
 
-/// EditorAccessibility is what VoiceOver offers at the caret: what a tap
-/// does on the block's marker, its due date's chip, its view or a link,
-/// which VoiceOver can't reach in the text, and the choices of the menu at
-/// the caret while it shows.
 @MainActor
 enum EditorAccessibility {
     static func actions(_ editor: EditorController) -> [UIAccessibilityCustomAction] {
@@ -26,8 +22,6 @@ enum EditorAccessibility {
         let (para, info) = editor.text.paragraph(at: caret)
         let at = para.location
         let editable = textView.isEditable
-        // The block where it is as the action runs: the page may have
-        // changed above it since VoiceOver was given the action.
         let id = info.id
         func offerOnBlock(
             _ name: String, _ run: @escaping @MainActor (EditorController, BlockInfo, Int) -> Void
@@ -53,7 +47,6 @@ enum EditorAccessibility {
                 $0.taps.tapMarker($1, at: $2)
             }
         case "code":
-            // What the code's bar offers, Copy and its language.
             offerOnBlock(L.editorCopyCode) {
                 $0.taps.tapCodeBar($1, at: $2, copy: true, from: .zero)
             }
@@ -104,7 +97,6 @@ enum EditorAccessibility {
                 }
             }
         }
-        // The link the caret is in, or just after.
         for i in [caret, caret - 1] where i >= 0 && i < storage.length {
             if let url = EditorStyle.linkTarget(storage.attributes(at: i, effectiveRange: nil)) {
                 offer(LI.openLink) { $0.open(url) }

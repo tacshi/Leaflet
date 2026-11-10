@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// listen starts a loopback on any free port, closed as the test ends.
 func listen(t *testing.T) *Loopback {
 	t.Helper()
 	l, err := ListenFor("Example", 0, false, "the-state", "the-verifier")
@@ -22,8 +21,6 @@ func listen(t *testing.T) *Loopback {
 	return l
 }
 
-// comeBack sends the browser's answer to the loopback, as from host, and
-// returns the status and page it got.
 func comeBack(t *testing.T, l *Loopback, query, host string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest("GET", l.Redirect+"?"+query, nil)
@@ -42,8 +39,6 @@ func comeBack(t *testing.T, l *Loopback, query, host string) (int, string) {
 	return res.StatusCode, string(body)
 }
 
-// waited is what Wait returns within a short time, or "waits" when it is
-// still waiting then.
 func waited(l *Loopback) (code string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -54,15 +49,12 @@ func waited(l *Loopback) (code string, err error) {
 	return v.Get("code"), err
 }
 
-// The challenge is S256 of the verifier, as RFC 7636's example has it.
 func TestChallengeIsS256(t *testing.T) {
 	if got := Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"); got != "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" {
 		t.Errorf("challenge %q", got)
 	}
 }
 
-// The browser's answer with the sign-in's state ends the wait with its
-// code, and the first answer counts: the tab loaded again changes nothing.
 func TestLoopbackTakesTheAnswer(t *testing.T) {
 	l := listen(t)
 	if status, body := comeBack(t, l, "state=the-state&code=first", ""); status != http.StatusOK || !strings.Contains(body, "Signed in") {
@@ -76,8 +68,6 @@ func TestLoopbackTakesTheAnswer(t *testing.T) {
 	}
 }
 
-// An answer with another state, as from a tab of an earlier sign-in, is
-// stale: the page says so, and the sign-in goes on waiting for its own.
 func TestLoopbackRefusesAStaleState(t *testing.T) {
 	l := listen(t)
 	for _, q := range []string{"state=earlier&code=old", "code=old", "state=earlier&error=access_denied"} {
@@ -94,9 +84,6 @@ func TestLoopbackRefusesAStaleState(t *testing.T) {
 	}
 }
 
-// Only the loopback's own address is answered: a page of another site
-// that the browser sends there, by a name that resolves to it, finds
-// nothing, as does another path.
 func TestLoopbackRefusesAnotherHost(t *testing.T) {
 	l := listen(t)
 	_, port, _ := net.SplitHostPort(strings.TrimPrefix(strings.TrimSuffix(l.Redirect, "/auth/callback"), "http://"))
@@ -118,8 +105,6 @@ func TestLoopbackRefusesAnotherHost(t *testing.T) {
 	}
 }
 
-// An error the provider sends back ends the sign-in: the person declining
-// is a cancel, anything else names the provider and its error.
 func TestLoopbackErrorEndsTheSignIn(t *testing.T) {
 	for _, c := range []struct{ code, want string }{
 		{"access_denied", "Sign-in was cancelled."},
@@ -135,8 +120,6 @@ func TestLoopbackErrorEndsTheSignIn(t *testing.T) {
 	}
 }
 
-// A port another app holds is taken for another when any port does, and
-// refused, naming the provider, when only that one does.
 func TestListenOnATakenPort(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

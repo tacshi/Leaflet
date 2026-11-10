@@ -12,12 +12,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// moveInto has this device sync the pages of space, the space of the
-// library it joins, as signing in or joining the Leaflet folder of iCloud
-// Drive does: the pages made on this device move into it, and what is
-// made from here on goes there too, its own space gone. A library another
-// device started (joined) has starter pages of its own: this device's
-// stay out of it, unless the user took them up.
 func (s *Service) moveInto(space, name, owner string, joined bool) error {
 	if err := s.st.SettleStarterPages(joined); err != nil {
 		return err
@@ -41,10 +35,6 @@ func (s *Service) moveInto(space, name, owner string, joined bool) error {
 	return nil
 }
 
-// adopted queues everything on this device to go up in space, which this
-// device joined, and keeps it under key once it has: the space counts as
-// adopted only then. A device that stops before, or could not queue it
-// all, adopts it again on the next pass.
 func (s *Service) adopted(ctx context.Context, space, key string) error {
 	failed := s.requeueAll(ctx, space)
 	if errors.Is(failed, errNotRequeued) {
@@ -53,29 +43,13 @@ func (s *Service) adopted(ctx context.Context, space, key string) error {
 	return errors.Join(failed, s.st.SetValue(key, space))
 }
 
-// requeueAll queues everything of the space spaceID on this device to go
-// up: the pages and their content, folders, comments, files and
-// recordings with their audio. A file or audio this device has only in
-// iCloud Drive, as after syncing through it, comes here first, to go up
-// from here; one that does not come yet waits, and retryMoves tries it
-// again before each pass.
-//
-// What it could not read or queue it does all again before the next pass
-// (requeueKey), so nothing is left behind for good. It waits for iCloud
-// Drive no longer than ctx lets it, so stopping the pass stops it too.
 func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	if err := s.st.SetValue(requeueKey, spaceID); err != nil {
 		return fmt.Errorf("%w: %w", errNotRequeued, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, moveWait)
 	defer cancel()
-	// Each row goes as stored when it is queued, not as read here: a
-	// change made meanwhile, as a deletion, is not undone.
 	var queued error
-	// Only what is of the space goes, with what is on its pages: a page
-	// another account shared with the user, kept here after the user's
-	// session ended on its own, is not the user's to send, and the devices
-	// that took it would file it as one of the user's own.
 	pages, err := s.st.AllPages()
 	queued = errors.Join(queued, err)
 	ofSpace := map[string]bool{}
@@ -109,8 +83,6 @@ func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	recordings = slices.DeleteFunc(recordings, func(r store.Recording) bool { return !ofSpace[r.PageID] })
 	var failed error
 	moves := map[string]bool{}
-	// Deleted files go too, as deleted pages do, so a deletion sent in a
-	// batch that was lost goes again: its stored copy may be gone.
 	for _, f := range files {
 		if err := s.requeueFile(ctx, f, spaceID); err != nil {
 			moves["files:"+f.ID] = true
@@ -130,26 +102,14 @@ func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	return errors.Join(failed, s.st.SetValue(requeueKey, ""))
 }
 
-// requeueKey keeps the space requeueAll is queuing everything in, until it
-// has: one it could not finish runs again before the next pass.
 const requeueKey = "sync.requeue_waiting"
 
-// errNotRequeued is a requeueAll that did not queue everything, and runs
-// again before the next pass.
 var errNotRequeued = errors.New("not everything is queued to go up")
 
-// moveWait is how long requeueAll waits for iCloud Drive to bring what
-// this device has only there; a retry waits a quarter of it. Tests
-// shorten it.
 var moveWait = 2 * time.Minute
 
-// movesKey keeps the files and recordings requeueAll could not bring
-// from iCloud Drive yet, as "files:<id>" and "recordings:<id>".
 const movesKey = "sync.moves_waiting"
 
-// retryMoves queues the files and recordings requeueAll could not bring
-// from iCloud Drive, once they come, and runs again a requeueAll that did
-// not finish.
 func (s *Service) retryMoves(ctx context.Context) error {
 	if space, _ := s.st.Value(requeueKey); space != "" {
 		return s.requeueAll(ctx, space)
@@ -162,9 +122,6 @@ func (s *Service) retryMoves(ctx context.Context) error {
 	defer cancel()
 	var failed error
 	left := map[string]bool{}
-	// A table that cannot be read keeps its entries for the next retry. Of
-	// one read, an entry whose row is gone is let go: a deleted file's
-	// row stays, and goes up, as requeueAll has it.
 	keep := func(table string, err error) {
 		failed = errors.Join(failed, err)
 		for key := range moves {
@@ -200,11 +157,6 @@ func (s *Service) retryMoves(ctx context.Context) error {
 	return errors.Join(failed, s.setIDs(movesKey, left))
 }
 
-// requeueFile queues a file to go up in space spaceID, with its contents
-// when this device has them (a deleted file's row goes alone). It changes
-// nothing while the file is in iCloud Drive but does not come here
-// (fromICloud). What it queues is the file as stored once it has come, as
-// a change made while it waited for it is not undone.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
 	if f.DeletedAt.IsZero() {
 		data, err := s.fromICloud(ctx, "files", f.StoragePath, f.LocalPath)
@@ -222,10 +174,6 @@ func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string)
 	return s.st.RequeueFile(f.ID, spaceID)
 }
 
-// requeueRecording queues a finished recording to go up with its audio,
-// which keeps the path it has until the upload gives it another. It
-// changes nothing while the audio is in iCloud Drive but does not come
-// here, as requeueFile does a file.
 func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error {
 	if r.Status != "ready" && r.Status != "failed" {
 		return nil
@@ -244,16 +192,6 @@ func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error
 	return s.st.RequeueRecording(r.ID)
 }
 
-// fromICloud opens a file or audio, by its storage path, that this device
-// has only in the Leaflet folder of iCloud Drive it synced through, so it
-// comes here to go up elsewhere, read as it comes; it is nil when nothing
-// has to come, and the caller closes it otherwise. One that went up there
-// but is not listed yet, as while the device that has it still copies it
-// there, is errNotInICloud, and waits: queued now, it would go up with a
-// path of its own and nothing stored there. While sync goes through
-// iCloud Drive, as when a device sends everything again there, it stays
-// where the other devices read it: waiting for it would hold up the pass
-// for nothing.
 func (s *Service) fromICloud(ctx context.Context, bucket, storagePath, local string) (io.ReadCloser, error) {
 	if s.cloudOn.Load() || store.OnDevice(local) || storagePath == "" || !s.joinedICloud() {
 		return nil, nil

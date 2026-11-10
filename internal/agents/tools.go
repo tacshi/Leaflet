@@ -18,9 +18,6 @@ import (
 	"leaflet/locales"
 )
 
-// The page tools every agent surface uses (docs/protocol.md §2), mirroring
-// supabase/functions/_shared/tools.ts.
-
 var positionSchema = map[string]any{
 	"type":        "object",
 	"description": "Where to put the blocks. Exactly one of: after, before, parent (append as last child of a list block), at (\"start\" or \"end\").",
@@ -32,8 +29,6 @@ var positionSchema = map[string]any{
 	},
 }
 
-// writeSchema is where write_markdown writes: a position, or an empty
-// block to write in place of.
 var writeSchema = map[string]any{
 	"type":        "object",
 	"description": "Where to write. Exactly one of: replace (an empty block to write in place of, as the empty line the user asked from), after, before, parent (append as last children of a list block), at (\"start\" or \"end\").",
@@ -90,11 +85,8 @@ var blockSchema = map[string]any{
 	"required": []string{"type"},
 }
 
-// ordered are a schema's properties in the order a model should write
-// them, as a map's are not.
 type ordered []prop
 
-// prop is one of a schema's properties.
 type prop struct {
 	key   string
 	value any
@@ -116,7 +108,6 @@ func (o ordered) MarshalJSON() ([]byte, error) {
 	return append(b, '}'), nil
 }
 
-// Properties are a tool's parameters' properties, as a map.
 func Properties(params map[string]any) map[string]any {
 	switch p := params["properties"].(type) {
 	case ordered:
@@ -141,8 +132,6 @@ func tool(name, desc string, props any, required ...string) map[string]any {
 	}}
 }
 
-// ToolDefinitions are the tools offered to a model: only the reading ones
-// on a page the user may not edit.
 func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	out := []map[string]any{
 		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole.", map[string]any{}),
@@ -161,8 +150,6 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	return out
 }
 
-// pageSchema is a new page's: its title, where it goes, and its content in
-// Markdown or as blocks, or neither for an empty page.
 func pageSchema(place ...prop) ordered {
 	o := append(ordered{{"title", map[string]any{"type": "string"}}}, place...)
 	return append(o,
@@ -170,8 +157,6 @@ func pageSchema(place ...prop) ordered {
 		prop{"blocks", map[string]any{"type": "array", "items": blockSchema}})
 }
 
-// WebToolDefinitions are the web's tools offered to a model: a search,
-// when its provider searches, and reading a page.
 func WebToolDefinitions(search bool) []map[string]any {
 	var out []map[string]any
 	if search {
@@ -184,10 +169,8 @@ func WebToolDefinitions(search bool) []map[string]any {
 
 func editTools() []map[string]any {
 	return []map[string]any{
-		// Writing streams into the page as the model writes it.
 		tool("write_markdown", "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. It goes into the page as you write it.",
 			ordered{{"position", writeSchema}, {"markdown", map[string]any{"type": "string"}}}, "position", "markdown"),
-		// The position first, so the blocks can go in as they stream.
 		tool("insert_blocks", "Insert new blocks at a position.", ordered{{"position", positionSchema}, {"blocks", map[string]any{"type": "array", "minItems": 1, "items": blockSchema}}}, "position", "blocks"),
 		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", ordered{{"id", map[string]any{"type": "string"}}, {"block", blockSchema}}, "id", "block"),
 		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
@@ -198,73 +181,33 @@ func editTools() []map[string]any {
 	}
 }
 
-// ToolContext is what the tools need beyond the page's blocks.
 type ToolContext struct {
-	Content   *doc.Content
-	PageID    string
-	PageTitle string
-	AgentName string
-	// ReadOnly is a page the user may view but not edit: the tools that
-	// change it refuse.
-	ReadOnly bool
-	Subpages func() []map[string]any
-	Comments func() []map[string]any
-	// CreateSubpage makes the subpage and returns its ID.
+	Content       *doc.Content
+	PageID        string
+	PageTitle     string
+	AgentName     string
+	ReadOnly      bool
+	Subpages      func() []map[string]any
+	Comments      func() []map[string]any
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
-	// CreatePage makes a page of the user's own at the top level, in the
-	// folder of ID folderID when it is not "", and returns its ID; nil on a
-	// page someone else writes or reads, whose writing it would take into
-	// the user's own pages.
-	CreatePage func(title string, nodes []*doc.Node, folderID string) (string, error)
-	// ListPages, ReadOtherPage and ListFolders are nil when cross-page
-	// reading is off.
+	CreatePage    func(title string, nodes []*doc.Node, folderID string) (string, error)
 	ListPages     func() []map[string]any
 	ReadOtherPage func(id string) map[string]any
 	ListFolders   func() []map[string]any
-	// Alone reports whether page pageID is the user's alone, as the page a
-	// run makes pages of the user's own from must be (CreatePage): once the
-	// run reads, with ReadOtherPage, a page that is not, what someone else
-	// wrote there could go into the pages it makes, and it makes none, nor
-	// a subpage. Nil takes every page for one.
-	Alone func(pageID string) bool
-	// LinkedNow reports whether the page the run is on has a public link
-	// now, read again as the run goes on: one started since it began, on
-	// this device or another, has visitors read what the run writes there.
-	// Nil takes the page to have none.
-	LinkedNow func() bool
-	// Transcript is the transcript of a recording on page pageID as text,
-	// "" when there is none, or the recording is another page's.
-	Transcript func(pageID, recordingID string) string
-	// SiteInfo keeps in the blocks the tools read what sites wrote of
-	// them, which the app read from them: a link card's title and
-	// description, and a video's title. An MCP client's, whose writing
-	// keeps to no URL guard of the app's, keeps it; a run reads a card's
-	// link and a video's alone (withoutSiteInfo).
-	SiteInfo bool
-	// Captions reads a video's captions from its site; nil reads none.
-	Captions func(v doc.Video) (web.Captions, error)
-	// Request is what the user asked the run, whose URLs a block may load
-	// as this page's may (checkURLs).
-	Request string
-	// SearchWeb searches the web through the run's provider, and ReadWeb
-	// reads a page of it; nil when the run has no web, or its provider no
-	// search.
-	SearchWeb func(query string) (Search, error)
-	ReadWeb   func(link string) (web.Page, error)
-	// Workspace is the workspace agent's, whose tools are of the user's
-	// pages rather than of one: nil on a page.
-	Workspace *Workspace
+	Alone         func(pageID string) bool
+	LinkedNow     func() bool
+	Transcript    func(pageID, recordingID string) string
+	SiteInfo      bool
+	Captions      func(v doc.Video) (web.Captions, error)
+	Request       string
+	SearchWeb     func(query string) (Search, error)
+	ReadWeb       func(link string) (web.Page, error)
+	Workspace     *Workspace
 }
 
-// PageTools is the ToolContext of a page in the store: its subpages,
-// comments and transcripts, subpages made in the store, and, with
-// crossPage, reading the user's other pages.
 func PageTools(st *store.Store, pageID, title, agent string, content *doc.Content, crossPage bool) ToolContext {
 	tc := ToolContext{
 		Content: content, PageID: pageID, PageTitle: title, AgentName: agent,
-		// Only a recording of the page whose block names it, as the agent
-		// function reads a page's: a block can name any recording's ID,
-		// another page's among them.
 		Transcript: func(pageID, id string) string {
 			rec, err := st.Recording(id)
 			if err != nil || rec.PageID != pageID {
@@ -290,7 +233,6 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 					if !c.DeletedAt.IsZero() {
 						body = "(deleted)"
 					}
-					// A guest names themself: say so, as the agent function does.
 					author := c.AuthorName
 					if c.AuthorKind == "guest" {
 						author += " (guest, through the page's public link)"
@@ -309,9 +251,6 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			p, err := st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: title, Content: c})
 			return p.ID, err
 		},
-		// A page of its own is the user's, in their space, whatever space
-		// the page the run is on is in; the hub offers it only on a page no
-		// one else writes or reads (toolContext).
 		CreatePage: func(title string, nodes []*doc.Node, folderID string) (string, error) {
 			if folderID != "" && !spaceFolder(st, folderID) {
 				return "", noFolder(folderID)
@@ -325,9 +264,6 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 		},
 	}
 	if crossPage {
-		// The other pages are those of this page's space, as the agent
-		// function has them: a page someone else shared is theirs, and
-		// what they wrote in it, its URLs among them, is not the user's.
 		here, _ := st.Page(pageID)
 		tc.ListPages = func() []map[string]any {
 			pages, _ := st.Pages()
@@ -341,8 +277,6 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			for _, p := range others {
 				out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
 			}
-			// A page at the top level counted as the server writes it, of
-			// parent null: the more of the two.
 			return out[:listed(len(out), 0, func(i int) int {
 				if out[i]["parent_id"] == "" {
 					return jsonCost(out[i]) + jsonCost(nil) - jsonCost("")
@@ -350,8 +284,6 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 				return jsonCost(out[i])
 			})]
 		}
-		// Shaped as read_page's, as protocol §2 has it: its subpages, and
-		// no comments, which are of this page's alone.
 		tc.ReadOtherPage = func(id string) map[string]any {
 			p, err := st.Page(id)
 			c := st.Content(id)
@@ -372,20 +304,10 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 	return tc
 }
 
-// maxListedPages is the most pages list_pages lists, as the agent
-// function lists at most so many.
 const maxListedPages = 500
 
-// listBudget is how much of a tool's result, in UTF-16 units by
-// jsonCost, the pages list_pages lists take at most, with what is listed
-// with them: within toolResultLimit, with room for the keys around them.
-// Past it, as past maxListedPages, the rest are left for a search to
-// find, rather than cut off with the result.
 const listBudget = toolResultLimit - 2_000
 
-// jsonCost is at least how many UTF-16 units v takes as JSON, as either
-// side writes it, the server counting it so too: six for a character one
-// of them escapes (\u003c, as Go writes <), one or two for the rest.
 func jsonCost(v any) int {
 	switch x := v.(type) {
 	case string:
@@ -436,9 +358,6 @@ func jsonCost(v any) int {
 	return 4
 }
 
-// listed is how many of n pages list_pages lists: at most maxListedPages,
-// and as many as listBudget takes past spent, what is listed with them,
-// cost being each page's jsonCost.
 func listed(n, spent int, cost func(i int) int) int {
 	for i := range min(n, maxListedPages) {
 		if spent += cost(i) + 1; spent > listBudget {
@@ -448,8 +367,6 @@ func listed(n, spent int, cost func(i int) int) int {
 	return min(n, maxListedPages)
 }
 
-// spaceFolders are the folders of the user's own space, as list_folders
-// lists them.
 func spaceFolders(st *store.Store) []map[string]any {
 	space := st.Session().SpaceID
 	folders, _ := st.Folders()
@@ -462,30 +379,19 @@ func spaceFolders(st *store.Store) []map[string]any {
 	return out
 }
 
-// spaceFolder reports whether id is a folder of the user's own space, not
-// deleted: one a page can be made or put in.
 func spaceFolder(st *store.Store, id string) bool {
 	f, err := st.Folder(id)
 	return err == nil && f.SpaceID == st.Session().SpaceID && f.DeletedAt.IsZero()
 }
 
-// noFolder is a call naming a folder the user has not, as the server says
-// it.
 func noFolder(id string) error {
 	return terr("No folder %q. Call list_folders for the folders' IDs.", id)
 }
 
-// maxViewHTML is the longest embed source agents read, in characters. A
-// longer one is left out, its length given instead: a few would be more
-// than a model reads at once, or an MCP client takes from a tool, and
-// the page could not be read at all.
 const maxViewHTML = 30_000
 
-// Views are the blocks of the page as agents read them (Finish).
 func (tc ToolContext) Views(c *doc.Content) []map[string]any { return tc.viewsOf(tc.PageID, c) }
 
-// viewsOf are the blocks of page pageID, whose content c is, as agents
-// read them (Finish).
 func (tc ToolContext) viewsOf(pageID string, c *doc.Content) []map[string]any {
 	views := doc.BlockViews(c)
 	for _, v := range views {
@@ -494,11 +400,6 @@ func (tc ToolContext) viewsOf(pageID string, c *doc.Content) []map[string]any {
 	return views
 }
 
-// Finish makes a block's view, as doc.BlockViews has it, one as agents
-// read it: with the transcript of a recording of page pageID, which is
-// not in the page itself; without an embed's source longer than
-// maxViewHTML; and, but for SiteInfo, without what sites wrote of the
-// block (withoutSiteInfo).
 func (tc ToolContext) Finish(pageID string, v map[string]any) {
 	if e, ok := v["embed"].(map[string]any); ok {
 		if html, _ := e["html"].(string); utf8.RuneCountInString(html) > maxViewHTML {
@@ -517,17 +418,6 @@ func (tc ToolContext) Finish(pageID string, v map[string]any) {
 	}
 }
 
-// withoutSiteInfo takes out of a block's view what a site wrote of it,
-// which the apps read from the site to show the block: a link card's
-// title and description, its page's of itself, and a video's title, its
-// uploader's, which the apps give a video that has none. That is the
-// web's writing, read with none of the web's guard (checkURLs). A video's
-// title is the site's but for one an agent wrote, and the block keeps no
-// word of which, nor did pages kept before, so none is read. A run that
-// would know what a page says reads it with the web, and a video's title
-// comes with its transcript, read as the web is (readTranscript), each
-// keeping the run to the URLs it may write after. Nor are the URLs in that
-// text the user's, to write as the page's (begin).
 func withoutSiteInfo(v map[string]any) {
 	switch v["type"] {
 	case "link_preview":
@@ -542,9 +432,6 @@ func withoutSiteInfo(v map[string]any) {
 	}
 }
 
-// ownText is the plain text of content c without what sites wrote of its
-// blocks, as withoutSiteInfo leaves a block's view: a link card's title and
-// description, and a video's title. A card's link stays, as its text.
 func ownText(c *doc.Content) string {
 	c = c.Copy()
 	c.Walk(func(n, _ *doc.Node) {
@@ -559,76 +446,37 @@ func ownText(c *doc.Content) string {
 	return c.PlainText()
 }
 
-// Edit is a short description of a change, with the blocks it touched,
-// or the page it made.
 type Edit struct {
 	Summary  string   `json:"summary"`
 	BlockIDs []string `json:"block_ids"`
 	PageID   string   `json:"page_id,omitempty"`
 }
 
-// editOf is op as an edit summary says it.
 func editOf(op doc.Op, summary string) Edit {
 	return Edit{Summary: summary, BlockIDs: OpBlockIDs(op), PageID: OpPageID(op)}
 }
 
-// Executor validates and applies tool calls, recording each as an op.
 type Executor struct {
-	Ctx  ToolContext
-	OnOp func(op doc.Op, summary string)
-	// OnRevise changes the op at at, as a draft grows: delta is what it
-	// changes in the page. A nil op takes it away, the last.
-	OnRevise func(at int, op *doc.Op, summary string, delta []doc.Op)
-	Ops      []doc.Op
-	Edits    []Edit
-	// draft is an insert_blocks call going in as it streams.
-	draft *draft
-	// allowed are the URLs the user gave the run, which a block may load
-	// once the run reads beyond this page or the web (checkURLs): those on
-	// it when the run began, and in the user's request; nil before the
-	// run's first call.
-	allowed map[string]bool
-	// armed is a run that has read beyond this page, or follows turns
-	// that may have; readPages, one that has itself.
+	Ctx              ToolContext
+	OnOp             func(op doc.Op, summary string)
+	OnRevise         func(at int, op *doc.Op, summary string, delta []doc.Op)
+	Ops              []doc.Op
+	Edits            []Edit
+	draft            *draft
+	allowed          map[string]bool
 	armed, readPages bool
-	// readOthers is a run that has read a page someone else writes or
-	// reads (Alone), or follows turns of its conversation that did: it
-	// makes no page of the user's own.
-	readOthers bool
-	// linked is a run whose page has had a public link since it began
-	// (LinkedNow), and ended one that stopped there for it, after it had
-	// read beyond its page.
-	linked, ended bool
-	// found are the URLs the run came on in the web: those its searches
-	// found, and those on the pages it read. Nil before it reads the web,
-	// after which what it writes, and the pages it reads, keep to them
-	// and those the user gave it (checkURLs, readWeb). sources are those
-	// of them the run came on itself, its searches' results and the pages
-	// it read that it picked from none it read, not the links on those:
-	// the only ones a block the app loads by itself may hold (loads).
-	found, sources map[string]bool
-	// followed counts the links the run has read that it picked from pages
-	// it read, toward maxFollowedLinks.
-	followed int
-	// written counts the blocks the run's calls have written, toward
-	// maxRunBlocks.
-	written int
-	// Refused is why the latest call was refused, said in words of the
-	// code's own, with nothing the run read or wrote in them, for a log:
-	// "" when it was not.
-	Refused string
+	readOthers       bool
+	linked, ended    bool
+	found, sources   map[string]bool
+	followed         int
+	written          int
+	Refused          string
 }
 
-// Guarded reports whether the run's URL guard is on: it has read beyond
-// its page or the web, or follows turns that did (checkURLs). What it
-// says may then carry what it read, its reply too (ReplyBlocks).
 func (x *Executor) Guarded() bool { return x.armed || x.found != nil }
 
-// maxRunBlocks bounds the blocks one run writes: a model that goes on and
-// on, as one repeating itself, stops there.
 const maxRunBlocks = 5000
 
-// room refuses blocks that would take the run past maxRunBlocks.
 func (x *Executor) room(nodes []*doc.Node) error {
 	if x.written+countNodes(nodes) > maxRunBlocks {
 		return terr("This run has written %d blocks, and one run writes at most %d. Stop here, and say in your reply what is left to do.", x.written, maxRunBlocks)
@@ -636,7 +484,6 @@ func (x *Executor) room(nodes []*doc.Node) error {
 	return nil
 }
 
-// countNodes counts blocks and the blocks inside them.
 func countNodes(nodes []*doc.Node) int {
 	n := 0
 	for _, k := range nodes {
@@ -645,15 +492,8 @@ func countNodes(nodes []*doc.Node) int {
 	return n
 }
 
-// urlRe finds the URLs in text the agent read, each to the first space
-// of unicode.IsSpace's, as the server's URL_RE: their scheme in any case,
-// as the app takes a link's (doc.WebURL), and in ASCII's letters alone,
-// as url.Parse has a scheme.
 var urlRe = regexp.MustCompile(`[hH][tT][tT][pP][sS]?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
 
-// canonURL is u with a web link's scheme in lower case, as url.Parse
-// reads it: the guard keeps and compares URLs so, as two that only their
-// scheme's case sets apart are one link to the app.
 func canonURL(u string) string {
 	for _, scheme := range []string{"https://", "http://"} {
 		if len(u) >= len(scheme) && asciiFold(u[:len(scheme)]) == scheme {
@@ -663,8 +503,6 @@ func canonURL(u string) string {
 	return u
 }
 
-// asciiFold is s with its ASCII letters in lower case, and nothing else
-// changed.
 func asciiFold(s string) string {
 	b := []byte(s)
 	for i, c := range b {
@@ -675,9 +513,6 @@ func asciiFold(s string) string {
 	return string(b)
 }
 
-// see adds the URLs in v to set, their schemes in lower case (canonURL):
-// strings that are one, and those in text, in v and in every list and map
-// in it, a table's rows of cells among them, as the server's urlsIn.
 func see(set map[string]bool, v any) {
 	if s, ok := v.(string); ok {
 		if c := canonURL(s); strings.HasPrefix(c, "http://") || strings.HasPrefix(c, "https://") {
@@ -700,43 +535,11 @@ func see(set map[string]bool, v any) {
 	}
 }
 
-// The URL guard: the app loads an image, a video or a link card by itself,
-// as it shows them. An agent that has read another of the user's pages
-// could write what it read into one, such as https://example.com/x.png?notes=…,
-// and the app would send it to that server without anyone clicking. So once a run reads another page, or
-// lists them, what it writes may hold only a URL the user gave it: one on
-// this page as the run began, or in their request. Not one on a page it
-// read, which someone else may have written there for it to use, nor one
-// the run made up, which could carry what it read. Not in text either: a
-// link a run writes in text would be on the page for the next run, which
-// takes the page's URLs as the user's, to load in a block. A page it read
-// it names with a link to that page, which loads nothing.
-//
-// The web is written by anyone, to steer the agents that read it: a page
-// could have one write what is on this page into such a URL, or read the
-// page at one. So once a run reads the web, a video's captions among it,
-// what it writes, and the pages it reads, may hold only a URL the user
-// gave it, or one it found there: a search's result, or a link on a page
-// it read. Not one it made up. A block the app loads by itself keeps to
-// fewer: a search's result, or a page the run read but did not pick from
-// another it read, not a link on one, read or not, which its writer could
-// have put there by the hundred for the run to pick from, the one it
-// picked spelling out what it read. Reading such a link tells its site the
-// same, with no block at all, so a run reads a few of them and no more
-// (maxFollowedLinks): enough to follow a page on, too few to spell much
-// out. And once it reads the user's other pages, it does not use the web
-// at all (errWebClosed), as what it asked for there could carry what it
-// read, and what it writes keeps to the URLs the user gave it, as above.
-//
-// checkURLs refuses blocks that hold a URL the run may not write, in a
-// block the app loads or in text, and more text that does, as a subpage's
-// title, once it has read beyond this page.
 func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	if !x.armed && x.found == nil {
 		return nil
 	}
 	x.begin()
-	// Every URL, as text holds them, and those the app loads by itself.
 	urls, loaded := map[string]bool{}, map[string]bool{}
 	see(urls, more)
 	for _, n := range nodes {
@@ -770,28 +573,18 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	return nil
 }
 
-// loads are the blocks whose url the app loads by itself, as it shows
-// them, as the server's LOADS.
 var loads = map[string]bool{"image": true, "link_preview": true, "video": true}
 
-// given reports whether the run may write or read the URL u: one the user
-// gave it, or one it found on the web while it has not read beyond this
-// page.
 func (x *Executor) given(u string) bool {
 	u = canonURL(u)
 	return x.allowed[u] || !x.armed && x.found[u]
 }
 
-// mayLoad reports whether a block the app loads by itself may hold the
-// URL u: one the user gave the run, or one of the web's it came on itself
-// (sources) while it has not read beyond this page.
 func (x *Executor) mayLoad(u string) bool {
 	u = canonURL(u)
 	return x.allowed[u] || !x.armed && x.sources[u]
 }
 
-// find keeps a URL the run came on in the web, a source of its own or
-// only a link on one.
 func (x *Executor) find(u string, source bool) {
 	u = canonURL(u)
 	x.found[u] = true
@@ -800,26 +593,14 @@ func (x *Executor) find(u string, source bool) {
 	}
 }
 
-// errWebClosed is a web tool's answer once the run has read the user's
-// other pages, or follows turns that did.
 const errWebClosed = "This run has read the user's other pages, or follows turns of this conversation that did, so it cannot use the web: what it asked for there could carry what it read. Work from what you have."
 
-// maxFollowedLinks is the most links picked from pages it read a run
-// reads, as on the server (checkURLs): the pages the user gave it or a
-// search found are not counted.
 const maxFollowedLinks = 10
 
-// errNowLinked refuses reading beyond a page whose public link started
-// while the run went on (LinkedNow).
 const errNowLinked = "This page has a public link now: its visitors read what you write here, so this run reads no other page. Work from this page."
 
-// errLinkedStop ends a run that read beyond its page, whose public link
-// started since it began, before it writes there: it ends as one the user
-// stopped, keeping what it did (Hub.finish).
 var errLinkedStop = errors.New("the run's page has a public link now")
 
-// linkedNow reports whether the run's page has a public link now, read
-// again (LinkedNow) while it has had none: one it has had, it keeps.
 func (x *Executor) linkedNow() bool {
 	if !x.linked && x.Ctx.LinkedNow != nil && x.Ctx.LinkedNow() {
 		x.linked = true
@@ -827,20 +608,10 @@ func (x *Executor) linkedNow() bool {
 	return x.linked
 }
 
-// endsHere reports whether a call that writes to the page ends the run
-// instead: it has read beyond its page, or follows turns that did, and the
-// page has a public link now, whose visitors would read what it writes.
 func (x *Executor) endsHere() bool { return x.armed && x.linkedNow() }
 
-// addressRe finds a web address in a search's query, with its scheme, its
-// www. or a path after its host.
 var addressRe = regexp.MustCompile(`(?i)://|\bwww\.|\b[a-z0-9-]+(\.[a-z0-9-]+)+/`)
 
-// searchWeb searches the web through the run's provider. The results'
-// links are found (given), but not those its answer names, which the
-// model that searched wrote and the query could have asked it for, nor
-// those the query names itself. Once the run has read the web, a query
-// may name no address: a search may read the page at one.
 func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
 	if x.Ctx.SearchWeb == nil {
 		return nil, terr("Searching the web is off.")
@@ -878,8 +649,6 @@ func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
 	return map[string]any{"query": q, "answer": s.Answer, "results": results}, nil
 }
 
-// readWeb reads a web page for the run: any the run names until it has
-// read the web, then only one it may (given).
 func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	if x.Ctx.ReadWeb == nil {
 		return nil, terr("Reading the web is off.")
@@ -896,16 +665,11 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	if x.found != nil && !x.given(link) && !x.given(bare) {
 		return nil, terr("After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which %s is not.", link)
 	}
-	// The page is a source of the run's own (loads) only when its link was
-	// not one picked from a page the run read: the run's first page of the
-	// web, one the user gave, or a search's result. A link a page had, read,
-	// stays a link: reading it does not make it one a block may load.
 	source := x.found == nil || x.mayLoad(link) || x.mayLoad(bare)
 	if !source {
 		if x.followed >= maxFollowedLinks {
 			return nil, terr("This run has followed %d links from the pages it read, the most one run follows. Work from what you have, or search for what is missing.", maxFollowedLinks)
 		}
-		// Counted though it fails: its site heard the request all the same.
 		x.followed++
 	}
 	p, err := x.Ctx.ReadWeb(link)
@@ -924,13 +688,6 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-// readTranscript reads what is said in a video block of the page, from
-// its site's captions, as lines of the times they start and their words.
-// Once the run has read the user's other pages, only a video the page had
-// as it began, or the request names, may be read: a video the run put
-// there itself could be named for what it read. The captions, whoever put
-// the video up wrote, are the web's: the run that reads them keeps to the
-// URLs it may write after reading the web (checkURLs).
 func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
 	id, err := str(args, "id")
 	if err != nil {
@@ -969,7 +726,6 @@ func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
 	case err != nil:
 		return nil, terr("Could not read the video's captions: %v", err)
 	}
-	// Read with the web or without it.
 	x.saw()
 	segs := make([]store.Segment, 0, len(c.Lines))
 	for _, l := range web.Passages(c.Lines) {
@@ -982,7 +738,6 @@ func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-// siteName is the name of a video's site.
 func siteName(v doc.Video) string {
 	switch v.Provider {
 	case "vimeo":
@@ -993,8 +748,6 @@ func siteName(v doc.Video) string {
 	return v.Provider
 }
 
-// saw starts keeping the URLs the run finds on the web, as it first reads
-// it, or as it starts after turns that did (RunLocal).
 func (x *Executor) saw() {
 	if x.found == nil {
 		x.found, x.sources = map[string]bool{}, map[string]bool{}
@@ -1002,8 +755,6 @@ func (x *Executor) saw() {
 	x.begin()
 }
 
-// CallRaw runs a tool with JSON arguments. Invalid calls return {error}
-// and change nothing.
 func (x *Executor) CallRaw(name, raw string) map[string]any {
 	args := map[string]any{}
 	if strings.TrimSpace(raw) != "" {
@@ -1011,8 +762,6 @@ func (x *Executor) CallRaw(name, raw string) map[string]any {
 		if err := json.Unmarshal([]byte(raw), &v); err != nil {
 			return x.refuse(terr("Arguments were not valid JSON."))
 		}
-		// Arguments that are no object are refused, as the server
-		// refuses them, rather than taken as none.
 		m, ok := v.(map[string]any)
 		if !ok {
 			return x.refuse(terr("Arguments must be a JSON object."))
@@ -1022,21 +771,17 @@ func (x *Executor) CallRaw(name, raw string) map[string]any {
 	return x.Call(name, args)
 }
 
-// Call runs a tool.
 func (x *Executor) Call(name string, args map[string]any) map[string]any {
 	out, err := x.dispatch(name, args)
 	x.Refused = reason(err)
 	return ToolAnswer(out, err)
 }
 
-// refuse is a call's answer that err refused it.
 func (x *Executor) refuse(err error) map[string]any {
 	x.Refused = reason(err)
 	return ToolAnswer(nil, err)
 }
 
-// ToolAnswer is a tool's result as the model reads it: out, or else what
-// err says was wrong, as {error}.
 func ToolAnswer(out map[string]any, err error) map[string]any {
 	if err != nil {
 		return map[string]any{"error": toolMessage(err)}
@@ -1044,14 +789,10 @@ func ToolAnswer(out map[string]any, err error) map[string]any {
 	return out
 }
 
-// terr is a tool's refusal, as the model is told it: format with args.
-// The format is why too, for a log (reason), as it holds nothing the run
-// read or wrote.
 func terr(format string, args ...any) error {
 	return &refusal{ToolError: doc.ToolError{Message: fmt.Sprintf(format, args...)}, why: format}
 }
 
-// refusal is a tool's refusal, with why in the code's own words.
 type refusal struct {
 	doc.ToolError
 	why string
@@ -1059,9 +800,6 @@ type refusal struct {
 
 func (r *refusal) Unwrap() error { return &r.ToolError }
 
-// reason is why err refused a call, for a log, with nothing the run read
-// or wrote in it: a refusal's format, or the kind of error another is; ""
-// for none.
 func reason(err error) string {
 	var r *refusal
 	var te *doc.ToolError
@@ -1076,11 +814,6 @@ func reason(err error) string {
 	return "The call failed."
 }
 
-// begin keeps the URLs a block may load once the run reads beyond this
-// page, before its first call changes the page: those on it, and in the
-// user's request. RunLocal calls it before any call, as one streaming in
-// changes the page before it is made. A run that may read nothing beyond
-// it keeps none, as it needs none.
 func (x *Executor) begin() {
 	c := x.Ctx
 	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
@@ -1099,15 +832,6 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	if x.Ctx.Workspace != nil {
 		return x.workspace(name, args)
 	}
-	// Text on the page, in its comments or in what a tool returns may be
-	// written to steer the agent, and only the prompt has it take that as
-	// data. The tools that delete or rewrite blocks are not refused for
-	// it: a run is asked for by the user, who may edit the page, in their
-	// own words (a comment's run by their own comment), and its edits are
-	// one undo step over a snapshot of the page kept before them, so what
-	// such text has the agent take away comes back with Undo. Reading the
-	// user's other pages, which could carry them off, is what is refused
-	// where others write (crossPage).
 	switch name {
 	case "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage", "create_page":
 		if x.Ctx.ReadOnly {
@@ -1142,12 +866,6 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if x.linkedNow() {
 			return nil, terr(errNowLinked)
 		}
-		// Only the user names their folders, and no page's words are in
-		// them: a run that lists them has read nothing beyond this page, so
-		// the web's links stay the run's to write. But the names are the
-		// user's to keep: the run's one read of the web that may go to any
-		// page, whose link could spell them out, is spent, as by a first
-		// read (saw), and it reads and writes only the URLs it may then.
 		x.saw()
 		return map[string]any{"folders": x.Ctx.ListFolders()}, nil
 	case "list_pages":
@@ -1157,7 +875,6 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if x.linkedNow() {
 			return nil, terr(errNowLinked)
 		}
-		// The titles it lists are read too.
 		x.armed, x.readPages = true, true
 		return map[string]any{"pages": x.Ctx.ListPages()}, nil
 	case "read_other_page":
@@ -1206,23 +923,14 @@ func (x *Executor) readPage() map[string]any {
 	return out
 }
 
-// block is the block of ID id a call may name, nil when there is none:
-// not a table's cell, nor a block in one, which the server's tools cannot
-// find either. A table changes whole, with replace_block.
 func (x *Executor) block(id string) *doc.Node { return x.Ctx.Content.Addressable(id) }
 
 func (x *Executor) has(id string) bool { return x.block(id) != nil }
 
-// noBlock is a call naming a block that is not there, or not one it may
-// name (block), as the server says it.
 func noBlock(id any) error {
 	return terr("No block with id \"%v\" on this page. Call read_page for current ids.", id)
 }
 
-// given are the keys of a position a model gave a value. Models that
-// write every key of a schema give the others null or "", and at, which
-// takes only start or end, one of those: at counts only alone. Keys a
-// position has not are left out, as the server leaves them.
 func given(raw any) map[string]any {
 	m, _ := raw.(map[string]any)
 	set := map[string]any{}
@@ -1243,8 +951,6 @@ func given(raw any) map[string]any {
 }
 
 func (x *Executor) position(raw any) (doc.Position, error) {
-	// "start" or "end" alone is that end of the page, as the server takes
-	// it.
 	if s, ok := raw.(string); ok && (s == "start" || s == "end") {
 		return doc.Position{At: s}, nil
 	}
@@ -1289,7 +995,6 @@ func (x *Executor) position(raw any) (doc.Position, error) {
 
 func (x *Executor) specs(raw any) ([]*doc.Node, error) { return Specs(raw, x.Ctx.AgentName) }
 
-// Specs turns a tool call's list of blocks into nodes, written by author.
 func Specs(raw any, author string) ([]*doc.Node, error) {
 	list, ok := raw.([]any)
 	if !ok || len(list) == 0 {
@@ -1337,7 +1042,6 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 	return map[string]any{"inserted_ids": ids}, nil
 }
 
-// write writes Markdown in the page, as its call does streaming, whole.
 func (x *Executor) write(args map[string]any) (map[string]any, error) {
 	d, err := x.newDraft(args["position"], true)
 	if err != nil {
@@ -1348,7 +1052,6 @@ func (x *Executor) write(args map[string]any) (map[string]any, error) {
 	if len(nodes) == 0 {
 		return nil, terr("markdown is empty.")
 	}
-	// As many blocks as a call of blocks makes, as on the server.
 	if err := doc.CallNodes(nodes); err != nil {
 		return nil, err
 	}
@@ -1397,14 +1100,9 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	return map[string]any{"id": id}, nil
 }
 
-// replacement is the block spec gives to replace prev with.
 func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, error) {
 	id := prev.ID
 	if spec["type"] == "file" && prev.Type == "file" {
-		// A file's notes are text the run writes as any other: a URL in
-		// them would be on the page for the next run to take for the
-		// user's, so they keep to the URLs the run may write, as on the
-		// server.
 		n, err := doc.FileWithNotes(prev, spec)
 		if err != nil {
 			return nil, err
@@ -1421,11 +1119,6 @@ func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, 
 	if err := x.checkURLs([]*doc.Node{n}); err != nil {
 		return nil, err
 	}
-	// A block written without children, or with none, keeps the nested
-	// items it had, as the server's replace does. It is the spec that says
-	// so, not the node: a table's children are its cells, which no other
-	// type keeps, so a new table has children of its own and still drops
-	// the items.
 	if kids, _ := spec["children"].([]any); len(prev.Children) > 0 && len(kids) == 0 && prev.Type != "table" {
 		if doc.NestableTypes[n.Type] {
 			for _, k := range prev.Children {
@@ -1478,7 +1171,6 @@ func (x *Executor) delete(args map[string]any) (map[string]any, error) {
 			ids = append(ids, s)
 		}
 	}
-	// Nested items go with their parent.
 	var roots []string
 	for _, id := range ids {
 		nested := false
@@ -1497,9 +1189,6 @@ func (x *Executor) delete(args map[string]any) (map[string]any, error) {
 	return map[string]any{"deleted_ids": roots}, nil
 }
 
-// PageNodes is the title and the blocks a call gives a new page, written
-// by author: as blocks, or in Markdown as write_markdown takes it, or
-// neither for an empty page, as the server takes them.
 func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) {
 	title, err := str(args, "title")
 	if err != nil {
@@ -1510,7 +1199,6 @@ func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) 
 		return "", nil, err
 	}
 	var nodes []*doc.Node
-	// No blocks, or none listed, is no content, as the server takes it.
 	if list, ok := args["blocks"].([]any); args["blocks"] != nil && (!ok || len(list) > 0) {
 		if md != "" {
 			return "", nil, terr("Give the page markdown or blocks, not both.")
@@ -1519,27 +1207,17 @@ func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) 
 			return "", nil, err
 		}
 	} else if nodes = doc.MarkdownBlocks(md); len(nodes) > 0 {
-		// As many blocks as a call of blocks makes, as write_markdown.
 		if err := doc.CallNodes(nodes); err != nil {
 			return "", nil, err
 		}
 	}
-	// Without the spaces around it, and no longer than the store keeps
-	// one, as the server keeps it.
 	return store.ClampTitle(strings.TrimSpace(title)), nodes, nil
 }
 
-// errNoOwnPages refuses a page of the user's own on a page someone else
-// writes or reads, as the server words it.
 const errNoOwnPages = "Someone else writes or reads this page: a page of the user's own made from it could take what they wrote into the user's own pages. Make a subpage of this page with create_subpage instead."
 
-// errReadOthers refuses a page of the user's own, a subpage of the page
-// the run is on among them, after the run read one someone else writes or
-// reads (ToolContext.Alone).
 const errReadOthers = "This run read a page someone else writes or reads: a page of the user's own made now could take what they wrote into the user's own pages."
 
-// optionalString is the text args has at key: "" when it has none, and an
-// error when it has something else.
 func optionalString(args map[string]any, key string) (string, error) {
 	switch v := args[key].(type) {
 	case nil:
@@ -1550,7 +1228,6 @@ func optionalString(args map[string]any, key string) (string, error) {
 	return "", terr("%s must be a string.", key)
 }
 
-// record keeps an op that changes no block of the page, as create_page.
 func (x *Executor) record(op doc.Op, summary string) {
 	x.Ops = append(x.Ops, op)
 	x.Edits = append(x.Edits, editOf(op, summary))
@@ -1560,7 +1237,6 @@ func (x *Executor) record(op doc.Op, summary string) {
 }
 
 func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
-	// A subpage of a page of the user's alone is a page of their own too.
 	if x.readOthers {
 		return nil, terr(errReadOthers)
 	}
@@ -1568,7 +1244,6 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Its title shows on this page, in its card, as the next run reads it.
 	if err := x.checkURLs(nodes, title); err != nil {
 		return nil, err
 	}
@@ -1583,8 +1258,6 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	x.written += countNodes(nodes)
-	// Its card goes at the end of this page, as the app puts one there, so
-	// the page shows its subpage and Undo takes both away.
 	card := doc.SubpageNode(id)
 	if err := x.emit(doc.InsertOp(doc.Position{At: "end"}, card.Clone()), summaryFor(locales.AgentEditInserted, []*doc.Node{card}), []string{card.ID}); err != nil {
 		return nil, err
@@ -1608,8 +1281,6 @@ func (x *Executor) createPage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Its title shows in the sidebar, where the next run that lists the
-	// user's pages reads it.
 	if err := x.checkURLs(nodes, title); err != nil {
 		return nil, err
 	}
@@ -1633,8 +1304,6 @@ func str(args map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-// kinds name the blocks an edit summary names by their kind, in the
-// app's language.
 var kinds = map[string]func() string{
 	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
 	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
@@ -1642,8 +1311,6 @@ var kinds = map[string]func() string{
 	"subpage": locales.AgentEditSubpageLink,
 }
 
-// summaryFor is what an edit that wrote nodes did, as verb says it of
-// what it wrote: their number, or the one block's kind and title.
 func summaryFor(verb func(what string) string, nodes []*doc.Node) string {
 	if len(nodes) > 1 {
 		return verb(locales.AgentEditBlocks(len(nodes)))
@@ -1661,47 +1328,6 @@ func summaryFor(verb func(what string) string, nodes []*doc.Node) string {
 	return verb(what)
 }
 
-// opEdit is a cloud run's op as an edit, said as a local run's would be
-// in the app's language: the server words its summaries in English. tool
-// is the call that made it, as the server names it: write_markdown's
-// blocks, inserted or in place of an empty one, are said as written, as
-// a local run says them. An older server names none, and its inserts are
-// said as insert_blocks' are.
-func opEdit(op doc.Op, tool string) Edit {
-	wrote := tool == "write_markdown"
-	summary := locales.AgentEditedPage()
-	switch {
-	case op.Op == "insert" && len(op.Nodes) > 0 && wrote:
-		summary = summaryFor(locales.AgentEditWrote, op.Nodes)
-	case op.Op == "insert" && len(op.Nodes) > 0:
-		summary = summaryFor(locales.AgentEditInserted, op.Nodes)
-	case op.Op == "replace" && op.Node != nil && wrote:
-		summary = summaryFor(locales.AgentEditWrote, []*doc.Node{op.Node})
-	case op.Op == "replace" && op.Node != nil:
-		summary = summaryFor(locales.AgentEditRewrote, []*doc.Node{op.Node})
-	case op.Op == "move":
-		summary = locales.AgentEditMoved()
-	case op.Op == "delete" && len(op.IDs) > 0:
-		summary = locales.AgentEditDeleted(len(op.IDs))
-	case op.Op == "create_page" && op.Page != nil && op.Page.ParentID == "":
-		summary = locales.AgentEditCreatedPage(store.TitleOr(op.Page.Title))
-	case op.Op == "create_page" && op.Page != nil:
-		summary = locales.AgentEditCreatedSubpage(store.TitleOr(op.Page.Title))
-	// A page op names an untitled page "", said in the app's language.
-	case op.Op == "move_page":
-		summary = locales.AgentEditMovedPage(store.TitleOr(op.Title))
-	case op.Op == "rename_page":
-		summary = locales.AgentEditRenamedPage(store.TitleOr(op.PrevTitle), store.TitleOr(op.Title))
-	case op.Op == "set_page_tags":
-		summary = locales.AgentEditTaggedPage(store.TitleOr(op.Title))
-	case op.Op == "create_folder" && op.Folder != nil:
-		summary = locales.AgentEditCreatedFolder(op.Folder.Name)
-	}
-	return editOf(op, summary)
-}
-
-// OpPageID is the page an op made, or moved, renamed or tagged: "" for
-// one that changed no page of its own.
 func OpPageID(op doc.Op) string {
 	switch {
 	case op.Op == "create_page" && op.Page != nil:
@@ -1712,7 +1338,6 @@ func OpPageID(op doc.Op) string {
 	return ""
 }
 
-// OpBlockIDs are the blocks an op touches, for tinting them.
 func OpBlockIDs(op doc.Op) []string {
 	switch op.Op {
 	case "insert":

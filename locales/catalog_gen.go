@@ -5533,22 +5533,6 @@ func (msgs Messages) AgentNoProvider() string {
 	return Catalog.Format(msgs.locale, "agentNoProvider", nil)
 }
 
-// AgentSignInToUse says "Sign in to use {agent}, or add a provider on this machine."
-// in the language the app shows.
-//
-// Why an agent can't run: its provider runs on the server, and the user is
-// signed out.
-func AgentSignInToUse(agent string) string { return In(i18n.Locale()).AgentSignInToUse(agent) }
-
-// AgentSignInToUse says "Sign in to use {agent}, or add a provider on this machine."
-// in the language of msgs.
-//
-// Why an agent can't run: its provider runs on the server, and the user is
-// signed out.
-func (msgs Messages) AgentSignInToUse(agent string) string {
-	return Catalog.Format(msgs.locale, "agentSignInToUse", map[string]any{"agent": agent})
-}
-
 // AgentNeedsConnection says "Agents need a connection. You can keep editing; agents return when you are back online."
 // in the language the app shows.
 //
@@ -5681,6 +5665,24 @@ func AgentKeyUnread(agent string) string { return In(i18n.Locale()).AgentKeyUnre
 // could not be read, as the user turned the system's prompt down.
 func (msgs Messages) AgentKeyUnread(agent string) string {
 	return Catalog.Format(msgs.locale, "agentKeyUnread", map[string]any{"agent": agent})
+}
+
+// AgentKeyMissing says "Paste the API key of {agent} in Settings › Agent providers: this device has none for it."
+// in the language the app shows.
+//
+// Why an agent can't run: its provider runs on an API key and this device's
+// keychain has none for it, as for a provider whose key the server kept in
+// an earlier version.
+func AgentKeyMissing(agent string) string { return In(i18n.Locale()).AgentKeyMissing(agent) }
+
+// AgentKeyMissing says "Paste the API key of {agent} in Settings › Agent providers: this device has none for it."
+// in the language of msgs.
+//
+// Why an agent can't run: its provider runs on an API key and this device's
+// keychain has none for it, as for a provider whose key the server kept in
+// an earlier version.
+func (msgs Messages) AgentKeyMissing(agent string) string {
+	return Catalog.Format(msgs.locale, "agentKeyMissing", map[string]any{"agent": agent})
 }
 
 // OauthPortTaken says "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again."
@@ -6299,22 +6301,6 @@ func (msgs Messages) AgentStoppedAfterRounds(count int) string {
 	return Catalog.Format(msgs.locale, "agentStoppedAfterRounds", map[string]any{"count": count})
 }
 
-// AgentEditedPage says "Edited the page"
-// in the language the app shows.
-//
-// An edit a cloud agent made that came without saying what it was, in the
-// agent's reply and the list of its edits.
-func AgentEditedPage() string { return In(i18n.Locale()).AgentEditedPage() }
-
-// AgentEditedPage says "Edited the page"
-// in the language of msgs.
-//
-// An edit a cloud agent made that came without saying what it was, in the
-// agent's reply and the list of its edits.
-func (msgs Messages) AgentEditedPage() string {
-	return Catalog.Format(msgs.locale, "agentEditedPage", nil)
-}
-
 // AgentEditInserted says "Inserted {what}"
 // in the language the app shows.
 //
@@ -6755,22 +6741,6 @@ func AgentPageUnreadable() string { return In(i18n.Locale()).AgentPageUnreadable
 // device can't be read, as one saved by a newer version of the app.
 func (msgs Messages) AgentPageUnreadable() string {
 	return Catalog.Format(msgs.locale, "agentPageUnreadable", nil)
-}
-
-// AgentConnectionEnded says "The connection to the agent ended before it finished."
-// in the language the app shows.
-//
-// Why a cloud agent run failed: the connection to the server ended before
-// it said how the run went.
-func AgentConnectionEnded() string { return In(i18n.Locale()).AgentConnectionEnded() }
-
-// AgentConnectionEnded says "The connection to the agent ended before it finished."
-// in the language of msgs.
-//
-// Why a cloud agent run failed: the connection to the server ended before
-// it said how the run went.
-func (msgs Messages) AgentConnectionEnded() string {
-	return Catalog.Format(msgs.locale, "agentConnectionEnded", nil)
 }
 
 // AgentModelNoChoices says "The model returned no choices."
@@ -9449,68 +9419,6 @@ func (msgs Messages) RecSttKeyNotSaved(error string) string {
 	return Catalog.Format(msgs.locale, "recSttKeyNotSaved", map[string]any{"error": error})
 }
 
-// RecSttNoKey says "No key"
-// in the language the app shows.
-//
-// Settings › Speech to text › API key from: the choice of no provider's
-// key.
-func RecSttNoKey() string { return In(i18n.Locale()).RecSttNoKey() }
-
-// RecSttNoKey says "No key"
-// in the language of msgs.
-//
-// Settings › Speech to text › API key from: the choice of no provider's
-// key.
-func (msgs Messages) RecSttNoKey() string {
-	return Catalog.Format(msgs.locale, "recSttNoKey", nil)
-}
-
-// RecSttKeyFrom says "API key from"
-// in the language the app shows.
-//
-// Settings › Speech to text: the row choosing which agent provider's key
-// a cloud endpoint uses.
-func RecSttKeyFrom() string { return In(i18n.Locale()).RecSttKeyFrom() }
-
-// RecSttKeyFrom says "API key from"
-// in the language of msgs.
-//
-// Settings › Speech to text: the row choosing which agent provider's key
-// a cloud endpoint uses.
-func (msgs Messages) RecSttKeyFrom() string {
-	return Catalog.Format(msgs.locale, "recSttKeyFrom", nil)
-}
-
-// RecSttKeyFromDesc says "The server calls the endpoint with this provider's key"
-// in the language the app shows.
-//
-// Settings › Speech to text: the description of the API key from row.
-func RecSttKeyFromDesc() string { return In(i18n.Locale()).RecSttKeyFromDesc() }
-
-// RecSttKeyFromDesc says "The server calls the endpoint with this provider's key"
-// in the language of msgs.
-//
-// Settings › Speech to text: the description of the API key from row.
-func (msgs Messages) RecSttKeyFromDesc() string {
-	return Catalog.Format(msgs.locale, "recSttKeyFromDesc", nil)
-}
-
-// RecSttAddProvider says "Add a cloud agent provider, such as OpenAI, to use its key here"
-// in the language the app shows.
-//
-// Settings › Speech to text: the description of the API key from row when
-// there is no cloud provider.
-func RecSttAddProvider() string { return In(i18n.Locale()).RecSttAddProvider() }
-
-// RecSttAddProvider says "Add a cloud agent provider, such as OpenAI, to use its key here"
-// in the language of msgs.
-//
-// Settings › Speech to text: the description of the API key from row when
-// there is no cloud provider.
-func (msgs Messages) RecSttAddProvider() string {
-	return Catalog.Format(msgs.locale, "recSttAddProvider", nil)
-}
-
 // RecSttSonioxKey says "Soniox API key"
 // in the language the app shows.
 //
@@ -9525,34 +9433,18 @@ func (msgs Messages) RecSttSonioxKey() string {
 	return Catalog.Format(msgs.locale, "recSttSonioxKey", nil)
 }
 
-// RecSttSonioxOnServer says "Live transcripts; key kept on the server"
-// in the language the app shows.
-//
-// Settings › Speech to text: description of the Soniox key row, signed
-// in.
-func RecSttSonioxOnServer() string { return In(i18n.Locale()).RecSttSonioxOnServer() }
-
-// RecSttSonioxOnServer says "Live transcripts; key kept on the server"
-// in the language of msgs.
-//
-// Settings › Speech to text: description of the Soniox key row, signed
-// in.
-func (msgs Messages) RecSttSonioxOnServer() string {
-	return Catalog.Format(msgs.locale, "recSttSonioxOnServer", nil)
-}
-
 // RecSttSonioxOnDevice says "Live transcripts; key kept on this device"
 // in the language the app shows.
 //
-// Settings › Speech to text: description of the Soniox key row, signed
-// out.
+// Settings › Speech to text: description of the Soniox key row, and of
+// Soniox in the providers list.
 func RecSttSonioxOnDevice() string { return In(i18n.Locale()).RecSttSonioxOnDevice() }
 
 // RecSttSonioxOnDevice says "Live transcripts; key kept on this device"
 // in the language of msgs.
 //
-// Settings › Speech to text: description of the Soniox key row, signed
-// out.
+// Settings › Speech to text: description of the Soniox key row, and of
+// Soniox in the providers list.
 func (msgs Messages) RecSttSonioxOnDevice() string {
 	return Catalog.Format(msgs.locale, "recSttSonioxOnDevice", nil)
 }
@@ -9754,29 +9646,15 @@ func (msgs Messages) RecSttItWorks() string {
 // RecSttSavedOnDevice says "Saved the key on this device"
 // in the language the app shows.
 //
-// Toast after saving the Soniox key on this device.
+// Toast after saving a speech provider's key on this device.
 func RecSttSavedOnDevice() string { return In(i18n.Locale()).RecSttSavedOnDevice() }
 
 // RecSttSavedOnDevice says "Saved the key on this device"
 // in the language of msgs.
 //
-// Toast after saving the Soniox key on this device.
+// Toast after saving a speech provider's key on this device.
 func (msgs Messages) RecSttSavedOnDevice() string {
 	return Catalog.Format(msgs.locale, "recSttSavedOnDevice", nil)
-}
-
-// RecSttSavedOnServer says "Saved the key on the server"
-// in the language the app shows.
-//
-// Toast after saving the key on the server.
-func RecSttSavedOnServer() string { return In(i18n.Locale()).RecSttSavedOnServer() }
-
-// RecSttSavedOnServer says "Saved the key on the server"
-// in the language of msgs.
-//
-// Toast after saving the key on the server.
-func (msgs Messages) RecSttSavedOnServer() string {
-	return Catalog.Format(msgs.locale, "recSttSavedOnServer", nil)
 }
 
 // RecLanguageDetect says "Detect"
@@ -10009,34 +9887,6 @@ func (msgs Messages) RecErrNeedsConnection() string {
 	return Catalog.Format(msgs.locale, "recErrNeedsConnection", nil)
 }
 
-// RecErrSignInOrServer says "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speec…"
-// in the language the app shows.
-//
-// Error when signed out without a local engine.
-func RecErrSignInOrServer() string { return In(i18n.Locale()).RecErrSignInOrServer() }
-
-// RecErrSignInOrServer says "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speec…"
-// in the language of msgs.
-//
-// Error when signed out without a local engine.
-func (msgs Messages) RecErrSignInOrServer() string {
-	return Catalog.Format(msgs.locale, "recErrSignInOrServer", nil)
-}
-
-// RecErrOfflineServer says "Transcription needs a connection. Set a server on your network in Settings › Speech to text to record offline."
-// in the language the app shows.
-//
-// Error when offline with a cloud engine.
-func RecErrOfflineServer() string { return In(i18n.Locale()).RecErrOfflineServer() }
-
-// RecErrOfflineServer says "Transcription needs a connection. Set a server on your network in Settings › Speech to text to record offline."
-// in the language of msgs.
-//
-// Error when offline with a cloud engine.
-func (msgs Messages) RecErrOfflineServer() string {
-	return Catalog.Format(msgs.locale, "recErrOfflineServer", nil)
-}
-
 // RecErrAlreadyRecording says "Already recording."
 // in the language the app shows.
 //
@@ -10063,22 +9913,6 @@ func RecErrWindowNotReady() string { return In(i18n.Locale()).RecErrWindowNotRea
 // Error when recording starts before the window is.
 func (msgs Messages) RecErrWindowNotReady() string {
 	return Catalog.Format(msgs.locale, "recErrWindowNotReady", nil)
-}
-
-// RecErrCloudTest says "A cloud endpoint transcribes saved recordings, so record on a page to try it."
-// in the language the app shows.
-//
-// Settings › Speech to text: why a microphone test cannot transcribe with
-// a cloud endpoint.
-func RecErrCloudTest() string { return In(i18n.Locale()).RecErrCloudTest() }
-
-// RecErrCloudTest says "A cloud endpoint transcribes saved recordings, so record on a page to try it."
-// in the language of msgs.
-//
-// Settings › Speech to text: why a microphone test cannot transcribe with
-// a cloud endpoint.
-func (msgs Messages) RecErrCloudTest() string {
-	return Catalog.Format(msgs.locale, "recErrCloudTest", nil)
 }
 
 // RecErrQuit says "Leaflet quit before the transcript was done."
@@ -10313,6 +10147,20 @@ func (msgs Messages) RecErrSonioxFailed(details string) string {
 	return Catalog.Format(msgs.locale, "recErrSonioxFailed", map[string]any{"details": details})
 }
 
+// RecErrSetUpSoniox says "Add a Soniox API key in Settings › Speech to text."
+// in the language the app shows.
+//
+// Error when transcribing with Soniox before a key is saved on this device.
+func RecErrSetUpSoniox() string { return In(i18n.Locale()).RecErrSetUpSoniox() }
+
+// RecErrSetUpSoniox says "Add a Soniox API key in Settings › Speech to text."
+// in the language of msgs.
+//
+// Error when transcribing with Soniox before a key is saved on this device.
+func (msgs Messages) RecErrSetUpSoniox() string {
+	return Catalog.Format(msgs.locale, "recErrSetUpSoniox", nil)
+}
+
 // RecErrSetUpMoss says "Add a MOSS API key in Settings › Speech to text."
 // in the language the app shows.
 //
@@ -10501,20 +10349,6 @@ func RecErrAudioMissing() string { return In(i18n.Locale()).RecErrAudioMissing()
 // Error when a recording's audio is missing.
 func (msgs Messages) RecErrAudioMissing() string {
 	return Catalog.Format(msgs.locale, "recErrAudioMissing", nil)
-}
-
-// RecErrSignIn says "Sign in with Supabase to transcribe in the cloud."
-// in the language the app shows.
-//
-// Error when the cloud needs signing in.
-func RecErrSignIn() string { return In(i18n.Locale()).RecErrSignIn() }
-
-// RecErrSignIn says "Sign in with Supabase to transcribe in the cloud."
-// in the language of msgs.
-//
-// Error when the cloud needs signing in.
-func (msgs Messages) RecErrSignIn() string {
-	return Catalog.Format(msgs.locale, "recErrSignIn", nil)
 }
 
 // RecErrEndpoint says "Transcription failed: {status} {details}"
@@ -10707,20 +10541,6 @@ func (msgs Messages) RecReplaceNotesAction() string {
 	return Catalog.Format(msgs.locale, "recReplaceNotesAction", nil)
 }
 
-// RecErrFileUploading says "This file is still uploading. Try again once it’s up."
-// in the language the app shows.
-//
-// Why a file can’t be transcribed on the server yet.
-func RecErrFileUploading() string { return In(i18n.Locale()).RecErrFileUploading() }
-
-// RecErrFileUploading says "This file is still uploading. Try again once it’s up."
-// in the language of msgs.
-//
-// Why a file can’t be transcribed on the server yet.
-func (msgs Messages) RecErrFileUploading() string {
-	return Catalog.Format(msgs.locale, "recErrFileUploading", nil)
-}
-
 // RecErrFileKind says "The on-device model can’t read this kind of audio. Choose Soniox or an endpoint for it."
 // in the language the app shows.
 //
@@ -10823,22 +10643,6 @@ func RecFileTranscribed(name string) string { return In(i18n.Locale()).RecFileTr
 // A file’s transcript has gone into its notes.
 func (msgs Messages) RecFileTranscribed(name string) string {
 	return Catalog.Format(msgs.locale, "recFileTranscribed", map[string]any{"name": name})
-}
-
-// RecErrServerOld says "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-dev…"
-// in the language the app shows.
-//
-// The server’s functions are older than this app, and don’t know how to
-// transcribe a file.
-func RecErrServerOld() string { return In(i18n.Locale()).RecErrServerOld() }
-
-// RecErrServerOld says "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-dev…"
-// in the language of msgs.
-//
-// The server’s functions are older than this app, and don’t know how to
-// transcribe a file.
-func (msgs Messages) RecErrServerOld() string {
-	return Catalog.Format(msgs.locale, "recErrServerOld", nil)
 }
 
 // EditorPage says "Page"
@@ -13067,18 +12871,38 @@ func (msgs Messages) SettingsNoProvidersDesc() string {
 	return Catalog.Format(msgs.locale, "settingsNoProvidersDesc", nil)
 }
 
-// SettingsProviderCloud says "Cloud · key on the server"
+// SettingsProviderCloud says "Cloud · key on this device"
 // in the language the app shows.
 //
-// Settings › Agent providers: where a cloud provider runs.
+// Settings › Agent providers: under a cloud provider's name, where its
+// key is kept.
 func SettingsProviderCloud() string { return In(i18n.Locale()).SettingsProviderCloud() }
 
-// SettingsProviderCloud says "Cloud · key on the server"
+// SettingsProviderCloud says "Cloud · key on this device"
 // in the language of msgs.
 //
-// Settings › Agent providers: where a cloud provider runs.
+// Settings › Agent providers: under a cloud provider's name, where its
+// key is kept.
 func (msgs Messages) SettingsProviderCloud() string {
 	return Catalog.Format(msgs.locale, "settingsProviderCloud", nil)
+}
+
+// SettingsProviderNeedsKey says "Cloud · paste its API key to use it"
+// in the language the app shows.
+//
+// Settings › Agent providers: under a cloud provider's name, when this
+// device's keychain has no key for it, as for one an earlier version kept
+// on the server.
+func SettingsProviderNeedsKey() string { return In(i18n.Locale()).SettingsProviderNeedsKey() }
+
+// SettingsProviderNeedsKey says "Cloud · paste its API key to use it"
+// in the language of msgs.
+//
+// Settings › Agent providers: under a cloud provider's name, when this
+// device's keychain has no key for it, as for one an earlier version kept
+// on the server.
+func (msgs Messages) SettingsProviderNeedsKey() string {
+	return Catalog.Format(msgs.locale, "settingsProviderNeedsKey", nil)
 }
 
 // SettingsProviderPlan says "ChatGPT plan"
@@ -13263,20 +13087,6 @@ func (msgs Messages) SettingsConnectProvider(name string) string {
 	return Catalog.Format(msgs.locale, "settingsConnectProvider", map[string]any{"name": name})
 }
 
-// SettingsProviderDescCloud says "Runs in Leaflet's server with your key, which never comes back to this device."
-// in the language the app shows.
-//
-// The provider dialog: a cloud provider.
-func SettingsProviderDescCloud() string { return In(i18n.Locale()).SettingsProviderDescCloud() }
-
-// SettingsProviderDescCloud says "Runs in Leaflet's server with your key, which never comes back to this device."
-// in the language of msgs.
-//
-// The provider dialog: a cloud provider.
-func (msgs Messages) SettingsProviderDescCloud() string {
-	return Catalog.Format(msgs.locale, "settingsProviderDescCloud", nil)
-}
-
 // SettingsProviderDescAccount says "Agents use your ChatGPT Plus or Pro plan. Sign-in stays on this device."
 // in the language the app shows.
 //
@@ -13407,22 +13217,6 @@ func SettingsPasteKey() string { return In(i18n.Locale()).SettingsPasteKey() }
 // The provider dialog: the key field's placeholder.
 func (msgs Messages) SettingsPasteKey() string {
 	return Catalog.Format(msgs.locale, "settingsPasteKey", nil)
-}
-
-// SettingsKeySaved says "Saved on the server · paste a new key to replace it"
-// in the language the app shows.
-//
-// The provider dialog: the key field's placeholder for a saved cloud
-// provider.
-func SettingsKeySaved() string { return In(i18n.Locale()).SettingsKeySaved() }
-
-// SettingsKeySaved says "Saved on the server · paste a new key to replace it"
-// in the language of msgs.
-//
-// The provider dialog: the key field's placeholder for a saved cloud
-// provider.
-func (msgs Messages) SettingsKeySaved() string {
-	return Catalog.Format(msgs.locale, "settingsKeySaved", nil)
 }
 
 // SettingsOptional says "Optional"
@@ -13811,22 +13605,6 @@ func SettingsRemoveProviderTitle(name string) string {
 // removed: its title.
 func (msgs Messages) SettingsRemoveProviderTitle(name string) string {
 	return Catalog.Format(msgs.locale, "settingsRemoveProviderTitle", map[string]any{"name": name})
-}
-
-// SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
-// in the language the app shows.
-//
-// Settings › Agent providers: the alert asking before a provider kept on
-// the server is removed: its message.
-func SettingsRemoveProviderCloud() string { return In(i18n.Locale()).SettingsRemoveProviderCloud() }
-
-// SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
-// in the language of msgs.
-//
-// Settings › Agent providers: the alert asking before a provider kept on
-// the server is removed: its message.
-func (msgs Messages) SettingsRemoveProviderCloud() string {
-	return Catalog.Format(msgs.locale, "settingsRemoveProviderCloud", nil)
 }
 
 // SettingsRemoveProviderLocal says "Agents can no longer use it, and its key is deleted from this device."

@@ -10,9 +10,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// The pages a phone shows in a web view lay out at the view's width:
-// without a viewport, WebKit there lays a page out 980 points wide and
-// shrinks it to fit, an embed and all.
 func TestPagesLayOutAtTheViewsWidth(t *testing.T) {
 	for name, page := range map[string]string{
 		"embed":   EmbedPage("e", "<p>Hello</p>", "#fff", false, false),
@@ -26,10 +23,6 @@ func TestPagesLayOutAtTheViewsWidth(t *testing.T) {
 	}
 }
 
-// The math and diagram pages run only their own scripts, which their
-// policy names by their hashes: what a formula or a diagram's source
-// holds, even a script's end, stays data, and nothing reaches the
-// network, on the phone as in the desktop's frames.
 func TestRenderedPagesRunOnlyTheirScripts(t *testing.T) {
 	script := regexp.MustCompile(`(?s)<script([^>]*)>(.*?)</script>`)
 	policy := regexp.MustCompile(`<meta http-equiv="Content-Security-Policy" content="([^"]*)">`)
@@ -67,8 +60,6 @@ func TestRenderedPagesRunOnlyTheirScripts(t *testing.T) {
 	}
 }
 
-// The wrapper says whose wheel it passes on, for the app to scroll the
-// page by it only while the pointer is over that embed.
 func TestEmbedPagePassesTheWheelWithItsID(t *testing.T) {
 	page := EmbedPage("b1", "<p>x</p>", "#fff", false, true)
 	if !strings.Contains(page, `window.mygo.call("Embeds.Scroll", id, e.data.leafletWheel)`) {
@@ -76,8 +67,6 @@ func TestEmbedPagePassesTheWheelWithItsID(t *testing.T) {
 	}
 }
 
-// NoRTC runs in the embed's own frame, and takes WebRTC from the frames
-// it reaches through their elements too.
 func TestNoRTCGuardsFramesReached(t *testing.T) {
 	if EmbedNoRTC != "<script>"+NoRTC+"</script>" || !strings.HasPrefix(EmbedFrame("<p>x</p>", "light", false), `<meta http-equiv="Content-Security-Policy" content="`+EmbedCSP+`">`+EmbedNoRTC) {
 		t.Error("the embed's frame does not start without WebRTC")
@@ -89,8 +78,6 @@ func TestNoRTCGuardsFramesReached(t *testing.T) {
 	}
 }
 
-// A file's player plays the file beside it, from a time, and its script
-// reaches it as a video's does.
 func TestFilePlayerPage(t *testing.T) {
 	audio := FilePlayerPage(false, 83)
 	if !strings.Contains(audio, `<audio src="media#t=83" controls autoplay`) {
@@ -108,7 +95,6 @@ func TestFilePlayerPage(t *testing.T) {
 	}
 }
 
-// A file's player gives the system its name, quoted, and its cover.
 func TestFileMetadata(t *testing.T) {
 	got := FileMetadata(`Mum's "talk"</script>`)
 	if !strings.Contains(got, `"Mum's \"talk\"\u003c/script\u003e"`) || !strings.Contains(got, `{src: "cover"}`) {
@@ -116,7 +102,6 @@ func TestFileMetadata(t *testing.T) {
 	}
 }
 
-// A file's player is told which to do, not to change.
 func TestFilePlaying(t *testing.T) {
 	if got := FilePlaying(true); !strings.Contains(got, "el.play()") {
 		t.Errorf("play %s", got)
@@ -126,7 +111,6 @@ func TestFilePlaying(t *testing.T) {
 	}
 }
 
-// A file's player keeps its speed through loading.
 func TestFileSpeed(t *testing.T) {
 	got := FileSpeed(1.5)
 	if !strings.Contains(got, "el.defaultPlaybackRate = 1.50") || !strings.Contains(got, "el.playbackRate = 1.50") {
@@ -134,7 +118,6 @@ func TestFileSpeed(t *testing.T) {
 	}
 }
 
-// A file's player can be told where to go without starting or stopping.
 func TestFileSeekTo(t *testing.T) {
 	if got := FileSeekTo(83.5); !strings.Contains(got, "el.currentTime = 83.500") || strings.Contains(got, "play") {
 		t.Errorf("seek %s", got)

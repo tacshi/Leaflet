@@ -1,7 +1,8 @@
 # Leaflet backend (Supabase)
 
 Postgres schema, row-level security, storage buckets, Realtime broadcasts of
-page saves, and four Edge Functions.
+page saves, and one Edge Function. Agents and speech to text run on the
+device, with its own providers and keys, through no function here.
 The contract with the Go client is [`../docs/protocol.md`](../docs/protocol.md).
 
 ```
@@ -11,18 +12,14 @@ supabase/
                      has the tables, RLS, RPCs, Vault helpers and buckets, and each
                      later one says at its top what it changes and why
   functions/
-    _shared/        cors, clients, OpenAI-compatible client, blocks, tools, prompt
-    agent/          NDJSON agent worker (protocol §4)
-    providers/      save / models / test / delete model providers
-    stt/            Soniox temporary keys, Soniox key storage, file transcription
-    account/        account deletion
-    _testing/       the tests' own: a project in memory, the fixtures' writer
+    _shared/        cors, clients
+    account/        account deletion (protocol §5)
+    _testing/       the tests' own: a project in memory
   embed.go          carries migrations/ and functions/ into the app
 
-Each function's `index.ts` serves its `handler.ts` on the project it runs in;
+The function's `index.ts` serves its `handler.ts` on the project it runs in;
 the tests beside it run the handler on a project in memory
-(`_testing/project.ts`), with the model, Soniox and the checks of typed
-addresses stood in for.
+(`_testing/project.ts`).
 ```
 
 Each schema change is a new migration: `supabase db push` never runs one a
@@ -41,14 +38,17 @@ Leaflet, then sets it up from this folder, built into the app:
 - sign-ups closed and addresses confirmed (Auth's `disable_signup`, and
   `mailer_autoconfirm` off), so the owner's account is the project's only
   one, where the sign-in may change Auth settings;
-- the four functions, when the project's are older: a project secret
-  named `LEAFLET_FUNCTIONS_V`, their version (`FunctionsVersion` in
-  `internal/provision`, raised by one with every change to them), `_` and
-  the first 16 hex digits of their sources' hash says which they are (the
-  name, since the API lists secrets' values only as digests). A build
-  never deploys over functions of its version or a newer one, so two
-  builds never take turns; a development build replaces those of its own
-  version, as they change while it is worked on;
+- the `account` function, when the project's functions are older: a
+  project secret named `LEAFLET_FUNCTIONS_V`, their version
+  (`FunctionsVersion` in `internal/provision`, raised by one with every
+  change to them), `_` and the first 16 hex digits of their sources' hash
+  says which they are (the name, since the API lists secrets' values only
+  as digests). A build never deploys over functions of its version or a
+  newer one, so two builds never take turns; a development build replaces
+  those of its own version, as they change while it is worked on. The
+  `agent`, `providers` and `stt` functions an earlier build deployed stay
+  in the project, with the tables and keys they work through, for the
+  devices still on that build;
 - the Realtime policy for a page's saves, once Realtime has made the table
   it goes on: until then the setup runs again as the app starts;
 - a 500 MiB upload limit, where the plan allows it.
@@ -114,7 +114,7 @@ Needs the [Supabase CLI](https://supabase.com/docs/guides/cli) and Docker.
 ```bash
 supabase start                 # Postgres, Auth, Storage, Studio on :54321–54324
 supabase db reset              # apply migrations/ to a fresh database
-supabase functions serve       # serve every function with hot reload
+supabase functions serve       # serve the function with hot reload
 ```
 
 `supabase start` prints the local API URL and Publishable key (`sb_publishable_…`;
@@ -127,15 +127,15 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key fr
 Without these variables the app uses the project it was built with
 ([`MYGO_LDFLAGS`](../README.md#build-and-release)), else the one chosen with
 **Continue with Supabase** and kept on the device. With none, it runs on the
-device only until then: pages, editing, recording, public links and local
-models work; sync, cloud models and cloud speech to text are off.
+device only until then: pages, editing, recording, public links, agents and
+speech to text work, each with the providers and keys the device has; sync
+is off.
 
 ### Tests
 
 ```bash
 cd supabase/functions
-deno test --frozen             # the shared modules, and each function's handler
-deno test --frozen --allow-write=_shared/testdata   # writes the fixtures the Go tests read
+deno test --frozen             # the account function's handler
 deno check --frozen */index.ts
 deno lint
 ```
@@ -161,7 +161,7 @@ A project the app does not set up, such as one a build fixes with
 ```bash
 supabase link --project-ref <ref>
 supabase db push
-supabase functions deploy agent providers stt account
+supabase functions deploy account
 ```
 
 The app takes the project URL and its Publishable key (Project Settings › API
@@ -170,37 +170,11 @@ as `apikey`. The Secret key bypasses row-level security and never goes in the
 app.
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
-provided to functions automatically. There is no app-wide Soniox key: each
-user saves their own (Settings › Speech to text), and Soniox streaming and
-transcription are refused until they do.
-
-An agent run stops calling the model at `AGENT_DEADLINE_MS` (default 120000,
-under the 150 s wall-clock limit of the free plan) and saves what it did; each
-model call times out after `AGENT_CALL_TIMEOUT_MS` (default 60000). On a paid
-plan (400 s limit) the deadline may go up to 380000:
-`supabase secrets set AGENT_DEADLINE_MS=360000`. The limit is the worker's, and
-a worker serves many requests: a run on one already old stops sooner, as far
-as its worker lets it, and at once, saving what it did and ending failed, as
-the platform says it will shut the worker down (`beforeunload`). One stopped
-with no word leaves its ops on its job, kept as it worked, for the caller's
-next run to mark it failed; a job left `running` past the deadline plus a
-minute can be claimed again. The plan isn't told: a worker younger than half
-the free plan's limit is taken for the free plan's, which on a paid plan with
-the default deadline only ends a run on a warm worker sooner than it had to.
+provided to functions automatically.
 
 Buckets cap uploads at 500 MiB for `recordings` (audio only), 200 MiB for
 `files` and 50 MiB for `images` (images only); a hosted project's global upload
-limit (Storage settings) must be at least as high for long recordings. The
-`stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
-about 54 minutes of the app's WAV); longer ones transcribe on the device. It
-streams a recording from Storage to the transcriber rather than holding it,
-so the deadline bounds that size, not the function's memory. A call has
-`STT_DEADLINE_MS` (default 120000, the most), on any plan: its answer comes
-at its end, and the gateway gives up on one that has not begun at 150 s. Soniox
-goes on with a long recording past that: its transcription is kept in
-`stt_jobs`, or `stt_file_jobs` for an audio file (service role only), and asking again picks it up, sending nothing
-and spending nothing more, until it is done. What went to Soniox goes from it
-once it is; Soniox deletes what is never asked for again in 30 days.
+limit (Storage settings) must be at least as high for long recordings.
 
 Keep email confirmation on (Authentication › Sign In / Providers › Email ›
 Confirm email; `enable_confirmations = true` in `config.toml`, which local
@@ -215,14 +189,17 @@ otherwise make one and use its functions and storage. A project deployed
 by hand keeps sign-ups on: its people make their accounts with an emailed
 code.
 
-Supabase Vault (`supabase_vault`) is enabled on every Supabase project. Keys
-go in it through `vault.create_secret` and `vault.update_secret`, and the
-Functions read them from `vault.decrypted_secrets`; clearing a key
-(`set_provider_secret`, `set_stt_secret`) and deleting a provider or a
-speech-to-text key (the `model_providers_cleanup` and `stt_secrets_cleanup`
-triggers) delete its row from `vault.secrets` directly, as `postgres`, who
-owns those functions. The `supabase/postgres` image grants `postgres` that,
-and `access.sql` checks it.
+Supabase Vault (`supabase_vault`) is enabled on every Supabase project.
+The app keeps no key in it: a provider's key, and a speech-to-text one,
+stay in the keychain of the device that uses them. The migrations' Vault
+helpers are for the functions an earlier build deployed, which keep keys
+in it through `vault.create_secret` and `vault.update_secret` and read
+them from `vault.decrypted_secrets`; clearing a key (`set_provider_secret`,
+`set_stt_secret`) and deleting a provider or a speech-to-text key (the
+`model_providers_cleanup` and `stt_secrets_cleanup` triggers) delete its
+row from `vault.secrets` directly, as `postgres`, who owns those functions.
+The `supabase/postgres` image grants `postgres` that, and `access.sql`
+checks it.
 
 The migrations state every privilege the roles have (`20261103020000`): they
 count on no default grant of a project's. Four things they assume of a
@@ -255,36 +232,17 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
 
 ## Notes for the client
 
-- **model_providers**: clients can't read or write `encrypted_secret` /
-  `refresh_token`, so select explicit columns (see `PROVIDER_COLUMNS` in
-  `functions/_shared/supabase.ts`), never `*`. `has_secret` says whether a key
-  is saved. Clients read and delete their rows but cannot insert or update
-  them: rows go through the `providers` function (`save`), which checks the
-  base URL. Keys go through `save` with `api_key` (a string) or the
-  `set_provider_secret` RPC; an empty key clears it. A key stays with the
-  address it was saved for: when a row's `base_url` origin, `preset` or
-  `is_local` changes, the database drops its keys, whoever writes it, so a
-  provider moved keeps a key only when one is saved with the move. A base
-  URL is printable ASCII with no backslash, which a URL parser would read
-  as a slash.
-- **Base URLs** the server calls (cloud providers, OpenAI-compatible speech to
-  text) must be `https://` to a public host: names that resolve to private,
-  loopback, link-local or CGNAT addresses are refused, redirects are errors,
-  and errors show the status and the provider's JSON message, never the raw
-  body (`functions/_shared/net.ts`).
-- **Local providers** (`ollama`, `lmstudio`, `local`) may be saved without a
-  key for listing, but the server never calls them, for models, tests or
-  transcriptions, and rejects their keys; one saved local loses the key it
-  had. Clients call local endpoints directly.
-- **Account sign-in** (`auth_kind: "account"`) is rejected by `providers.save`
-  until provider terms for third-party apps are confirmed (open question in the
-  design); use API keys.
+- **Agents and speech to text** run on the device: of the server, a run
+  reads only `pages.public_link_until`. The tables `ai_jobs`,
+  `model_providers`, `stt_settings`, `stt_secrets`, `stt_jobs` and
+  `stt_file_jobs`, the Vault helpers and the `agent_…` RPCs stay as the
+  migrations make them, with their rows, for the `agent`, `providers` and
+  `stt` functions an earlier build deployed; the app neither reads nor
+  writes them. A provider such a build kept here stays listed on a device,
+  and runs once its key is pasted there.
 - **Tree depth**: a tree goes at most 256 pages deep (`page_too_deep`); one
   already deeper stays, read to its deepest page, and its pages may change,
   or move no deeper.
-- **Soniox keys** live in `stt_secrets` (service role only), not in
-  `model_providers`. `has_stt_secret('soniox')` tells the client whether one is
-  saved.
 - **updated_at** is always set by the server (`clock_timestamp()`), on insert
   and update. Pull with `updated_at > cursor`; soft-deleted rows
   (`deleted_at`) come through the same pull. What is on a page deleted
@@ -299,19 +257,6 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
 - **Comments** keep `body` and `quote` to 100,000 characters, `mentions`
   to 64 KB and `block_id` to 256 characters; on someone else's page, one
   person writes at most 2,000 comments, of 10 MB in all.
-- **ai_jobs**: viewers may create jobs; the worker then runs without edit
-  tools. The worker claims a job by moving it from `queued` to `running`; a
-  second call returns 409.
-- **Subpages created by agents** get a `sort_key` after the last sibling's, as
-  the app makes one (`functions/_shared/sortkey.ts`, `internal/store/sortkey.go`):
-  the digit halfway between that key's first digit and the last one, so the
-  first child gets `V` and the next `l`.
-- **stt_settings.provider** values: `on-device` (the device's own speech
-  recognition), `soniox`, `openai-compatible`; rows from earlier versions may
-  have `qwen3-asr`, `moss-transcribe-diarize` or `sensevoice`. The server
-  transcribes only `soniox` and OpenAI-compatible endpoints (`provider_id` or
-  `base_url` set); the others transcribe on the device. It saves the
-  transcript as the caller, so only an editor of the recording's page may ask.
 - **Sharing** invites: `share_page` adds a pending `page_permissions` row
   (`accepted_at` null) that grants nothing until the person accepts it with
   `accept_page_invite` (or removes it with `decline_page_invite`);
@@ -324,9 +269,6 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
   parents that the same shares reach (`forbidden_move` otherwise), and only
   the owner puts a page in a folder, as it is made or moved
   (`forbidden_folder`).
-- **Speech to text with a provider's key** (`stt_settings.provider_id`) goes
-  only to that provider's base URL; a `base_url` that names another address
-  is refused rather than sent the key.
 - **Storage**: viewers of a shared page can read its recordings, the files
   on it and the images on it; only the space owner writes `files/` (a file
   on a page only while they can edit that page) and `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the

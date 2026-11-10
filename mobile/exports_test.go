@@ -20,8 +20,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// A recording's transcript is the blocks its page's editor puts after
-// its block, a paragraph a line, each after its time in bold.
 func TestInsertTranscript(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Standup"}`)
@@ -54,8 +52,6 @@ func TestInsertTranscript(t *testing.T) {
 	}
 }
 
-// Settings' test of the microphone records a while into no page, and
-// says what it heard.
 func TestTestMicrophoneSaysWhatItHeard(t *testing.T) {
 	c, _ := open(t)
 	c.UseMicrophone(&fakeMic{closed: make(chan struct{}, 1)})
@@ -76,8 +72,6 @@ func TestTestMicrophoneSaysWhatItHeard(t *testing.T) {
 	}
 }
 
-// Account › Devices lists the account's devices, this one marked, and
-// signs another out by revoking it on the server.
 func TestDevicesAndSigningOneOut(t *testing.T) {
 	c, _ := open(t)
 	me := c.core.Store.DeviceID()
@@ -117,8 +111,6 @@ func TestDevicesAndSigningOneOut(t *testing.T) {
 	}
 }
 
-// A starter deleted is hidden on this device, and back once Undo
-// restores it.
 func TestSetStarterDeleted(t *testing.T) {
 	c, _ := open(t)
 	keys := func() []string {
@@ -159,7 +151,6 @@ func TestSetStarterDeleted(t *testing.T) {
 	}
 }
 
-// A run undone is made again by Redo, its block back in the page.
 func TestRedoRun(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Plan"}`)
@@ -195,8 +186,6 @@ func TestRedoRun(t *testing.T) {
 	}
 }
 
-// A page moves under a page of its space the user may change, but not
-// under itself, a page inside it or a template.
 func TestMoveTargets(t *testing.T) {
 	c, _ := open(t)
 	trip := create(t, c, `{"title":"Trip"}`)
@@ -221,8 +210,6 @@ func TestMoveTargets(t *testing.T) {
 	}
 }
 
-// A picture on this device or its network is not read, as on the
-// desktop: a link in a shared page could reach a router's page.
 func TestPictureReadsOnlyPublicAddresses(t *testing.T) {
 	c, _ := open(t)
 	if _, err := c.Picture("http://127.0.0.1:1/a.png"); !errors.Is(err, web.ErrNotPublic) {
@@ -233,8 +220,6 @@ func TestPictureReadsOnlyPublicAddresses(t *testing.T) {
 	}
 }
 
-// The To-dos tab's sections come from the core in order, each by date, as
-// the desktop sorts them.
 func TestTodosComeInSections(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Chores"}`)
@@ -277,9 +262,6 @@ func TestTodosComeInSections(t *testing.T) {
 	}
 }
 
-// A picture a block links to on this device shows only from the app's
-// data folder: the link can come from another device or person, and name
-// any file, by way of ".." or a link too.
 func TestInFolderKeepsToTheDataFolder(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "Leaflet")

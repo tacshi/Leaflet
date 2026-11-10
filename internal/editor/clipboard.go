@@ -13,15 +13,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// Copy and paste carry formats. A copy offers the selection as MyGo's
-// rich text and as HTML, which MyGo's rich text writes, besides its
-// Markdown; a paste from another app reads those, or RTF, as blocks of
-// their formats. Leaflet's own copy pastes as the blocks it came from.
-// Copy as plain text offers only text, without formats or Markdown.
-
-// CopyPlainText puts the selection on the clipboard as text alone, for
-// apps that would paste formats: a line per block, as doc.PlainCopy
-// writes them. It pastes in Leaflet as text another app copied.
 func (e *Editor) CopyPlainText() {
 	if e.Collapsed() && !e.blockSelected() {
 		return
@@ -39,7 +30,6 @@ func (e *Editor) CopyPlainText() {
 	e.services.WriteClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.Text, []byte(text)))))
 }
 
-// copySelection puts the selection on the clipboard.
 func (e *Editor) copySelection() {
 	nodes := e.copyBlocks()
 	text := e.markdownOf(nodes)
@@ -48,7 +38,6 @@ func (e *Editor) copySelection() {
 	}
 	clip.text, clip.blocks, clip.delta, clip.token = text, nodes, nil, rand.Text()
 	if nodes == nil {
-		// Text within one block keeps its formats too.
 		a, b := e.ordered()
 		clip.delta = e.node(a.ID).Delta().Slice(a.Off, b.Off)
 		nodes = []*doc.Node{newText("paragraph", clip.delta)}
@@ -63,20 +52,14 @@ func (e *Editor) copySelection() {
 	e.services.WriteClipboardData(transfer.New(transfer.NewItem(reps...)))
 }
 
-// pasteClipboard pastes what is on the clipboard: formatted text from
-// another app as blocks in its formats, unless plain, and anything else
-// as its text, which reads as Markdown.
 func (e *Editor) pasteClipboard(plain bool) {
 	data := e.services.ReadClipboardData(richtext.Format, transfer.HTML, richtext.RTF, transfer.Text, clipFormat)
 	raw, _ := data.Read(transfer.Text)
 	text := string(raw)
 	if token, err := data.Read(clipFormat); err != nil || string(token) != clip.token {
-		// Another app has copied since, the same text maybe: what Leaflet
-		// copied is no longer on the clipboard, and its blocks are stale.
 		clip.text, clip.blocks, clip.delta, clip.token = "", nil, nil, ""
 	}
 	own := text != "" && text == clip.text && (clip.blocks != nil || clip.delta != nil)
-	// Code takes text as it is.
 	if !plain && !own && !e.ReadOnly && !e.inCode() {
 		if rich, ok := richOfData(data); ok && formatted(rich) {
 			e.pasteBlocks(blocksOf(rich))
@@ -86,11 +69,6 @@ func (e *Editor) pasteClipboard(plain bool) {
 	e.pasteAs(text, plain)
 }
 
-// richOfData reads the richest format of data it has: MyGo's rich text,
-// HTML or RTF. Only MyGo's rich text, as Leaflet copies, keeps its
-// colors: those of HTML or RTF are the theme of the page or the editor of
-// code it came from more than colors anyone gave its text, and would
-// make Markdown copied from an editor of code paste as colored text.
 func richOfData(data transfer.Data) (richtext.Text, bool) {
 	if raw, err := data.Read(richtext.Format); err == nil {
 		var t richtext.Text
@@ -107,7 +85,6 @@ func richOfData(data transfer.Data) (richtext.Text, bool) {
 	return richtext.Text{}, false
 }
 
-// uncolored is t without its text colors and highlights.
 func uncolored(t richtext.Text) richtext.Text {
 	var paras []richtext.Paragraph
 	for _, p := range t.Paragraphs() {
@@ -121,9 +98,6 @@ func uncolored(t richtext.Text) richtext.Text {
 	return richtext.TextOf(paras...)
 }
 
-// formatted reports whether rich text has any format Leaflet keeps. Text
-// without one pastes as its plain text, which may be Markdown, as an
-// editor of code copies it.
 func formatted(t richtext.Text) bool {
 	for _, p := range t.Paragraphs() {
 		if s := p.Style; s.Heading > 0 || s.List != richtext.NoList || s.Quote || s.CodeBlock {
@@ -138,15 +112,10 @@ func formatted(t richtext.Text) bool {
 	return false
 }
 
-// markdownOptions are how a copy writes blocks as Markdown: in the app's
-// language, subpages by their titles, as title gives them.
 func markdownOptions(title func(string) string) doc.MarkdownOptions {
 	return doc.MarkdownOptions{Lang: i18n.Locale(), PageTitle: title}
 }
 
-// richOf writes blocks as rich text: a paragraph of its kind for each text
-// block, its list items indented as they nest, and the Markdown of the
-// others.
 func richOf(nodes []*doc.Node, title func(string) string) richtext.Text {
 	var paras []richtext.Paragraph
 	var walk func(nodes []*doc.Node, depth int)
@@ -187,8 +156,6 @@ func richOf(nodes []*doc.Node, title func(string) string) richtext.Text {
 	return richtext.TextOf(paras...)
 }
 
-// richAttrs are a run's formats in rich text. A link to a page of
-// Leaflet's goes: other apps can't open it.
 func richAttrs(a doc.Attrs) richtext.Attributes {
 	out := richtext.Attributes{Italic: a.Italic, Underline: a.Under, Strikethrough: a.Strike, Code: a.Code,
 		Color: hexColor(a.Color), Background: hexColor(a.Background)}
@@ -201,8 +168,6 @@ func richAttrs(a doc.Attrs) richtext.Attributes {
 	return out
 }
 
-// attrsOf are the formats of a run of rich text that Leaflet keeps: a
-// link only to the web or a mail address.
 func attrsOf(a richtext.Attributes) doc.Attrs {
 	out := doc.Attrs{Bold: a.Bold(), Italic: a.Italic, Under: a.Underline, Strike: a.Strikethrough, Code: a.Code,
 		Color: colorHex(a.Color), Background: colorHex(a.Background)}
@@ -212,13 +177,8 @@ func attrsOf(a richtext.Attributes) doc.Attrs {
 	return out
 }
 
-// blocksOf reads rich text as blocks: a block for each paragraph, list
-// items nested under the item one level up, and the lines of code next
-// to each other one code block. Attachments, as pictures, are left out.
 func blocksOf(t richtext.Text) []*doc.Node {
 	var out []*doc.Node
-	// lists are the list items open at each level; code the code block
-	// open.
 	var lists []*doc.Node
 	var code *doc.Node
 	for _, p := range t.Paragraphs() {
@@ -242,7 +202,6 @@ func blocksOf(t richtext.Text) []*doc.Node {
 		}
 		code = nil
 		if d.Len() == 0 {
-			// An empty line only separates blocks, as in Markdown.
 			continue
 		}
 		var n *doc.Node

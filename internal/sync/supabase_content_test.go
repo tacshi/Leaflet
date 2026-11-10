@@ -141,8 +141,6 @@ func TestPushKeepsASaveMadeWhileStoring(t *testing.T) {
 	}
 }
 
-// A block changed on the server and typed here while the push was out
-// is a conflict: the side the merge does not keep stays to recover.
 func TestPushKeepsAConflictTypedWhileStoring(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -187,9 +185,6 @@ func TestPushKeepsAConflictTypedWhileStoring(t *testing.T) {
 	}
 }
 
-// conflictedPage is a page edited here, on block a, since it synced at
-// revision 1, and a server that has a later edit of the same block at
-// revision 2: merging them is a conflict, which the server's edit wins.
 func conflictedPage(t *testing.T, st *store.Store) (store.Page, *contentServer) {
 	t.Helper()
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -209,8 +204,6 @@ func conflictedPage(t *testing.T, st *store.Store) (store.Page, *contentServer) 
 	return p, &contentServer{content: theirs.Encode(), revision: 2}
 }
 
-// refuseConflicts has the database fail to record a conflict, as a full
-// disk would, until the returned func lets it again.
 func refuseConflicts(t *testing.T, st *store.Store) func() {
 	t.Helper()
 	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON conflicts BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
@@ -223,7 +216,6 @@ func refuseConflicts(t *testing.T, st *store.Store) func() {
 	}
 }
 
-// localSides are the sides this device lost of the conflicts on a block.
 func localSides(t *testing.T, st *store.Store, blockID string) []string {
 	t.Helper()
 	conflicts, err := st.Conflicts()
@@ -239,9 +231,6 @@ func localSides(t *testing.T, st *store.Store, blockID string) []string {
 	return out
 }
 
-// A merge whose conflict cannot be recorded is not stored as merged: the
-// revision stays unmerged and the change queued, so the next push merges
-// again and records the side its edit lost.
 func TestPushStoresNoMergeWithoutItsConflicts(t *testing.T) {
 	st := openStore(t)
 	p, srv := conflictedPage(t, st)
@@ -268,15 +257,9 @@ func TestPushStoresNoMergeWithoutItsConflicts(t *testing.T) {
 	}
 }
 
-// A merge the server takes keeps its conflicts though this device then
-// fails to store it: the next push merges over the server's copy, which
-// has this device's side already, and would never meet the side the
-// server lost.
 func TestPushKeepsConflictsTheServerTookOver(t *testing.T) {
 	st := openStore(t)
 	p, srv := conflictedPage(t, st)
-	// The server's edit is the older here, so this device's is kept and
-	// the server's is the side lost.
 	theirs := doc.MustDecode(srv.content)
 	theirs.Blocks["a"] = 1500
 	srv.content = theirs.Encode()
@@ -314,8 +297,6 @@ func TestPushKeepsConflictsTheServerTookOver(t *testing.T) {
 	}
 }
 
-// A merge the server refuses, as another device saved first, takes its
-// conflicts back: the merge over that save meets its own.
 func TestStalePushTakesItsConflictsBack(t *testing.T) {
 	st := openStore(t)
 	p, srv := conflictedPage(t, st)
@@ -330,7 +311,6 @@ func TestStalePushTakesItsConflictsBack(t *testing.T) {
 	if conflicts, err := st.Conflicts(); err != nil || len(conflicts) != 0 {
 		t.Errorf("conflicts of a merge the server refused: %d, %v", len(conflicts), err)
 	}
-	// Merged again over that save, the conflict is the push's, once.
 	if done, err := svc.pushContent(context.Background(), p.ID); err != nil || !done {
 		t.Fatalf("push: done %v, %v", done, err)
 	}
@@ -339,10 +319,6 @@ func TestStalePushTakesItsConflictsBack(t *testing.T) {
 	}
 }
 
-// A save the server answers that it did not apply, as one it refuses or
-// whose statement ran out of time, takes its conflicts back, as a stale
-// one does: the merge tried again meets its own. One met with no answer
-// may have been applied, and keeps them.
 func TestRefusedPushTakesItsConflictsBack(t *testing.T) {
 	for name, tc := range map[string]struct {
 		status int
@@ -376,9 +352,6 @@ func TestRefusedPushTakesItsConflictsBack(t *testing.T) {
 	}
 }
 
-// A pulled revision is stored with the conflicts of its merge or not at
-// all: stored without them, the page would no longer be behind, and the
-// merge that meets them would never run again.
 func TestPullStoresNoRevisionWithoutItsConflicts(t *testing.T) {
 	st := openStore(t)
 	p, srv := conflictedPage(t, st)
@@ -406,8 +379,6 @@ func TestPullStoresNoRevisionWithoutItsConflicts(t *testing.T) {
 	}
 }
 
-// Content the device cannot read now stays queued; only a page that is
-// gone takes its content off the queue.
 func TestPushKeepsContentItCannotRead(t *testing.T) {
 	st := openStore(t)
 	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
@@ -427,8 +398,6 @@ func TestPushKeepsContentItCannotRead(t *testing.T) {
 	}
 }
 
-// keepContent has svc keep pageIDs' content, as KeepContent does, and
-// returns once they wait for a pass, which it asks for.
 func keepContent(t *testing.T, svc *Service, pageIDs ...string) {
 	t.Helper()
 	select {
@@ -443,9 +412,6 @@ func keepContent(t *testing.T, svc *Service, pageIDs ...string) {
 	}
 }
 
-// A page marked to keep on this device, and every page once all are kept,
-// brings the content that changed on the server while it was not kept,
-// which the pulls passed over; a page still not kept does not come.
 func TestKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
 	st := openStore(t)
 	settings := st.Settings()
@@ -526,8 +492,6 @@ func TestKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
 	}
 }
 
-// Content can come before its page's row: it is fetched once the row has
-// come, though the content pull has moved past it.
 func TestContentWaitsForItsPage(t *testing.T) {
 	st := openStore(t)
 	const id = "00000000-0000-0000-0000-0000000000aa"
@@ -570,9 +534,6 @@ func TestContentWaitsForItsPage(t *testing.T) {
 	}
 }
 
-// Content here that cannot be read is neither sent over the server's nor
-// merged with it as an empty page: the server keeps its copy, and the
-// change waits.
 func TestUnreadableContentIsNotSynced(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -593,7 +554,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	srv := &contentServer{content: base.Encode(), revision: 1}
 	svc, requests := fullPass(t, st, onlyContent(srv))
 
-	// A whole pass: the page waits, and the rest of it goes on.
 	if err := svc.pass(context.Background(), true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
@@ -607,7 +567,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 		t.Errorf("the pass stopped before the pulls: %v", *requests)
 	}
 
-	// The server moves on: the change waiting here is not merged either.
 	theirs := base.Copy()
 	theirs.Children = append(theirs.Children, para("b", "two, added there"))
 	theirs.Blocks["b"] = time.Now().UnixMilli()
@@ -619,8 +578,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 		t.Errorf("content %q, pending %v", row.Content, st.HasPending("page_content", p.ID))
 	}
 
-	// A pull leaves the page waiting until it can be read, and the other
-	// pages' content still comes.
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
 	if err != nil {
@@ -653,9 +610,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	}
 }
 
-// Content listed for a page whose row this device fails to read, as with
-// the database failing, stops the pull before it, for the next to go on
-// from: only a page not here yet waits for its row.
 func TestPullStopsAtAPageItCannotRead(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -679,10 +633,6 @@ func TestPullStopsAtAPageItCannotRead(t *testing.T) {
 	}
 }
 
-// Content on the server that this device cannot read, as a newer version
-// of Leaflet may write, is neither merged as an empty page nor saved
-// over: the server keeps its copy, the device keeps its own, the change
-// waits, and the other pages' content still comes.
 func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -720,7 +670,6 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 		t.Errorf("content %v, pending %v", c, st.HasPending("page_content", p.ID))
 	}
 
-	// A pull leaves the page waiting for content it can read, and goes on.
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
 	if err != nil {
@@ -757,8 +706,6 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	}
 }
 
-// Content from the server that is not a page's, as null, is refused rather
-// than taken for an empty page in place of the one here.
 func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 	st := openStore(t)
 	base := doc.FromBlocks([]*doc.Node{para("a", "important text")})
@@ -786,9 +733,6 @@ func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 	}
 }
 
-// Content the server refuses to save, as the user may only view the page
-// now, gives way to the server's: else it would go, and fail, on every
-// pass, and the pulls would pass over the page for good.
 func TestRefusedContentTakesTheServers(t *testing.T) {
 	st, shared, svc, patches := refusedContent(t)
 	if err := svc.push(context.Background()); err != nil {
@@ -808,9 +752,6 @@ func TestRefusedContentTakesTheServers(t *testing.T) {
 	}
 }
 
-// A refused change to a page's content stays queued while the server's
-// content cannot be stored over it: gone from the queue first, it would
-// be neither sent nor replaced.
 func TestRefusedContentStaysQueuedWhenTheServersCannotStore(t *testing.T) {
 	st, shared, svc, _ := refusedContent(t)
 	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
@@ -827,10 +768,6 @@ func TestRefusedContentStaysQueuedWhenTheServersCannotStore(t *testing.T) {
 	}
 }
 
-// refusedContent is a page shared with the user as an editor, whose
-// content they changed here since, and a server where they are a viewer
-// now, which refuses the change, with the owner's edit since; and the
-// count of saves the server refused.
 func refusedContent(t *testing.T) (*store.Store, string, *Service, *int) {
 	t.Helper()
 	st := openStore(t)
@@ -868,7 +805,7 @@ func refusedContent(t *testing.T) (*store.Store, string, *Service, *int) {
 		case r.URL.Path == "/rest/v1/rpc/page_members":
 			out = []map[string]any{{"user_id": "u2", "role": "owner", "accepted": true}, {"user_id": "u1", "role": "viewer", "accepted": true}}
 		case r.URL.Path == "/rest/v1/page_content" && r.Method == "PATCH":
-			*patches++ // row-level security matches no row
+			*patches++
 		case r.URL.Path == "/rest/v1/page_content":
 			out = []map[string]any{{"content": json.RawMessage(theirs.Encode()), "revision": 3, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}}
 		}
@@ -878,8 +815,6 @@ func refusedContent(t *testing.T) (*store.Store, string, *Service, *int) {
 	return st, shared, New(st, remote.SignedInForTest(hs.URL, st, "u1")), patches
 }
 
-// Merged content the server took is stored here before its change leaves
-// the queue: one that cannot be stored goes again.
 func TestSaveKeepsTheChangeQueuedWhenItCannotStore(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -893,8 +828,6 @@ func TestSaveKeepsTheChangeQueuedWhenItCannotStore(t *testing.T) {
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
 		t.Fatal(err)
 	}
-	// The row cannot be read once the server has saved, as a database that
-	// is busy may not be.
 	srv := &contentServer{content: base.Encode(), revision: 1, between: func(*contentServer) {
 		if _, err := st.DB().Exec(`UPDATE page_contents SET updated_at = 'busy' WHERE page_id = ?`, p.ID); err != nil {
 			t.Error(err)
@@ -909,9 +842,6 @@ func TestSaveKeepsTheChangeQueuedWhenItCannotStore(t *testing.T) {
 	}
 }
 
-// Pages whose content together takes longer than a request may come in
-// fewer at a time, and the next pass starts from there: asked for the same
-// way, they would never come.
 func TestContentTooSlowToComeTogetherComesApart(t *testing.T) {
 	old := contentBatch
 	contentBatch = 4
@@ -977,9 +907,6 @@ func TestContentTooSlowToComeTogetherComesApart(t *testing.T) {
 	}
 }
 
-// slowContent is page_content on a server that gives up, as answer says, on
-// a request for more pages than it can take, and counts how many each
-// asked for. It answers a light read of spaces.
 type slowContent struct {
 	mu    gosync.Mutex
 	asked []int
@@ -1009,7 +936,6 @@ func (s *slowContent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// heavyPages makes pages, none of them waiting to go up.
 func heavyPages(t *testing.T, st *store.Store, n int) []string {
 	t.Helper()
 	var ids []string
@@ -1024,8 +950,6 @@ func heavyPages(t *testing.T, st *store.Store, n int) []string {
 	return ids
 }
 
-// Pages whose content is too much for a request come apart however the
-// request ended: the database out of time, or a gateway giving up.
 func TestContentComesApartWhoeverGaveUp(t *testing.T) {
 	old := contentBatch
 	contentBatch = 4
@@ -1066,8 +990,6 @@ func TestContentComesApartWhoeverGaveUp(t *testing.T) {
 	}
 }
 
-// A page too heavy alone waits, and the others come: left to stop the pull,
-// it would hold back every page after it for good.
 func TestAPageTooHeavyAloneWaits(t *testing.T) {
 	st := openStore(t)
 	ids := heavyPages(t, st, 3)
@@ -1100,8 +1022,6 @@ func TestAPageTooHeavyAloneWaits(t *testing.T) {
 	}
 }
 
-// A database timing out on every statement stops the pull, with what it
-// asked for waiting: no page is passed over for a server in trouble.
 func TestContentStopsForADatabaseInTrouble(t *testing.T) {
 	st := openStore(t)
 	ids := heavyPages(t, st, 3)
@@ -1117,9 +1037,6 @@ func TestContentStopsForADatabaseInTrouble(t *testing.T) {
 	}
 }
 
-// The size a slow request left is kept through pulls that fetched nothing,
-// which tell nothing of it, and grows at most once a pull, by those that
-// fetched and took no such wait.
 func TestContentSizeGrowsOncePerPullThatFetched(t *testing.T) {
 	old := contentBatch
 	contentBatch = 8
@@ -1157,7 +1074,6 @@ func TestContentSizeGrowsOncePerPullThatFetched(t *testing.T) {
 	if svc.contentsAt != 1 {
 		t.Fatalf("pulls that fetched nothing left %d at a time", svc.contentsAt)
 	}
-	// One pull fetches twice, the content changed and the pages that wait.
 	mu.Lock()
 	rows = []map[string]any{{"page_id": ids[0], "updated_at": at}}
 	mu.Unlock()

@@ -1,13 +1,8 @@
 import MediaPlayer
 import UIKit
 
-/// NowPlaying shows the audio of a page where the system shows media: Control
-/// Center and the lock screen. Those, and the keyboard's and headphones' media
-/// keys, then play, pause, skip, seek and change its speed. A site's video
-/// shows through its web view.
 @MainActor
 final class NowPlaying {
-    /// Controls are what the system can do to the audio.
     struct Controls {
         let isPlaying: () -> Bool
         let toggle: () -> Void
@@ -15,7 +10,6 @@ final class NowPlaying {
         let skip: (Double) -> Void
     }
 
-    /// Shown is what the system was last told, which it goes on from.
     private struct Shown {
         let at: Double
         let length: Double
@@ -25,22 +19,17 @@ final class NowPlaying {
     }
 
     static let shared = NowPlaying()
-    /// lost is how far the audio can be from where the system thinks before
-    /// it is told again.
     private static let lost = 1.5
 
     private var block: String?
     private var title = ""
     private var controls: Controls?
-    /// artwork is the picture beside the title.
     private var artwork: MPMediaItemArtwork?
     private var shown: Shown?
     private var listening = false
 
     private init() {}
 
-    /// show says block's audio, named title, is what plays, beside its cover
-    /// if it has one, and the app's icon if not.
     func show(block: String, title: String, cover: UIImage?, controls: Controls) {
         if !listening {
             listening = true
@@ -53,8 +42,6 @@ final class NowPlaying {
         shown = nil
     }
 
-    /// sync tells the system where the audio is, when it would be wrong: it
-    /// counts on by itself while the audio plays.
     func sync(at: Double, length: Double, on: Bool) {
         guard block != nil else { return }
         let rate = PlaySpeed.current
@@ -75,7 +62,6 @@ final class NowPlaying {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    /// clear says nothing plays, or block's audio no longer does.
     func clear(block id: String? = nil) {
         guard block != nil, id == nil || id == block else { return }
         block = nil
@@ -97,8 +83,6 @@ final class NowPlaying {
     private func seek(_ at: Double) { controls?.seek(at) }
     private func skip(_ seconds: Double) { controls?.skip(seconds) }
 
-    /// listen hears the system's commands, which may not come on the main
-    /// thread.
     private nonisolated static func listen() {
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.addTarget { _ in
@@ -144,8 +128,6 @@ final class NowPlaying {
         }
     }
 
-    /// artwork is image as the system shows it. The system asks for it away
-    /// from the main thread, so it isn't made on the main actor.
     private nonisolated static func artwork(_ image: UIImage) -> MPMediaItemArtwork {
         MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }

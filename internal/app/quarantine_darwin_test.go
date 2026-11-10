@@ -9,7 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// A file opened from a page is quarantined first, once.
 func TestMarkDownloaded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.pdf")
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
@@ -23,8 +22,6 @@ func TestMarkDownloaded(t *testing.T) {
 	}
 }
 
-// An exported zip is quarantined, so what is unpacked from it, the pages'
-// files from other devices and people among it, is too.
 func TestExportIsQuarantined(t *testing.T) {
 	a := templatesApp(t)
 	out := filepath.Join(t.TempDir(), "export.zip")

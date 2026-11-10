@@ -9,25 +9,15 @@ import (
 	"leaflet/internal/doc"
 )
 
-// What iCloud sync keeps of the other devices: the version of each row it
-// has, and, for each page, the content each device last published, the
-// base its next version merges against (docs/protocol.md §8).
-
-// RowVersion is a row's version: when it changed and on which device. The
-// later time wins, and at the same time the greater device.
 type RowVersion struct {
 	At     int64
 	Device string
 }
 
-// After reports whether v is newer than o.
 func (v RowVersion) After(o RowVersion) bool {
 	return v.At > o.At || v.At == o.At && v.Device > o.Device
 }
 
-// RowVersion returns the version of a row this device has, or the zero
-// version for one it has none of. One that cannot be read is an error, as
-// the zero version would let any other device's change go over the row.
 func (s *Store) RowVersion(table, id string) (RowVersion, error) {
 	var v RowVersion
 	err := s.db.QueryRow(`SELECT at, device FROM row_versions WHERE tbl = ? AND id = ?`, table, id).Scan(&v.At, &v.Device)
@@ -37,24 +27,20 @@ func (s *Store) RowVersion(table, id string) (RowVersion, error) {
 	return v, err
 }
 
-// SetRowVersion records the version of a row this device has.
 func (s *Store) SetRowVersion(table, id string, v RowVersion) error {
 	_, err := s.db.Exec(`INSERT INTO row_versions (tbl, id, at, device) VALUES (?, ?, ?, ?)
 		ON CONFLICT(tbl, id) DO UPDATE SET at = excluded.at, device = excluded.device`, table, id, v.At, v.Device)
 	return err
 }
 
-// synced are the tables iCloud sync carries rows of.
 var synced = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true}
 
-// RowUpdatedAt is when a row of a synced table last changed here, or the
-// zero time.
 func (s *Store) RowUpdatedAt(table, id string) (time.Time, error) {
 	if !synced[table] {
 		return time.Time{}, fmt.Errorf("store: %s rows do not sync", table)
 	}
 	var at int64
-	err := s.db.QueryRow(`SELECT updated_at FROM `+table+` WHERE id = ?`, id).Scan(&at) // #nosec G202 -- table is one of synced.
+	err := s.db.QueryRow(`SELECT updated_at FROM `+table+` WHERE id = ?`, id).Scan(&at) // #nosec G202
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, nil
 	}
@@ -64,17 +50,12 @@ func (s *Store) RowUpdatedAt(table, id string) (time.Time, error) {
 	return time.UnixMilli(at), nil
 }
 
-// PeerContent is a page's content as a device published it.
 type PeerContent struct {
 	Peer    string
 	Version int64
 	Content string
 }
 
-// PeerContent returns what a device last published of a page that this
-// one has merged, or false when it has merged none. One that cannot be
-// read is an error, not none: a merge with no base would bring back what
-// either side deleted.
 func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool, error) {
 	p := PeerContent{Peer: peer}
 	err := s.db.QueryRow(`SELECT version, content FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).Scan(&p.Version, &p.Content)
@@ -84,8 +65,6 @@ func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool, error) {
 	return p, err == nil, err
 }
 
-// PeerVersion is PeerContent without the content: the version of a page
-// this device last merged from another, and whether it has merged one.
 func (s *Store) PeerVersion(peer, pageID string) (int64, bool, error) {
 	var v int64
 	err := s.db.QueryRow(`SELECT version FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).Scan(&v)
@@ -95,8 +74,6 @@ func (s *Store) PeerVersion(peer, pageID string) (int64, bool, error) {
 	return v, err == nil, err
 }
 
-// PeerContents returns what every device last published of a page, as far
-// as this one has merged it.
 func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {
 	rows, err := s.db.Query(`SELECT peer_id, version, content FROM peer_contents WHERE page_id = ? ORDER BY peer_id`, pageID)
 	return collect(rows, err, func(sc scanner) (PeerContent, error) {
@@ -106,7 +83,6 @@ func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {
 	})
 }
 
-// PutPeerContent records what a device published of a page.
 func (s *Store) PutPeerContent(peer, pageID string, version int64, content string) error {
 	return putPeerContent(s.db, peer, pageID, version, content)
 }
@@ -118,11 +94,6 @@ func putPeerContent(q querier, peer, pageID string, version int64, content strin
 	return err
 }
 
-// PeerMerged records a merge of another device's version of a page, from,
-// that left this device's content as it was: from, the base the next merge
-// with that device starts from, the conflicts the merge met, and, unless
-// label is "", the content queued to go out, all in one transaction, as
-// PutMergedContentOver records them with the content it stores.
 func (s *Store) PeerMerged(pageID string, from PeerContent, label string, conflicts ...doc.Conflict) error {
 	if err := s.inTx(func(tx *sql.Tx) error { return putPeerMerge(tx, pageID, from, label, conflicts) }); err != nil {
 		return err
@@ -131,9 +102,6 @@ func (s *Store) PeerMerged(pageID string, from PeerContent, label string, confli
 	return nil
 }
 
-// putPeerMerge records what merging another device's version of a page,
-// from, leaves besides the content: from, the conflicts, and, unless label
-// is "", the page's content queued to go out.
 func putPeerMerge(tx *sql.Tx, pageID string, from PeerContent, label string, conflicts []doc.Conflict) error {
 	if err := putPeerContent(tx, from.Peer, pageID, from.Version, from.Content); err != nil {
 		return err
@@ -144,7 +112,6 @@ func putPeerMerge(tx *sql.Tx, pageID string, from PeerContent, label string, con
 	return queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID)
 }
 
-// notifyPeerMerge tells the listeners what putPeerMerge changed.
 func (s *Store) notifyPeerMerge(pageID, label string, conflicts []doc.Conflict) {
 	if label != "" {
 		s.Notify("outbox", pageID)
@@ -154,10 +121,6 @@ func (s *Store) notifyPeerMerge(pageID, label string, conflicts []doc.Conflict) 
 	}
 }
 
-// ForgetICloud removes what iCloud sync kept of the other devices, so the
-// next sync starts afresh. The public links this device serves stay
-// (icloud.link.<lease>): they are this device's, and the next device.json
-// it writes says them.
 func (s *Store) ForgetICloud() error {
 	tx, err := s.db.Begin()
 	if err != nil {

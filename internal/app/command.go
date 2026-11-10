@@ -13,42 +13,22 @@ import (
 	"leaflet/locales"
 )
 
-// The command line (internal/cli) in a terminal: Settings › External
-// agents installs it, as a link to this app's executable on the Mac
-// (command_darwin.go), and on Windows as the console program beside it,
-// its folder on the user's Path (command_windows.go).
-
-// commandStatus is how the command line stands on this computer.
 type commandStatus struct {
-	// supported is false where this copy has none to install: a build
-	// without it, or a system Leaflet does not run on.
-	supported bool
-	// installed is the command set up for this copy; other, it running
-	// another copy of Leaflet, which installing points here.
+	supported        bool
 	installed, other bool
-	// taken is another program's file where the command would go, or that
-	// terminals run in its place, which is left as it is.
-	taken string
-	// newTerminal is set where terminals read where commands are as they
-	// start, as Windows' read the Path: one open already finds none.
-	newTerminal bool
+	taken            string
+	newTerminal      bool
 }
 
-// commandUI is the command line's row's state.
 type commandUI struct {
-	status   commandStatus
-	checked  time.Time
-	checking bool
-	// busy is set while installing, or removing while removing.
+	status         commandStatus
+	checked        time.Time
+	checking       bool
 	busy, removing bool
 }
 
-// commandName is the command line's name: leaflet, or leaflet-debug for
-// Leaflet Debug.
 func commandName() string { return cli.CommandName(mygo.App.Name()) }
 
-// commandSettings is the command line's card: how it stands, and the
-// button that installs, updates or removes it.
 func (a *App) commandSettings(c *ui.Context, exe string, moved bool) {
 	st := &a.external.command
 	if !st.checking && !st.busy && time.Since(st.checked) > 3*time.Second {
@@ -113,15 +93,8 @@ func (a *App) commandSettings(c *ui.Context, exe string, moved bool) {
 	})
 }
 
-// commandExts are what a command's file ends in where terminals look for
-// it along a Path, in the order they try them.
 var commandExts = []string{".com", ".exe", ".bat", ".cmd"}
 
-// onPath is s, the command named name in the folder bin, with what
-// terminals run in its place: the first such file along dirs, the folders
-// of their Path in order, before bin. Another copy's command there is
-// other, and another program's taken. same reports whether a folder is
-// bin, and isFile whether a file is there.
 func onPath(s commandStatus, dirs []string, name, exe, bin string, same func(d, bin string) bool, isFile func(string) bool) commandStatus {
 	for _, d := range dirs {
 		if same(d, bin) {
@@ -143,15 +116,11 @@ func onPath(s commandStatus, dirs []string, name, exe, bin string, same func(d, 
 	return s
 }
 
-// isCopyBin reports whether the folder d is the command named name's of
-// a copy of Leaflet, as commandBin has it: a bin beside the copy's app.
 func isCopyBin(d, name, exe string, isFile func(string) bool) bool {
 	return strings.EqualFold(filepath.Base(d), "bin") && isFile(filepath.Join(d, name+".exe")) &&
 		isFile(filepath.Join(filepath.Dir(d), filepath.Base(exe)))
 }
 
-// checkCommand looks at how the command line stands, away from the
-// window's thread.
 func (a *App) checkCommand(exe string) {
 	a.external.command.checking = true
 	name := commandName()
@@ -164,8 +133,6 @@ func (a *App) checkCommand(exe string) {
 	}()
 }
 
-// changeCommand installs the command line, or removes it, then looks at
-// it again before the row stops being busy.
 func (a *App) changeCommand(exe string, remove bool) {
 	st := &a.external.command
 	st.busy, st.removing = true, remove

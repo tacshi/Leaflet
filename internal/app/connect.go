@@ -27,29 +27,14 @@ import (
 	"leaflet/locales"
 )
 
-// Connecting AI apps on this computer to `leaflet mcp` for the user, so
-// nobody has to open a terminal or find a settings file: by the app's
-// own command-line tool (Claude Code, OpenCode), its install link, which
-// asks in the app (Cursor), or by its settings file (Claude Desktop,
-// Codex and ChatGPT, and OpenCode without its tool).
-
-// agentApp is an AI app Leaflet can connect.
 type agentApp struct {
-	// id is the app's choice in externalClients, where it has one.
 	id, label string
-	// bundles are the app's names in the Applications folder on macOS.
-	bundles []string
-	// windows are the folders, in %LOCALAPPDATA%, the app installs to on
-	// Windows: its Microsoft Store package's, or its installer's.
-	windows []string
-	// cli is the app's command-line tool.
-	cli string
-	// settings is the app whose settings it reads, if another's.
-	settings string
+	bundles   []string
+	windows   []string
+	cli       string
+	settings  string
 }
 
-// settingsID is the app whose settings the app reads: its own, or, for
-// ChatGPT, Codex's.
 func (a agentApp) settingsID() string {
 	if a.settings != "" {
 		return a.settings
@@ -57,11 +42,7 @@ func (a agentApp) settingsID() string {
 	return a.id
 }
 
-// agentApps are in the order Settings lists them: the apps for chatting
-// first, then those for code.
 var agentApps = []agentApp{
-	// The ChatGPT app that runs Codex inside, and reads Codex's settings;
-	// an older ChatGPT runs no local servers.
 	{id: "chatgpt", label: "ChatGPT", bundles: []string{"ChatGPT.app/Contents/Resources/codex-cli"}, cli: "codex", settings: "codex"},
 	{id: "claude-desktop", label: "Claude Desktop", bundles: []string{"Claude.app"}, windows: []string{`Packages\Claude_pzs8sxrjxfjjc`, "AnthropicClaude"}},
 	{id: "codex", label: "Codex", bundles: []string{"Codex.app"}, windows: []string{`Packages\OpenAI.Codex_2p2nqsd0c76g0`}, cli: "codex"},
@@ -70,12 +51,8 @@ var agentApps = []agentApp{
 	{id: "cursor", label: "Cursor", bundles: []string{"Cursor.app"}, windows: []string{`Programs\cursor`}},
 }
 
-// agentEnv is where to look for the apps: the home folder, the user's
-// configuration folder (os.UserConfigDir), and the folders of tools.
 type agentEnv struct{ home, config, path string }
 
-// currentAgentEnv is this computer's: its tools on the PATH of a login
-// shell, or where their installers put them.
 func currentAgentEnv() agentEnv {
 	home, _ := os.UserHomeDir()
 	config, _ := os.UserConfigDir()
@@ -83,14 +60,11 @@ func currentAgentEnv() agentEnv {
 		"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".bun", "bin"),
 		filepath.Join(home, ".opencode", "bin"))
 	if runtime.GOOS == "windows" {
-		// Where npm puts the tools it installs, which PATH may lack.
 		dirs = append(dirs, filepath.Join(config, "npm"))
 	}
 	return agentEnv{home, config, strings.Join(dirs, string(filepath.ListSeparator))}
 }
 
-// serverEntry is what an app's settings say about the server named
-// leaflet: how it starts, and whether it is turned off.
 type serverEntry struct {
 	Command string
 	Args    []string
@@ -98,28 +72,19 @@ type serverEntry struct {
 	Off     bool
 }
 
-// agentStatus is an app as found on this computer.
 type agentStatus struct {
-	app agentApp
-	// cli is the path of the app's command-line tool, if found.
+	app       agentApp
 	cli       string
 	installed bool
-	// entry is the leaflet server in the app's settings, or nil.
-	entry *serverEntry
-	// seen is when `leaflet mcp` last served the app.
-	seen time.Time
+	entry     *serverEntry
+	seen      time.Time
 }
 
-// current says whether the app's leaflet server starts this copy of
-// Leaflet's server on the pages in dir. Anything else, another copy or a
-// server that would not start or is turned off, is for Update to mend.
 func (s agentStatus) current(exe, dir string) bool {
 	e := s.entry
 	return e != nil && !e.Off && e.Command == exe && slices.Equal(e.Args, []string{"mcp"}) && e.Env["LEAFLET_DATA_DIR"] == dir
 }
 
-// detectAgents finds the apps on this computer, and what their settings
-// and seen, the times of mcp.SeenPrefix by client name, say of Leaflet.
 func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 	var out []agentStatus
 	for _, app := range agentApps {
@@ -130,20 +95,15 @@ func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 		s.installed = s.cli != "" || hasApp(app, env.home)
 		switch app.id {
 		case "claude":
-			// Connected only by its tool, which keeps its settings file busy.
 		case "chatgpt":
-			// Its tool is Codex's, which it may keep inside.
 			s.installed = hasApp(app, env.home)
 		case "codex":
-			// Codex of its own: not the one inside ChatGPT, which has a row.
 			s.installed = s.cli != "" && !strings.Contains(s.cli, "/ChatGPT.app/") || hasApp(app, env.home)
 		default:
 			path, _ := jsonConfig(app.id, env)
 			s.installed = s.installed || exists(filepath.Dir(path))
 		}
 		s.entry, _ = readEntry(app.settingsID(), env)
-		// ChatGPT's Codex and Codex call themselves the same; what one has
-		// used, both have.
 		for name, v := range seen {
 			if clientOf(name) != app.settingsID() {
 				continue
@@ -157,8 +117,6 @@ func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 	return out
 }
 
-// clientOf is the app of agentApps that calls itself name in MCP's
-// clientInfo, or "".
 func clientOf(name string) string {
 	n := strings.ToLower(name)
 	switch {
@@ -176,17 +134,12 @@ func clientOf(name string) string {
 	return ""
 }
 
-// connectAgent adds this copy of Leaflet, exe on the pages in dir, to
-// an app's settings by its tool cli or its settings file; Cursor is
-// connected by its installLink instead.
 func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 	switch id {
 	case "claude":
 		if cli == "" {
 			return errors.New(locales.ExternalClaudeNotFound())
 		}
-		// It will not add a server it has, so the old one goes first, and
-		// comes back as it was if the new one could not be added.
 		old := claudeEntry(env)
 		_ = runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
 		err := runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
@@ -197,8 +150,6 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		}
 		return err
 	case "codex":
-		// Not by its tool, which writes the whole file anew: other tables
-		// reordered, numbers and empty lists respelled, comments lost.
 		_, snippet := agentSetup("codex", exe, dir)
 		want := &serverEntry{Command: exe, Args: []string{"mcp"}, Env: map[string]string{"LEAFLET_DATA_DIR": dir}}
 		return editCodex(codexConfig(env), want, func(text string) (string, error) {
@@ -219,11 +170,9 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 	return editServers(path, keys, map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}})
 }
 
-// claudeEntry is the leaflet server in Claude Code's user settings, as
-// it has it, or nil.
 func claudeEntry(env agentEnv) json.RawMessage {
 	path, keys := jsonConfig("claude", env)
-	raw, err := os.ReadFile(path) // #nosec G304 -- Claude Code's own settings file.
+	raw, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil
 	}
@@ -234,7 +183,6 @@ func claudeEntry(env agentEnv) json.RawMessage {
 	return servers["leaflet"]
 }
 
-// disconnectAgent removes Leaflet from an app's settings.
 func disconnectAgent(id, cli string, env agentEnv) error {
 	switch id {
 	case "claude":
@@ -242,13 +190,10 @@ func disconnectAgent(id, cli string, env agentEnv) error {
 	case "codex":
 		return editCodex(codexConfig(env), nil, withoutCodexEntry)
 	}
-	// OpenCode's tool adds servers but does not remove them.
 	path, keys := jsonConfig(id, env)
 	return editServers(path, keys, nil)
 }
 
-// installLink is the link that has Cursor ask to add this copy of
-// Leaflet, or "" for the other apps.
 func installLink(id, exe, dir string) string {
 	if id != "cursor" {
 		return ""
@@ -258,17 +203,16 @@ func installLink(id, exe, dir string) string {
 	return "cursor://anysphere.cursor-deeplink/mcp/install?name=leaflet&config=" + url.QueryEscape(config)
 }
 
-// readEntry is the leaflet server in an app's settings, or nil.
 func readEntry(id string, env agentEnv) (*serverEntry, error) {
 	if id == "codex" {
-		raw, err := os.ReadFile(codexConfig(env)) // #nosec G304 -- Codex's own settings file.
+		raw, err := os.ReadFile(codexConfig(env)) // #nosec G304
 		if err != nil {
 			return nil, ignoreMissing(err)
 		}
 		return codexEntry(string(raw)), nil
 	}
 	path, keys := jsonConfig(id, env)
-	raw, err := os.ReadFile(path) // #nosec G304 -- an AI app's own settings file, at the place it keeps it.
+	raw, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil, ignoreMissing(err)
 	}
@@ -287,9 +231,6 @@ func readEntry(id string, env agentEnv) (*serverEntry, error) {
 	if err := json.Unmarshal(servers["leaflet"], &e); err != nil {
 		return nil, err
 	}
-	// OpenCode keeps the command and its arguments in one list, the
-	// environment under its own name, and turns a server off by enabled
-	// (before its second version) or disabled.
 	out := &serverEntry{Args: e.Args, Env: e.Env, Off: e.Disabled || e.Enabled != nil && !*e.Enabled}
 	if e.Environment != nil {
 		out.Env = e.Environment
@@ -303,8 +244,6 @@ func readEntry(id string, env agentEnv) (*serverEntry, error) {
 	return out, nil
 }
 
-// jsonConfig is an app's JSON settings file, and the keys its servers
-// are under.
 func jsonConfig(id string, env agentEnv) (path string, keys []string) {
 	switch id {
 	case "claude":
@@ -315,14 +254,12 @@ func jsonConfig(id string, env agentEnv) (path string, keys []string) {
 		return filepath.Join(env.home, ".cursor", "mcp.json"), []string{"mcpServers"}
 	case "opencode":
 		path = openCodeConfig(env)
-		raw, _ := os.ReadFile(path) // #nosec G304 -- OpenCode's own settings file.
+		raw, _ := os.ReadFile(path) // #nosec G304
 		return path, openCodeKeys(raw)
 	}
 	return "", nil
 }
 
-// openCodeConfig is OpenCode's own settings file, which may have
-// comments (.jsonc).
 func openCodeConfig(env agentEnv) string {
 	dir := filepath.Join(env.home, ".config", "opencode")
 	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
@@ -334,9 +271,6 @@ func openCodeConfig(env agentEnv) string {
 	return filepath.Join(dir, "opencode.json")
 }
 
-// openCodeKeys are where OpenCode's settings keep servers: under
-// mcp.servers since its second version, under mcp before. A file with
-// neither is taken as the second's.
 func openCodeKeys(raw []byte) []string {
 	mcp, err := nested(raw, []string{"mcp"})
 	if err == nil && len(mcp) > 0 && mcp["servers"] == nil {
@@ -345,13 +279,9 @@ func openCodeKeys(raw []byte) []string {
 	return []string{"mcp", "servers"}
 }
 
-// nested is the object under keys in a JSON document, or nil. The
-// document may have comments and trailing commas (JSONC), as OpenCode's
-// may.
 func nested(raw []byte, keys []string) (map[string]json.RawMessage, error) {
 	var m map[string]json.RawMessage
 	if len(bytes.TrimSpace(raw)) > 0 {
-		// Standardize works in place.
 		std, err := hujson.Standardize(bytes.Clone(raw))
 		if err != nil {
 			return nil, err
@@ -375,12 +305,8 @@ func nested(raw []byte, keys []string) (map[string]json.RawMessage, error) {
 	return m, nil
 }
 
-// editServers sets the server named leaflet, under keys in a JSON
-// settings file, to server, or removes it when server is nil. The rest of
-// the file stays as it was, comments, order and spacing too; the server
-// is written in the spacing of those around it.
 func editServers(path string, keys []string, server any) error {
-	raw, err := os.ReadFile(path) // #nosec G304 -- an AI app's own settings file, at the place it keeps it.
+	raw, err := os.ReadFile(path) // #nosec G304
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -402,9 +328,6 @@ func editServers(path string, keys []string, server any) error {
 		return b.String()
 	}
 	full := append(slices.Clone(keys), "leaflet")
-	// A JSONC object may end in a comma, which hujson keeps as the last
-	// member having an AfterExtra; the member that is last after the
-	// change gets the comma, as the last one had.
 	object := func(keys []string) *hujson.Object {
 		if v := doc.Find(ptr(keys)); v != nil {
 			obj, _ := v.Value.(*hujson.Object)
@@ -431,7 +354,6 @@ func editServers(path string, keys []string, server any) error {
 		keepComma(object(keys), comma)
 		return writeAtomic(path, doc.Pack())
 	}
-	// The value goes in at the first of keys missing, holding the rest.
 	at := 0
 	for at < len(full)-1 && doc.Find(ptr(full[:at+1])) != nil {
 		at++
@@ -458,7 +380,6 @@ func editServers(path string, keys []string, server any) error {
 	if err := doc.Patch([]byte(patch)); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	// Lay out the new member as its neighbours are: on a line of its own.
 	if obj := object(full[:at]); obj != nil {
 		keepComma(obj, comma)
 		for i := range obj.Members {
@@ -480,9 +401,6 @@ func editServers(path string, keys []string, server any) error {
 	return writeAtomic(path, doc.Pack())
 }
 
-// indentUnit is the indentation a JSON document steps in by: a tab, or
-// as many spaces as its first member is in; two spaces for a document
-// without one.
 func indentUnit(doc hujson.Value) string {
 	if obj, ok := doc.Value.(*hujson.Object); ok && len(obj.Members) > 0 {
 		before := string(obj.Members[0].Name.BeforeExtra)
@@ -495,7 +413,6 @@ func indentUnit(doc hujson.Value) string {
 	return "  "
 }
 
-// codexConfig is Codex's settings file.
 func codexConfig(env agentEnv) string {
 	if h := os.Getenv("CODEX_HOME"); h != "" {
 		return filepath.Join(h, "config.toml")
@@ -503,12 +420,8 @@ func codexConfig(env agentEnv) string {
 	return filepath.Join(env.home, ".codex", "config.toml")
 }
 
-// editCodex changes Codex's config.toml by fn, and writes the change only
-// when the file still reads as it did, but for the leaflet server, which
-// is want after it (nil: gone). A spelling of the file fn cannot change so
-// is left as it is, and said.
 func editCodex(path string, want *serverEntry, fn func(string) (string, error)) error {
-	raw, err := os.ReadFile(path) // #nosec G304 -- Codex's own settings file.
+	raw, err := os.ReadFile(path) // #nosec G304
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -526,7 +439,6 @@ func editCodex(path string, want *serverEntry, fn func(string) (string, error)) 
 	}
 	got := tomlEntry(after)
 	for _, doc := range []map[string]any{before, after} {
-		// An mcp_servers that held only leaflet may come or go with it.
 		if servers := tomlServers(doc); servers != nil {
 			if delete(servers, "leaflet"); len(servers) == 0 {
 				delete(doc, "mcp_servers")
@@ -547,13 +459,11 @@ func decodeTOML(raw []byte) (map[string]any, error) {
 	return doc, nil
 }
 
-// tomlServers is the mcp_servers table of a decoded config.toml, or nil.
 func tomlServers(doc map[string]any) map[string]any {
 	servers, _ := doc["mcp_servers"].(map[string]any)
 	return servers
 }
 
-// tomlEntry is the leaflet server of a decoded config.toml, or nil.
 func tomlEntry(doc map[string]any) *serverEntry {
 	server, ok := tomlServers(doc)["leaflet"].(map[string]any)
 	if !ok {
@@ -579,8 +489,6 @@ func tomlEntry(doc map[string]any) *serverEntry {
 	return e
 }
 
-// codexEntry reads the leaflet server of a Codex config.toml, however
-// its keys are spelled, or nil.
 func codexEntry(text string) *serverEntry {
 	doc, err := decodeTOML([]byte(text))
 	if err != nil {
@@ -589,10 +497,6 @@ func codexEntry(text string) *serverEntry {
 	return tomlEntry(doc)
 }
 
-// withoutCodexEntry is a Codex config.toml without the leaflet server:
-// without each table header and key under mcp_servers.leaflet, as TOML
-// reads them (quoted, spaced, dotted or inline), and the comments among
-// them. Everything else stays as it was, strings that look like tables too.
 func withoutCodexEntry(text string) (string, error) {
 	data := []byte(text)
 	p := unstable.Parser{KeepComments: true}
@@ -627,15 +531,12 @@ func withoutCodexEntry(text string) (string, error) {
 		default:
 			e.leaflet = isLeafletKey(append(slices.Clone(table), key...))
 		}
-		// From the start of its line.
 		e.start = strings.LastIndex(text[:e.start], "\n") + 1
 		exprs = append(exprs, e)
 	}
 	if err := p.Error(); err != nil {
 		return "", err
 	}
-	// A comment among the leaflet server's lines goes with them, unless
-	// what follows it is not the server's: then it heads that.
 	for i := len(exprs) - 1; i >= 0; i-- {
 		if exprs[i].comment && exprs[i].leaflet {
 			exprs[i].leaflet = i+1 < len(exprs) && exprs[i+1].leaflet
@@ -649,7 +550,6 @@ func withoutCodexEntry(text string) (string, error) {
 			end = exprs[i+1].start
 		}
 		if e.leaflet {
-			// Keep the blank lines after it.
 			cut := strings.TrimRight(text[e.start:end], " \t\r\n")
 			b.WriteString(text[at:e.start])
 			at = e.start + len(cut)
@@ -657,7 +557,6 @@ func withoutCodexEntry(text string) (string, error) {
 			if at < end && text[at] == '\n' {
 				at++
 			}
-			// Unless a blank line comes before it already, or nothing does.
 			if out := b.String(); out == "" || strings.HasSuffix(out, "\n\n") {
 				at = end
 			}
@@ -667,25 +566,19 @@ func withoutCodexEntry(text string) (string, error) {
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
-// isLeafletKey says whether a TOML key is the leaflet server or in it.
 func isLeafletKey(key []string) bool {
 	return len(key) >= 2 && key[0] == "mcp_servers" && key[1] == "leaflet"
 }
 
-// writeAtomic replaces a file whole, so an app reading it never finds it
-// half written, and keeps its permissions. A link, as to settings kept in
-// a dotfiles folder, stays a link: the file it leads to is replaced.
 func writeAtomic(path string, data []byte) error {
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	} else if to, err := os.Readlink(path); err == nil {
-		// A link to a file not made yet makes it.
 		if !filepath.IsAbs(to) {
 			to = filepath.Join(filepath.Dir(path), to)
 		}
 		path = to
 	}
-	// A new file only its owner reads, as settings may hold keys.
 	mode := fs.FileMode(0o600)
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
@@ -712,12 +605,7 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(f.Name(), path)
 }
 
-// findCLI is the path of an app's command-line tool: in the env's
-// folders of tools, or the one the app keeps (Claude Desktop's Claude
-// Code, newest first).
 func findCLI(name string, env agentEnv) string {
-	// On Windows, a tool is a program or a script with one of the
-	// extensions that run, such as claude.exe or npm's codex.cmd.
 	names := []string{name}
 	if runtime.GOOS == "windows" {
 		names = names[:0]
@@ -755,7 +643,6 @@ func findCLI(name string, env agentEnv) string {
 	return ""
 }
 
-// versionOf is the version folder of a Claude Desktop's Claude Code.
 func versionOf(p string) string {
 	rel := strings.Split(filepath.ToSlash(p), "/claude-code/")
 	if len(rel) < 2 {
@@ -764,7 +651,6 @@ func versionOf(p string) string {
 	return strings.Split(rel[1], "/")[0]
 }
 
-// compareVersions orders dotted versions by their numbers.
 func compareVersions(a, b string) int {
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < max(len(as), len(bs)); i++ {
@@ -782,9 +668,6 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// hasApp says whether the app is installed: one of its bundles in an
-// Applications folder on macOS, or one of its folders in %LOCALAPPDATA%
-// on Windows.
 func hasApp(app agentApp, home string) bool {
 	if runtime.GOOS == "windows" {
 		for _, d := range app.windows {
@@ -805,13 +688,10 @@ func hasApp(app agentApp, home string) bool {
 	return false
 }
 
-// runCLI runs an app's tool, with the PATH it finds its own tools on
-// (Claude Code may be a Node script), and says what went wrong in its
-// own words.
 func runCLI(cli string, env agentEnv, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204 -- an AI app's own command-line tool, found where it installs, with arguments Leaflet writes.
+	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204
 	cmd.Env = append(os.Environ(), "PATH="+strings.Join([]string{filepath.Dir(cli), env.path}, string(filepath.ListSeparator)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -823,8 +703,6 @@ func runCLI(cli string, env agentEnv, args ...string) error {
 	return nil
 }
 
-// loginPath is the PATH of the user's login shell, which an app opened
-// from the Finder does not get; it is read once.
 var loginPath = sync.OnceValue(func() string {
 	if runtime.GOOS == "windows" {
 		return os.Getenv("PATH")
@@ -839,16 +717,10 @@ var loginPath = sync.OnceValue(func() string {
 	return os.Getenv("PATH")
 })
 
-// shellPath asks the login shell sh for its PATH, for at most wait. A
-// process its startup files leave running, as a job started in the
-// background, can keep its output open once it has exited: what it
-// printed by then is enough.
 func shellPath(sh string, wait time.Duration) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
-	// Interactive too, as version managers set PATH in .zshrc; the
-	// marker keeps what the shell prints as it starts out of it.
-	cmd := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`) // #nosec G204 -- the user's own login shell, from $SHELL.
+	cmd := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`) // #nosec G204
 	cmd.WaitDelay = time.Second
 	out, _ := cmd.Output()
 	for line := range strings.SplitSeq(string(out), "\n") {
@@ -864,8 +736,6 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// isExecutable says whether p is a file that runs: by its permissions,
-// or on Windows, which has none, by its extension.
 func isExecutable(p string) bool {
 	fi, err := os.Stat(p)
 	if err != nil || !fi.Mode().IsRegular() {
@@ -877,8 +747,6 @@ func isExecutable(p string) bool {
 	return fi.Mode().Perm()&0o111 != 0
 }
 
-// windowsExts are the extensions of files Windows runs as commands, in
-// the order it tries them.
 func windowsExts() []string {
 	var exts []string
 	for _, e := range strings.Split(strings.ToLower(os.Getenv("PATHEXT")), ";") {

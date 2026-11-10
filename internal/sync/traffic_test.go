@@ -19,8 +19,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// recorder is a fake server that notes each request it has, as
-// "METHOD /path?query", and answers it with answer, or [].
 type recorder struct {
 	mu       gosync.Mutex
 	requests []string
@@ -41,7 +39,6 @@ func (rec *recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// asked are the requests had, of those whose line contains each of parts.
 func (rec *recorder) asked(parts ...string) []string {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
@@ -60,9 +57,6 @@ func (rec *recorder) reset() {
 	rec.requests = nil
 }
 
-// A page pushed over the revision this device merged reads only the
-// revision, never the content, and the server answers the save with its
-// revision and time, not the content sent.
 func TestPushReadsContentOnlyWhenBehind(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -101,7 +95,6 @@ func TestPushReadsContentOnlyWhenBehind(t *testing.T) {
 	reads, saves = nil, nil
 	mu.Unlock()
 
-	// Another device saved since: its content comes, and merges.
 	theirs := doc.MustDecode(srv.content)
 	theirs.Children = append(theirs.Children, para("b", "two, added there"))
 	theirs.Blocks["b"] = time.Now().UnixMilli()
@@ -125,8 +118,6 @@ func TestPushReadsContentOnlyWhenBehind(t *testing.T) {
 	}
 }
 
-// The content this device pushed is not fetched again by the next pull,
-// overlap or not: it has that version.
 func TestPullPassesOverWhatThisDevicePushed(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -147,7 +138,6 @@ func TestPullPassesOverWhatThisDevicePushed(t *testing.T) {
 	hs := httptest.NewServer(rec)
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	// The cursor is well before the row, which is no row of the overlap.
 	svc.setCursor("page_content", cursor{at.Add(-time.Hour).Format(time.RFC3339Nano), ""})
 	if err := svc.pullContents(context.Background()); err != nil {
 		t.Fatal(err)
@@ -160,9 +150,6 @@ func TestPullPassesOverWhatThisDevicePushed(t *testing.T) {
 	}
 }
 
-// Content the server stamped again without a new revision, as a move of its
-// page does, is fetched once: the passes after, which read the row again
-// while it is in the overlap behind the cursor, pass over it.
 func TestPullFetchesContentStampedAgainOnce(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -207,9 +194,6 @@ func TestPullFetchesContentStampedAgainOnce(t *testing.T) {
 	}
 }
 
-// The content of many pages changed elsewhere comes a batch of pages at a
-// time, not a request each; the pages that wait come after the rows the
-// cursor passes, and one of them failing leaves the cursor past those.
 func TestPullFetchesContentInBatches(t *testing.T) {
 	was := contentBatch
 	contentBatch = 2
@@ -247,7 +231,6 @@ func TestPullFetchesContentInBatches(t *testing.T) {
 	}}
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if slices.Contains(askedPages(r), late.ID) {
-			// The page that waits fails to come.
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"message": "not now"}`))
 			return
@@ -278,8 +261,6 @@ func TestPullFetchesContentInBatches(t *testing.T) {
 	}
 }
 
-// A pass that finds the pages waiting as they were does not write them
-// again, nor tell the app key_values changed.
 func TestWaitingIsWrittenOnlyAsItChanges(t *testing.T) {
 	st := openStore(t)
 	svc, _ := fullPass(t, st, nil)
@@ -311,9 +292,6 @@ func TestWaitingIsWrittenOnlyAsItChanges(t *testing.T) {
 	}
 }
 
-// An idle pass asks the server for what changed in each table it pulls,
-// but says the device is in use, and lists the model connections removed
-// elsewhere, only every so often: once after Start.
 func TestIdlePassesAskLess(t *testing.T) {
 	st := openStore(t)
 	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
@@ -331,14 +309,11 @@ func TestIdlePassesAskLess(t *testing.T) {
 	if got := rec.asked("/rest/v1/devices"); len(got) != 1 || !strings.HasPrefix(got[0], "POST") || !strings.Contains(got[0], "select=revoked_at") {
 		t.Errorf("heartbeats %v, want one upsert", got)
 	}
-	if got := slices.DeleteFunc(rec.asked("GET /rest/v1/model_providers?"), func(r string) bool {
-		return r != "GET /rest/v1/model_providers?select=id"
-	}); len(got) != 1 {
-		t.Errorf("listed the model connections %d times", len(got))
+	if got := rec.asked("GET /rest/v1/model_providers?"); len(got) != 0 {
+		t.Errorf("asked for the model connections: %v", got)
 	}
-	// A loop started again says so again at once.
 	svc.mu.Lock()
-	svc.beat, svc.providersSwept = every{}, every{}
+	svc.beat = every{}
 	svc.mu.Unlock()
 	rec.reset()
 	if err := svc.SyncNow(); err != nil {
@@ -349,8 +324,6 @@ func TestIdlePassesAskLess(t *testing.T) {
 	}
 }
 
-// A pass asked for after a save sends it and pulls nothing; a Kick, as
-// for what another device did, pulls too.
 func TestAPassForASaveOnlyPushes(t *testing.T) {
 	st := openStore(t)
 	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
@@ -382,8 +355,6 @@ func TestAPassForASaveOnlyPushes(t *testing.T) {
 	}
 }
 
-// A page opened and closed again before the pass in progress is done is
-// not brought up to date for nothing, holding the passes after it.
 func TestAPageClosedMeanwhileIsNotRefreshed(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -398,7 +369,6 @@ func TestAPageClosedMeanwhileIsNotRefreshed(t *testing.T) {
 	svc.SetOpen(p.ID, true)
 	svc.SetOpen(p.ID, false)
 	svc.running.Unlock()
-	// Let the goroutine take the lock and go.
 	time.Sleep(200 * time.Millisecond)
 	svc.running.Lock()
 	defer svc.running.Unlock()
@@ -407,9 +377,6 @@ func TestAPageClosedMeanwhileIsNotRefreshed(t *testing.T) {
 	}
 }
 
-// A snapshot's entry names it alone: its content is read as it goes up,
-// once, from page_history. One an earlier version queued whole still goes
-// as it is, and one pruned meanwhile is done.
 func TestHistoryGoesUpFromItsSnapshot(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -424,7 +391,6 @@ func TestHistoryGoesUpFromItsSnapshot(t *testing.T) {
 	if err != nil || len(entries) != 1 || entries[0].Entity != "page_history" || strings.Contains(entries[0].Payload, "the snapshot") {
 		t.Fatalf("queued %+v, %v", entries, err)
 	}
-	// One pruned before it went has nothing to send.
 	if err := st.AddHistory(p.ID, doc.Empty(), "autosave", "", "Autosave"); err != nil {
 		t.Fatal(err)
 	}
@@ -469,10 +435,6 @@ func TestHistoryGoesUpFromItsSnapshot(t *testing.T) {
 	}
 }
 
-// Pages that wait for good, as with content this version cannot read, do
-// not keep the pages after them from coming, more of them than a pass
-// brings: each pass goes on from where the last stopped, and has the next
-// run at once only when it brought some.
 func TestPagesThatStayWaitingDoNotHoldUpTheOthers(t *testing.T) {
 	was := waitingBatch
 	waitingBatch = 3
@@ -531,10 +493,6 @@ func TestPagesThatStayWaitingDoNotHoldUpTheOthers(t *testing.T) {
 	}
 }
 
-// A session begun, as the user signing in again, says the device is in use
-// at once, so a device revoked while its last session ended on its own
-// learns it as the new one starts, and forgets its ID, to register anew
-// as the user signs in again.
 func TestASessionBegunAsksWhetherTheDeviceIsRevoked(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {

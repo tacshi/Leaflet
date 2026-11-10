@@ -13,9 +13,6 @@ import (
 	"leaflet/locales"
 )
 
-// chartHTML draws a chart block for a web page as the editor does, with
-// MyGo's scales: its marks sit in percentages of the plot, as MyGo's do,
-// so they follow the page's width, and their labels stay text.
 func chartHTML(n *doc.Node) string {
 	kind, _, _, labels, series := editor.ChartOf(n)
 	if len(labels) == 0 || len(series) == 0 {
@@ -54,8 +51,6 @@ func chartHTML(n *doc.Node) string {
 	return b.String()
 }
 
-// chartColors are the colors of a chart's series, as the editor's: the
-// accent first.
 func chartColors(n int) []string {
 	base := append([]string{"var(--accent)"}, editor.ChartColors...)
 	out := make([]string, n)
@@ -65,9 +60,6 @@ func chartColors(n int) []string {
 	return out
 }
 
-// sliceColors are the colors of a pie's n slices, as the editor's: those
-// of as many series, but never the first's on the last slice, which is
-// beside it.
 func sliceColors(n int) []string {
 	base := chartColors(1 + len(editor.ChartColors))
 	out := make([]string, n)
@@ -77,10 +69,8 @@ func sliceColors(n int) []string {
 	return out
 }
 
-// pct is a fraction of the plot as a CSS percentage.
 func pct(f float32) string { return fmt.Sprintf("%.3f%%", f*100) }
 
-// chartValues are all the values of a chart's series.
 func chartValues(series []editor.ChartSeries) []float64 {
 	var out []float64
 	for _, s := range series {
@@ -89,16 +79,12 @@ func chartValues(series []editor.ChartSeries) []float64 {
 	return out
 }
 
-// xLabels writes the labels under a plot, one under each band.
 func xLabels(b *strings.Builder, x chart.Band) {
 	for _, t := range x.Ticks() {
 		fmt.Fprintf(b, `<span class="x" style="left:%s">%s</span>`, pct(t.At), html.EscapeString(t.Label))
 	}
 }
 
-// barHTML writes bars from zero with their values above them: one
-// series' tallest in the accent and the others muted, several series
-// side by side in their own colors.
 func barHTML(b *strings.Builder, labels []string, series []editor.ChartSeries) {
 	lo, hi := chart.Extent(append(chartValues(series), 0)...)
 	y := chart.NewLinear(lo, hi).Nice(4)
@@ -142,15 +128,12 @@ func barHTML(b *strings.Builder, labels []string, series []editor.ChartSeries) {
 	b.WriteString(`</div></div>`)
 }
 
-// lineHTML writes lines with a dot at each value, over gridlines whose
-// values are at the left.
 func lineHTML(b *strings.Builder, labels []string, series []editor.ChartSeries) {
 	lo, hi := chart.Extent(chartValues(series)...)
 	y := chart.NewLinear(lo, hi).Nice(3)
 	x := chart.NewBand(labels...)
 	ticks := y.Ticks(3)
 	colors := chartColors(len(series))
-	// Room at the left for the longest of the values there.
 	wide := 0
 	for _, t := range ticks {
 		wide = max(wide, len([]rune(t.Label)))
@@ -182,9 +165,6 @@ func lineHTML(b *strings.Builder, labels []string, series []editor.ChartSeries) 
 	b.WriteString(`</div></div>`)
 }
 
-// pieHTML writes the first series' shares as slices, with the share of
-// each one large enough on it. It reports whether there was anything to
-// share.
 func pieHTML(b *strings.Builder, series []editor.ChartSeries) bool {
 	vals := series[0].Values
 	total := 0.0
@@ -198,7 +178,6 @@ func pieHTML(b *strings.Builder, series []editor.ChartSeries) bool {
 	colors := sliceColors(len(vals))
 	fmt.Fprintf(b, `<svg class="pie" viewBox="0 0 200 200" role="img" aria-label="%s">`, html.EscapeString(locales.EditorPieChart()))
 	for i, s := range chart.Pie(vals, 0.015) {
-		// The gap between slices, as MyGo's Sector leaves it on a pie.
 		d := math.Asin(min(1, s.Pad/2))
 		a0, a1 := s.Start+d, s.End-d
 		if a1 <= a0 {

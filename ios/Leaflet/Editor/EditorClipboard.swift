@@ -1,11 +1,6 @@
 import LeafletCore
 import UIKit
 
-/// EditorClipboard copies and pastes as the desktop's editor does: Copy
-/// keeps Leaflet's own copy of what it took, which pastes back as the
-/// blocks it was, and puts their Markdown on the clipboard for other apps;
-/// text pasted from elsewhere goes in as the blocks its lines say, and a
-/// link as its link, its video or its picture.
 @MainActor
 final class EditorClipboard {
     private unowned let editor: EditorController
@@ -16,12 +11,6 @@ final class EditorClipboard {
 
     init(_ editor: EditorController) { self.editor = editor }
 
-    /// Clip is what Copy or Cut last took in an editor, as the desktop's
-    /// editor keeps its own copy: the text it left on the clipboard, and
-    /// the blocks it stands for, whole or cut to the selection, or the
-    /// formatted text of a selection within a block. count is the
-    /// clipboard's changeCount once it was there, which another app's copy
-    /// since, of the same text maybe, changes.
     struct Clip {
         var text: String?
         var blocks: [DocNode] = []
@@ -29,15 +18,8 @@ final class EditorClipboard {
         var count: Int?
     }
 
-    /// clip is Leaflet's own copy, as the app's editors share it.
     private static var clip: Clip?
 
-    /// copied keeps what the system's Copy or Cut takes of the selection
-    /// as Leaflet's own copy, before it goes: text within a block, which
-    /// pastes back with its formats, or blocks, which go on the clipboard
-    /// as their Markdown, as the desktop's Copy puts them, for other apps,
-    /// and paste back here as the blocks they were, their kind and nesting
-    /// too, which the system's plain text has lost.
     func copied() {
         let range = textView.selectedRange
         guard range.length > 0 else { return }
@@ -49,8 +31,6 @@ final class EditorClipboard {
         copy(blocks: DocumentMapper.content(piece, meta: nil).document.children ?? [])
     }
 
-    /// copy takes blocks as Copy takes them: Leaflet's own copy, and their
-    /// Markdown on the clipboard. A block's menu copies it so.
     func copy(blocks: [DocNode]) {
         Self.clip = Clip(blocks: blocks)
         guard let copyText = editor.copyText else { return }
@@ -62,15 +42,10 @@ final class EditorClipboard {
         }
     }
 
-    /// copiedOut marks the clip as on the clipboard, as the system's Copy
-    /// or Cut has put the text within a block there.
     func copiedOut() {
         if Self.clip?.inline != nil { Self.clip?.count = UIPasteboard.general.changeCount }
     }
 
-    /// copyPlainText copies the selection as text alone, without its
-    /// formats, as the desktop's Copy as Plain Text: a line per block, for
-    /// apps that would paste the formats the system's Copy keeps.
     func copyPlainText() {
         let range = textView.selectedRange
         guard textView.isFirstResponder, range.length > 0, let plainCopy = editor.plainCopy else {
@@ -86,10 +61,6 @@ final class EditorClipboard {
         }
     }
 
-    /// pastedCopy pastes Leaflet's own copy, when text is what it left on
-    /// the clipboard, and reports whether it did: blocks as the blocks they
-    /// were, with IDs of their own; text from within a block with its
-    /// formats, in the block it goes in.
     func pastedCopy(
         _ s: String, replacing range: NSRange, _ para: NSRange, _ info: BlockInfo
     ) -> Bool {
@@ -114,9 +85,6 @@ final class EditorClipboard {
         return true
     }
 
-    /// pasteBlocks puts blocks in place of range: the first joining the
-    /// line it goes in, as the desktop pastes them, a block without text
-    /// on a line of its own.
     private func pasteBlocks(
         _ blocks: [DocNode], replacing range: NSRange, _ para: NSRange, _ info: BlockInfo
     ) {
@@ -133,12 +101,6 @@ final class EditorClipboard {
         editor.edited(editor.paragraphs(around: r))
     }
 
-    /// pasted puts text pasted, or written by dictation, in place of range
-    /// as the desktop's editor pastes it (mobile.PasteText), and reports
-    /// whether it did: lines as the blocks their Markdown says, the first
-    /// joining the line it goes in; a video's or a picture's link on an
-    /// empty line as that block; one link on text chosen as its link, and
-    /// at the caret as a link to itself. Other text goes in as typed.
     func pasted(
         _ s: String, replacing range: NSRange, _ para: NSRange, _ info: BlockInfo
     ) -> Bool {
@@ -176,9 +138,6 @@ final class EditorClipboard {
         return true
     }
 
-    /// follow follows a video's share link pasted on a line of its own to
-    /// the video, off the main thread, as the core asks its site, and then
-    /// shows the line as the video, as the video's link pasted there does.
     private func follow(_ link: String, in id: String) {
         Task { [weak editor] in
             let raw = await Task.detached { () -> String? in
@@ -193,13 +152,6 @@ final class EditorClipboard {
         }
     }
 
-    /// liftCards gives each block card pasted or dropped into the page a
-    /// paragraph and a block of its own, and returns the range from the
-    /// first it moved to the end of the page, or nil when none needed it.
-    /// UIKit puts a card where the caret is, in a block of text, which
-    /// writes its text without it, so it would be saved as nothing; and a
-    /// copy of a card the page has, with the same IDs, its cells' too,
-    /// which then get IDs of their own.
     func liftCards() -> NSRange? {
         let all = NSRange(location: 0, length: storage.length)
         var cards: [(range: NSRange, card: BlockAttachment)] = []
@@ -224,9 +176,6 @@ final class EditorClipboard {
             }
         }
         guard let first = lift.first else { return nil }
-        // From the end, so the ranges before stay where they are, each a
-        // step to undo before the paste: left out, the paste undone would
-        // take out what is no longer where it put it.
         for (r, card) in lift.reversed() {
             let ns = storage.string as NSString
             let para = ns.paragraphRange(for: NSRange(location: r.location, length: 0))
@@ -235,7 +184,6 @@ final class EditorClipboard {
             let depth =
                 (storage.attribute(.leafletBlock, at: r.location, effectiveRange: nil) as? BlockInfo)?
                 .depth ?? 0
-            // A card moved keeps its IDs; a copy takes new ones.
             var node = card.node
             if kept.contains(node.id) { node = Self.renewed(node) }
             kept.insert(node.id)
@@ -257,7 +205,6 @@ final class EditorClipboard {
             location: first.range.location, length: storage.length - first.range.location)
     }
 
-    /// renewed is node with new IDs, its children's too, as a copy of it.
     private static func renewed(_ node: DocNode) -> DocNode {
         var n = node
         n.id = BlockInfo.newID()

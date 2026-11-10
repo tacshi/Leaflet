@@ -6,25 +6,18 @@ import (
 	"strings"
 )
 
-// PageLinkPrefix starts a link to one of the user's pages: a page mention
-// is text linked to it, kept as the page's title.
 const PageLinkPrefix = "leaflet://page/"
 
-// PageLink is the link to page id.
 func PageLink(id string) string { return PageLinkPrefix + id }
 
-// PageLinkID returns the page a link points to, if it is a page link, or
-// a link to a block of one.
 func PageLinkID(href string) (string, bool) {
 	id, ok := strings.CutPrefix(href, PageLinkPrefix)
 	id, _, _ = strings.Cut(id, "#")
 	return id, ok && id != ""
 }
 
-// BlockLink is the link to block id of page pageID: it opens the page there.
 func BlockLink(pageID, id string) string { return PageLink(pageID) + "#" + id }
 
-// LinkBlock returns the block a page link points to, or "" for the page.
 func LinkBlock(href string) string {
 	if _, ok := PageLinkID(href); !ok {
 		return ""
@@ -34,15 +27,10 @@ func LinkBlock(href string) string {
 	return block
 }
 
-// MomentLink is the link to a moment of a video or a recording, block id
-// of page pageID, at seconds into it: it opens the page there and plays
-// the block from that time.
 func MomentLink(pageID, id string, at int) string {
 	return BlockLink(pageID, id) + "?t=" + strconv.Itoa(max(at, 0))
 }
 
-// LinkMoment returns the time a link to a block plays it from, in seconds,
-// if it names one: as MomentLink writes it, or as 1m23s or 1:23.
 func LinkMoment(href string) (int, bool) {
 	if LinkBlock(href) == "" {
 		return 0, false
@@ -63,16 +51,10 @@ func LinkMoment(href string) (int, bool) {
 	return linkSeconds(t)
 }
 
-// PageMention is the text and formats of a mention of page id titled
-// title: a link to it, which opens it, and a mention, which shows as one
-// and keeps its title.
 func PageMention(id, title string) Attrs {
 	return Attrs{Href: PageLink(id), Mention: &Mention{Kind: "page", ID: id, Name: title}}
 }
 
-// RefreshPageMentions writes each page mention in c with its page's title
-// now, as title gives it, and reports whether one changed. A page title
-// does not know is left as it was written.
 func (c *Content) RefreshPageMentions(title func(id string) (string, bool)) bool {
 	changed := false
 	c.Walk(func(n, _ *Node) {
@@ -101,12 +83,6 @@ func (c *Content) RefreshPageMentions(title func(id string) (string, bool)) bool
 	return changed
 }
 
-// CopyPages returns copies of contents, by page ID, for new pages: new
-// block IDs, stamped now, and links to the pages in pages, of subpage
-// blocks and inline links alike, pointing to the page each maps to
-// instead, so a page copied with its subpages links to the copies. A link
-// to a block of a page copied here, or a moment of it, goes to that block
-// of the copy; one to a block it no longer has, to the page.
 func CopyPages(contents map[string]*Content, pages map[string]string) map[string]*Content {
 	copies := make(map[string]*Content, len(contents))
 	blocks := make(map[string]map[string]string, len(contents))
@@ -129,8 +105,6 @@ func CopyPages(contents map[string]*Content, pages map[string]string) map[string
 	return copies
 }
 
-// relink points c's links at the copies of the pages and blocks they name
-// (CopyPages).
 func (c *Content) relink(pages map[string]string, blocks map[string]map[string]string) {
 	c.Walk(func(n, _ *Node) {
 		if to, ok := pages[n.Str("page_id")]; ok && n.Type == "subpage" {

@@ -26,8 +26,6 @@ import (
 	"leaflet/locales"
 )
 
-// Export All takes the app's own files, and no file elsewhere that a
-// block links to.
 func TestExportOnlyOwnFiles(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -76,8 +74,6 @@ func TestExportOnlyOwnFiles(t *testing.T) {
 	}
 }
 
-// An exported page has its recordings' transcripts under their blocks:
-// the block alone said only the recording's title.
 func TestExportKeepsTranscripts(t *testing.T) {
 	a := templatesApp(t)
 	rec := store.Recording{ID: "r1", PageID: "p", Status: "ready", DurationMs: 9000,
@@ -96,8 +92,6 @@ func TestExportKeepsTranscripts(t *testing.T) {
 	}
 }
 
-// A page whose content is not on this device, and can't come down now,
-// exports as nothing, saying so, rather than nothing at all.
 func TestExportSaysThePageIsNotHere(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Away"})
@@ -120,8 +114,6 @@ func TestExportSaysThePageIsNotHere(t *testing.T) {
 	}
 }
 
-// A page not kept here whose content can't come down, the server failing,
-// exports as this device has it; only with none here does it say why.
 func TestExportFallsBackToTheCopyHere(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "down", http.StatusInternalServerError)
@@ -171,10 +163,6 @@ func TestExportFallsBackToTheCopyHere(t *testing.T) {
 	}
 }
 
-// A page exports at once where this device keeps its content as the
-// other devices have it: with nothing to sync with, kept on the device,
-// alone or with all pages, open, or served by a public link. Any other
-// comes down first.
 func TestExportBringsAPageNotKeptDown(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Away"})
@@ -204,9 +192,6 @@ func TestExportBringsAPageNotKeptDown(t *testing.T) {
 	}
 }
 
-// A zip export takes each recording's audio into files/, named for the
-// recording, and links it from the page; a file kept in a folder whose
-// path has a space, as Application Support has, is linked there too.
 func TestExportZipTakesAudio(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Application Support")
 	if err := os.MkdirAll(filepath.Join(dir, "recordings"), 0o750); err != nil {
@@ -265,7 +250,6 @@ func TestExportZipTakesAudio(t *testing.T) {
 	}
 }
 
-// readZip reads a zip's files by name.
 func readZip(t *testing.T, path string) map[string]string {
 	t.Helper()
 	r, err := zip.OpenReader(path)
@@ -286,8 +270,6 @@ func readZip(t *testing.T, path string) map[string]string {
 	return out
 }
 
-// The Edit menu's Copy as Plain Text copies the page's selection as text
-// alone, while the page has the focus.
 func TestEditMenuCopiesPlainText(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -329,8 +311,6 @@ func TestEditMenuCopiesPlainText(t *testing.T) {
 	}
 }
 
-// File › Export saves the open page as Markdown or as a PDF, as the
-// page's menu does, in the sidebar and in the page's header.
 func TestExportMenus(t *testing.T) {
 	a := templatesApp(t)
 	var export *mygo.MenuItem

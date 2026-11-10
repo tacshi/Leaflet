@@ -21,18 +21,13 @@ import (
 	"leaflet/locales"
 )
 
-// filePreview is a file shown in the window: what it needs of the file,
-// read once. Nothing in it runs: HTML shows as its source, and a file with
-// a page of its own, as a PDF, shows in a web view that is no part of the
-// app's.
 type filePreview struct {
 	file    store.File
 	kind    string
 	path    string
 	loading bool
-	// failed says it can't be shown.
-	failed bool
-	notice string
+	failed  bool
+	notice  string
 
 	code *codeeditor.State
 	md   string
@@ -44,8 +39,6 @@ type filePreview struct {
 	address string
 }
 
-// previewFile shows a file in the window, once it is here, or opens one
-// the app can't show in another app, as other files open.
 func (a *App) previewFile(f store.File) {
 	kind := doc.FilePreviewKind(f.Name, f.MimeType)
 	if kind == "" {
@@ -53,7 +46,6 @@ func (a *App) previewFile(f store.File) {
 		return
 	}
 	a.closePreview()
-	// The players' web views leave the window with the page.
 	a.playAlone("", "")
 	p := &filePreview{file: f, kind: kind, loading: true}
 	a.preview = p
@@ -79,7 +71,6 @@ func (a *App) previewFile(f store.File) {
 	}
 }
 
-// loadPreview reads what p shows from the file at path.
 func (a *App) loadPreview(p *filePreview, path string) {
 	p.path = path
 	switch p.kind {
@@ -109,7 +100,6 @@ func (a *App) loadPreview(p *filePreview, path string) {
 	}
 }
 
-// separator is what a table of name's values are separated by.
 func separator(name string) rune {
 	if strings.EqualFold(filepath.Ext(name), ".tsv") {
 		return '\t'
@@ -117,7 +107,6 @@ func separator(name string) rune {
 	return ','
 }
 
-// showPreview shows what was read of p's file.
 func (a *App) showPreview(p *filePreview, text filepreview.Text, rows [][]string, rowsCut bool, limit int64, err error) {
 	p.loading = false
 	if err != nil {
@@ -155,9 +144,6 @@ func (a *App) showPreview(p *filePreview, text filepreview.Text, rows [][]string
 	}
 }
 
-// previewPage shows p's file in a web view of its own: a player, or the
-// web view's own PDF viewer. It is someone else's, as the file is: it
-// calls nothing of the app's and goes nowhere.
 func (a *App) previewPage(p *filePreview) {
 	p.loading = false
 	if a.win == nil {
@@ -196,7 +182,6 @@ func (a *App) previewPage(p *filePreview) {
 	p.wv, p.address = wv, address
 }
 
-// closePreview goes back to what the window showed.
 func (a *App) closePreview() {
 	p := a.preview
 	if p == nil {
@@ -209,8 +194,6 @@ func (a *App) closePreview() {
 	}
 }
 
-// previewView fills the window with the file shown, under a bar with its
-// name; Escape or the bar's button go back.
 func (a *App) previewView(c *ui.Context) {
 	pal := theme.Of(c)
 	p := a.preview
@@ -239,7 +222,6 @@ func (a *App) previewView(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyEscape, a.closePreview)
 }
 
-// previewBody draws the file itself.
 func (a *App) previewBody(c *ui.Context, p *filePreview) {
 	pal := theme.Of(c)
 	message := func(text string) {
@@ -272,8 +254,6 @@ func (a *App) previewBody(c *ui.Context, p *filePreview) {
 	}
 }
 
-// previewWeb draws p's web view, as tall as the room, or height tall in
-// its middle for an audio bar.
 func (a *App) previewWeb(c *ui.Context, p *filePreview, height float32) {
 	if height == 0 {
 		ui.WebView(c.Key("preview-web"), p.wv).Fill()
@@ -284,7 +264,6 @@ func (a *App) previewWeb(c *ui.Context, p *filePreview, height float32) {
 	})
 }
 
-// previewImage draws p's picture, whole, in the room there is.
 func (a *App) previewImage(c *ui.Context, p *filePreview, message func(string)) {
 	link := "file://" + p.path
 	bmp := a.images.get(link, func() { a.update(func() {}) })
@@ -298,7 +277,6 @@ func (a *App) previewImage(c *ui.Context, p *filePreview, message func(string)) 
 	}
 }
 
-// previewTable draws p's rows, the first as the table's head.
 func (a *App) previewTable(c *ui.Context, p *filePreview) {
 	if len(p.rows) == 0 {
 		return
@@ -316,5 +294,4 @@ func (a *App) previewTable(c *ui.Context, p *filePreview) {
 	}).Fill().Padding(0, 16)
 }
 
-// audioBarHeight is the height of an audio file's player.
 const audioBarHeight = 54

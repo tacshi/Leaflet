@@ -18,15 +18,8 @@ import (
 	"leaflet/internal/store"
 )
 
-// The tools: the in-app agents' page tools (internal/agents/tools.go),
-// each given the page it works on, and tools to find, make and file pages.
-
-// pageToolNames are the in-app tools that work on one page.
 var pageToolNames = []string{"read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks"}
 
-// hints are each tool's title, and whether it only reads, or changes what
-// is there rather than adding to it, as a move does (the page history
-// keeps a page's blocks all the same).
 var hints = map[string]struct {
 	title                 string
 	readOnly, destructive bool
@@ -59,9 +52,6 @@ func toolList() []map[string]any {
 	var out []map[string]any
 	add := func(name, desc string, schema map[string]any) {
 		h := hints[name]
-		// What a tool reads stays on this device. What it writes does not:
-		// sync sends it on, to whoever else has the page, and the app loads
-		// a picture or a link card in it from its site by itself.
 		annotations := map[string]any{"title": h.title, "readOnlyHint": h.readOnly, "openWorldHint": !h.readOnly}
 		if !h.readOnly {
 			annotations["destructiveHint"] = h.destructive
@@ -115,36 +105,18 @@ func toolList() []map[string]any {
 	return out
 }
 
-// historyGap is how long after an agent's last edit of a page the next
-// one keeps a new history snapshot: a client's tool calls have no runs,
-// so edits close together count as one.
 const historyGap = 10 * time.Minute
 
 type pageTools struct {
-	s *Server
-	// app is a client that is an AI app, which what it reads on a page can
-	// steer, not a command the user gave themselves (Server.Call).
-	app bool
-	// edited is when this client last edited each page.
+	s      *Server
+	app    bool
 	edited map[string]int64
-	// read is each page as this client last read or edited it, of the
-	// keptReads it read or edited last, those first in order: a block it
-	// replaces or deletes that changed since, as the user typed in the
-	// app, is kept in a snapshot first (conflictSince).
-	read  map[string]*doc.Content
-	order []string
+	read   map[string]*doc.Content
+	order  []string
 }
 
-// keptReads is how many pages the server keeps as the client last read or
-// edited them: a client that reads page after page, as to search them,
-// would have the server keep every one. An edit of one read longer ago
-// keeps no snapshot of a change the client never saw, as an edit of a
-// page never read does (conflictSince), but the one before its edits
-// (snapshot).
 const keptReads = 16
 
-// keep keeps c as the client last read or edited page id, and forgets the
-// page read longest ago past keptReads.
 func (t *pageTools) keep(id string, c *doc.Content) {
 	t.read[id] = c
 	t.order = append(slices.DeleteFunc(t.order, func(k string) bool { return k == id }), id)
@@ -159,10 +131,6 @@ func (t *pageTools) call(name string, args map[string]any) map[string]any {
 	return agents.ToolAnswer(t.dispatch(name, clean))
 }
 
-// cleanArg is an argument of a call, its text fit to keep, in titles and
-// names as in Markdown: a NUL, which the server's columns refuse, so that
-// the page would never sync, and bytes that are no UTF-8, which go through
-// JSON no further, each read as U+FFFD.
 func cleanArg(v any) any {
 	switch v := v.(type) {
 	case string:
@@ -185,8 +153,6 @@ func cleanArg(v any) any {
 
 func toolErr(msg string) error { return &doc.ToolError{Message: msg} }
 
-// errUnreadable is a page whose stored content cannot be read
-// (store.ErrUnreadable), as the client is told: it is left as it is.
 var errUnreadable = toolErr("The page's content could not be read, so it was left as it is.")
 
 func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, error) {
@@ -202,7 +168,6 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 		}
 		out := []map[string]any{}
 		for _, h := range hits {
-			// Templates stay out of agents' page lists.
 			if h.Kind == "template" {
 				continue
 			}
@@ -285,9 +250,6 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 	return nil, toolErr("Unknown tool " + name + ".")
 }
 
-// currentPage is the page open in the app, with its selection, or else the
-// page opened last. A page agents can't reach is left out, as they would
-// read of it through the selection.
 func (t *pageTools) currentPage() (map[string]any, error) {
 	st := t.s.st
 	view, err := st.OpenView()
@@ -344,8 +306,6 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	return map[string]any{"pages": out, "folders": outFolders}, nil
 }
 
-// folders are the folders of the user's own space, the ones the sidebar
-// shows.
 func (t *pageTools) folders() ([]store.Folder, error) {
 	all, err := t.s.st.Folders()
 	if err != nil {
@@ -355,7 +315,6 @@ func (t *pageTools) folders() ([]store.Folder, error) {
 	return slices.DeleteFunc(all, func(f store.Folder) bool { return f.SpaceID != space }), nil
 }
 
-// folder is the folder of ID id.
 func (t *pageTools) folder(id any) (store.Folder, error) {
 	s, _ := id.(string)
 	if strings.TrimSpace(s) == "" {
@@ -373,8 +332,6 @@ func (t *pageTools) folder(id any) (store.Folder, error) {
 	return store.Folder{}, toolErr("No folder " + s + ".")
 }
 
-// place is where args put a page: inside the page parent_id, which the
-// user may change, or in the folder folder_id, or at the top level.
 func (t *pageTools) place(args map[string]any) (parent store.Page, folderID string, err error) {
 	parentID, _ := args["parent_id"].(string)
 	folderID, _ = args["folder_id"].(string)
@@ -393,8 +350,6 @@ func (t *pageTools) place(args map[string]any) (parent store.Page, folderID stri
 	return store.Page{}, folderID, nil
 }
 
-// page is the page args name, which edit asks to be one the user may
-// change.
 func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	id, _ := args["page_id"].(string)
 	if strings.TrimSpace(id) == "" {
@@ -404,8 +359,6 @@ func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	if err != nil || !p.DeletedAt.IsZero() {
 		return store.Page{}, toolErr("No page " + id + ".")
 	}
-	// Templates stay out of agents' page lists, and out of their reach by
-	// ID too: nor does a page go inside one, which would make it one.
 	if p.Template {
 		return store.Page{}, toolErr("Page " + id + " is a template, which agents leave alone.")
 	}
@@ -415,8 +368,6 @@ func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	return p, nil
 }
 
-// onPage runs one of the in-app agents' tools on a page, and stores what
-// it changed.
 func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	p, err := t.page(args, name != "read_page")
@@ -431,9 +382,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	delete(args, "page_id")
 	delete(args, "offset")
 	delete(args, "limit")
-	// The app may save the page while the tool runs: then it runs again on
-	// what the app saved, rather than save over it (UpdateContent). The
-	// edit keeps one snapshot, however many times it runs.
 	var out map[string]any
 	var saved *doc.Content
 	snapped := false
@@ -441,11 +389,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if !kept {
 			return false, toolErr("The page's content is not kept on this device.")
 		}
-		// Not with the user's other pages, which MCP's own tools read.
-		// What sites wrote of the blocks, a link card's title and a
-		// video's, which the in-app agents read only with the web (agents'
-		// Finish), the client reads as the page has it: it keeps to no URL
-		// guard of the app's.
 		tc := agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)
 		tc.SiteInfo = true
 		if name == "read_page" {
@@ -459,8 +402,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if len(x.Ops) == 0 {
 			return false, nil
 		}
-		// The snapshot goes first: an edit that could not keep one is not
-		// saved, so trying it again does not make it twice.
 		if !snapped {
 			if err := t.snapshot(p.ID, before); err != nil {
 				return false, err
@@ -478,8 +419,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	})
 	switch {
 	case errors.Is(err, store.ErrUnreadable):
-		// What cannot be read is refused rather than taken for an empty
-		// page, which saving would then put in its place.
 		return nil, errUnreadable
 	case errors.Is(err, store.ErrContentChanged):
 		return nil, toolErr("The page kept changing while saving. Read it again and retry.")
@@ -489,7 +428,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	if saved != nil {
 		t.edited[p.ID] = doc.NowMs()
 		t.keep(p.ID, saved.Copy())
-		// Not kept, the client's next edit only keeps a snapshot more.
 		if err := st.SetValue(editedPrefix+p.ID, editMark(t.s.agent, saved)); err != nil {
 			log.Printf("mcp: %v", err)
 		}
@@ -497,14 +435,8 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	return out, nil
 }
 
-// maxRead bounds a read_page answer's blocks, in bytes of JSON: what MCP
-// clients take from a tool is limited (Claude Code's 25,000 tokens, say),
-// and a longer page, of a few embeds, would not be read at all. It comes
-// in parts instead, each saying where the next starts.
 const maxRead = 60_000
 
-// partOf is the part of a page read_page's args ask for: from the block
-// at offset, at most limit blocks (0, as many as fit in maxRead).
 func partOf(args map[string]any) (offset, limit int, err error) {
 	count := func(key string, least int) (int, error) {
 		v, ok := args[key]
@@ -524,13 +456,6 @@ func partOf(args map[string]any) (offset, limit int, err error) {
 	return offset, limit, err
 }
 
-// readPart is read_page's answer of the part of page p, of content c,
-// from the block at offset, at most limit of them, or as many as fit in
-// maxRead, though always one: it says how many blocks the page has, and
-// where the next part starts, when there is more. The page's subpages and
-// comments come with the first part. Only the part's blocks are read as
-// agents read them (agents' Finish), with their transcripts: a long page
-// read in parts would have each read every one.
 func readPart(tc agents.ToolContext, p store.Page, c *doc.Content, offset, limit int) map[string]any {
 	out := map[string]any{"page": map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}}
 	size := 0
@@ -561,10 +486,6 @@ func readPart(tc agents.ToolContext, p store.Page, c *doc.Content, offset, limit
 	return out
 }
 
-// conflictSince reports whether ops replace or delete a block that changed
-// in now since read, the page as the client last had it: the client
-// writes over a change it never saw, as the user's in the app, which a
-// snapshot then keeps to restore. A page it never read tells nothing.
 func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
 	if read == nil {
 		return false
@@ -593,30 +514,15 @@ func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
 	return false
 }
 
-// beforeSave runs between an edit and saving it; tests save there,
-// standing in for the app.
 var beforeSave = func(pageID string) {}
 
-// editedPrefix starts the key-value settings that say how a client left a
-// page: editedPrefix + its ID is the page's editMark as last saved here.
 const editedPrefix = "mcp_edited:"
 
-// editMark names content as agent saved it, for a client started again to
-// tell the page it finds from one changed since: the blocks alone, as a
-// save stamps their times.
 func editMark(agent string, c *doc.Content) string {
 	sum := sha256.Sum256([]byte(agent + "\x00" + (&doc.Content{Children: c.Children}).Encode()))
 	return hex.EncodeToString(sum[:])
 }
 
-// snapshot keeps the page as it was before this client's edits, once per
-// stretch of them: none while the last edit saved is recent, nor while
-// the page's newest snapshot is a recent one of this client's. A client
-// started again for each edit, as the command line is, remembers no edit
-// of its own, and would otherwise keep one a run, pushing the page's
-// older history out. Either way the page must be as this client left it:
-// what the user typed since is in no snapshot, as a snapshot this recent
-// holds autosave back, and an edit after it would leave it in none.
 func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
 	label := "Before " + t.s.agent
 	if mark, ok := t.s.st.Value(editedPrefix + pageID); ok && mark == editMark(t.s.agent, before) {
@@ -632,7 +538,6 @@ func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
 
 func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	st := t.s.st
-	// Its content as the app's agents give a page theirs.
 	title, nodes, err := agents.PageNodes(args, t.s.agent)
 	if err != nil {
 		return nil, err
@@ -650,8 +555,6 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	if parent.ID != "" {
-		// As a page made from the sidebar, it shows in the page it is
-		// inside.
 		if err := t.linkSubpage(parent, p.ID); err != nil {
 			return nil, err
 		}
@@ -659,17 +562,12 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	return map[string]any{"page_id": p.ID}, nil
 }
 
-// movePage moves a page as the sidebar does, and keeps the links to it in
-// step: a page it leaves loses its link, and a page it goes into links to
-// it at its end. A page stays in its space, as the server has it: it goes
-// inside a page of that space, or to the top level only of the user's own.
 func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	p, err := t.page(args, true)
 	if err != nil {
 		return nil, err
 	}
-	// Neither p nor parent is a template: page refuses them.
 	parent, folderID, err := t.place(args)
 	if err != nil {
 		return nil, err
@@ -681,10 +579,6 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 		return nil, toolErr("A page shared with the user stays inside a page of its space: it cannot move to the top level or into a folder.")
 	case parent.ID != "" && st.IsDescendant(parent.ID, p.ID):
 		return nil, toolErr("A page cannot move inside itself or one of its subpages.")
-	// As the workspace agent's rule has it: with this one call a page the
-	// user alone has would go to others, its subpages with it, on what a
-	// page may have told the client. The user does that themselves, in
-	// the app or with a command of their own.
 	case t.app && parent.ID != "" && agents.ShowsToOthers(st, p, parent):
 		return nil, toolErr("Other people may have that page: inside it, this page and its subpages would be theirs to read. The user can move it there themselves, in the app.")
 	}
@@ -709,8 +603,6 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 	return map[string]any{"page_id": p.ID}, nil
 }
 
-// linkSubpage links page id at the end of parent, unless it links it
-// already.
 func (t *pageTools) linkSubpage(parent store.Page, id string) error {
 	return t.editLinks(parent, func(c *doc.Content) bool {
 		if len(subpageLinks(c, id)) > 0 {
@@ -721,7 +613,6 @@ func (t *pageTools) linkSubpage(parent store.Page, id string) error {
 	})
 }
 
-// unlinkSubpage removes parent's links to page id.
 func (t *pageTools) unlinkSubpage(parent store.Page, id string) error {
 	return t.editLinks(parent, func(c *doc.Content) bool {
 		links := subpageLinks(c, id)
@@ -732,7 +623,6 @@ func (t *pageTools) unlinkSubpage(parent store.Page, id string) error {
 	})
 }
 
-// subpageLinks are the IDs of c's links to page id.
 func subpageLinks(c *doc.Content, id string) []string {
 	var out []string
 	c.Walk(func(n, _ *doc.Node) {
@@ -743,10 +633,6 @@ func subpageLinks(c *doc.Content, id string) []string {
 	return out
 }
 
-// editLinks saves parent's content changed by edit, which reports whether
-// it changed it. A parent whose content is not on this device, or cannot
-// be read, is left as it is: the page is inside it all the same, in the
-// sidebar.
 func (t *pageTools) editLinks(parent store.Page, edit func(c *doc.Content) bool) error {
 	err := t.s.st.UpdateContent(parent.ID, func(c *doc.Content, kept bool) (bool, error) {
 		return kept && edit(c), nil

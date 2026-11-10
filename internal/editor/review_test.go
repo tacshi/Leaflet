@@ -16,7 +16,6 @@ import (
 	"leaflet/internal/theme"
 )
 
-// page sets the editor's page to paragraphs of texts.
 func page(e *Editor, texts ...string) []*doc.Node {
 	var nodes []*doc.Node
 	for _, s := range texts {
@@ -26,8 +25,6 @@ func page(e *Editor, texts ...string) []*doc.Node {
 	return nodes
 }
 
-// A page that has become read-only takes no undo or redo: the steps kept
-// from before would put back its text as it was, for a later edit to save.
 func TestUndoOnAReadOnlyPage(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello")
@@ -49,8 +46,6 @@ func TestUndoOnAReadOnlyPage(t *testing.T) {
 	}
 }
 
-// A line break that replaces text, as an input method or a text
-// replacement commits one, is one step with the text it replaced.
 func TestReplaceTextWithALineBreakIsOneStep(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello")
@@ -65,8 +60,6 @@ func TestReplaceTextWithALineBreakIsOneStep(t *testing.T) {
 	}
 }
 
-// Text that replaces a selection, as autocorrect or an input method's
-// commit puts it, is one step of undo, however many runes it has.
 func TestReplacingASelectionIsOneStep(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello world")
@@ -83,8 +76,6 @@ func TestReplacingASelectionIsOneStep(t *testing.T) {
 	}
 }
 
-// A block pasted on an empty line gives it its kind and none of what was
-// the line's own kind's: an empty heading's level, a folded toggle's fold.
 func TestPasteOnAnEmptyLineTakesOnlyItsKind(t *testing.T) {
 	for _, tc := range []struct {
 		typ  string
@@ -119,9 +110,6 @@ func TestPasteOnAnEmptyLineTakesOnlyItsKind(t *testing.T) {
 	}
 }
 
-// With no layout, as a second key before the next frame finds a block,
-// the caret and deletes still step a grapheme cluster: an emoji of
-// several, a flag, a letter and its mark.
 func TestStepsWithoutALayoutKeepClusters(t *testing.T) {
 	for _, cluster := range []string{"👩‍👩‍👧", "🇯🇵", "e\u0301", "👍🏽"} {
 		e, _, _ := setup(t)
@@ -153,8 +141,6 @@ func TestStepsWithoutALayoutKeepClusters(t *testing.T) {
 	}
 }
 
-// Text another app copies, the same as Leaflet copied, pastes as its own
-// text, not as the blocks Leaflet copied.
 func TestPasteOfTheSameTextFromAnotherApp(t *testing.T) {
 	e, tt, _ := setup(t)
 	nodes := page(e, "one", "two")
@@ -169,7 +155,6 @@ func TestPasteOfTheSameTextFromAnotherApp(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:one", "quote:two", "paragraph:one", "quote:two"}) {
 		t.Fatalf("own copy pasted as %v", got)
 	}
-	// Another app copies the same text, as plain text.
 	tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.Text, []byte(text)))))
 	clip.blocks[0].SetDelta(doc.Delta{{Text: "stale"}})
 	end = newText("paragraph", nil)
@@ -181,8 +166,6 @@ func TestPasteOfTheSameTextFromAnotherApp(t *testing.T) {
 	}
 }
 
-// An edit that takes out the page's only block, as removing its one
-// subpage's card does, leaves the page an empty line to type in.
 func TestEditThatEmptiesThePage(t *testing.T) {
 	e, tt, _ := setup(t)
 	sub := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": "P"}}
@@ -196,8 +179,6 @@ func TestEditThatEmptiesThePage(t *testing.T) {
 	}
 }
 
-// bigPage is an editor of a page of n paragraphs, every fourth with an
-// item nested under it, and all selected.
 func bigPage(b testing.TB, n int) *Editor {
 	b.Helper()
 	e := New(doc.Empty(), &fakeHost{})
@@ -214,8 +195,6 @@ func bigPage(b testing.TB, n int) *Editor {
 	return e
 }
 
-// What the selection toolbar's Comment and Ask agent read of a selection
-// over a long page takes one walk of it, not one for each block.
 func BenchmarkSelectedText(b *testing.B) {
 	for _, n := range []int{2000, 8000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
@@ -228,7 +207,6 @@ func BenchmarkSelectedText(b *testing.B) {
 	}
 }
 
-// Copying and deleting all of a long page walk it once.
 func BenchmarkCopyAndDeleteSelection(b *testing.B) {
 	for _, n := range []int{2000, 8000} {
 		b.Run(fmt.Sprint("copy/", n), func(b *testing.B) {
@@ -249,8 +227,6 @@ func BenchmarkCopyAndDeleteSelection(b *testing.B) {
 	}
 }
 
-// Tab and Shift-Tab with a selection over a long page find what it holds
-// in one walk of it, not one for each block.
 func TestTabOverASelectionIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times keys")
@@ -261,11 +237,7 @@ func TestTabOverASelectionIsLinear(t *testing.T) {
 		for range 3 {
 			runtime.GC()
 			start := time.Now()
-			// Until the clock has moved far enough to read: Windows' moves in
-			// ticks, and reads 0 for what ends within one.
 			for runs := 1; ; runs++ {
-				// The first block has none before it to go under, and the
-				// page's are in none to come out of.
 				e.Indent()
 				e.Outdent()
 				if took := time.Since(start); took >= 32*time.Millisecond {
@@ -282,8 +254,6 @@ func TestTabOverASelectionIsLinear(t *testing.T) {
 	}
 }
 
-// A key typed on a long page lays out only the block it changed: the
-// others keep their layouts without reading their text again.
 func BenchmarkTypeOnLongPage(b *testing.B) {
 	for _, n := range []int{1000, 3000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
@@ -308,9 +278,6 @@ func BenchmarkTypeOnLongPage(b *testing.B) {
 	}
 }
 
-// A change made as the blocks build, as typing in a table's cell, leaves
-// the blocks after it their places and depths, found again once, not a
-// walk of the page for each.
 func TestChangeWhileBuildingKeepsOrder(t *testing.T) {
 	e := bigPage(t, 8)
 	e.building = true
@@ -332,9 +299,6 @@ func TestChangeWhileBuildingKeepsOrder(t *testing.T) {
 	}
 }
 
-// The page's text takes a new accent or sepia paper as it is chosen, a
-// link's accent too: its layouts are of their palette, and made again in
-// another, not only once each block is edited.
 func TestLookChangesTheLayout(t *testing.T) {
 	t.Cleanup(func() { theme.Look(false, "") })
 	e, tt, _ := setup(t)
@@ -358,10 +322,6 @@ func TestLookChangesTheLayout(t *testing.T) {
 	}
 }
 
-// Home and End, Cmd-Left and Cmd-Right, and Cmd-Backspace take the line
-// the caret is on as the block wraps, not the whole block; at the end of
-// a line that wraps, the caret shows there, not at the next line's start.
-// Alt-Up and Alt-Down go to the block's ends.
 func TestLineKeysTakeTheLineShown(t *testing.T) {
 	e, tt, _ := setup(t)
 	e.SetWidth(120)
@@ -395,7 +355,7 @@ func TestLineKeysTakeTheLineShown(t *testing.T) {
 	tt.Key(ui.Alt, ui.KeyUp)
 	at(0, 0)
 	if runtime.GOOS != "darwin" {
-		return // Cmd is Ctrl, a word's key
+		return
 	}
 	e.PlaceCaret(n.ID, 14)
 	tt.Key(ui.Cmd, ui.KeyRight)
@@ -409,8 +369,6 @@ func TestLineKeysTakeTheLineShown(t *testing.T) {
 	}
 }
 
-// The arrows go the way they point in a paragraph reading right to left:
-// Left goes on in its text, and Right back.
 func TestArrowsInRightToLeftText(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("שלום עולם")
@@ -435,9 +393,6 @@ func TestArrowsInRightToLeftText(t *testing.T) {
 	}
 }
 
-// An input method composing on a block selected whole, or on a selection
-// ending on one, starts a paragraph, as typing does, and what it commits
-// goes there.
 func TestCompositionOnABlockSelectedWhole(t *testing.T) {
 	e, tt, _ := setup(t)
 	nodes := page(e, "first")
@@ -469,8 +424,6 @@ func TestCompositionOnABlockSelectedWhole(t *testing.T) {
 	}
 }
 
-// A double click takes a word whole, a letter with its marks, as an "e"
-// with its accent, and between words a cluster whole, as a flag.
 func TestWordAtTakesClusters(t *testing.T) {
 	rs := []rune("café au lait 🇯🇵!")
 	for _, tc := range []struct{ off, from, to int }{
@@ -482,9 +435,6 @@ func TestWordAtTakesClusters(t *testing.T) {
 	}
 }
 
-// A word deleted or stepped over goes in whole grapheme clusters: an
-// emoji with its variation selector, as "‼️", or a keycap, as "#️⃣", goes
-// whole, not a code point of it.
 func TestWordStepsTakeClusters(t *testing.T) {
 	rs := []rune("a ‼️ #️⃣ x")
 	for _, tc := range []struct{ off, start, end int }{
@@ -499,9 +449,6 @@ func TestWordStepsTakeClusters(t *testing.T) {
 	}
 }
 
-// Copy writes the blocks as CommonMark nests them, as an export does: a
-// bullet under "1. " three columns in, which pastes back nested, and a
-// toggle with its children in its <details>.
 func TestCopyNestsAsMarkdown(t *testing.T) {
 	e := New(doc.Empty(), &fakeHost{})
 	parent := newText("numbered_list", doc.Delta{{Text: "Parent"}})
@@ -523,9 +470,6 @@ func TestCopyNestsAsMarkdown(t *testing.T) {
 	}
 }
 
-// The link editor makes links that open: a web address without its
-// scheme over https, a mail address to mail, nothing to unlink; what no
-// link opens it doesn't take.
 func TestLinkEditorMakesLinksThatOpen(t *testing.T) {
 	for typed, want := range map[string]string{
 		" example.com/a ": "https://example.com/a", "https://x.dev": "https://x.dev", "localhost:3000": "https://localhost:3000",
@@ -554,8 +498,6 @@ func TestLinkEditorMakesLinksThatOpen(t *testing.T) {
 	}
 }
 
-// Keys in a menu just opened, before a frame has shown it, choose among
-// its own choices, not those of the menu before.
 func TestMenuKeysChooseFromTheMenuOpen(t *testing.T) {
 	e, tt, host := setup(t)
 	tt.Type("/")
@@ -569,9 +511,6 @@ func TestMenuKeysChooseFromTheMenuOpen(t *testing.T) {
 	}
 }
 
-// The full-width forms Chinese and Japanese input methods type take as
-// their ASCII does: "／" and "＠" open the menus, as "、" does where it is
-// no comma, "＃　" makes a heading and "－－－" a divider.
 func TestFullWidthShortcuts(t *testing.T) {
 	for _, tc := range []struct {
 		typed string
@@ -603,8 +542,6 @@ func TestFullWidthShortcuts(t *testing.T) {
 	}
 }
 
-// The table's buttons add a row under the cell being edited and a column
-// right of it, and take its own row or column away, not the last.
 func TestTableButtonsActOnTheEditedCell(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"A", "B", "C"}, {"a1", "b1", "c1"}, {"a2", "b2", "c2"}}, "")
@@ -641,8 +578,6 @@ func TestTableButtonsActOnTheEditedCell(t *testing.T) {
 	}
 }
 
-// Enter on the last row of a table that ends the page leaves it for a
-// new paragraph after it.
 func TestEnterLeavesATableThatEndsThePage(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"A"}, {"a1"}}, "")
@@ -659,8 +594,6 @@ func TestEnterLeavesATableThatEndsThePage(t *testing.T) {
 	}
 }
 
-// Typing makes a step of undo for each word, the space after it with it,
-// and for each run of maxTyped characters without one.
 func TestTypingStepsEndAtWords(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("one two three")
@@ -680,9 +613,6 @@ func TestTypingStepsEndAtWords(t *testing.T) {
 	}
 }
 
-// Undoing an edit leaves a toggle or a heading folded as the user left it
-// since: folding is no edit, and undo keeps it. A fold an edit made, as
-// indenting under a folded toggle unfolds it, goes back with the edit.
 func TestUndoKeepsLaterFolds(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("# Head")
@@ -699,8 +629,6 @@ func TestUndoKeepsLaterFolds(t *testing.T) {
 	}
 }
 
-// What the editor keeps of the blocks it shows goes with the blocks: a
-// block deleted leaves no box, layout or look behind.
 func TestDeletedBlocksLeaveNothingBehind(t *testing.T) {
 	e, tt, _ := setup(t)
 	nodes := page(e, "one", "two", "three")
@@ -716,8 +644,6 @@ func TestDeletedBlocksLeaveNothingBehind(t *testing.T) {
 	}
 }
 
-// Cmd-Enter checks the to-dos selected, or unchecks them when all are, and
-// folds the toggle or heading at the caret, or unfolds it.
 func TestCmdEnterChecksAndFolds(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("[] one")
@@ -755,8 +681,6 @@ func TestCmdEnterChecksAndFolds(t *testing.T) {
 	}
 }
 
-// A to-do's box is a check box to assistive technology, named as the
-// to-do, and a click on it checks the to-do once.
 func TestTodoBoxIsACheckBox(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("[] Call Ann")
@@ -773,10 +697,8 @@ func TestTodoBoxIsACheckBox(t *testing.T) {
 	}
 }
 
-// The page's context menu cuts, copies and pastes, as the keys do.
 func TestContextMenuCutsCopiesAndPastes(t *testing.T) {
 	e, tt, _ := setup(t)
-	// Below the room the selection's toolbar takes over it.
 	nodes := page(e, "", "", "hello world")
 	e.Select(Pos{nodes[2].ID, 0}, Pos{nodes[2].ID, 6})
 	tt.Frame()
@@ -798,9 +720,6 @@ func TestContextMenuCutsCopiesAndPastes(t *testing.T) {
 	}
 }
 
-// Backspace at the start of a paragraph last in a toggle takes it out,
-// after the toggle, as it outdents a nested item, and Enter on one that
-// is empty leaves the toggle for the line after it.
 func TestBackspaceAndEnterLeaveAToggle(t *testing.T) {
 	e, _, _ := setup(t)
 	e.SetType("toggle_list", 0)
@@ -822,7 +741,6 @@ func TestBackspaceAndEnterLeaveAToggle(t *testing.T) {
 	}
 }
 
-// A pie's last slice, beside its first, never takes the first's color.
 func TestPieSlicesBesideDiffer(t *testing.T) {
 	pal := theme.For(false)
 	for n := 2; n <= 20; n++ {
@@ -835,18 +753,10 @@ func TestPieSlicesBesideDiffer(t *testing.T) {
 	}
 }
 
-// A frame in which an edit is made as the blocks build, as typing in a
-// table's cell, costs as much more for a longer page, not the square:
-// eight times the blocks take well under the 64 times of the square. The
-// keys are timed by turns on the two pages, so a busy machine slows both
-// alike, the fastest of each taken; a comparison that still fails is
-// timed again, twice at most, as the square's would fail each time.
 func TestEditWhileBuildingIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times frames")
 	}
-	// page is a page of n paragraphs after a table, with the caret in its
-	// cell; key types a letter there, and returns how long it took.
 	page := func(n int) (table *doc.Node, key func() time.Duration) {
 		table, _ = doc.TableNode([][]string{{"A"}, {"a1"}}, "")
 		kids := []*doc.Node{table}
@@ -892,10 +802,6 @@ func TestEditWhileBuildingIsLinear(t *testing.T) {
 	}
 }
 
-// Blocks pasted together go in the order they came, wherever the caret
-// is: before its block at its start, after its text, or joined to it,
-// with the text after the caret, its children and the caret itself after
-// the last of them, and all in one step of undo.
 func TestPasteOfSeveralBlocksKeepsTheirOrder(t *testing.T) {
 	code := func(text string) *doc.Node { return doc.CodeNode(text, "go") }
 	item := func(text string, kids ...*doc.Node) *doc.Node {
@@ -972,8 +878,6 @@ func TestPasteOfSeveralBlocksKeepsTheirOrder(t *testing.T) {
 	}
 }
 
-// A long paste goes in at once, in one walk of the page, not one for each
-// of its lines.
 func TestPasteOfManyBlocksIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times pastes")
@@ -987,8 +891,6 @@ func TestPasteOfManyBlocksIsLinear(t *testing.T) {
 		for range 3 {
 			runtime.GC()
 			start := time.Now()
-			// Until the clock has moved far enough to read, as Tab's is
-			// timed: a new page each run, which takes its blocks as they are.
 			for runs := 1; ; runs++ {
 				e := New(doc.FromBlocks([]*doc.Node{newText("paragraph", doc.Delta{{Text: "abcd"}})}), &fakeHost{})
 				e.PlaceCaret(e.Content.Children[0].ID, 2)

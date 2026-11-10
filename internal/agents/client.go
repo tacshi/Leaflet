@@ -1,7 +1,3 @@
-// Package agents runs agents on pages: an OpenAI-compatible client, the
-// provider presets, the system prompt, the page tools every surface uses,
-// the loop for local models and the client of the server's loop for cloud
-// models (docs/protocol.md §2–4).
 package agents
 
 import (
@@ -23,32 +19,26 @@ import (
 	"leaflet/locales"
 )
 
-// APIError is a failed model request.
 type APIError struct {
-	Status  int
-	Message string
-	// RetryAfter is how long the server asked to be left before trying
-	// again, 0 when it did not say.
+	Status     int
+	Message    string
 	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string { return e.Message }
 
-// ToolCall is a tool the model asked to call.
 type ToolCall struct {
 	ID        string
 	Name      string
-	Arguments string // the raw JSON arguments
+	Arguments string
 }
 
-// ChatResult is the model's answer.
 type ChatResult struct {
 	Content      string
 	ToolCalls    []ToolCall
 	FinishReason string
 }
 
-// AssistantMessage is the answer as a message of the conversation.
 func (r ChatResult) AssistantMessage() map[string]any {
 	m := map[string]any{"role": "assistant", "content": r.Content}
 	if len(r.ToolCalls) > 0 {
@@ -61,11 +51,6 @@ func (r ChatResult) AssistantMessage() map[string]any {
 	return m
 }
 
-// sentArguments are a call's arguments as the conversation goes back to
-// the server with them: {} for what is no JSON object, as a call cut off.
-// A server that reads them back, as Ollama's does, refuses the whole
-// conversation over them, and the model is told what was wrong by the
-// call's result.
 func sentArguments(raw string) string {
 	var args map[string]any
 	if json.Unmarshal([]byte(raw), &args) != nil || args == nil {
@@ -74,17 +59,13 @@ func sentArguments(raw string) string {
 	return raw
 }
 
-// Client talks to any OpenAI-compatible API: OpenAI, Claude's compatibility
-// layer, xAI, OpenRouter, DeepSeek, GLM, Ollama, LM Studio, llama.cpp, vLLM.
 type Client struct {
 	BaseURL string
 	APIKey  string
 	HTTP    *http.Client
-	// Stream is the client of streamed answers, HTTP when nil.
-	Stream *http.Client
+	Stream  *http.Client
 }
 
-// NewClient returns a client for an endpoint.
 func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		BaseURL: endpoint.NormalizeBaseURL(baseURL), APIKey: apiKey,
@@ -93,42 +74,23 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
-// Model requests have no overall timeout: a long answer may take most of
-// a run, whose context bounds it. A server that stops answering is given
-// up on instead.
 const (
-	// answerTimeout bounds the wait for an answer that is not streamed,
-	// whose headers come only once the model has finished: a run's length.
 	answerTimeout = 10 * time.Minute
-	// streamTimeout bounds the wait for a streamed answer to start.
 	streamTimeout = 2 * time.Minute
 )
 
-// idleTimeout is how long an answer may go without sending more of
-// itself; tests shorten it.
 var idleTimeout = 2 * time.Minute
 
-// streamIdleTimeout is idleTimeout for a streamed answer, ChatGPT's: its
-// Responses API sends nothing while the model reasons, which can take
-// minutes before the first word.
 var streamIdleTimeout = 10 * time.Minute
 
-// errIdle is an answer that stopped coming.
 var errIdle = errors.New("the model stopped answering")
 
-// The transports are made on first use, after main gives
-// http.DefaultTransport the system's proxy (netproxy), so they keep it.
 var (
-	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &idleTimeout) })
-	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout, &streamIdleTimeout) })
-	// streamedAnswerTransport is an OpenAI-compatible server's streamed
-	// answer: a local server may load the model before it starts, and a
-	// reasoning model may send nothing while it thinks.
+	answerTransport         = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &idleTimeout) })
+	streamTransport         = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout, &streamIdleTimeout) })
 	streamedAnswerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &streamIdleTimeout) })
 )
 
-// modelTransport is http.DefaultTransport giving up on a server that sends
-// no headers within header, or no more of its answer within *idle.
 func modelTransport(header time.Duration, idle *time.Duration) http.RoundTripper {
 	base := http.DefaultTransport
 	if t, ok := base.(*http.Transport); ok {
@@ -157,7 +119,6 @@ func (t idleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return res, nil
 }
 
-// idleBody is an answer whose request ends when it stops coming.
 type idleBody struct {
 	io.ReadCloser
 	ctx    context.Context
@@ -184,8 +145,6 @@ func (b *idleBody) Close() error {
 	return err
 }
 
-// noRedirect refuses to follow a redirect: the request carries the API
-// key, which would go on to wherever the redirect points.
 func noRedirect(*http.Request, []*http.Request) error {
 	return errors.New("redirected")
 }
@@ -199,7 +158,6 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 	return io.ReadAll(res.Body)
 }
 
-// send makes a request, its answer an error when it failed.
 func (c *Client) send(ctx context.Context, hc *http.Client, method, path string, body any) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
@@ -236,8 +194,6 @@ func (c *Client) send(ctx context.Context, hc *http.Client, method, path string,
 	return nil, &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data), RetryAfter: retryAfter(res.Header)}
 }
 
-// retryAfter is the wait a busy server's Retry-After asks for, in seconds
-// or until a time; 0 when it asks none.
 func retryAfter(h http.Header) time.Duration {
 	v := strings.TrimSpace(h.Get("Retry-After"))
 	if s, err := strconv.Atoi(v); err == nil {
@@ -249,8 +205,6 @@ func retryAfter(h http.Header) time.Duration {
 	return 0
 }
 
-// errorMessage is what a failed answer says went wrong, its status if it
-// says nothing readable.
 func errorMessage(status string, data []byte) string {
 	msg := status
 	var m map[string]any
@@ -269,7 +223,6 @@ func errorMessage(status string, data []byte) string {
 	return msg
 }
 
-// ListModels reads the endpoint's /models.
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -309,17 +262,12 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// Chat sends a conversation, with tools when given.
 func (c *Client) Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error) {
 	return c.ChatStream(ctx, model, messages, tools, maxTokens, nil)
 }
 
-// Streamed is told an answer as it streams.
 type Streamed struct {
-	// Text gets the answer's text so far.
 	Text func(text string)
-	// Call gets the i-th tool call so far: its arguments as far as they
-	// came, the calls before it whole.
 	Call func(i int, name, args string)
 }
 
@@ -335,8 +283,6 @@ func (s *Streamed) call(i int, name, args string) {
 	}
 }
 
-// ChatStream is Chat with the answer streamed to on as it comes. A nil on
-// asks for the answer whole.
 func (c *Client) ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error) {
 	body := map[string]any{"model": model, "messages": messages, "stream": on != nil}
 	if len(tools) > 0 {
@@ -355,7 +301,6 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 		return ChatResult{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	// A server that does not stream answers whole, as JSON.
 	if on != nil && strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
 		return readStream(res.Body, on)
 	}
@@ -386,14 +331,12 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 	return out, nil
 }
 
-// chatMessage is a message of an answer, or a streamed piece of one.
 type chatMessage struct {
 	Content   any            `json:"content"`
 	ToolCalls []chatToolCall `json:"tool_calls"`
 }
 
 type chatToolCall struct {
-	// Index places a streamed piece of a call among the answer's calls.
 	Index    *int   `json:"index"`
 	ID       string `json:"id"`
 	Function struct {
@@ -414,7 +357,6 @@ func (tc chatToolCall) arguments() string {
 	}
 }
 
-// call is the i-th call of an answer.
 func (tc chatToolCall) call(i int) ToolCall {
 	args := tc.arguments()
 	if args == "" {
@@ -427,8 +369,6 @@ func (tc chatToolCall) call(i int) ToolCall {
 	return ToolCall{ID: id, Name: tc.Function.Name, Arguments: args}
 }
 
-// readStream reads a streamed answer: server-sent events, each a piece of
-// the message, its calls coming in pieces by index.
 func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
@@ -436,9 +376,6 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 	var text strings.Builder
 	var calls []*chatToolCall
 	var args []*strings.Builder
-	// slot numbers the calls by a server's indices in the order they
-	// began, as the answer's ToolCalls are: the indices may start past 0
-	// or leave gaps.
 	slot := map[int]int{}
 	done := false
 	for sc.Scan() {
@@ -473,13 +410,8 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 			on.text(text.String())
 		}
 		for _, tc := range ch.Delta.ToolCalls {
-			// A call without an index is a new one, unless it names one
-			// that came before.
 			i := -1
 			if tc.Index != nil {
-				// An index a server gives again with another ID starts
-				// another call: merged, the two would be one, of the
-				// second's name and both's arguments run together.
 				if j, ok := slot[*tc.Index]; ok && (tc.ID == "" || calls[j].ID == "" || calls[j].ID == tc.ID) {
 					i = j
 				}
@@ -545,7 +477,6 @@ func textOf(v any) string {
 	return fmt.Sprint(v)
 }
 
-// TestResult is what a connection test found.
 type TestResult struct {
 	OK            bool
 	SupportsTools bool
@@ -553,8 +484,6 @@ type TestResult struct {
 	Models        []string
 }
 
-// Test checks the endpoint answers and whether the model calls tools: the
-// one given, else the first the endpoint lists.
 func (c *Client) Test(ctx context.Context, model string) TestResult {
 	models, listErr := c.ListModels(ctx)
 	if model == "" {
@@ -569,15 +498,10 @@ func (c *Client) Test(ctx context.Context, model string) TestResult {
 	return testModel(ctx, c, model, models, c.BaseURL)
 }
 
-// TestModel checks a model answers and whether it calls tools; models are
-// those its provider lists, nil when it lists none.
 func TestModel(ctx context.Context, m Model, model string, models []string) TestResult {
 	return testModel(ctx, m, model, models, "")
 }
 
-// testModel is TestModel of a model at the endpoint at, which a failure
-// other than the model's own answer says could not be reached; "" says
-// the failure as it is.
 func testModel(ctx context.Context, m Model, model string, models []string, at string) TestResult {
 	res, err := m.Chat(ctx, model, []map[string]any{{
 		"role": "user", "content": `Call the ping tool with {"value": "ok"}. Do not reply with text.`,
@@ -587,9 +511,6 @@ func testModel(ctx context.Context, m Model, model string, models []string, at s
 			"name": "ping", "description": "Health check.",
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{"value"}},
 		},
-		// No cap on the answer: a model that thinks first spends a small
-		// one thinking, and would seem not to call tools, and reasoning
-		// models refuse max_tokens. The server's test sets none either.
 	}}, 0)
 	if err != nil {
 		var api *APIError

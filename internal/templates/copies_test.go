@@ -18,9 +18,6 @@ import (
 	"leaflet/locales"
 )
 
-// A copy goes next to the page, titled as a copy; one of a page shared
-// with the user goes into their own space when they can't add to its
-// parent.
 func TestDuplicate(t *testing.T) {
 	st := openStore(t)
 	mine, _ := st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -66,8 +63,6 @@ func TestDuplicate(t *testing.T) {
 	}
 }
 
-// A page with a recording on it, or under it, being made or transcribed
-// is not copied; one beside it is.
 func TestRecordingIn(t *testing.T) {
 	st := openStore(t)
 	notes, _ := st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -105,9 +100,6 @@ func TestRecordingIn(t *testing.T) {
 	}
 }
 
-// A file or a recording's audio not on this device, or gone from where it
-// was stored, says the copy waits for it, in the app's language; another
-// error is itself.
 func TestCopyError(t *testing.T) {
 	for _, err := range []error{store.ErrCopyNotHere, fs.ErrNotExist} {
 		if got := CopyError(err); !errors.Is(got, ErrFilesUploading) || got.Error() != locales.TemplateFilesUploading() {
@@ -120,8 +112,6 @@ func TestCopyError(t *testing.T) {
 	}
 }
 
-// fetching is a page with a file and a recording only stored, the
-// server's store of them, and sync through it.
 func fetching(t *testing.T, st *store.Store, served map[string]string) (store.Page, store.Recording, *syncsvc.Service) {
 	t.Helper()
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,8 +152,6 @@ func fetching(t *testing.T, st *store.Store, served map[string]string) (store.Pa
 	return p, r, syncsvc.New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 }
 
-// What a copy needs comes to this device, the audio said for dropping
-// once the copy is made; until sync can fetch, it waits.
 func TestNeedsAndFetch(t *testing.T) {
 	st := openStore(t)
 	p, r, sync := fetching(t, st, map[string]string{"files": "%PDF", "recordings": "RIFF"})
@@ -186,7 +174,6 @@ func TestNeedsAndFetch(t *testing.T) {
 	}
 }
 
-// A fetch that fails gives the audio that came before it, to drop.
 func TestFetchFailsWithWhatCame(t *testing.T) {
 	st := openStore(t)
 	p, r, sync := fetching(t, st, map[string]string{"recordings": "RIFF"})
@@ -200,8 +187,6 @@ func TestFetchFailsWithWhatCame(t *testing.T) {
 	}
 }
 
-// A recording still uploading from where it was made can't come: the
-// copy waits for it.
 func TestNeedsWaitsForUploads(t *testing.T) {
 	st := openStore(t)
 	p, r, sync := fetching(t, st, nil)
@@ -213,8 +198,6 @@ func TestNeedsWaitsForUploads(t *testing.T) {
 	}
 }
 
-// The audio fetched for a copy goes as Keep the audio says: until
-// uploaded, at once, as the original's is uploaded; else it stays.
 func TestDropAudio(t *testing.T) {
 	st := openStore(t)
 	p, _ := st.CreatePage(store.NewPageOptions{Title: "Call"})

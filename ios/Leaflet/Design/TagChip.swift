@@ -2,8 +2,6 @@ import LeafletCore
 import SwiftUI
 import UIKit
 
-/// TagChip shows a tag as the desktop does: a pill tinted in the tag's
-/// color, its name in that color mixed toward the text's.
 struct TagChip<Trailing: View>: View {
     let name: String
     @ViewBuilder var trailing: () -> Trailing
@@ -28,21 +26,16 @@ extension TagChip where Trailing == EmptyView {
 }
 
 extension TagChip {
-    /// color is a tag's color, as the core chooses it for the desktop too
-    /// (MobileTagColor), so a tag has the same one on every device.
     static func color(_ name: String) -> UIColor {
         UIColor(hex: MobileTagColor(name)) ?? .systemTeal
     }
 
-    /// ink is the color of a tag's name: its color, darker or, on a dark
-    /// theme, lighter, mixed toward the text's.
     static func ink(_ name: String, text: Color) -> Color {
         Color(color(name).mixed(with: UIColor(text), by: 0.35))
     }
 }
 
 extension UIColor {
-    /// mixed is the color a fraction t of the way to other.
     func mixed(with other: UIColor, by t: CGFloat) -> UIColor {
         var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
         var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)

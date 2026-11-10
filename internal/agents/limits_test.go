@@ -20,9 +20,6 @@ import (
 	"leaflet/locales"
 )
 
-// The thinking of a model that thinks aloud stays out of its reply: a
-// whole block of it, in any case; all before a closing tag none opened,
-// as models whose template opens it write; and an opening tag left open.
 func TestThinkingLeftOut(t *testing.T) {
 	for in, want := range map[string]string{
 		"Plain.":              "Plain.",
@@ -48,8 +45,6 @@ func TestThinkingLeftOut(t *testing.T) {
 	}
 }
 
-// The page's title, which someone else may have written, goes with the
-// request as quoted data, not in the system prompt.
 func TestPageTitleIsData(t *testing.T) {
 	f := &fakeModel{replies: []map[string]any{{"content": "Done."}}}
 	srv := httptest.NewServer(f)
@@ -70,8 +65,6 @@ func TestPageTitleIsData(t *testing.T) {
 	}
 }
 
-// An embed's source too long to read is left out of what agents read,
-// its length said instead; one that fits is read whole.
 func TestLongEmbedLeftOutOfViews(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{
 		{ID: "fits", Type: "embed", Data: map[string]any{"title": "Fits", "html": strings.Repeat("é", maxViewHTML)}},
@@ -89,9 +82,6 @@ func TestLongEmbedLeftOutOfViews(t *testing.T) {
 	}
 }
 
-// A call streaming more blocks than a call writes stops going into the
-// page at the limit, and once it has all come, refused, takes out what
-// it put in.
 func TestDraftStopsAtTheCallLimit(t *testing.T) {
 	var lines []string
 	for i := range 2050 {
@@ -129,8 +119,6 @@ func TestDraftStopsAtTheCallLimit(t *testing.T) {
 	}
 }
 
-// A run writes at most maxRunBlocks blocks in all: a call past them is
-// refused, and changes nothing.
 func TestRunStopsAtTheBlockLimit(t *testing.T) {
 	x := executor(page())
 	x.written = maxRunBlocks - 1
@@ -146,8 +134,6 @@ func TestRunStopsAtTheBlockLimit(t *testing.T) {
 	}
 }
 
-// Calls past the most one answer makes are not made: the model is told to
-// make them in its next.
 func TestTooManyCallsInOneAnswer(t *testing.T) {
 	var calls []any
 	for i := range maxRoundCalls + 1 {
@@ -171,9 +157,6 @@ func TestTooManyCallsInOneAnswer(t *testing.T) {
 	}
 }
 
-// A model that was busy or failing is asked once more, after the wait it
-// asks for; one that refused the request, or asks for too long a wait, is
-// not.
 func TestBusyModelAskedAgain(t *testing.T) {
 	saved := retryWait
 	t.Cleanup(func() { retryWait = saved })
@@ -210,8 +193,6 @@ func TestBusyModelAskedAgain(t *testing.T) {
 	}
 }
 
-// What a run did is said in the app's language: its edits, and how it
-// ended.
 func TestRunSaidInTheAppsLanguage(t *testing.T) {
 	i18n.SetLocaleFunc(func() string { return "ja" })
 	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
@@ -230,9 +211,6 @@ func TestRunSaidInTheAppsLanguage(t *testing.T) {
 	}
 }
 
-// A table's cell, and the paragraph in it, are no blocks a call may name,
-// as on the server: not as a position, nor to rewrite, move, delete or
-// write in place of. The table itself is.
 func TestTableCellsAreNotBlocks(t *testing.T) {
 	c := page()
 	table, err := doc.SpecToNode(map[string]any{"type": "table", "rows": []any{[]any{"a", ""}}}, "t1", "Test")
@@ -267,11 +245,6 @@ func TestTableCellsAreNotBlocks(t *testing.T) {
 	}
 }
 
-// What others may have written, the title, the selection and the comment
-// thread, goes before the request as JSON on one line each, as the
-// server's runs send it: none of it opens a "Request:" of its own. The
-// page's blocks go too while short, and the model reads a longer page
-// with read_page, unless it cannot.
 func TestRequestCarriesOthersWritingAsData(t *testing.T) {
 	ask := func(req Request, c *doc.Content) string {
 		f := &fakeModel{replies: []map[string]any{{"content": "Done."}}}
@@ -322,9 +295,6 @@ func TestRequestCarriesOthersWritingAsData(t *testing.T) {
 	}
 }
 
-// The prompt has the server's rules: block IDs stay stable, a run
-// finishes its job, its edits being one undo step, a new page is one of
-// its own, and text it is asked to save goes in whole.
 func TestPromptHasTheServersRules(t *testing.T) {
 	p := SystemPrompt("Claude", "sidebar", false, true, false, false, false, true)
 	for _, rule := range []string{"Keep block IDs stable", "finish the job", "If the page's blocks are not in the request, call read_page", "come before the request as JSON",
@@ -335,8 +305,6 @@ func TestPromptHasTheServersRules(t *testing.T) {
 	}
 }
 
-// A URL in a table's cell is on the page as the run began, as the server
-// takes it: a run that read another page may load it in a block.
 func TestURLInATableCellIsTheUsers(t *testing.T) {
 	c := page()
 	table, err := doc.SpecToNode(map[string]any{"type": "table", "rows": []any{[]any{"Chart"}, []any{"https://example.com/cell.png"}}}, "t1", "Test")
@@ -362,75 +330,6 @@ func TestURLInATableCellIsTheUsers(t *testing.T) {
 	}
 }
 
-// A cloud run's write_markdown is said as written, as a local run's is,
-// by the tool the server names with its ops, streamed or in its job; from
-// an older server, which names none, as inserted.
-func TestCloudWriteSaidAsWritten(t *testing.T) {
-	para := map[string]any{"id": "p9", "type": "paragraph", "data": map[string]any{"delta": []any{map[string]any{"insert": "Hi"}}}}
-	insert := map[string]any{"op": "insert", "position": map[string]any{"at": "end"}, "nodes": []any{para, para}}
-	replace := map[string]any{"op": "replace", "id": "p1", "node": para, "previous": para}
-	var said []string
-	_, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{
-		{"type": "op", "op": replace, "tool": "write_markdown"},
-		{"type": "op", "op": insert, "tool": "write_markdown"},
-		{"type": "op", "op": replace, "tool": "replace_block"},
-		{"type": "op", "op": insert},
-		{"type": "done", "reply": ""},
-	}}, "j1", Events{Op: func(_ doc.Op, s string) { said = append(said, s) }})
-	want := []string{"Wrote a block", "Wrote 2 blocks", "Rewrote a block", "Inserted 2 blocks"}
-	if err != nil || strings.Join(said, "|") != strings.Join(want, "|") {
-		t.Errorf("said %q, %v", said, err)
-	}
-	was := jobPollEvery
-	jobPollEvery = time.Millisecond
-	t.Cleanup(func() { jobPollEvery = was })
-	read := 0
-	res, err := RunCloud(context.Background(), fakeStream{read: &read, jobs: []map[string]any{
-		{"status": "done", "result": map[string]any{"reply": "", "ops": []any{insert, insert},
-			"edits": []any{map[string]any{"tool": "write_markdown"}, map[string]any{"tool": "insert_blocks"}}}},
-	}}, "j1", Events{})
-	if err != nil || len(res.Edits) != 2 || res.Edits[0].Summary != "Wrote 2 blocks" || res.Edits[1].Summary != "Inserted 2 blocks" {
-		t.Errorf("cut off: %v, edits %+v", err, res.Edits)
-	}
-}
-
-// A cloud run's edits are said from its ops in the app's language, as a
-// local run's are, not as the server words them; those of a run whose
-// stream was cut off too, from its job.
-func TestCloudEditsSaidInTheAppsLanguage(t *testing.T) {
-	i18n.SetLocaleFunc(func() string { return "ja" })
-	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
-	chart := map[string]any{"id": "c1", "type": "chart", "data": map[string]any{"title": "Q3"}}
-	insert := map[string]any{"op": "insert", "position": map[string]any{"at": "end"}, "nodes": []any{chart}}
-	del := map[string]any{"op": "delete", "ids": []any{"p1", "l1"}}
-	var said []string
-	res, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{
-		{"type": "op", "op": insert, "summary": "Inserted a chart · Q3"},
-		{"type": "op", "op": del, "summary": "Deleted 2 blocks"},
-		{"type": "done", "reply": ""},
-	}}, "j1", Events{Op: func(_ doc.Op, s string) { said = append(said, s) }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"グラフ · Q3を挿入", "2個のブロックを削除"}
-	if strings.Join(said, "|") != strings.Join(want, "|") || len(res.Edits) != 2 || res.Edits[0].Summary != want[0] || res.Edits[1].Summary != want[1] {
-		t.Errorf("said %q, edits %+v", said, res.Edits)
-	}
-	was := jobPollEvery
-	jobPollEvery = time.Millisecond
-	t.Cleanup(func() { jobPollEvery = was })
-	read := 0
-	res, err = RunCloud(context.Background(), fakeStream{read: &read, jobs: []map[string]any{
-		{"status": "done", "result": map[string]any{"reply": "", "ops": []any{insert, del},
-			"edits": []any{map[string]any{"summary": "Inserted a chart · Q3"}, map[string]any{"summary": "Deleted 2 blocks"}}}},
-	}}, "j1", Events{})
-	if err != nil || len(res.Edits) != 2 || res.Edits[0].Summary != want[0] || res.Edits[1].Summary != want[1] {
-		t.Errorf("cut off: %v, edits %+v", err, res.Edits)
-	}
-}
-
-// A tool's result reaches the model cut to as many UTF-16 units of its
-// JSON as the server's, saying it was cut, as the server cuts one.
 func TestToolResultsCutAsOnTheServer(t *testing.T) {
 	short := strings.Repeat("a", toolResultLimit)
 	if got := cutResult(short); got != short {
@@ -441,7 +340,6 @@ func TestToolResultsCutAsOnTheServer(t *testing.T) {
 	if !strings.HasSuffix(got, "…(truncated)") || !strings.HasPrefix(got, strings.Repeat("😀", toolResultLimit/2)) || len([]rune(got)) != toolResultLimit/2+len([]rune("…(truncated)")) {
 		t.Errorf("cut to %d runes", len([]rune(got)))
 	}
-	// Through a run: a page of many long blocks, read whole.
 	c := page()
 	for i := range 40 {
 		n := &doc.Node{ID: fmt.Sprint("long", i), Type: "paragraph"}
@@ -460,7 +358,6 @@ func TestToolResultsCutAsOnTheServer(t *testing.T) {
 	}
 }
 
-// list_pages lists at most as many pages as the agent function's.
 func TestListPagesListsAtMostAsManyAsTheServer(t *testing.T) {
 	st := openStore(t)
 	here, err := st.CreatePage(store.NewPageOptions{Title: "Here"})
@@ -478,9 +375,6 @@ func TestListPagesListsAtMostAsManyAsTheServer(t *testing.T) {
 	}
 }
 
-// Blocks that come together in a tick of the stream go in as one insert,
-// which walks the page once, not one each: the page gets one change for
-// them, and the run its op as ever.
 func TestDraftsNewBlocksTogether(t *testing.T) {
 	x := executor(page())
 	var deltas [][]doc.Op
@@ -501,10 +395,6 @@ func TestDraftsNewBlocksTogether(t *testing.T) {
 	}
 }
 
-// A cloud run's request keeps to well under the most the server keeps of
-// one (1 MiB of its JSON), however much the user selected or wrote, even
-// of characters JSON writes six bytes each: its free text is cut at a
-// character's boundary, as the device's own run reads the selection.
 func TestJobRequestKeepsUnderTheServersMost(t *testing.T) {
 	huge := strings.Repeat("\x01é日", 400_000)
 	req := Request{Instruction: "Sum up " + huge, SelectionText: huge, AgentName: huge}

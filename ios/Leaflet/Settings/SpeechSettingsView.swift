@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// SpeechSection is Settings' row for Speech to text: where recordings
-/// are transcribed, which opens its settings.
 struct SpeechSection: View {
     @Environment(AppModel.self) private var app
     @State private var status = ""
@@ -16,49 +14,31 @@ struct SpeechSection: View {
         }
         .task {
             if let s = try? await app.client?.speechSettings() { status = s.status }
-            // Where transcription runs follows signing in or out, and the
-            // keys and settings, here or from another device.
             for await _ in app.changes(of: Self.tables) {
                 if let s = try? await app.client?.speechSettings() { status = s.status }
             }
         }
     }
 
-    /// tables are those whose changes change the speech settings: the
-    /// session, the settings and the agent providers, whose keys a cloud
-    /// endpoint uses.
-    static let tables: Set<String> = ["session", "key_values", "model_providers", "*"]
+    static let tables: Set<String> = ["key_values", "*"]
 }
 
-/// SpeechSettingsView is Settings › Speech to text, as on the desktop: the
-/// speech providers set up, each with its own page of settings, the
-/// language, and a test of the microphone. There is no default: each
-/// transcription picks its provider.
 struct SpeechSettingsView: View {
     @Binding var status: String
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var loaded: SpeechSettings?
     @State private var stt: SttSettings?
-    /// keepAudio is the choice made here, over the one read.
     @State private var keepAudio: String?
     @State private var endpointKey = ""
-    /// savedKey is the endpoint's key as kept, and keyFocused says its field
-    /// has the keyboard: the key is kept as the field lets it go, not as
-    /// each letter comes, which would keep the first letters of it.
     @State private var savedKey = ""
     @FocusState private var keyFocused: Bool
     @State private var sonioxKey = ""
     @State private var mossKey = ""
-    @State private var providers: [AgentProvider] = []
     @State private var testing = false
     @State private var saving = false
-    /// result is how the last Test, or saving a key, went.
     @State private var result: (ok: Bool, text: String)?
-    /// onDevice are the languages the device's own engine transcribes, by
-    /// code, once it has said.
     @State private var onDevice: Set<String>?
-    /// adding is the provider being added, whose page shows.
     @State private var adding: String?
 
     var body: some View {
@@ -71,7 +51,6 @@ struct SpeechSettingsView: View {
         .themedForm(palette)
         .navigationTitle(L.recSttTitle)
         .navigationBarTitleDisplayMode(.inline)
-        // A provider being added, from the Add menu: its page, as its row's.
         .navigationDestination(item: $adding) { id in
             if let stt = Binding($stt) { providerPage(id, stt) }
         }
@@ -82,18 +61,14 @@ struct SpeechSettingsView: View {
             await load()
             for await _ in app.changes(of: SpeechSection.tables) {
                 await refresh()
-                providers = ((try? await app.client?.providers()) ?? []).filter { !$0.isLocal }
             }
         }
         .onDisappear {
             saveKey()
-            // What changed in the moment before Back, which the wait below
-            // would drop as the view goes.
             if let stt, loaded != nil, stt != loaded?.stt {
                 Task { await save(stt) }
             }
         }
-        // Kept as it changes, once typing stops for a moment.
         .task(id: stt) {
             guard let stt, loaded != nil, stt != loaded?.stt else { return }
             try? await Task.sleep(for: .milliseconds(400))
@@ -102,8 +77,6 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// save keeps the settings as stt has them, and reads again what they
-    /// make of themselves.
     private func save(_ stt: SttSettings) async {
         try? await app.client?.saveSpeechSettings(stt)
         await refresh()
@@ -116,22 +89,20 @@ struct SpeechSettingsView: View {
         endpointKey = s.endpointKey
         savedKey = s.endpointKey
         status = s.status
-        providers = ((try? await client.providers()) ?? []).filter { !$0.isLocal }
     }
 
-    /// refresh reads again what the settings make of themselves: where
-    /// transcription runs, and whether the endpoint is on this network.
     private func refresh() async {
         guard let s = try? await app.client?.speechSettings() else { return }
         loaded?.stt = s.stt
         loaded?.status = s.status
-        loaded?.localEndpoint = s.localEndpoint
         loaded?.sonioxSaved = s.sonioxSaved
+        if !keyFocused, endpointKey == savedKey, s.stt.baseURL == stt?.baseURL {
+            endpointKey = s.endpointKey
+            savedKey = s.endpointKey
+        }
         loaded?.mossSaved = s.mossSaved
         loaded?.providers = s.providers
         loaded?.addable = s.addable
-        // The core takes the first provider set up when the one chosen is
-        // not, as when the first one's key is saved.
         if stt?.provider != s.stt.provider { stt?.provider = s.stt.provider }
         status = s.status
     }
@@ -163,8 +134,6 @@ struct SpeechSettingsView: View {
                     }
                 }
             }
-            // Each transcription picks its provider: speakers are labelled by
-            // those that can, Soniox and MOSS.
             if s.providers.contains(where: { ["soniox", "moss"].contains($0.id) }) {
                 Toggle(L.recSttSpeakers, isOn: stt.speakerLabels)
             }
@@ -189,8 +158,6 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// providerPage is a speech provider's own settings: its key, address
-    /// or model, a test of them, and removing it.
     private func providerPage(_ id: String, _ stt: Binding<SttSettings>) -> some View {
         ProviderPage { dismiss in
             Form {
@@ -204,7 +171,7 @@ struct SpeechSettingsView: View {
                         case "moss":
                             moss(s, stt)
                         default:
-                            endpoint(s, stt)
+                            endpoint(stt)
                         }
                     }
                 } footer: {
@@ -230,7 +197,6 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// remove takes a provider off the list, its key off this device.
     private func remove(_ id: String) async {
         do {
             try await app.client?.removeSpeechProvider(id)
@@ -242,61 +208,60 @@ struct SpeechSettingsView: View {
         } catch {
             result = (false, error.localizedDescription)
         }
-        // The address the core cleared, which the fields here still have.
         if let s = try? await app.client?.speechSettings() {
             stt?.baseURL = s.stt.baseURL
             stt?.model = s.stt.model
-            stt?.providerID = s.stt.providerID
         }
         await refresh()
     }
 
     @ViewBuilder
-    private func endpoint(_ s: SpeechSettings, _ stt: Binding<SttSettings>) -> some View {
-        // A server on another machine: none runs on the iPad itself.
+    private func endpoint(_ stt: Binding<SttSettings>) -> some View {
         field(L.commonEndpoint, "http://mac.local:8000/v1", stt.baseURL, url: true)
+            .onChange(of: stt.wrappedValue.baseURL) { before, now in
+                guard Self.origin(before) != Self.origin(now) else { return }
+                endpointKey = ""
+                savedKey = ""
+            }
         field(L.commonModel, "gpt-transcribe", stt.model)
         let url = stt.wrappedValue.baseURL.trimmingCharacters(in: .whitespaces)
-        if url.isEmpty {
-            // The key's row comes with an address: where it is says where
-            // the key is kept.
-        } else if s.localEndpoint {
-            SecureField(L.recSttApiKey, text: $endpointKey, prompt: Text(L.recSttOptional))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($keyFocused)
-                .onSubmit(saveKey)
-                .onChange(of: keyFocused) { if !keyFocused { saveKey() } }
-            // The test has the fields as they are now.
-            let (model, key) = (stt.wrappedValue.model, endpointKey)
-            testButton { try await $0.testEndpoint(url: url, model: model, key: key) }
-        } else {
-            // The server calls a cloud endpoint with an agent provider's key.
-            Picker(
-                L.recSttKeyFrom,
-                selection: Binding(
-                    get: { stt.wrappedValue.providerID ?? "" },
-                    set: { stt.wrappedValue.providerID = $0.isEmpty ? nil : $0 })
-            ) {
-                Text(L.recSttNoKey).tag("")
-                ForEach(providers) { Text($0.name).tag($0.id) }
+        if !url.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                SecureField(L.recSttApiKey, text: $endpointKey, prompt: Text(L.recSttOptional))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($keyFocused)
+                    .onSubmit(saveKey)
+                    .onChange(of: keyFocused) { if !keyFocused { saveKey() } }
+                Text(L.recSttKeyInKeychain).font(.footnote).foregroundStyle(.secondary)
             }
-            Text(providers.isEmpty ? L.recSttAddProvider : L.recSttKeyFromDesc)
-                .font(.footnote).foregroundStyle(.secondary)
+            let model = stt.wrappedValue.model
+            let typed = endpointKey == savedKey ? nil : endpointKey
+            testButton { client in
+                if let typed { try await client.setEndpointKey(url: url, key: typed) }
+                return try await client.testEndpoint(url: url, model: model, key: "")
+            }
         }
     }
 
-    /// saveKey keeps the endpoint's key as the field has it, if it
-    /// changed.
+    private static func origin(_ address: String) -> String? {
+        let address = address.trimmingCharacters(in: .whitespaces)
+        guard let url = URLComponents(string: address), let scheme = url.scheme,
+            let host = url.host, !host.isEmpty
+        else { return nil }
+        return "\(scheme)://\(host)\(url.port.map { ":\($0)" } ?? "")".lowercased()
+    }
+
     private func saveKey() {
         let (key, before) = (endpointKey, savedKey)
-        guard loaded != nil, key != before else { return }
+        guard loaded != nil, key != before, let url = stt?.baseURL else { return }
         savedKey = key
         Task {
-            do { try await app.client?.setEndpointKey(key) } catch {
+            do { try await app.client?.setEndpointKey(url: url, key: key) } catch {
                 savedKey = before
                 result = (false, L.recSttKeyNotSaved(error: error.localizedDescription))
             }
+            await refresh()
         }
     }
 
@@ -309,7 +274,7 @@ struct SpeechSettingsView: View {
             )
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            Text(s.signedIn ? L.recSttSonioxOnServer : L.recSttSonioxOnDevice)
+            Text(L.recSttSonioxOnDevice)
                 .font(.footnote).foregroundStyle(.secondary)
         }
         HStack {
@@ -370,8 +335,6 @@ struct SpeechSettingsView: View {
         .buttonStyle(.borderless)
     }
 
-    /// languages are those the language picker offers: on the device, only
-    /// those its engine transcribes, and the one chosen, to change.
     private func languages(_ s: SpeechSettings, _ stt: SttSettings) -> [SpeechSettings.Language] {
         guard stt.provider == "on-device", let onDevice else { return s.languages }
         return s.languages.filter {
@@ -430,8 +393,6 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// heard says how the test of the microphone goes, or what it heard:
-    /// live, as it hears it.
     private func heard(_ state: RecordingState, live: String) -> String? {
         if !state.testing { return state.heard.isEmpty ? nil : state.heard }
         if state.starting { return L.recSttMicStarting }
@@ -454,7 +415,6 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// testButton is a Test button that runs test, saying how it went.
     private func testButton(_ test: @escaping @Sendable (CoreClient) async throws -> String)
         -> some View
     {
@@ -475,8 +435,6 @@ struct SpeechSettingsView: View {
     }
 }
 
-/// ProviderPage is a pushed page that can go back by itself, as removing
-/// its provider does.
 private struct ProviderPage<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     @ViewBuilder let content: (DismissAction) -> Content
@@ -484,9 +442,6 @@ private struct ProviderPage<Content: View>: View {
     var body: some View { content(dismiss) }
 }
 
-/// VoiceNotesFolderPicker chooses the folder Record Voice Note records in,
-/// from the Action Button, Control Center or Siri: the Voice Notes folder,
-/// made as the first voice note needs it, until another is chosen.
 private struct VoiceNotesFolderPicker: View {
     @Environment(AppModel.self) private var app
     @AppStorage(VoiceNotes.folderKey) private var folder = ""
@@ -495,7 +450,6 @@ private struct VoiceNotesFolderPicker: View {
         let folders = app.library.folders.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        // One deleted is the Voice Notes folder's again, as recording does.
         let chosen =
             folder == VoiceNotes.topLevel || folders.contains(where: { $0.id == folder })
             ? folder : ""

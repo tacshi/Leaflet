@@ -19,8 +19,6 @@ import (
 	"github.com/egoist/mygo/i18n"
 )
 
-// fakeAPI answers the OAuth endpoints: the code goes for tokens when its
-// verifier matches the challenge, and refresh tokens rotate.
 func fakeAPI(t *testing.T, routes http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	var challenge string
@@ -30,7 +28,6 @@ func fakeAPI(t *testing.T, routes http.HandlerFunc) *httptest.Server {
 		case "/v1/oauth/authorize":
 			challenge = r.URL.Query().Get("code_challenge")
 		case "/v1/oauth/token", "/token":
-			// /token is the Worker's, which passes the form on.
 			_ = r.ParseForm()
 			if r.Form.Get("client_id") != "leaflet-app" {
 				http.Error(w, `{"message":"unknown client"}`, http.StatusUnauthorized)
@@ -64,8 +61,6 @@ func fakeAPI(t *testing.T, routes http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
-// browser plays the person signing in: it opens the authorize page, then
-// comes back to the loopback with the code.
 func browser(t *testing.T, ctx context.Context) func(string) {
 	return func(link string) {
 		u, err := url.Parse(link)
@@ -76,7 +71,6 @@ func browser(t *testing.T, ctx context.Context) func(string) {
 		q := u.Query()
 		back := q.Get("redirect_uri")
 		if Auth != "" {
-			// The Worker's page sends the browser on to the loopback.
 			if back != Auth+"/auth/supabase" {
 				t.Errorf("redirect %s", back)
 			}
@@ -122,7 +116,6 @@ func TestRefreshRotatesAndEnds(t *testing.T) {
 		_, _ = io.WriteString(w, `[]`)
 	})
 	ctx := context.Background()
-	// The first sign-in issued refresh-0's successor: start from there.
 	c := Resume("refresh-0")
 	var kept []string
 	c.OnRefresh = func(r string) { kept = append(kept, r) }
@@ -138,8 +131,6 @@ func TestRefreshRotatesAndEnds(t *testing.T) {
 	}
 }
 
-// A refused client, as with the Worker's secret wrong, is not a sign-in
-// that ended: the refresh token stays for when it is put right.
 func TestRefusedClientKeepsTheSignIn(t *testing.T) {
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {})
 	ClientID = "other"
@@ -156,7 +147,7 @@ func TestDeployFunctionSendsSources(t *testing.T) {
 	var meta map[string]any
 	var names []string
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/abc/functions/deploy" || r.URL.Query().Get("slug") != "agent" {
+		if r.URL.Path != "/v1/projects/abc/functions/deploy" || r.URL.Query().Get("slug") != "account" {
 			http.NotFound(w, r)
 			return
 		}
@@ -165,7 +156,6 @@ func TestDeployFunctionSendsSources(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		// The names as sent: Go's own parts keep only their base.
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			_, params, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 			switch params["name"] {
@@ -180,23 +170,21 @@ func TestDeployFunctionSendsSources(t *testing.T) {
 		_, _ = io.WriteString(w, `{}`)
 	})
 	c := Resume("refresh-0")
-	err := c.DeployFunction(context.Background(), "abc", "agent", "supabase/functions/agent/index.ts", true, []File{
-		{Path: "supabase/functions/agent/index.ts", Data: []byte("x")},
+	err := c.DeployFunction(context.Background(), "abc", "account", "supabase/functions/account/index.ts", true, []File{
+		{Path: "supabase/functions/account/index.ts", Data: []byte("x")},
 		{Path: "supabase/functions/_shared/cors.ts", Data: []byte("y")},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta["entrypoint_path"] != "supabase/functions/agent/index.ts" || meta["verify_jwt"] != true {
+	if meta["entrypoint_path"] != "supabase/functions/account/index.ts" || meta["verify_jwt"] != true {
 		t.Errorf("metadata %v", meta)
 	}
-	if strings.Join(names, ",") != "supabase/functions/agent/index.ts,supabase/functions/_shared/cors.ts" {
+	if strings.Join(names, ",") != "supabase/functions/account/index.ts,supabase/functions/_shared/cors.ts" {
 		t.Errorf("files %v", names)
 	}
 }
 
-// Through the Worker, the code goes to its /token with the redirect URL
-// its page has, and no secret from the app.
 func TestSignInThroughTheWorker(t *testing.T) {
 	var form url.Values
 	srv := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
@@ -223,9 +211,6 @@ func TestSignInThroughTheWorker(t *testing.T) {
 	}
 }
 
-// Without the loopback, as on iOS, the app takes the browser's answer
-// itself: one with the sign-in's state is exchanged, a stale or cancelled
-// one is refused.
 func TestBeginAndFinishSignIn(t *testing.T) {
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -252,8 +237,6 @@ func TestBeginAndFinishSignIn(t *testing.T) {
 	}
 }
 
-// A sign-in that failed says so in the app's language, and an ended one is
-// still ErrSignedOut to errors.Is.
 func TestSignInFailsInTheAppsLanguage(t *testing.T) {
 	i18n.SetLocaleFunc(func() string { return "zh-Hans" })
 	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })

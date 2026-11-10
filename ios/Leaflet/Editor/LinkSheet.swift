@@ -1,25 +1,15 @@
 import LeafletCore
 import SwiftUI
 
-/// LinkSheet asks for the link of a block to put at the caret, as the
-/// desktop's link dialog does: a picture, a video or a link card, of kind
-/// "image", "video" or "link_preview". A picture can be one on the device
-/// instead.
 struct LinkSheet: View {
     let kind: String
-    /// current is the link of a block whose link the sheet changes, as a
-    /// video's menu's Edit link asks: it starts with it, and saves.
     var current: String?
-    /// insert gives the block made from the link.
     let insert: (DocNode) -> Void
-    /// upload picks a picture on the device instead, for "image".
     var upload: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var link = ""
     @State private var failure: String?
-    /// making says the core is making the block, as it follows a video's
-    /// share link, which asks its site.
     @State private var making = false
     @FocusState private var focused: Bool
 
@@ -94,16 +84,11 @@ struct LinkSheet: View {
         }
     }
 
-    /// dirty says a link was typed or pasted, or the block's changed,
-    /// which Cancel asks before throwing away.
     private var dirty: Bool {
         let typed = link.trimmingCharacters(in: .whitespacesAndNewlines)
         return current.map { typed != $0 } ?? !typed.isEmpty
     }
 
-    /// apply makes the block as the core does, off the main thread, as a
-    /// video's share link is followed to its video, or says what is wrong
-    /// with the link.
     private func apply() {
         guard !making else { return }
         making = true
@@ -128,15 +113,9 @@ struct LinkSheet: View {
     }
 }
 
-/// EmbedSheet makes an embed, a page of HTML that runs in the page, as the
-/// desktop's dialog does: its title, its HTML and how tall it is. Given
-/// an embed in the page, it changes that one.
 struct EmbedSheet: View {
-    /// author is who made it, as the block keeps it.
     let author: String
     var editing: DocNode?
-    /// insert gives the embed made, or the one changed, keeping its id
-    /// and who made it.
     let insert: (DocNode) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
@@ -144,7 +123,6 @@ struct EmbedSheet: View {
     @State private var html = MobileEmbedStart()
     @State private var height = "320"
     @State private var failure: String?
-    /// original is the embed as the sheet opened with it.
     @State private var original: [String]?
 
     private var fields: [String] { [title, html, height] }

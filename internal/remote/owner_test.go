@@ -13,8 +13,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// The project chosen is kept on this device and comes back with the next
-// client; another one forgets the session of the one before.
 func TestUseKeepsTheProject(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -49,8 +47,6 @@ func TestUseKeepsTheProject(t *testing.T) {
 	}
 }
 
-// Signing in as the owner makes the account once, then signs in with a
-// link made for it, with the secret key only on admin requests.
 func TestSignInAsOwner(t *testing.T) {
 	users := map[string]bool{}
 	marked := map[string]bool{}
@@ -152,20 +148,14 @@ func TestSignInAsOwner(t *testing.T) {
 		t.Errorf("owner %q, %v", email, err)
 	}
 
-	// Another refusal is not an account that is there.
 	if _, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "not-an-email", "Me"); err == nil || !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("an invalid email: %v", err)
 	}
 
-	// The owner's own account, marked, keeps its password and its other
-	// sessions, as on each device that signs in.
 	if passwords != 0 || others != 0 {
 		t.Errorf("the owner's account had %d passwords set and %d sign-outs of other sessions", passwords, others)
 	}
 
-	// An account there before, unmarked, becomes the owner's, with a new
-	// password and its other sessions ended, as someone else may have made
-	// it with the owner's email.
 	marked["me@example.com"] = false
 	if _, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "me@example.com", "Me"); err != nil || !marked["me@example.com"] {
 		t.Errorf("not marked: %v", err)
@@ -175,9 +165,6 @@ func TestSignInAsOwner(t *testing.T) {
 	}
 }
 
-// An account there before stays unmarked when its other sessions cannot
-// be ended, so the next sign-in tries again, and the session made for it
-// is signed out.
 func TestSignInAsOwnerEndsOthersBeforeMarking(t *testing.T) {
 	var marked bool
 	var loggedOut []string
@@ -222,8 +209,6 @@ func TestSignInAsOwnerEndsOthersBeforeMarking(t *testing.T) {
 	}
 }
 
-// A sign-in thrown away, as a cancelled one, leaves the session in use:
-// it signs out only its own.
 func TestDiscardLeavesTheSession(t *testing.T) {
 	var loggedOut []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -247,8 +232,6 @@ func TestDiscardLeavesTheSession(t *testing.T) {
 	}
 }
 
-// Signing out ends this device's session only: Auth's logout would end
-// the others too, as a revoked device's sign-out would every device's.
 func TestSignOutEndsOnlyThisSession(t *testing.T) {
 	var scopes []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

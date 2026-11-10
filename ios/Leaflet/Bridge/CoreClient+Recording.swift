@@ -1,8 +1,6 @@
 import Foundation
 import LeafletCore
 
-/// RecordingState is the recording in progress, and the transcriptions
-/// running, as the core last said.
 struct RecordingState: Codable, Equatable, Sendable {
     var active = false
     var starting = false
@@ -10,28 +8,17 @@ struct RecordingState: Codable, Equatable, Sendable {
     var pageID = ""
     var blockID = ""
     var id = ""
-    /// levels are the latest loudness levels, 0 to 1, one each 50 ms,
-    /// newest last.
     var levels: [Double] = []
     var liveText = ""
-    /// engine says where it is transcribed, or that it keeps only audio.
     var engine = ""
     var error = ""
-    /// elapsedMs is how long it had recorded, without pauses, as the core
-    /// said this.
     var elapsedMs: Int64 = 0
     var transcribing: [String] = []
-    /// transcribingFiles are the file blocks being transcribed.
     var transcribingFiles: [String] = []
-    /// finishing are the recordings transcribed live, now getting their
-    /// times.
     var finishing: [String] = []
-    /// testing is Settings' test of the microphone running; heard is what
-    /// the last one heard, or why it heard nothing.
     var testing = false
     var heard = ""
 
-    /// recording says a recording runs, or is starting.
     var recording: Bool { active || starting }
 
     static let idle = RecordingState()
@@ -47,7 +34,6 @@ struct RecordingState: Codable, Equatable, Sendable {
     }
 }
 
-/// Segment is a line of a transcript, from startMs.
 struct Segment: Codable, Hashable, Sendable {
     var startMs: Int
     var endMs: Int
@@ -61,28 +47,17 @@ struct Segment: Codable, Hashable, Sendable {
     }
 }
 
-/// RecordingRow is a recording block's recording: its audio's state and
-/// its transcript.
 struct RecordingRow: Codable, Equatable, Sendable {
     var id: String
-    /// status is recording, transcribing, ready or failed.
     var status: String
     var durationMs: Int
-    /// sttProvider is what transcribed it, or "" for audio alone.
     var sttProvider: String
     var error: String
     var transcript: [Segment]
-    /// plain is the transcript to copy.
     var plain: String
-    /// label is the line under the block's title while nothing runs for
-    /// it here, as the core words it.
     var label = ""
-    /// createdMs is when it was made, and pageTitle the title of the page
-    /// it was made in, for its block's title (MobileRecordingTitle).
     var createdMs: Int64 = 0
     var pageTitle = ""
-    /// folded is how many lines its transcript shows until it is opened,
-    /// 0 for all of them.
     var folded = 0
 
     enum CodingKeys: String, CodingKey {
@@ -94,21 +69,16 @@ struct RecordingRow: Codable, Equatable, Sendable {
     }
 }
 
-/// TranscriptFile is a recording's transcript as a file to share.
 struct TranscriptFile: Decodable, Sendable {
     var name: String
     var text: String
 }
 
-/// Transcript is a recording's transcript as blocks, a paragraph a line,
-/// to put after the recording's block it was asked from.
 struct Transcript: Decodable, Sendable {
     var blocks: [DocNode]
 }
 
-/// SttSettings are the speech-to-text choice, as the core keeps it.
 struct SttSettings: Codable, Equatable, Sendable {
-    /// provider is "openai-compatible", "soniox", "moss" or "on-device".
     var provider: String
     var modelSize: String
     var runOn: String
@@ -117,12 +87,8 @@ struct SttSettings: Codable, Equatable, Sendable {
     var speakerLabels: Bool
     var baseURL: String
     var model: String
-    /// providerID is the agent provider a cloud endpoint's key comes from.
-    var providerID: String?
     var sonioxModel: String
     var languageHints: [String]?
-    /// sonioxOnServer says this device saved a Soniox key on the server.
-    var sonioxOnServer: Bool?
 
     enum CodingKeys: String, CodingKey {
         case provider, language, model
@@ -131,34 +97,21 @@ struct SttSettings: Codable, Equatable, Sendable {
         case liveTranscript = "live_transcript"
         case speakerLabels = "speaker_labels"
         case baseURL = "base_url"
-        case providerID = "provider_id"
         case sonioxModel = "soniox_model"
         case languageHints = "language_hints"
-        case sonioxOnServer = "soniox_on_server"
     }
 }
 
-/// SpeechSettings are Settings › Speech to text.
 struct SpeechSettings: Codable, Sendable {
     var stt: SttSettings
     var endpointKey: String
     var sonioxSaved: Bool
-    /// mossSaved says this device's keychain has a MOSS key.
     var mossSaved: Bool
-    var signedIn: Bool
-    /// onDevice says the device can transcribe by itself.
     var onDevice: Bool
-    /// localEndpoint says the endpoint is on this device's network.
-    var localEndpoint: Bool
-    /// status says where transcription runs, or that it is not set up.
     var status: String
-    /// providers are the speech providers set up, and addable those to
-    /// add.
     var providers: [SpeechProvider]
     var addable: [SpeechProvider]
     var languages: [Language]
-    /// keepAudio is how long recordings' audio stays here once uploaded:
-    /// until_uploaded, 30_days or always.
     var keepAudio: String
 
     struct Language: Codable, Hashable, Sendable {
@@ -172,31 +125,21 @@ struct SpeechSettings: Codable, Sendable {
         case endpointKey = "endpoint_key"
         case sonioxSaved = "soniox_saved"
         case mossSaved = "moss_saved"
-        case signedIn = "signed_in"
         case onDevice = "on_device"
-        case localEndpoint = "local_endpoint"
     }
 }
 
-/// SpeechChoices are the speech providers a transcription on a page can
-/// be picked from, and current, the one marked: last picked there.
 struct SpeechChoices: Codable, Equatable, Sendable {
     var choices: [SpeechProvider]
     var current: String
 }
 
-/// SpeechProvider is a speech provider as Settings lists it.
 struct SpeechProvider: Codable, Hashable, Identifiable, Sendable {
-    /// id is "on-device", "soniox", "moss" or "openai-compatible".
     var id: String
-    /// name is what the list calls it, with its model where it has one.
     var name: String
-    /// place says where it runs and where its key is kept.
     var place: String?
     var removable: Bool?
 
-    /// name is a provider's name, without its model, as
-    /// recording.ProviderName has it.
     static func name(of id: String) -> String {
         switch id {
         case "on-device": L.recSttOnDevice
@@ -208,15 +151,10 @@ struct SpeechProvider: Codable, Hashable, Identifiable, Sendable {
 }
 
 extension CoreClient {
-    // MARK: Recording
-
-    /// useMicrophone gives the core's recorder the device's microphone.
     nonisolated(nonsending) func useMicrophone(_ mic: Microphone) async {
         try? await call { $0.use(mic) }
     }
 
-    /// useTranscriber gives the core's recorder the device's own speech
-    /// engine.
     nonisolated(nonsending) func useTranscriber(_ transcriber: DeviceTranscriber) async {
         try? await call { $0.use(transcriber) }
     }
@@ -227,9 +165,6 @@ extension CoreClient {
         }
     }
 
-    /// startRecording records into an open page, transcribed by provider,
-    /// or the one marked for the page when it is "", returning the block
-    /// for the editor to put at the caret.
     nonisolated(nonsending) func startRecording(_ pageID: String, provider: String) async throws
         -> DocNode
     {
@@ -238,19 +173,12 @@ extension CoreClient {
         }
     }
 
-    /// recordNewPage records into a page of its own, named after when it
-    /// began, in folderID, or at the top level when it is "", as for the
-    /// Action Button: the page, its recording's block in it, is made as
-    /// the microphone comes on, and isn't should it never come on. It
-    /// returns the page's ID.
     nonisolated(nonsending) func recordNewPage(folderID: String) async throws -> String {
         try await call { core in
             try Self.answer { e in core.recordNewPage(folderID, error: e) }
         }
     }
 
-    /// speechChoices returns the speech providers a transcription on page
-    /// can be picked from, and the one marked.
     nonisolated(nonsending) func speechChoices(_ pageID: String) async throws -> SpeechChoices {
         try await call(SpeechChoices.self) { core in
             try Self.answer { e in core.speechChoices(pageID, error: e) }
@@ -269,8 +197,6 @@ extension CoreClient {
         }
     }
 
-    /// recordingAudio returns a recording's WAV audio on this device,
-    /// downloaded first when it is not.
     nonisolated(nonsending) func recordingAudio(_ id: String) async throws -> URL {
         let path = try await cancellable { core, token in
             try Self.answer { e in core.recordingAudio(id, token: token, error: e) }
@@ -278,8 +204,6 @@ extension CoreClient {
         return URL(fileURLWithPath: path)
     }
 
-    /// recordingTranscriptFile returns a recording's transcript as a file
-    /// of format, txt, srt or vtt, named for title.
     nonisolated(nonsending) func recordingTranscriptFile(
         _ id: String, title: String, format: String
     )
@@ -292,7 +216,6 @@ extension CoreClient {
         }
     }
 
-    /// transcribeFile transcribes audio file block of page into its notes.
     nonisolated(nonsending) func transcribeFile(page: String, block: String, provider: String)
         async throws
     {
@@ -303,21 +226,15 @@ extension CoreClient {
         try await call { try $0.retranscribe(id, provider: provider) }
     }
 
-    /// dismissRecordingError lets go of what went wrong with a recording,
-    /// which its block shows until it is closed.
     nonisolated(nonsending) func dismissRecordingError(_ id: String) async throws {
         try await call { try $0.dismissRecordingError(id) }
     }
 
-    /// transcriptBlocks is a recording's transcript as the blocks its
-    /// page's editor puts after its block.
     nonisolated(nonsending) func transcriptBlocks(_ id: String) async throws -> Transcript {
         try await call(Transcript.self) { core in
             try Self.answer { e in core.transcriptBlocks(id, error: e) }
         }
     }
-
-    // MARK: Speech to text
 
     nonisolated(nonsending) func speechSettings() async throws -> SpeechSettings {
         try await call(SpeechSettings.self) { core in
@@ -325,9 +242,6 @@ extension CoreClient {
         }
     }
 
-    /// saveSpeechSettings keeps the speech settings, in line with the
-    /// other calls, for the last saved to be the one kept: the core sends
-    /// them to the server on its own, waiting for nothing.
     nonisolated(nonsending) func setKeepAudio(_ keep: String) async throws {
         try await call { try $0.setKeepAudio(keep) }
     }
@@ -337,27 +251,22 @@ extension CoreClient {
         try await call { try $0.saveSpeechSettings(json) }
     }
 
-    nonisolated(nonsending) func setEndpointKey(_ key: String) async throws {
-        try await call { try $0.setEndpointKey(key) }
+    nonisolated(nonsending) func setEndpointKey(url: String, key: String) async throws {
+        try await call { try $0.setEndpointKey(url, key: key) }
     }
 
-    /// saveSonioxKey keeps a Soniox key, returning where it went.
     nonisolated(nonsending) func saveSonioxKey(_ key: String) async throws -> String {
         try await call(waiting: true) { core in
             try Self.answer { e in core.saveSonioxKey(key, error: e) }
         }
     }
 
-    /// saveMossKey keeps a MOSS key on this device, returning where it
-    /// went.
     nonisolated(nonsending) func saveMossKey(_ key: String) async throws -> String {
         try await call(waiting: true) { core in
             try Self.answer { e in core.saveMossKey(key, error: e) }
         }
     }
 
-    /// testEndpoint, testSoniox and testMoss return words for the engine
-    /// working.
     nonisolated(nonsending) func testEndpoint(url: String, model: String, key: String) async throws
         -> String
     {
@@ -378,7 +287,6 @@ extension CoreClient {
         }
     }
 
-    /// removeSpeechProvider takes a speech provider off Settings' list.
     nonisolated(nonsending) func removeSpeechProvider(_ id: String) async throws {
         try await call { try $0.removeSpeechProvider(id) }
     }

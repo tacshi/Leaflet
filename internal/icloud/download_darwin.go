@@ -12,7 +12,6 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
-// Foundation's NSFileManager asks iCloud to download a file.
 var (
 	nsOnce sync.Once
 	nsOK   bool
@@ -47,8 +46,6 @@ func loadFoundation() bool {
 	return nsOK
 }
 
-// StartDownload asks iCloud to download the file at path, named as it
-// will be once downloaded. Tests stand in for it.
 var StartDownload = func(path string) error {
 	if !loadFoundation() {
 		return errors.New("the Foundation framework is not available")
@@ -58,11 +55,11 @@ var StartDownload = func(path string) error {
 	pool, _, _ := purego.SyscallN(poolPush)
 	defer purego.SyscallN(poolPop, pool)
 	cpath := append([]byte(path), 0)
-	str := clsString.Send(selWithUTF8, unsafe.Pointer(&cpath[0])) // #nosec G103 -- a C string for NSString, kept alive below.
+	str := clsString.Send(selWithUTF8, unsafe.Pointer(&cpath[0])) // #nosec G103
 	runtime.KeepAlive(cpath)
 	url := clsURL.Send(selFileURL, str)
 	var nserr objc.ID
-	if objc.Send[bool](clsFileManager.Send(selDefault), selDownload, url, unsafe.Pointer(&nserr)) { // #nosec G103 -- the NSError out-parameter.
+	if objc.Send[bool](clsFileManager.Send(selDefault), selDownload, url, unsafe.Pointer(&nserr)) { // #nosec G103
 		return nil
 	}
 	if nserr == 0 {
@@ -71,14 +68,13 @@ var StartDownload = func(path string) error {
 	return errors.New(goString(objc.Send[*byte](nserr.Send(selDescribe), selUTF8)))
 }
 
-// goString copies a C string.
 func goString(p *byte) string {
 	if p == nil {
 		return ""
 	}
 	var b []byte
 	for i := 0; ; i++ {
-		c := *(*byte)(unsafe.Add(unsafe.Pointer(p), i)) // #nosec G103 -- reading the C string NSString returned.
+		c := *(*byte)(unsafe.Add(unsafe.Pointer(p), i)) // #nosec G103
 		if c == 0 {
 			break
 		}

@@ -15,67 +15,33 @@ import (
 	syncsvc "leaflet/internal/sync"
 )
 
-// What a run may read: the page's tools, and the user's other pages only
-// where no one else writes or reads.
-
-// toolContext is the tools a run on a page has: the page's, the user's
-// other pages where crossPage lets it read them, and none that edit a
-// page the user may only view.
 func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
 	p, err := h.st.Page(pageID)
 	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
-	// An agent edits only what the user may.
 	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
-	// A page of the user's own made from one someone else writes or reads
-	// would take what they wrote into the user's pages, where the user's
-	// workspace agent reads it as theirs: only from a page of no one else.
 	if err != nil || !h.private(p) {
 		tc.CreatePage = nil
 	}
 	return tc
 }
 
-// crossPage reports whether an agent on p may read the user's other
-// pages. Not on a page other people write in too: what they wrote could
-// tell the agent to copy the user's other pages into it. Nor on one with
-// a public link, or a guest's comment from one: its visitors read what
-// the agent copies into it, and a guest's comment is someone else's
-// writing, though stored as the user's. A public link this device serves
-// it knows here; one another device serves, the server says, or iCloud
-// Drive signed out, which a run on this device asks before it starts
-// (publicElsewhere), and the agent function reads itself.
 func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
 	return settings.AgentsReadOtherPages && p.ID != "" && h.private(p)
 }
 
-// alone reports whether page id is the user's alone, as the page a run
-// makes pages of the user's own from must be, and each page it reads
-// (ToolContext.Alone): private, and with no public link another device
-// serves (publicElsewhere).
 func (h *Hub) alone(ctx context.Context, id string, online bool) bool {
 	p, err := h.st.Page(id)
 	return err == nil && h.private(p) && !h.publicElsewhere(ctx, id, online)
 }
 
-// linkedNow reports whether page id has a public link now: one this
-// device serves (PublicLink), or one another does, as the server or iCloud
-// Drive says (publicElsewhere). A run reads it again as it goes on
-// (ToolContext.LinkedNow).
 func (h *Hub) linkedNow(ctx context.Context, id string, online bool) bool {
 	return h.PublicLink != nil && h.PublicLink(id) || h.publicElsewhere(ctx, id, online)
 }
 
-// private reports whether no one but the user reads or writes p: no one
-// else has it, no guest commented on it, and it has no public link.
 func (h *Hub) private(p store.Page) bool {
 	return !OthersHave(h.st, p) && (h.PublicLink == nil || !h.PublicLink(p.ID))
 }
 
-// OthersHave reports whether someone else reads or writes p, as far as the
-// store can tell: it is shared with them, or a guest commented on it. What
-// the store cannot read counts as had by others. leaflet mcp asks it,
-// apart from the app, which alone knows the public link it serves
-// (Hub.private).
 func OthersHave(st *store.Store, p store.Page) bool {
 	if sharedWithOthers(st, p) {
 		return true
@@ -84,22 +50,8 @@ func OthersHave(st *store.Store, p store.Page) bool {
 	return guested || err != nil
 }
 
-// publicLinkLease is how often the device serving a public link says so
-// again (ServePublicLink): each lease the server gives lasts an hour by
-// its own clock, so one missed renewal leaves the link counted, and the
-// link of a device that quit without saying stops counting by then.
 const publicLinkLease = 15 * time.Minute
 
-// ServePublicLink says on the server that this device serves a public
-// link of page pageID, and says it again before each lease runs out
-// (publicLinkLease), until stop: the agent function's runs, and other
-// devices', then read none of the user's other pages into the page, as
-// this device's do not (PublicLink). The server sets each lease by its own
-// clock, which those runs compare it with. Stopping ends the lease this
-// one holds alone: a newer one of the page, as of the link started again
-// for other addresses, stays, whichever reaches the server first. Signed
-// out, the page goes to other devices through iCloud Drive alone, and it
-// says so there (ICloudLease). Any goroutine may call it, and stop.
 func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	if h.be == nil || !h.be.SignedIn() {
 		if h.ICloudLease != nil {
@@ -116,8 +68,6 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	h.linksMu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	// held is the lease the server last gave, which the goroutine alone
-	// writes, and stop reads once it has ended.
 	var held string
 	go func() {
 		defer guard.Recover()
@@ -160,18 +110,11 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	}
 }
 
-// publicElsewhere reports whether page pageID has a public link another
-// device serves, as the server says by its own clock (ServePublicLink); a
-// run on this device asks it as it starts. Where the server cannot be
-// asked, as offline, what it last said stands (lastLease): what the run
-// writes reaches the link only once this device syncs the page. Signed
-// out, the other devices say so in iCloud Drive (iCloudLinked).
 func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) bool {
 	if h.be == nil || !h.be.SignedIn() {
 		linked, known := h.iCloudLinked()
 		return !known || linked[pageID]
 	}
-	// Offline, the server is not asked: the lease it last gave stands.
 	if !online {
 		h.linksMu.Lock()
 		defer h.linksMu.Unlock()
@@ -195,12 +138,6 @@ func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) b
 	return row != nil
 }
 
-// lastLease reports whether page pageID has a public link another device
-// serves as the server last said, by this device's clock: the lease it
-// last gave of the page, or none where it has listed the page's space
-// since (publicElsewhereIn) without it. A page it has said nothing of
-// counts as linked, as it may have one this device has not heard of.
-// linksMu is held.
 func (h *Hub) lastLease(pageID string) bool {
 	if until, ok := h.links[pageID]; ok {
 		return until.After(time.Now())
@@ -209,15 +146,8 @@ func (h *Hub) lastLease(pageID string) bool {
 	return err != nil || !h.listed[p.SpaceID]
 }
 
-// iCloudLinkDrift is how far another device's clock may be off from this
-// one's, as its leases in iCloud Drive are by its own: a lease counts
-// until that long after it ends.
 const iCloudLinkDrift = 15 * time.Minute
 
-// iCloudLinked are the pages with a public link another device says in
-// iCloud Drive that it serves (ICloudLinks), as their leases stand now.
-// known is false where a device's could not be read: it may serve a link
-// of any page, so every page counts as linked.
 func (h *Hub) iCloudLinked() (linked map[string]bool, known bool) {
 	linked = map[string]bool{}
 	if h.ICloudLinks == nil {
@@ -236,16 +166,8 @@ func (h *Hub) iCloudLinked() (linked map[string]bool, known bool) {
 	return linked, err == nil
 }
 
-// errOffline is the server not asked, this device being offline.
 var errOffline = errors.New("offline")
 
-// publicElsewhereIn reports which pages of space have a public link
-// another device serves, as publicElsewhere does of one page: a workspace
-// run asks it as it starts, of all the pages it may change. Where the
-// server cannot be asked, what it last said stands, as lastLease has it:
-// the leases it last gave, and none of the pages it did not list, and
-// before it has listed the space, every page it gave no lease of counts
-// as linked.
 func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) func(pageID string) bool {
 	if h.be == nil || !h.be.SignedIn() {
 		linked, known := h.iCloudLinked()
@@ -256,7 +178,6 @@ func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) 
 	defer cancel()
 	var rows []map[string]any
 	err := errOffline
-	// Offline, the server is not asked: the leases it last gave stand.
 	if online {
 		rows, err = h.be.Select(ctx, "pages", remote.Query{Select: "id,public_link_until",
 			Filters: []string{remote.Eq("space_id", space), remote.Gt("public_link_until", "now")}})
@@ -287,7 +208,6 @@ func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) 
 		until, _ := time.Parse(time.RFC3339Nano, s)
 		h.links[id], out[id] = until, true
 	}
-	// Those of the space it no longer lists have ended.
 	for id := range h.links {
 		if p, err := h.st.Page(id); !out[id] && err == nil && p.SpaceID == space {
 			delete(h.links, id)
@@ -296,11 +216,6 @@ func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) 
 	return func(id string) bool { return out[id] }
 }
 
-// privacy is private for many pages at once, as list_pages asks it of
-// all the user's, and people sharedWithOthers: who else has them and
-// which have a guest's comment are read once for them all, and pages
-// finds those they are inside. Either unread, none is taken for private,
-// and each for had by others.
 func (h *Hub) privacy(pages []store.Page) (private, people func(store.Page) bool) {
 	others, err := h.st.SharedBeyond(h.st.Session().UserID)
 	guested, gerr := h.st.GuestCommented()
@@ -322,26 +237,14 @@ func (h *Hub) privacy(pages []store.Page) (private, people func(store.Page) bool
 	}, shared
 }
 
-// sharedWithOthers reports whether anyone but the user has a page: it is
-// in someone else's space, or it or a page it is inside has members other
-// than the user, or members the store cannot read. Signed in, the user's
-// own pages count as shared until sync has read who they are shared with:
-// members are kept of a page only once something loaded them, so none
-// kept says nothing before then.
 func sharedWithOthers(st *store.Store, p store.Page) bool {
 	me := st.Session().UserID
 	return sharing(st, func(id string) bool {
-		// Members unread count as someone else's.
 		members, err := st.Members(id)
 		return err != nil || slices.ContainsFunc(members, func(m store.Member) bool { return m.UserID != me })
 	}, st.Page)(p)
 }
 
-// ShowsToOthers reports whether page p inside parent would, or may, show
-// it to someone who has not got it: others have parent, and p is the
-// user's alone. Before sync has read who the user's pages are shared with
-// every page of theirs counts as had by others, which says nothing of p:
-// it may be the user's alone, unless it is of someone else's space.
 func ShowsToOthers(st *store.Store, p, parent store.Page) bool {
 	if !OthersHave(st, parent) {
 		return false
@@ -352,9 +255,6 @@ func ShowsToOthers(st *store.Store, p, parent store.Page) bool {
 	return !othersSurelyHave(st, p)
 }
 
-// othersSurelyHave is OthersHave of what the store can read: what it
-// cannot counts as not had by others, as p may then be the user's alone,
-// for ShowsToOthers to keep from showing it.
 func othersSurelyHave(st *store.Store, p store.Page) bool {
 	me := st.Session().UserID
 	if sharing(st, func(id string) bool {
@@ -367,17 +267,11 @@ func othersSurelyHave(st *store.Store, p store.Page) bool {
 	return err == nil && guested
 }
 
-// membersUnread reports whether sync has yet to read who the user's own
-// pages are shared with: signed in, members are kept of a page only once
-// something loaded them, so none kept says nothing before then.
 func membersUnread(st *store.Store) bool {
 	known, _ := st.Value(syncsvc.OwnMembersKey)
 	return st.Session().SignedIn && known == ""
 }
 
-// sharing is sharedWithOthers over others, which reports whether a page
-// has members other than the user, and page, which finds the page one is
-// inside. What it finds of a page it keeps, for the pages inside it.
 func sharing(st *store.Store, others func(id string) bool, page func(id string) (store.Page, error)) func(store.Page) bool {
 	sess := st.Session()
 	if membersUnread(st) {
@@ -392,7 +286,6 @@ func sharing(st *store.Store, others func(id string) bool, page func(id string) 
 		if v, ok := found[p.ID]; ok {
 			return v
 		}
-		// Not shared while it is worked out, so a loop of parents ends.
 		found[p.ID] = false
 		v := p.SpaceID != sess.SpaceID || others(p.ID)
 		if !v && p.ParentID != "" {
@@ -406,8 +299,6 @@ func sharing(st *store.Store, others func(id string) bool, page func(id string) 
 	return shared
 }
 
-// web reports whether a run may use the web: the user lets agents, and
-// the app is online.
 func (h *Hub) web(settings store.Settings) bool {
 	return settings.AgentsUseWeb && !settings.WorkOffline && h.host.Online()
 }

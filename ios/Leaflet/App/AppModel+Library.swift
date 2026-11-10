@@ -1,18 +1,10 @@
 import SwiftUI
 
-/// What the library's menus do: pages, folders and tags made, renamed,
-/// moved and deleted, and pages from templates and copies of them, each
-/// failure said in a toast.
 extension AppModel {
-    /// opens reports whether page id is here to open: one of the library's,
-    /// or a template's, not one deleted or not synced yet.
     func opens(_ id: String) -> Bool {
         library.page(id) != nil || templates.contains { $0.pageID == id }
     }
 
-    /// createRecordingPage makes a page of its own to record in, named for
-    /// its recording, as the desktop's New Recording does, and returns its
-    /// ID.
     func createRecordingPage() async -> String? {
         do {
             let page = try await client?.createPage(NewPage(title: L.recBlockTitle(when: Date())))
@@ -24,10 +16,6 @@ extension AppModel {
         }
     }
 
-    /// createPage makes a page, under parentID or in folderID, and returns
-    /// its ID, for the window to open it; link puts a card for a subpage
-    /// at the end of its parent. It starts from the template its parent or
-    /// folder names for new pages, as on the desktop.
     func createPage(parentID: String = "", folderID: String = "", link: Bool = false) async
         -> String?
     {
@@ -60,8 +48,6 @@ extension AppModel {
         await reload()
     }
 
-    /// renameFolder renames a folder, as the desktop's Rename folder does:
-    /// a name of spaces alone changes nothing.
     func renameFolder(_ folder: FolderRow, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, name != folder.name else { return }
@@ -73,9 +59,6 @@ extension AppModel {
         await reload()
     }
 
-    /// delete deletes a page and its subpages, with Undo in a toast: what
-    /// was typed in each window goes first, for Undo to bring the pages
-    /// back with it.
     func delete(_ page: PageRow) async {
         guard let client else { return }
         for scene in scenes.allObjects { await scene.flush() }
@@ -111,8 +94,6 @@ extension AppModel {
         }
     }
 
-    /// renameTag renames a tag on every page the user may change, and
-    /// returns its name as kept, or nil when nothing was renamed.
     func renameTag(_ tag: String, to name: String) async -> String? {
         do {
             let kept = try await client?.renameTag(tag, to: name) ?? ""
@@ -124,8 +105,6 @@ extension AppModel {
         }
     }
 
-    /// deleteTag takes a tag off every page the user may change, with
-    /// Undo in a toast to put each page's tags back as they were.
     func deleteTag(_ tag: String) async {
         guard let client else { return }
         do {
@@ -150,10 +129,6 @@ extension AppModel {
         }
     }
 
-    // MARK: Templates and copies
-
-    /// applyTemplate fills a blank page from a template, and returns the
-    /// title an untitled page took from it, or nil when it took none.
     func applyTemplate(_ key: String, to pageID: String) async -> String? {
         do {
             let title = try await client?.applyTemplate(pageID, key: key) ?? ""
@@ -165,9 +140,6 @@ extension AppModel {
         }
     }
 
-    /// insertTemplate puts a template's blocks in a page after a block, as
-    /// the / menu does, and returns the title an empty, untitled page took
-    /// from it, or nil.
     func insertTemplate(_ key: String, into pageID: String, after blockID: String) async
         -> String?
     {
@@ -181,7 +153,6 @@ extension AppModel {
         }
     }
 
-    /// editTemplate returns the page of a template to open and change.
     func editTemplate(_ template: TemplateRow) async -> String? {
         do {
             let id = try await client?.editTemplate(template.key)
@@ -193,8 +164,6 @@ extension AppModel {
         }
     }
 
-    /// deleteTemplate deletes one of the user's templates as a page, or
-    /// hides a starter on this device, with Undo.
     func deleteTemplate(_ template: TemplateRow) async {
         if let id = template.pageID, let page = library.page(id) {
             await delete(page)
@@ -215,8 +184,6 @@ extension AppModel {
         }
     }
 
-    /// setDefaultTemplate chooses the template new pages under a page or in
-    /// a folder start from, nil for blank ones.
     func setDefaultTemplate(
         _ template: TemplateRow?, page: PageRow? = nil, folder: FolderRow? = nil
     ) async {
@@ -232,15 +199,11 @@ extension AppModel {
         }
     }
 
-    /// defaultTemplate is the template a page or folder names for new
-    /// pages, if the user has it.
     func defaultTemplate(_ id: String?) -> TemplateRow? {
         guard let id, !id.isEmpty else { return nil }
         return templates.first { $0.pageID == id }
     }
 
-    /// duplicate copies a page and its subpages beside it, and returns the
-    /// copy's ID.
     func duplicate(_ page: PageRow) async -> String? {
         do {
             let copy = try await client?.duplicatePage(page.id)
@@ -252,8 +215,6 @@ extension AppModel {
         }
     }
 
-    /// saveAsTemplate keeps a copy of a page as a template, with Edit in
-    /// the toast to open it.
     func saveAsTemplate(_ page: PageRow, open: @escaping @MainActor (String) -> Void) async {
         do {
             guard let t = try await client?.saveAsTemplate(page.id) else { return }
@@ -267,8 +228,6 @@ extension AppModel {
         }
     }
 
-    /// move moves a page under parentID, into folderID, or to the top
-    /// level with neither, after the pages already there.
     func move(_ page: PageRow, parentID: String, folderID: String) async {
         do {
             try await client?.movePage(page.id, parentID: parentID, folderID: folderID)
@@ -278,10 +237,6 @@ extension AppModel {
         }
     }
 
-    /// place moves the page dragged, by its ID, before or after a page, in
-    /// the same place. Dragged text that names no page does nothing, nor
-    /// does a page dropped on itself, on a page inside it, or in or out of
-    /// what others shared.
     func place(_ id: String, beside target: PageRow, before: Bool) async {
         guard let page = library.page(id), page.id != target.id, page.canEdit, target.canEdit,
             !page.template, !target.template, library.own(page), library.own(target),
@@ -303,9 +258,6 @@ extension AppModel {
         }
     }
 
-    /// upload keeps the files chosen in a folder, or at the top level with
-    /// none, as the desktop's Upload does. The core copies each while the
-    /// app may read it.
     func upload(_ urls: [URL], folderID: String = "") async {
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
@@ -319,7 +271,6 @@ extension AppModel {
         await reload(.library)
     }
 
-    /// delete deletes a file of the sidebar, from every device.
     func delete(_ file: FileRow) async {
         do {
             try await client?.deleteFile(file.id)
@@ -329,8 +280,6 @@ extension AppModel {
         }
     }
 
-    /// syncs reports whether pages go anywhere but this device, through
-    /// an account or iCloud: only then is keeping one here a choice.
     var syncs: Bool { status?.signedIn ?? false || status?.iCloudOn ?? false }
 
     func setKeepOffline(_ page: PageRow, _ keep: Bool) async {

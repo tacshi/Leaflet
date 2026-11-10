@@ -35,12 +35,8 @@ import (
 	"leaflet/locales"
 )
 
-// The app as the agents' host.
-
-// Update runs fn on the main thread.
 func (a *App) Update(_ string, fn func()) { a.update(fn) }
 
-// Live returns a page as it is open, for agent runs to change.
 func (a *App) Live(pageID string) agents.LiveDoc {
 	if a.openEditor(pageID) != nil {
 		return a.page.live
@@ -48,9 +44,6 @@ func (a *App) Live(pageID string) agents.LiveDoc {
 	return nil
 }
 
-// openEditor returns a page's open editor. A page whose content could not
-// be read has none to change: what changes it reads the stored content,
-// and leaves it.
 func (a *App) openEditor(pageID string) *editor.Editor {
 	if a.page != nil && a.page.id == pageID && !a.page.live.Unreadable() {
 		return a.page.editor
@@ -58,32 +51,18 @@ func (a *App) openEditor(pageID string) *editor.Editor {
 	return nil
 }
 
-// SaveNow stores the open page's pending edits.
 func (a *App) SaveNow(pageID string) {
 	if a.page != nil && a.page.id == pageID {
 		a.savePage()
 	}
 }
 
-// Online reports whether the device has a connection.
 func (a *App) Online() bool { return a.online }
 
-// Settings returns the settings.
 func (a *App) Settings() store.Settings { return a.settings }
 
-// FlushPage pushes a page's pending changes to the server.
-func (a *App) FlushPage(ctx context.Context, pageID string) error {
-	return a.sync.FlushPage(ctx, pageID)
-}
-
-// SyncNow asks for a sync pass.
-func (a *App) SyncNow() { a.sync.Kick() }
-
-// Pages changes pages as the app has them, for agents: the open page
-// through its editor, its subpages' cards kept in step.
 func (a *App) Pages() agents.Pages { return a.pageCore() }
 
-// Tint marks the blocks an agent run changed.
 func (a *App) Tint(pageID string, ids []string) {
 	if a.page == nil || a.page.id != pageID {
 		return
@@ -98,26 +77,20 @@ func (a *App) Tint(pageID string, ids []string) {
 	a.dialogs.hideRun = ""
 }
 
-// host is the app as the editor's host.
 type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
 func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	redraw := func() { h.a.update(func() {}) }
-	// A download that failed shows as failed in the frame its end draws.
 	downloaded := func(ok bool) {
 		if ok {
 			redraw()
 		}
 	}
 	url := n.Str("url")
-	// An uploaded picture is found by its file: its url is a path on the
-	// device that uploaded it.
 	path := ""
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
-		// Drawn each frame, it waits for a download once: the frames
-		// after would each add a redraw to run as it ends.
 		done := downloaded
 		if _, busy := h.a.downloads[f.ID]; busy {
 			done = nil
@@ -132,7 +105,6 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	}
 	failed := url == "" || h.a.images.hasFailed(url)
 	if failed && path != "" {
-		// The file may have gone since it was found.
 		h.a.lost(path)
 	}
 	return nil, nil, failed
@@ -154,9 +126,6 @@ func (h *host) CommentCount(blockID string) int {
 
 func (h *host) OpenComments(blockID string) { h.a.showComments(blockID) }
 
-// CommentPreview shows a block's open threads as its badge's hover does:
-// each one's quote and comments, to read; a click on the badge opens them
-// in the panel to answer.
 func (h *host) CommentPreview(c *ui.Context, blockID string) {
 	a := h.a
 	if a.page == nil {
@@ -201,12 +170,6 @@ func (h *host) SlashItems(query string) []editor.MenuItem {
 	return menu.Filter(menu.Slash(templates.Items(h.a.templateChoices(), id, h.a.templateHint)), query)
 }
 
-// mentionMenu is the @ menu as last made (menu.Mention), to filter by one
-// query after another, and what it was made from: the pages, the folders
-// and the open page's members as read, each by its first, which a new read
-// makes another; the user, the open page and the agents. The menu asks for
-// its items at every frame it shows: they are made again only as one of
-// those changes, and filtered again only as the query does.
 type mentionMenu struct {
 	from     mentionsFrom
 	agents   []menu.Agent
@@ -311,8 +274,6 @@ func (h *host) Comment(blockID, quote string) {
 func (h *host) AskAgent(blockID, quote string) {
 	ip := &inlinePrompt{blockID: blockID, quote: quote, selection: true}
 	ip.from, ip.to = editor.Pos{ID: blockID}, editor.Pos{ID: blockID}
-	// Text selected in the page, not in a table's cell, which gives its
-	// table. It can span blocks.
 	if from, to := h.a.page.editor.Range(); from.ID == blockID {
 		ip.from, ip.to = from, to
 		ip.blocks = h.a.page.editor.SelectedBlocks()
@@ -339,16 +300,12 @@ func (h *host) EditBlock(blockID string) {
 	}
 }
 
-// addSubpageBlock creates a subpage, from the template set for the open
-// page's new subpages if it has one, and links it from the page.
 func (a *App) addSubpageBlock() {
 	ps := a.page
 	if ps == nil {
 		return
 	}
 	t := a.defaultTemplate(ps.id, "")
-	// As in newPageFrom: no subpage is made while the page's edits can't
-	// be saved, as it could not open.
 	if !a.flush() {
 		return
 	}
@@ -368,9 +325,6 @@ func (a *App) addSubpageBlock() {
 	}
 }
 
-// uploadImage picks a picture on the device for an image block: a new one
-// at the caret when blockID is "", else in place of the block's picture.
-// A file it showed before stays with the page, for its history.
 func (a *App) uploadImage(blockID string) {
 	ps := a.page
 	if ps == nil {
@@ -407,10 +361,6 @@ func (a *App) uploadImage(blockID string) {
 	}()
 }
 
-// addFiles copies files into the app's folder, for a folder or a page;
-// it runs off the main thread, as a large file takes a while to copy.
-// added runs on the main thread for each, in order, once it is in; one
-// that could not be added says so.
 func (a *App) addFiles(paths []string, folderID, pageID string, added func(f store.File)) {
 	for _, path := range paths {
 		f, err := a.st.AddFile(path, folderID, pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))
@@ -424,15 +374,12 @@ func (a *App) addFiles(paths []string, folderID, pageID string, added func(f sto
 	}
 }
 
-// uploadedImage is an image block showing a file of the page.
 func uploadedImage(f store.File) *doc.Node {
 	return &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
 		"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
 	}}
 }
 
-// uploadIntoPage picks files and puts them in the page: a picture as an
-// image, others as file cards.
 func (a *App) uploadIntoPage() {
 	ps := a.page
 	if ps == nil {
@@ -457,7 +404,6 @@ func (a *App) uploadIntoPage() {
 	}()
 }
 
-// uploadFile adds files to a folder.
 func (a *App) uploadFile(folderID string) {
 	go func() {
 		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
@@ -470,8 +416,6 @@ func (a *App) uploadFile(folderID string) {
 }
 
 func (a *App) openFile(f store.File) {
-	// A click tries a download that failed again, and looks for the file
-	// on the device again.
 	delete(a.downloadFails, f.ID)
 	a.lost(f.LocalPath)
 	path := a.localFile(f, func(ok bool) {
@@ -486,10 +430,6 @@ func (a *App) openFile(f store.File) {
 	openSafely(path)
 }
 
-// openSafely opens a file in its app. Files come from other devices and
-// people, so the system is told first that it came from elsewhere, for
-// its checks before a program runs; and a file that would run as one,
-// not open in one, is shown in its folder instead.
 func openSafely(path string) {
 	markDownloaded(path)
 	if runsAsProgram(path) {
@@ -499,10 +439,6 @@ func openSafely(path string) {
 	_ = mygo.Shell.OpenPath(path)
 }
 
-// programExts are the kinds of file that opening runs, or sends where
-// they say: apps, installers, scripts, the shortcuts and links to them,
-// documents that run what they hold, and disk images and plug-ins, which
-// opening mounts or installs.
 var programExts = map[string]bool{
 	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
 	".ksh": true, ".fish": true, ".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true,
@@ -519,7 +455,6 @@ var programExts = map[string]bool{
 	".sparsebundle": true, ".vhd": true, ".vhdx": true, ".pyz": true, ".pyzw": true, ".prefpane": true, ".saver": true,
 }
 
-// runsAsProgram reports whether opening the file would run it.
 func runsAsProgram(path string) bool {
 	if programExts[strings.ToLower(filepath.Ext(path))] {
 		return true
@@ -528,9 +463,6 @@ func runsAsProgram(path string) bool {
 	return err == nil && runtime.GOOS != "windows" && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
-// fileByID finds a file: in an index of the files, made again once they
-// are others than it was made from, as every uploaded picture asks as it
-// draws.
 func (a *App) fileByID(id string) (store.File, bool) {
 	if id == "" {
 		return store.File{}, false
@@ -551,16 +483,11 @@ func (a *App) fileByID(id string) (store.File, bool) {
 	return a.files[i], true
 }
 
-// presence is whether a file was on this device, and when that was found.
 type presence struct {
 	there bool
 	at    time.Time
 }
 
-// onDevice reports whether the file at path is there: as last looked, not
-// at every frame that shows it, until the files are read again, as after
-// a download, or showing it failed (lost); one that was not there is
-// looked for again once imageRetry has passed.
 func (a *App) onDevice(path string) bool {
 	if p, ok := a.present[path]; ok && (p.there || time.Since(p.at) < imageRetry) {
 		return p.there
@@ -573,15 +500,8 @@ func (a *App) onDevice(path string) bool {
 	return err == nil
 }
 
-// lost has the file at path looked for again, as showing it failed.
 func (a *App) lost(path string) { delete(a.present, path) }
 
-// localFile returns where a file is on this device, or "" while one
-// uploaded from another device downloads; done runs once the download
-// ends, ok if it came. A file asked for again while it downloads waits
-// for the same download, and each done runs; done may be nil. A download
-// that failed is tried again once imageRetry has passed, or when the file
-// is opened.
 func (a *App) localFile(f store.File, done func(ok bool)) string {
 	if f.LocalPath != "" && a.onDevice(f.LocalPath) {
 		return f.LocalPath
@@ -603,7 +523,6 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 	a.offMain(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), recording.DownloadWait(f.SizeBytes))
 		defer cancel()
-		// Written to the disk as it comes, never all in memory.
 		var r io.ReadCloser
 		r, err = a.sync.FetchReader(ctx, "files", f.StoragePath)
 		if err == nil {
@@ -619,7 +538,6 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 				a.downloadFails = map[string]time.Time{}
 			}
 			a.downloadFails[f.ID] = time.Now()
-			// The next frame after the wait tries again.
 			a.later(imageRetry, func() {})
 		} else {
 			delete(a.downloadFails, f.ID)
@@ -634,16 +552,12 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 	return ""
 }
 
-// downloadFailed reports whether a file's download failed, and waits to be
-// tried again.
 func (a *App) downloadFailed(id string) bool {
 	at, ok := a.downloadFails[id]
 	return ok && time.Since(at) < imageRetry
 }
 
-// exportMarkdown saves a page as Markdown, as the other devices have it.
 func (a *App) exportMarkdown(id string) {
-	// As exportAll, not without the edits waiting.
 	if a.page != nil && a.page.id == id && !a.savePage() {
 		return
 	}
@@ -673,14 +587,8 @@ func (a *App) exportMarkdown(id string) {
 	})
 }
 
-// keptHere reports whether this device has page p's content as the other
-// devices have it, kept up to date as it changes: with nothing to sync
-// it with, open or served by a public link (pulled), or kept on the
-// device, alone or with all the pages.
 func (a *App) keptHere(p store.Page) bool { return a.keeper().Keeps(p) }
 
-// keeper is which pages this device keeps up to date, as keptHere tells,
-// now: for an export of every page, which runs off the main thread.
 func (a *App) keeper() export.Keeper {
 	k := export.Keeper{SyncOn: a.syncOn(), AllOffline: a.settings.AllPagesOffline}
 	if a.page != nil {
@@ -692,12 +600,6 @@ func (a *App) keeper() export.Keeper {
 	return k
 }
 
-// exportContent runs use, which exports page id, with its content as the
-// other devices have it, on the main thread: at once where this device
-// keeps it up to date (keptHere), else once it has come down, as when the
-// page opens, or as this device has it when it can't come now. Content
-// that is not on this device at all is said to be missing instead, and
-// nothing is exported.
 func (a *App) exportContent(id string, use func(c *doc.Content)) {
 	p := a.pageByID(id)
 	if p == nil {
@@ -715,7 +617,6 @@ func (a *App) exportContent(id string, use func(c *doc.Content)) {
 	var c *doc.Content
 	var err error
 	a.offMain(func() {
-		// Between passes, as export.All brings a page down.
 		a.sync.Hold(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
@@ -723,8 +624,6 @@ func (a *App) exportContent(id string, use func(c *doc.Content)) {
 		})
 	}, func() {
 		if err != nil {
-			// The server could not be reached, or failed: the copy on this
-			// device is exported as it is, where there is one.
 			log.Printf("export %s: %v", id, err)
 			c = a.st.Content(id)
 		}
@@ -741,10 +640,6 @@ func (a *App) exportContent(id string, use func(c *doc.Content)) {
 
 func safeName(s string) string { return export.SafeName(s) }
 
-// loadMembers reads who a page is shared with, as it opens. Sync reads
-// them itself for the user's own pages as they open (sync.Service.SetOpen),
-// on the server: here they are read for the pages others share, and for
-// all of them while sync goes through iCloud Drive instead.
 func (a *App) loadMembers(pageID string) {
 	if p, err := a.st.Page(pageID); err == nil && p.SpaceID == a.st.Session().SpaceID && !a.sync.ICloudOn() {
 		return
@@ -754,45 +649,27 @@ func (a *App) loadMembers(pageID string) {
 	_ = a.sync.LoadMembers(ctx, pageID)
 }
 
-// imageCache loads the pictures of image blocks; root is the app's data
-// folder, the only one it reads files from.
 type imageCache struct {
-	root string
-	mu   sync.Mutex
-	// pictures are bitmaps, or SVGs, which MyGo draws itself; used is
-	// when each was last asked for, and swept when releasePictures last
-	// looked at them.
+	root     string
+	mu       sync.Mutex
 	pictures map[string]ui.ImageSource
 	used     map[string]time.Time
 	swept    time.Time
 	loading  map[string]bool
-	// failed holds when a picture last failed to load.
-	failed map[string]time.Time
-	// gifs are the animated GIFs among the pictures, as read. players
-	// play them, one for each block showing one, as MyGo shows a player
-	// in one place at a time: by url, # and block, none while it is made.
-	// releasePlayers closes those no block has shown for a while.
-	gifs    map[string][]byte
-	players map[string]*gifPlayer
-	making  map[string]bool
-	// closed is set once the cache is let go, as it is cleared: what it
-	// still makes then is closed rather than kept.
-	closed bool
+	failed   map[string]time.Time
+	gifs     map[string][]byte
+	players  map[string]*gifPlayer
+	making   map[string]bool
+	closed   bool
 }
 
-// gifPlayer is a block's player of an animated GIF, nil for one that did
-// not decode, and when a block last asked for it.
 type gifPlayer struct {
 	p     *ui.VideoPlayer
 	shown time.Time
 }
 
-// playerIdle is how long a GIF's player outlives the last frame that
-// built its block: its decoded frames and its goroutine go then.
 const playerIdle = 30 * time.Second
 
-// imageRetry is how long a picture that failed to load waits before it is
-// tried again, as the device may have come back online.
 const imageRetry = time.Minute
 
 func newImageCache(root string) *imageCache {
@@ -800,8 +677,6 @@ func newImageCache(root string) *imageCache {
 		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 
-// get returns a picture, or nil while it loads; done runs when it has
-// loaded or failed.
 func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -845,9 +720,6 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	return nil
 }
 
-// player returns the player of an animated GIF in block, looping, or nil
-// for another picture, and while it is made, off the main thread, as its
-// frames decode; done runs when it is made.
 func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -875,7 +747,6 @@ func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 		ic.mu.Lock()
 		delete(ic.making, key)
 		if ic.closed {
-			// No one else has this player yet.
 			if p != nil {
 				p.Close()
 			}
@@ -888,11 +759,6 @@ func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 	return nil
 }
 
-// releasePlayers closes and forgets the players no block has asked for
-// within playerIdle of now: those of blocks gone, scrolled away, or on a
-// page no longer open, and those made after their block went. Call it on
-// the main thread, as a player's methods are, after a frame's blocks are
-// built, so that a player on screen has just been asked for.
 func (ic *imageCache) releasePlayers(now time.Time) {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -907,20 +773,10 @@ func (ic *imageCache) releasePlayers(now time.Time) {
 	}
 }
 
-// pictureIdle is how long a picture stays decoded after the last frame
-// that asked for it, and pictureBudget about how many bytes of pixels the
-// pictures may hold: each of a page of large photos scrolled through
-// would stay otherwise, up to 200 MB each. The budget is a variable for
-// tests.
 const pictureIdle = 2 * time.Minute
 
 var pictureBudget int64 = 512 << 20
 
-// releasePictures forgets, once a second at most, the pictures no frame
-// has asked for within pictureIdle of now, and the least recently asked
-// for while the rest hold more than pictureBudget, but for those asked for
-// within the last second, which are on screen; a picture forgotten loads
-// again as a block asks for it. Call it as releasePlayers.
 func (ic *imageCache) releasePictures(now time.Time) {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -959,27 +815,19 @@ func (ic *imageCache) releasePictures(now time.Time) {
 	}
 }
 
-// forget lets a picture go; under mu.
 func (ic *imageCache) forget(url string) {
 	delete(ic.pictures, url)
 	delete(ic.gifs, url)
 	delete(ic.used, url)
 }
 
-// maxPixels is the most pixels a picture may have to be shown, and
-// maxGIFPixels those of all an animated GIF's frames: a small file can
-// say it is far larger, and decoding it would take more memory than the
-// device has.
 const (
 	maxPixels    = doc.MaxPixels
 	maxGIFPixels = 200_000_000
 )
 
-// errTooLarge is for a picture of more pixels than maxPixels.
 var errTooLarge = errors.New("picture too large")
 
-// checkPixels refuses a picture whose header says it has more pixels than
-// it may, before it is decoded. What is no bitmap, as an SVG, passes.
 func checkPixels(data []byte) error {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -994,8 +842,6 @@ func checkPixels(data []byte) error {
 	return nil
 }
 
-// close closes the players, for a cache let go. Call it on the main
-// thread, as releasePlayers.
 func (ic *imageCache) close() {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -1008,29 +854,21 @@ func (ic *imageCache) close() {
 	}
 }
 
-// animatedGIF reports whether data is a GIF of more than one frame.
 func animatedGIF(data []byte) bool {
 	n, _ := gifFrames(data)
 	return n > 1
 }
 
-// gifFrames counts a GIF's frames, and their pixels, from its blocks,
-// without decoding them; 0 for what is no GIF. What follows a block cut
-// short is left out.
 func gifFrames(data []byte) (frames, area int) {
 	if !bytes.HasPrefix(data, []byte("GIF8")) || len(data) < 13 {
 		return 0, 0
 	}
-	// A color table, after a packed byte saying it is there, of 2^(n+1)
-	// colors of 3 bytes.
 	table := func(packed byte) int {
 		if packed&0x80 == 0 {
 			return 0
 		}
 		return 3 << (packed&7 + 1)
 	}
-	// skip passes over sub-blocks: each its size, then its bytes, till
-	// one of size 0.
 	skip := func(i int) int {
 		for i < len(data) && data[i] != 0 {
 			i += 1 + int(data[i])
@@ -1040,24 +878,22 @@ func gifFrames(data []byte) (frames, area int) {
 	i := 13 + table(data[10])
 	for i < len(data) {
 		switch data[i] {
-		case 0x21: // an extension: its label, then sub-blocks
+		case 0x21:
 			i = skip(i + 2)
-		case 0x2C: // a frame: where it is, its size, then its pixels
+		case 0x2C:
 			if i+10 > len(data) {
 				return frames, area
 			}
 			w, h := int(data[i+5])|int(data[i+6])<<8, int(data[i+7])|int(data[i+8])<<8
 			frames, area = frames+1, area+w*h
 			i = skip(i + 10 + table(data[i+9]) + 1)
-		default: // the trailer, or what is no block
+		default:
 			return frames, area
 		}
 	}
 	return frames, area
 }
 
-// hasFailed reports whether a picture failed to load, and is not being
-// tried again.
 func (ic *imageCache) hasFailed(url string) bool {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
@@ -1065,9 +901,6 @@ func (ic *imageCache) hasFailed(url string) bool {
 	return ok && !ic.loading[url]
 }
 
-// read reads a picture: from the web, or a file of the app's own, in its
-// data folder. A file elsewhere on the device is not shown, as a block's
-// link to one can come from another device or person.
 func (ic *imageCache) read(url string) ([]byte, error) {
 	path, ok := strings.CutPrefix(url, "file://")
 	if !ok {
@@ -1076,24 +909,15 @@ func (ic *imageCache) read(url string) ([]byte, error) {
 	if !inFolder(ic.root, path) {
 		return nil, errNotOwnFile
 	}
-	return os.ReadFile(path) // #nosec G304 -- a file in the app's data folder.
+	return os.ReadFile(path) // #nosec G304
 }
 
-// errNotOwnFile is for a file outside the app's data folder.
 var errNotOwnFile = export.ErrNotOwnFile
 
-// inFolder reports whether path is in folder dir, links followed.
 func inFolder(dir, path string) bool { return export.InFolder(dir, path) }
 
-// embedURL is where an embed's wrapper page loads. WebView2 serves a
-// loaded document only to a URL it requests over the network, and never
-// requests about:blank, so there the page loads at an https URL of the
-// app's bundle ID instead, as a video's does, trusted to tell Go its
-// size. Its policy still keeps it off the network, and the embed's own
-// sandboxed frame has an opaque origin either way.
 var embedURL = map[bool]string{true: "https://embed.app.capyvibe.leaflet/", false: "about:blank"}[runtime.GOOS == "windows"]
 
-// hexOf writes a color as CSS's "#rrggbb".
 func hexOf(c ui.Color) string {
 	const digits = "0123456789abcdef"
 	out := []byte{'#'}
@@ -1103,28 +927,19 @@ func hexOf(c ui.Color) string {
 	return string(out)
 }
 
-// embedScroll is the service an embed's wrapper calls: to scroll the page,
-// and to say how tall the embed's content is and whether it is zoomed in.
 type embedScroll struct{ a *App }
 
-// embedSize is how tall an embed's content is at a width of its frame.
-// kept is set while it is what a view let go said: the block keeps that
-// height, its view made again hidden till it says its own.
 type embedSize struct {
 	h, w float32
 	kept bool
 }
 
-// Size keeps the height of embed id's content at its frame's width w. The
-// first call also tells that the embed has drawn, so it shows.
 func (s *embedScroll) Size(id string, h, w float64) {
 	s.a.update(func() {
 		s.a.embedSizes[id] = embedSize{h: float32(min(max(h, 0), 4000)), w: float32(w)}
 	})
 }
 
-// Zoomed keeps whether diagram id is zoomed in, for its bar to offer to
-// fit it again.
 func (s *embedScroll) Zoomed(id string, zoomed bool) {
 	s.a.update(func() {
 		if zoomed {
@@ -1135,7 +950,6 @@ func (s *embedScroll) Zoomed(id string, zoomed bool) {
 	})
 }
 
-// Exit leaves the full screen view of the diagram whose frame is id.
 func (s *embedScroll) Exit(id string) {
 	s.a.update(func() {
 		if ps := s.a.page; ps != nil && ps.fullDiagram != "" && fullView(ps.fullDiagram) == id {
@@ -1144,8 +958,6 @@ func (s *embedScroll) Exit(id string) {
 	})
 }
 
-// zoomEmbed asks embed key's frame to zoom: "in", "out", or "fit" to show
-// all of it again.
 func (a *App) zoomEmbed(key, how string) {
 	v := a.embeds[key]
 	if v == nil {
@@ -1153,18 +965,11 @@ func (a *App) zoomEmbed(key, how string) {
 	}
 	page := v.Page()
 	script := `document.getElementById("f").contentWindow.postMessage({leafletZoom: ` + strconv.Quote(how) + `}, "*")`
-	// Eval waits for the page, so not on the UI thread.
 	go func() { _, _ = page.Eval(script) }()
 }
 
-// maxEmbedWheel is the most DIPs an embed's leftover wheel scrolls the
-// page in a frame.
 const maxEmbedWheel = 2000
 
-// Scroll scrolls the open page by dy DIPs, for wheel movement over embed
-// id that the embed did not use: only while the pointer is over its view,
-// as an embed could otherwise scroll the page at will, and once a frame
-// (embedWheel), however often it asks.
 func (s *embedScroll) Scroll(id string, dy float64) {
 	dy = max(min(dy, maxEmbedWheel), -maxEmbedWheel)
 	s.a.update(func() {
@@ -1174,8 +979,6 @@ func (s *embedScroll) Scroll(id string, dy float64) {
 	})
 }
 
-// scrollByEmbeds scrolls the open page by the wheel the embed under the
-// pointer passed on since the frame before, up to maxEmbedWheel.
 func (a *App) scrollByEmbeds(ps *pageState) {
 	if dy := a.embedWheel; dy != 0 {
 		a.embedWheel = 0
@@ -1191,9 +994,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	}
 	pal := theme.Of(c)
 	height := float32(min(max(n.Int("height", 320), 120), 1200))
-	// The frame is inside the card's border and padding.
 	const pad = 14
-	// A card as a chart is, with the title inside.
 	box := ui.Column(c.Key("embed:"+n.ID)).Padding(12, pad, pad).Gap(10).Radius(10).Border(1, pal.Divider).Background(pal.Surface)
 	hovered := box.Hovered()
 	box.Children(func() {
@@ -1218,8 +1019,6 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 				ui.Text(c, locales.HostSandboxed()).FontSize(11).TextColor(pal.TextMuted)
 			})
 		})
-		// The block grows when the content is taller at this width, as a
-		// narrow page stacks its layout.
 		html := n.Str("html")
 		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
 			return max(height, min(content, 1200))
@@ -1227,12 +1026,6 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	})
 }
 
-// embedInput is what an embed's web view loads its page from: the embed's
-// HTML, or a formula's or a diagram's source, of block kind kind ("full"
-// for a diagram's full screen view), on the background bg, dark or not.
-// toPage gives the page all of the wheel (sandbox). The page, as large as
-// the scripts that draw math and diagrams, is made again only as one of
-// them changes, not at every frame.
 type embedInput struct {
 	src, kind string
 	bg        ui.Color
@@ -1240,24 +1033,6 @@ type embedInput struct {
 	toPage    bool
 }
 
-// sandbox shows a block's HTML in its sandboxed web view, key naming it,
-// at width w inside the page: page makes the HTML of in, which sandbox
-// fills in with the theme's colors. fit gives the frame's height from its
-// content's, once that has drawn; until then it is height, and the box
-// shows rather than a blank page in the frame's color. A nil fit has the
-// frame fill the rest of its parent instead. The view loads again when in
-// changes: by hand, by an agent, by undo or a restored version, or as the
-// theme does.
-//
-// A block's view is made only once its frame comes within a window's
-// height of the window, and let go once it is three away: a page of many
-// formulas runs those near the part of it shown, each with its own copy
-// of KaTeX, not all of them. One let go keeps its height for its block.
-//
-// in.toPage gives all of the wheel over the view to the page around it, as
-// MyGo does natively, for HTML that neither scrolls nor takes the wheel
-// itself, as math; otherwise the frame keeps the wheel and passes the
-// page what it leaves.
 func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() string, w float32, fit func(float32) float32, height float32) {
 	pal := theme.Of(c)
 	in.bg, in.dark = pal.Surface, pal.Dark
@@ -1272,15 +1047,10 @@ func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() stri
 	ready := sized && !size.kept
 	v := a.embeds[key]
 	if v != nil && a.embedToPage[key] != in.toPage {
-		// The block was replaced by another kind, keeping its ID, as an
-		// agent's replace_block does: a view takes the wheel as it was
-		// made, so a new one takes it as the new kind needs.
 		a.letGoEmbed(key)
 		delete(a.embedIn, key)
 		v = nil
 	}
-	// A view that could not be made is not tried again at every frame,
-	// while the block stays in the page: what failed would fail again.
 	if why, failed := a.embedFailed[key]; v == nil && failed {
 		ui.Text(c, locales.HostEmbedError(why)).TextColor(pal.TextMuted)
 		return
@@ -1322,8 +1092,6 @@ func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() stri
 	}
 	if v != nil && (made || a.embedIn[key] != in) {
 		if was, ok := a.embedIn[key]; ok && was == in && sized {
-			// Made again for the same page: it keeps its height, hidden
-			// till it has drawn.
 			size.kept = true
 			a.embedSizes[key] = size
 		} else {
@@ -1336,7 +1104,6 @@ func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() stri
 	}
 	show := func() {
 		if v == nil {
-			// Away from what the window shows: the block keeps its room.
 			ui.Box(c).Height(height).FillWidth().Radius(6).Background(pal.Ground)
 			return
 		}
@@ -1366,20 +1133,12 @@ func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() stri
 	holder.Children(show)
 }
 
-// embedViewOptions are those of an embed's web view, on a background of
-// bg: every frame of its page starts without WebRTC (rendered.NoRTC), the
-// frames the embed makes itself too, before their own scripts run.
 func embedViewOptions(bg ui.Color, toPage bool) mygo.WebViewOptions {
 	return mygo.WebViewOptions{BackgroundColor: hexOf(bg), ScrollToContainer: toPage,
 		Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")},
 			PreloadScript: rendered.NoRTC, PreloadAllFrames: true}}
 }
 
-// embedNear tells where a block's frame, r as last laid out, is from the
-// window: near within a window's height of it, where its web view is
-// made, or far past three, where it is let go; in between, neither, and a
-// view keeps as it is. A frame not laid out yet is neither, and the next
-// frame tells; in a window of no size, all are near.
 func embedNear(c *ui.Context, r ui.Rect) (near, far bool) {
 	_, wh := c.Size()
 	if wh <= 0 {
@@ -1399,24 +1158,15 @@ func embedNear(c *ui.Context, r ui.Rect) (near, far bool) {
 	return away <= wh, away > 3*wh
 }
 
-// blockView and fullView are the keys of a block's web view: in its place
-// in the page, and filling the page's body, as a diagram's full screen
-// view. Each is its kind and the block's ID after it, so that no ID a
-// block has, whatever it holds, names another block's view.
 func blockView(id string) string { return "block:" + id }
 
 func fullView(id string) string { return "full:" + id }
 
-// viewBlock is the block a web view's key is of, and whether the view is
-// the one filling the page's body (fullView).
 func viewBlock(key string) (id string, full bool) {
 	kind, id, _ := strings.Cut(key, ":")
 	return id, kind == "full"
 }
 
-// letGoEmbed destroys embed key's web view, keeping what its block shows
-// at: its height, and the page it had, to tell its next view, made for
-// the same page, to keep that height.
 func (a *App) letGoEmbed(key string) {
 	if v := a.embeds[key]; v != nil {
 		v.Destroy()
@@ -1428,11 +1178,6 @@ func (a *App) letGoEmbed(key string) {
 	}
 }
 
-// dropEmbeds lets go of the web views of embeds, math and diagrams no
-// longer in the open page, and what they said about themselves, as
-// deleting one or undoing its insert leaves it running otherwise; and,
-// called as the page has built, of the views of blocks it did not build,
-// as those folded away, which keep what they said, to show again.
 func (a *App) dropEmbeds() {
 	gone := func(key string) bool {
 		id, _ := viewBlock(key)

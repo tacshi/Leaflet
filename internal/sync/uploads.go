@@ -13,58 +13,26 @@ import (
 	"leaflet/internal/store"
 )
 
-// An upload through the server takes as long as the connection does,
-// which may be hours for a recording: longer than a pass may run, and it
-// starts again from nothing each time it is stopped. So it goes on beside
-// the passes, one at a time. A push waits for it a little, so a small one
-// and its row go together; past that the push and the pull go on, and the
-// upload settles its entry itself as it ends, asking for a pass.
-
-// uploadWait is how long a push waits for an upload it started. Tests
-// shorten it.
 var uploadWait = 15 * time.Second
 
-// uploadStall is how long an upload goes on with the server taking none
-// of it. Tests shorten it.
 var uploadStall = 2 * time.Minute
 
-// drainWait is the most Drain waits for uploads. Tests shorten it.
 var drainWait = 5 * time.Minute
 
 var (
-	// errUploadStalled is an upload the server stopped taking.
 	errUploadStalled = errors.New("the upload stopped: the server took none of it for too long")
-	// errUploadGone is an upload no longer wanted, as its file was deleted
-	// or the person signed out.
-	errUploadGone = errors.New("the upload is no longer wanted")
+	errUploadGone    = errors.New("the upload is no longer wanted")
 )
 
-// upload is an upload under way.
 type upload struct {
-	// entity is its outbox entry's ID.
-	entity string
-	// stop ends it, for the reason it is given.
-	stop context.CancelCauseFunc
-	// read is when it last read some of the file (ms), 0 before it has.
-	read atomic.Int64
-	// done is closed as it ends.
-	done chan struct{}
-	// alone says no push waits for it; ended says it ended, sent whether
-	// its entry can leave the queue, and err why not. Guarded by the
-	// service's mu.
+	entity             string
+	stop               context.CancelCauseFunc
+	read               atomic.Int64
+	done               chan struct{}
 	alone, ended, sent bool
 	err                error
 }
 
-// Drain sends what waits to go up, as signing out does before it counts
-// what has not: a pass, and for an upload that goes on past the wait of
-// its push, up to drainWait for it to end, and another pass for what waited
-// for it, as its file's row, until a pass starts none. The upload that
-// counts is the one started last, not one under way: it may end before
-// the pass that left it does, with what waited for it still queued. An
-// upload that ends without its file gone up, as one the server stopped
-// taking (uploadStall), ends the wait: what is still queued then is for
-// the caller to count.
 func (s *Service) Drain() error {
 	limit := time.NewTimer(drainWait)
 	defer limit.Stop()
@@ -89,9 +57,6 @@ func (s *Service) Drain() error {
 	}
 }
 
-// pushUpload sends a storage entry, and reports whether it can leave the
-// queue, once the upload ended: while one goes on, this entry and any
-// other stay queued, and the upload settles its own (uploadEnded).
 func (s *Service) pushUpload(ctx context.Context, uid string, e store.OutboxEntry, payload map[string]any) (bool, error) {
 	up := s.startUpload(uid, e, payload)
 	if up == nil {
@@ -116,8 +81,6 @@ func (s *Service) pushUpload(ctx context.Context, uid string, e store.OutboxEntr
 	return up.sent, up.err
 }
 
-// startUpload starts sending a storage entry, or returns nil while another
-// upload goes on. Stop ends it, as it ends a pass.
 func (s *Service) startUpload(uid string, e store.OutboxEntry, payload map[string]any) *upload {
 	session, stall := s.be.Sessions(), uploadStall
 	s.mu.Lock()
@@ -137,8 +100,6 @@ func (s *Service) startUpload(uid string, e store.OutboxEntry, payload map[strin
 	return up
 }
 
-// runUpload sends an upload to its end, for the push that waits for it,
-// or, with none left waiting, settling its entry itself.
 func (s *Service) runUpload(ctx context.Context, up *upload, uid string, e store.OutboxEntry, payload map[string]any) {
 	var sent bool
 	var err error
@@ -151,7 +112,6 @@ func (s *Service) runUpload(ctx context.Context, up *upload, uid string, e store
 		up.ended, up.sent, up.err = true, sent, err
 		alone := up.alone
 		s.mu.Unlock()
-		// Settled before another may start, which would send it again.
 		if alone {
 			s.uploadEnded(e, sent, err)
 		}
@@ -167,9 +127,6 @@ func (s *Service) runUpload(ctx context.Context, up *upload, uid string, e store
 	sent, err = s.pushFile(ctx, uid, payload, &up.read)
 }
 
-// uploadEnded settles the entry of an upload no push waited for, as a push
-// does (push). A pass then takes what waited for it, as a file's row, or
-// the next upload.
 func (s *Service) uploadEnded(e store.OutboxEntry, sent bool, err error) {
 	switch {
 	case err == nil && sent:
@@ -183,10 +140,6 @@ func (s *Service) uploadEnded(e store.OutboxEntry, sent bool, err error) {
 	}
 }
 
-// watchUpload ends an upload the server stopped taking, which would
-// otherwise wait for the connection to fail, however long that takes, or
-// no longer wanted: its entry went, sync can't go now, or the session it
-// began in ended.
 func (s *Service) watchUpload(ctx context.Context, up *upload, session uint64, stall time.Duration) {
 	tick := time.NewTicker(stall / 4)
 	defer tick.Stop()
@@ -207,17 +160,12 @@ func (s *Service) watchUpload(ctx context.Context, up *upload, session uint64, s
 	}
 }
 
-// uploadRuns reports whether a storage entry's upload is under way.
 func (s *Service) uploadRuns(entity string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.uploading != nil && s.uploading.entity == entity
 }
 
-// keyed has a file's upload go under a key Storage takes: one an earlier
-// version queued may have the file's name as it was, which Storage refuses
-// every time. It returns the entry's payload as it is now, nil for a file
-// that is gone.
 func (s *Service) keyed(entry *store.OutboxEntry, payload map[string]any) (map[string]any, error) {
 	id := store.S(payload, "file_id")
 	if id == "" || store.ValidStorageKey(store.S(payload, "path")) {
@@ -232,7 +180,6 @@ func (s *Service) keyed(entry *store.OutboxEntry, payload map[string]any) (map[s
 	return s.payload(entry)
 }
 
-// timedReader notes when a file an upload reads was last read.
 type timedReader struct {
 	r  io.Reader
 	at *atomic.Int64

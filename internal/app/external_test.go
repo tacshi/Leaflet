@@ -15,7 +15,6 @@ import (
 func TestAgentSetup(t *testing.T) {
 	exe := "/Applications/Leaflet.app/Contents/MacOS/Leaflet"
 	dir := "/Users/me/Library/Application Support/Leaflet"
-	// dir as one word of the shell a terminal here opens.
 	word := "'" + dir + "'"
 	if runtime.GOOS == "windows" {
 		word = `"` + dir + `"`
@@ -66,8 +65,6 @@ func TestAgentSetup(t *testing.T) {
 	}
 }
 
-// On Windows the paths go in double quotes, which PowerShell and cmd.exe
-// both take one word from; cmd.exe keeps single quotes as they are.
 func TestWindowsQuote(t *testing.T) {
 	for in, want := range map[string]string{
 		`C:\Program Files\Leaflet\Leaflet.exe`: `"C:\Program Files\Leaflet\Leaflet.exe"`,
@@ -89,9 +86,6 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// While an app's install link waits to be finished in the app, Connect
-// opens the link again, as when its question there was closed, and waits
-// longer with the watch already on the app's settings.
 func TestConnectOpensTheInstallLinkAgain(t *testing.T) {
 	was := openInstallLink
 	t.Cleanup(func() { openInstallLink = was })

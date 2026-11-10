@@ -11,8 +11,6 @@ import (
 	"leaflet/locales"
 )
 
-// SetDue gives a to-do a due date, with its time of day when timed, or
-// takes it away for a zero time, as a step of undo.
 func (e *Editor) SetDue(id string, t time.Time, timed bool) {
 	n := e.node(id)
 	if n == nil || n.Type != "todo_list" || e.ReadOnly {
@@ -24,38 +22,23 @@ func (e *Editor) SetDue(id string, t time.Time, timed bool) {
 	e.changed()
 }
 
-// DueLabel says when a due date is, from now, in the language the app
-// shows, as doc.DueLabel.
 func DueLabel(due time.Time, timed bool, now time.Time) string {
 	return doc.DueLabel(locales.In(i18n.Locale()), due, timed, now)
 }
 
-// Overdue reports whether a due date has passed, as doc.Overdue.
 func Overdue(due time.Time, timed bool, now time.Time) bool { return doc.Overdue(due, timed, now) }
 
-// DueToday reports whether a due date is on now's day, as doc.DueToday.
 func DueToday(due, now time.Time) bool { return doc.DueToday(due, now) }
 
-// clock is the time now, which a to-do's date is shown from.
 var clock = time.Now
 
-// dueHour is the time of day a due date takes as it is given one.
 const dueHour = 9
 
-// A dueDraft is the date in a to-do's calendar, with its time of day when
-// timed, which the to-do takes as the calendar closes when edited. Each
-// to-do has its own: a click on another's date, opening its calendar,
-// closes this one, which still saves what it was given.
 type dueDraft struct {
 	at            time.Time
 	timed, edited bool
 }
 
-// dueChip builds a to-do's due date after its text, which opens MyGo's
-// calendar to change it, and a time of day; with none, it offers one
-// while the to-do is under the pointer or has the caret. The popover
-// changes a draft, saved as it closes, as MyGo's calendar chooses a day
-// also as it turns the months.
 func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active bool, pal *theme.Palette) {
 	due, timed, has := n.Due()
 	d := e.dues[n.ID]
@@ -84,8 +67,6 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	if chip.Clicked() && !e.ReadOnly {
 		if open = !open; open {
 			if d != nil && d.edited {
-				// Closed by another's calendar and opened again before it
-				// built, it saves what it was given first.
 				e.SetDue(n.ID, d.at, d.timed)
 			}
 			d = &dueDraft{at: due, timed: timed}
@@ -99,9 +80,6 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		}
 	}
 	ui.Popover(c, chip, &open, func() {
-		// Its buttons and Page Up and Down only show other months, so
-		// looking at one leaves the date as it was. A click on a day, the
-		// one chosen too, focuses the calendar.
 		cal := ui.Calendar(c.Key("due-calendar"), &d.at).Browse()
 		if cal.Changed() || cal.FocusWithin() {
 			d.edited = true
@@ -134,7 +112,6 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	case open:
 		e.dueOpen = n.ID
 	case d != nil:
-		// Closed, by the user or by another to-do's calendar opening.
 		delete(e.dues, n.ID)
 		if e.dueOpen == n.ID {
 			e.dueOpen = ""
@@ -145,8 +122,6 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	}
 }
 
-// onChip reports whether a point in the window is on a to-do's date,
-// whose chip takes the press.
 func (e *Editor) onChip(wx, wy float32) bool {
 	for _, r := range e.chips {
 		if wx >= r.X && wx < r.X+r.W && wy >= r.Y && wy < r.Y+r.H {

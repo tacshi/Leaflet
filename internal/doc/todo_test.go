@@ -27,7 +27,6 @@ func TestTodos(t *testing.T) {
 	if d := got[0].Due; d.Year() != 2026 || d.Month() != 10 || d.Day() != 30 || d.Hour() != 0 || got[0].Timed {
 		t.Errorf("due %v, timed %v", d, got[0].Timed)
 	}
-	// With a time of day, it keeps the hour and minute.
 	dated.SetDue(time.Date(2026, 10, 30, 15, 30, 45, 0, time.Local), true)
 	if dated.Str("due") != "2026-10-30T15:30" {
 		t.Errorf("timed due %q", dated.Str("due"))
@@ -39,7 +38,6 @@ func TestTodos(t *testing.T) {
 	if _, _, ok := dated.Due(); ok {
 		t.Error("the date is still there")
 	}
-	// Agents write a due date as YYYY-MM-DD, and read it back.
 	n, err := SpecToNode(map[string]any{"type": "todo_list", "text": "Ship", "due": "2026-11-02"}, "", "Agent")
 	if err != nil || n.Str("due") != "2026-11-02" {
 		t.Fatalf("spec %+v %v", n, err)
@@ -47,16 +45,12 @@ func TestTodos(t *testing.T) {
 	if v := BlockViews(FromBlocks([]*Node{n}))[0]; v["due"] != "2026-11-02" {
 		t.Errorf("view %+v", v)
 	}
-	// Or as YYYY-MM-DDTHH:MM, with a time of day.
 	n, err = SpecToNode(map[string]any{"type": "todo_list", "text": "Call", "due": "2026-11-02T09:15"}, "", "Agent")
 	if err != nil || n.Str("due") != "2026-11-02T09:15" {
 		t.Fatalf("timed spec %+v %v", n, err)
 	}
 }
 
-// An agent's due date is kept as it is written, as the server keeps it:
-// a time the clocks skip here stays the time it was given, rather than
-// one an hour off, and a time not written in full is no due date.
 func TestSpecDueKeptAsWritten(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {

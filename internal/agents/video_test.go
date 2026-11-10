@@ -9,8 +9,6 @@ import (
 	"leaflet/internal/web"
 )
 
-// read_video_transcript reads what is said in a video block of the page,
-// from its site's captions, in passages after their times.
 func TestReadVideoTranscript(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{
 		{ID: "yt", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Talk"}},
@@ -21,8 +19,6 @@ func TestReadVideoTranscript(t *testing.T) {
 	})
 	var asked []doc.Video
 	answer := map[string]error{}
-	// Reading other pages is on, as only then may a run be kept to the
-	// page's URLs.
 	x := &Executor{Ctx: ToolContext{Content: c, PageID: "page", ListPages: func() []map[string]any { return nil }, Captions: func(v doc.Video) (web.Captions, error) {
 		asked = append(asked, v)
 		if err := answer[v.Provider]; err != nil {
@@ -59,9 +55,6 @@ func TestReadVideoTranscript(t *testing.T) {
 	if e, _ := x.Call("read_video_transcript", map[string]any{"id": "yt"})["error"].(string); !strings.Contains(e, "timeout") {
 		t.Errorf("failed: %q", e)
 	}
-	// Once the run has read the user's other pages, only a video the page
-	// had as it began may be read: one it put there itself could be named
-	// for what it read.
 	x.armed = true
 	answer["youtube"] = nil
 	if out := x.Call("read_video_transcript", map[string]any{"id": "yt"}); out["error"] != nil {
@@ -77,10 +70,6 @@ func TestReadVideoTranscript(t *testing.T) {
 	}
 }
 
-// A video's captions are the web's, written by whoever put it up, and read
-// with the web off too: once a run reads them, what it writes keeps to the
-// URLs the user gave, or it found, the page's own among them, as after
-// reading the web.
 func TestCaptionsCountAsTheWeb(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{
 		{ID: "yt", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}},

@@ -10,9 +10,6 @@ import (
 	"leaflet/locales"
 )
 
-// queue runs functions one at a time, in the order they came, on a
-// goroutine of its own. Posting never blocks, so what a function posts
-// waits behind it rather than for it.
 type queue struct {
 	mu   sync.Mutex
 	wake *sync.Cond
@@ -40,8 +37,6 @@ func (q *queue) run() {
 	}
 }
 
-// call runs fn, keeping a panic in it from taking the app down with the
-// rest of the queue: it is logged, and the next function runs.
 func (q *queue) call(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -51,7 +46,6 @@ func (q *queue) call(fn func()) {
 	fn()
 }
 
-// post runs fn after what was posted before it.
 func (q *queue) post(fn func()) {
 	q.mu.Lock()
 	q.fns = append(q.fns, fn)
@@ -59,11 +53,6 @@ func (q *queue) post(fn func()) {
 	q.wake.Signal()
 }
 
-// do runs fn after what was posted before it, and waits for it. A panic
-// in fn goes on in the caller, as if fn ran there, for the exported
-// function that called it to return as an error (catch); the queue goes on
-// to the next function. It must not be called from the queue's own
-// functions, which would wait on themselves.
 func (q *queue) do(fn func()) {
 	done := make(chan *panicked, 1)
 	q.post(func() {
@@ -73,7 +62,6 @@ func (q *queue) do(fn func()) {
 				done <- nil
 				return
 			}
-			// recover is nil for a runtime.Goexit, which still ends fn.
 			done <- &panicked{value: recover(), stack: debug.Stack()}
 		}()
 		fn()
@@ -84,8 +72,6 @@ func (q *queue) do(fn func()) {
 	}
 }
 
-// panicked is a panic on the queue, with where it happened, as do passes
-// it on to its caller.
 type panicked struct {
 	value any
 	stack []byte
@@ -93,13 +79,6 @@ type panicked struct {
 
 func (p *panicked) String() string { return fmt.Sprint(p.value) }
 
-// catch, deferred first in each of the package's exported functions,
-// keeps a panic in the core from taking the app down with it, as gomobile
-// would: it is logged, with where it happened, and the function returns it
-// as an error to err, when it returns one. The goroutines the package
-// starts run through guard.Go, which logs theirs; one that answers with
-// its error defers catch itself, as ChatGPT's sign-in does, and the
-// queue's catches each function it runs (call).
 func catch(err *error) {
 	r := recover()
 	if r == nil {

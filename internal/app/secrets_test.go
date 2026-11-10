@@ -10,9 +10,6 @@ import (
 	"leaflet/internal/keychain"
 )
 
-// MyGo's errors become the keychain's: no such secret, and the user
-// turning down or cancelling the system's prompt; any other stays as it
-// is.
 func TestSecretErr(t *testing.T) {
 	failed := errors.New("keychain: read: write permissions error (OSStatus -61)")
 	for _, tc := range []struct {

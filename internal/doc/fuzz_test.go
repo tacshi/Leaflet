@@ -9,8 +9,6 @@ import (
 	"unicode/utf8"
 )
 
-// markdownSeeds are Markdown as people paste it and PageMarkdown writes
-// it, for the fuzz tests to start from.
 var markdownSeeds = []string{
 	"# Title\n\nSome **bold** and *italic* text with `code` and [a link](https://x.dev).",
 	"- one\n  - nested\n- two\n\n1. first\n2. second\n\n- [ ] todo\n- [x] done",
@@ -23,27 +21,14 @@ var markdownSeeds = []string{
 	"- item\n\n    indented after\n\n1000. late\n2024. year",
 	"* star\n+ plus\n10) ten\n\n#tag\n####### seven\n\\# escaped",
 	"[Page](leaflet://page/p1) and **[Bold](leaflet://page/p2)** and [@Ann](mention:user:u1)",
-	// What the fuzz tests found: a line of other spaces, a lone \r, and a
-	// line break at a block's end.
 	"*\v    \v*", "00\r ", "`\\\n`",
-	// and then: a paragraph only of spaces among list items, a cell
-	// ending in spaces, emphasis around code that is only a line break,
-	// and rules of the kinds CommonMark reads and the server reads alike.
 	"*\n*\v*\n*", "|<***~~ ~~", "*`\\\n`*", "- --\n\n \u00a0---\n\v---\n-\t-\t-\n\u0085---",
 	"\u00a0```go\nx := 1\n```", "\u3000```\ncode\n```",
-	// and a third time: a page mention in italics with a space first, a
-	// summary's code over a line break, and bold in an italic that keeps a
-	// space between.
 	"*[ 0](leaflet://page/0)*", "<details>\n<summary>a `x\n 000`</summary>\n</details>", "**0**_**0** **0**_",
-	// Web addresses written out, a ~ and a _ in their paths, before a hard
-	// break and the space that keeps it out of them, and lines that would
-	// go under a table's header.
 	"see https://x.edu/~user/a_-b_(c) \\\nwww.x.dev/~~a~~_b_  \\\n__https://x.dev/a_-b__ *https://x.dev/~a*\\\nend",
 	"Name | Size\\\n:-- | --:\\\n--- |\n\n- a\\\n  :-:",
 }
 
-// After one reading, a page's Markdown reads back as the blocks it was
-// written from: PageMarkdown writes all that MarkdownBlocks reads.
 func FuzzMarkdownBlocksRoundTrip(f *testing.F) {
 	for _, s := range markdownSeeds {
 		f.Add(s)
@@ -59,23 +44,17 @@ func FuzzMarkdownBlocksRoundTrip(f *testing.F) {
 		if got, want := shape(MarkdownBlocks(again)), shape(twice); !slices.Equal(got, want) {
 			t.Errorf("%q wrote\n%s\nread back as\n%q\nwant\n%q", md, again, got, want)
 		}
-		// A paragraph only of spaces is a blank line the first time, and
-		// no line the next.
 		if blankRuns(again) != blankRuns(written) {
 			t.Errorf("%q wrote\n%s\nthen\n%s", md, written, again)
 		}
 	})
 }
 
-// blankRuns is Markdown with each run of blank lines one blank line.
 func blankRuns(md string) string {
 	lines := strings.Split(strings.Trim(md, "\n"), "\n")
 	return strings.Join(slices.CompactFunc(lines, func(a, b string) bool { return a == "" && b == "" }), "\n")
 }
 
-// A text block reads back from a page's Markdown as it was: of its type,
-// where it was, with its text, but for the spaces Markdown can't keep at
-// the start of a line or the end of a block.
 func FuzzPageMarkdownRoundTrip(f *testing.F) {
 	for _, s := range markdownSeeds {
 		f.Add(s, uint8(0), 7)
@@ -83,19 +62,13 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 	f.Add("  lead\n- x\n<details>\n</summary>", uint8(1), 3)
 	f.Add("1000. x\n|a|b|\n$$\n---\n> q", uint8(5), 0)
 	f.Add("a\n\nb\\\n`c`", uint8(9), 2)
-	// What fuzzing found: a heading's code over a line break, and an empty
-	// paragraph in a list item.
 	f.Add("00 0\n", uint8(5), 2)
 	f.Add("", uint8(9), 7)
-	// A list item's "--", which "- " before would make a rule, and lines
-	// a rule only for spaces other than spaces and tabs.
 	f.Add("--", uint8(1), -1)
 	f.Add("- -", uint8(3), -1)
 	f.Add("\v---", uint8(0), -1)
 	f.Add("\u0085---", uint8(0), -1)
 	f.Add("-\t-\t-", uint8(0), -1)
-	// A line after a break that starts with another kind of space, before
-	// what would end a toggle or start math.
 	f.Add("\n\v</detAils>", uint8(0), 12)
 	f.Add("a\n　$$", uint8(1), -1)
 	f.Fuzz(func(t *testing.T, text string, kind uint8, code int) {
@@ -105,7 +78,6 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 		}
 		types := []string{"paragraph", "bulleted_list", "numbered_list", "todo_list", "quote", "heading", "toggle_list", "callout", "code", "nested"}
 		typ := types[int(kind)%len(types)]
-		// Part of the text, from a rune on, is code.
 		runes := []rune(text)
 		cut := len(runes)
 		if code >= 0 && code < len(runes) && typ != "code" {
@@ -132,7 +104,6 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 		}
 		wantText := keptText(want, d)
 		if wantText == "" && want.Type == "paragraph" {
-			// An empty paragraph is no block in Markdown.
 			if typ == "nested" && (len(got) != 3 || len(got[1].Children) != 1) || typ != "nested" && len(got) != 2 {
 				t.Errorf("%s %q read back as %q", typ, text, shape(got))
 			}
@@ -149,12 +120,6 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 	})
 }
 
-// keptText is what of a text block's text its Markdown keeps: a heading
-// is one line, and spaces outside code at the start of a line, or at the
-// end of the block, go, but a callout's at the start, which follow its
-// lines' >, and a toggle's at the start of its summary; a callout's go at
-// the end of each line. Line breaks at the end go too, but a callout's
-// and a toggle's.
 func keptText(n *Node, d Delta) string {
 	switch n.Type {
 	case "code":
@@ -210,13 +175,9 @@ func keptText(n *Node, d Delta) string {
 	return strings.Join(out, "\n")
 }
 
-// A table's cell reads back from a page's Markdown as it was, but for the
-// spaces at its ends, which a cell of a Markdown table can't keep.
 func FuzzTableCellRoundTrip(f *testing.F) {
 	for _, s := range []string{"a|b", "`x|y`", "`a\\|b`", `x\|y`, "two\nlines", "`\\`", "<br>", "\\<br> stays", "-", "---", ":-:",
 		"`code` and | pipe", "a\\", "**bold** | *it*", "[link](https://x.dev/a|b)", "`` ` ``|``",
-		// What fuzzing found: code over a line break, which a cell's code
-		// has as a space, and a backtick in a link's address.
 		"`a\nb`", "` x\n`", "[0](`)\n`"} {
 		f.Add(s)
 	}
@@ -232,9 +193,6 @@ func FuzzTableCellRoundTrip(f *testing.F) {
 		if len(got) != 1 || got[0].Type != "table" {
 			t.Fatalf("%q read back as %q", md, shape(got))
 		}
-		// What a cell's Markdown reads as, and ToMarkdown writes it again,
-		// its ends' spaces gone, and a line break in its code a space, as
-		// a code span in a table's cell has it.
 		cells := func(rows [][]string) [][]string {
 			for _, row := range rows {
 				for i, cell := range row {
@@ -256,8 +214,6 @@ func FuzzTableCellRoundTrip(f *testing.F) {
 	})
 }
 
-// A merge of a change one side made to a page the other left as it was
-// is that change, with no conflict, whichever side made it.
 func FuzzMergeOneSidedChange(f *testing.F) {
 	for i, s := range markdownSeeds {
 		f.Add(s, uint8(i), uint8(i*7))
@@ -303,8 +259,6 @@ func FuzzMergeOneSidedChange(f *testing.F) {
 	})
 }
 
-// tree is a page's blocks as lines of their IDs, types and text, indented
-// under what holds them.
 func tree(c *Content) []string {
 	var out []string
 	var visit func([]*Node, string)
@@ -318,7 +272,6 @@ func tree(c *Content) []string {
 	return out
 }
 
-// fuzzBytes reads a fuzz input a byte at a time, 0 once it runs out.
 type fuzzBytes []byte
 
 func (b *fuzzBytes) next() int {
@@ -330,9 +283,6 @@ func (b *fuzzBytes) next() int {
 	return int(v)
 }
 
-// twoSidedBase is a page for two sides to change: lists nested in lists,
-// paragraphs, a toggle and a table, its blocks named by their places so
-// that a merge's ties come out alike each run.
 func twoSidedBase() *Content {
 	md := "# Plan\n\n- one\n  - one.a\n  - one.b\n- two\n\npara x\n\npara y\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n" +
 		"<details>\n<summary>more</summary>\n\nhidden\n\n</details>\n\nlast"
@@ -347,9 +297,6 @@ func twoSidedBase() *Content {
 	return c
 }
 
-// editSide makes up to four edits to c as one side would, as b says:
-// deleting, editing, moving and adding blocks, and growing the table and
-// editing its cells. It returns the blocks whose text it edited.
 func editSide(c *Content, b *fuzzBytes, side string) map[string]string {
 	edited := map[string]string{}
 	pick := func(ok func(n, parent *Node) bool) *Node {
@@ -434,9 +381,6 @@ func editSide(c *Content, b *fuzzBytes, side string) map[string]string {
 	return edited
 }
 
-// Changes made on both sides at once merge to the same page whichever
-// side is local, with no block twice and no table's cells at one place,
-// keeping every block both sides kept and every edit only one side made.
 func FuzzMergeTwoSides(f *testing.F) {
 	for _, s := range []string{"", "\x01\x02\x03\x04\x05", "\x03\x02\x00\x01\x03\x05\x00\x02\x06\x01", "\x00\x05\x00\x00\x00\x05\x00\x00",
 		"\x02\x03\x01\x02\x03\x02\x02\x00", "\x03\x07\x04\x07\x09\x03\x07\x04\x07\x02", "\x01\x01\x03\x01\x01\x02\x05\x01"} {

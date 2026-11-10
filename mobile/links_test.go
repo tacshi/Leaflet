@@ -10,14 +10,11 @@ import (
 	"leaflet/internal/doc"
 )
 
-// A link card whose page could not be read, as offline, is asked again
-// once the wait is over, not once a run.
 func TestLinkCardAskedAgainAfterAFailure(t *testing.T) {
 	was := linkRetry
 	linkRetry = 10 * time.Millisecond
 	t.Cleanup(func() { linkRetry = was })
 	c, _ := open(t)
-	// Not a public address: the look-up fails at once.
 	const link = "http://127.0.0.1:1/notes"
 	card := &doc.Node{ID: "card", Type: "link_preview", Data: map[string]any{"url": link}}
 	var first bool
@@ -41,8 +38,6 @@ func TestLinkCardAskedAgainAfterAFailure(t *testing.T) {
 	}
 }
 
-// A video without a title gets the one its site says, once for its every
-// block, as the desktop names its videos: one with a title keeps it.
 func TestVideosGetTheirTitles(t *testing.T) {
 	var asked atomic.Int32
 	was := videoTitle

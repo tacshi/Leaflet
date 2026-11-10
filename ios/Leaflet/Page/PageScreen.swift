@@ -1,8 +1,6 @@
 import LeafletCore
 import SwiftUI
 
-/// InspectorTab is the panel beside a page: the agent, the comments, or
-/// the outline, as the desktop's right panel.
 enum InspectorTab: String, CaseIterable, Identifiable {
     case agent, comments, outline
     var id: String { rawValue }
@@ -16,8 +14,6 @@ enum InspectorTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// PageScreen is a page open in a window: its title, tags and content,
-/// and the panel beside it.
 struct PageScreen: View {
     let pageID: String
     @Environment(AppModel.self) private var app
@@ -26,19 +22,11 @@ struct PageScreen: View {
     @State private var title = ""
     @Environment(SceneModel.self) private var scene
     @FocusState private var titleFocused: Bool
-    /// uploading picks files to put in the page.
     @State private var uploading = false
-    /// linking asks for the link of a picture, a video or a link card to
-    /// put at the caret, of its kind; uploadNext picks a picture on the
-    /// device instead, once its sheet has gone.
     @State private var linking: LinkKind?
     @State private var uploadNext = false
-    /// embedding makes an embed to put at the caret.
     @State private var embedding = false
-    /// pageTrailing is where the page ends on screen, for the panel to
-    /// tell whether it stands beside the page or floats over it.
     @State private var pageTrailing: CGFloat?
-    /// sizeClass is the page's: the panel's own column is narrow on iPad.
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
@@ -52,8 +40,6 @@ struct PageScreen: View {
                     onController: { [scene, model] c in
                         scene.editor = c
                         scene.page = model
-                        // The title's binding and not the view: the view
-                        // holds the window, which would hold it back.
                         scene.saveTitle = { [app, pageID, title = $title] in
                             await Self.keep(title.wrappedValue, of: pageID, app: app)
                         }
@@ -66,11 +52,6 @@ struct PageScreen: View {
                             scene.recordOnOpen = nil
                             Recorder.shared.start(pageID: pageID, editor: c)
                         }
-                        // The window holds the editor weakly: the editor's
-                        // view keeps it, as long as the page shows. So
-                        // onMenuItem may hold this view, and through it the
-                        // window, with no cycle; the others take the window
-                        // and the page weakly all the same.
                         c.onBlank = { [weak model] in model?.blank = $0 }
                         c.onComment = { [weak scene] blockID, quote in
                             scene?.newComment = NewComment(blockID: blockID, quote: quote)
@@ -151,8 +132,6 @@ struct PageScreen: View {
                         c.onMenuItem = { key, blockID in menuItem(key, at: blockID) }
                     }
                 ) {
-                    // The header is hosted apart from this view, so it is
-                    // given what it reads from the environment.
                     header(row)
                         .environment(\.palette, palette)
                         .environment(app)
@@ -163,8 +142,6 @@ struct PageScreen: View {
                             .environment(app)
                     }
                 }
-                // The page runs on under the keyboard's floating shortcuts
-                // bar: the editor keeps its text clear of a keyboard itself.
                 .ignoresSafeArea([.container, .keyboard], edges: .bottom)
             } else if let failure = model?.failure {
                 ContentUnavailableView(failure, systemImage: "exclamationmark.triangle")
@@ -172,10 +149,6 @@ struct PageScreen: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // Under the keyboard too, as the editor: the page is given the
-        // keyboard's safe area at its foot, which a background style keeps
-        // out of, and the hosting view's own background, black in the dark,
-        // would show behind the text there.
         .background { palette.surface.ignoresSafeArea() }
         .navigationTitle(row?.displayTitle ?? "")
         .navigationBarTitleDisplayMode(.inline)
@@ -192,8 +165,6 @@ struct PageScreen: View {
                 Button(LI.showInspector, systemImage: "sidebar.trailing") {
                     scene.inspectorShown.toggle()
                 }
-                // Plain as the sidebar's button while the panel is away;
-                // the accent says it is open.
                 .tint(scene.inspectorShown ? nil : Color.primary)
             }
         }
@@ -211,8 +182,6 @@ struct PageScreen: View {
                 isSheet: sizeClass == .compact,
                 pageTrailing: pageTrailing
             )
-            // Writing in the page, the keyboard's bar is no reason for the
-            // panel's composer to rise; writing in the panel, it is.
             .ignoresSafeArea(.keyboard, edges: scene.writing ? .bottom : [])
             .inspectorColumnWidth(min: 280, ideal: 340, max: 640)
             .presentationDetents([.medium, .large])
@@ -232,13 +201,9 @@ struct PageScreen: View {
         .sheet(item: Binding(get: { scene.editingLink }, set: { scene.editingLink = $0 })) {
             node in
             LinkSheet(kind: "video", current: node.data?["url"]?.string ?? "") { [scene] made in
-                // The block as it is now, with what synced in while the
-                // sheet was open; the same link saved changes nothing.
                 guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
                     now.type == "video", made.data?["url"] != now.data?["url"]
                 else { return }
-                // Another video: its title is learned again, and its player
-                // starts again from its picture; its notes stay.
                 var data = now.data ?? [:]
                 data["url"] = made.data?["url"]
                 data["title"] = made.data?["title"] ?? .string("")
@@ -251,8 +216,6 @@ struct PageScreen: View {
             node in
             NotesSheet(notes: node.data?["notes"]?.string ?? "", file: node.type == "file") {
                 [scene] notes in
-                // Into the block as it is now, with what synced in while the
-                // sheet was open.
                 guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
                     now.type == "video" || now.type == "file"
                 else { return }
@@ -293,15 +256,10 @@ struct PageScreen: View {
         }
         .task(id: pageID) {
             title = row?.title ?? ""
-            // A new page starts at its title, to name it.
             if let row, row.canEdit, row.title.isEmpty { titleFocused = true }
             let m = PageModel(id: pageID, app: app)
             model = m
             await m.open()
-            // The page stays open while the window shows it. SwiftUI ends
-            // this task as the view goes, but also, on iPhone, as it moves
-            // the page into the navigation stack, where it stays shown: the
-            // window closes it once it has moved on.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3600))
             }
@@ -315,7 +273,6 @@ struct PageScreen: View {
         }
     }
 
-    /// actions are the page's menu, as the desktop's header has it.
     private func actions(_ row: PageRow) -> some View {
         Menu(L.pageActions, systemImage: "ellipsis") {
             PageMenu(page: row, rename: { titleFocused = true })
@@ -323,7 +280,6 @@ struct PageScreen: View {
         .tint(Color.primary)
     }
 
-    /// startWith is a blank page's ways to start it.
     private func startWith(_ row: PageRow) -> some View {
         StartWith(
             page: row,
@@ -343,9 +299,6 @@ struct PageScreen: View {
             apply: { [app, scene, pageID] t in
                 Task {
                     await scene.flush()
-                    // The title it took shows, though the title has the
-                    // caret, as a new page's has: the field keeps it, and
-                    // doesn't put back the empty one it had.
                     if let taken = await app.applyTemplate(t.key, to: pageID) {
                         title = taken
                     }
@@ -356,9 +309,6 @@ struct PageScreen: View {
             })
     }
 
-    /// menuItem does a "/" item the editor leaves to the page, at block
-    /// blockID: a template's blocks, files, a recording, or a block made
-    /// from a link or HTML, asked for in a sheet.
     private func menuItem(_ key: String, at blockID: String) {
         switch key {
         case "file":
@@ -371,8 +321,6 @@ struct PageScreen: View {
             embedding = true
         default:
             Task { [app, scene, pageID] in
-                // What was typed, the "/" taken out, goes first, for the
-                // core to put the blocks in.
                 await scene.flush()
                 if let taken = await app.insertTemplate(key, into: pageID, after: blockID) {
                     title = taken
@@ -381,10 +329,6 @@ struct PageScreen: View {
         }
     }
 
-    /// upload keeps files with the page and puts them in it at the caret:
-    /// pictures as images, others as file cards. Copying one takes a while,
-    /// and the window may have moved on: it goes at the end of its page
-    /// then.
     private func upload(_ urls: [URL]) async {
         guard let client = app.client else { return }
         for url in urls {
@@ -403,8 +347,6 @@ struct PageScreen: View {
         }
     }
 
-    /// rename names node as typed, unless nothing is: a recording block's
-    /// title.
     private func rename(_ node: DocNode) {
         let name = scene.blockName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != node.data?["title"]?.string else { return }
@@ -413,8 +355,6 @@ struct PageScreen: View {
         scene.editor?.setData(data, ofBlock: node.id)
     }
 
-    /// blockSheet edits a block without text: a chart's data, a table's
-    /// cells, or a formula's or a diagram's source.
     @ViewBuilder private func blockSheet(_ node: DocNode) -> some View {
         let save: ([String: JSONValue]) -> Void = { [scene] data in
             scene.editor?.setData(data, ofBlock: node.id)
@@ -432,8 +372,6 @@ struct PageScreen: View {
         }
     }
 
-    /// header is what goes above the page's text: where it is, its title
-    /// and its tags.
     @ViewBuilder private func header(_ row: PageRow?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let row, !app.library.path(to: row).isEmpty {
@@ -446,9 +384,6 @@ struct PageScreen: View {
                 .disabled(!(row?.canEdit ?? false))
                 .accessibilityLabel(L.pageTitleLabel)
                 .onSubmit(submitTitle)
-                // A title that wraps takes Return as a line break rather
-                // than a submit: it is one line all the same. The page
-                // takes the keyboard once the keyboard is done with Return.
                 .onChange(of: title) { _, new in
                     guard new.contains(where: \.isNewline) else { return }
                     title = new.split(whereSeparator: \.isNewline).joined(separator: " ")
@@ -460,8 +395,6 @@ struct PageScreen: View {
                     if !titleFocused { saveTitle() }
                 }
             if let row {
-                // The user is among the members, as the page's owner, even
-                // on a page only synced: the byline counts the others.
                 Byline(
                     page: row, saving: model?.saving ?? false,
                     sharedWith: model?.members.filter { $0.userID != app.status?.userID }.count
@@ -471,23 +404,14 @@ struct PageScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// submitTitle keeps the title and goes on into the page, as Return
-    /// does on the desktop.
     private func submitTitle() {
         titleFocused = false
-        // Once the title has let the keyboard go: SwiftUI takes focus from
-        // the title on its next update, which would take it from the page
-        // too had the page taken it first.
         Task { @MainActor [scene] in
             await Task.yield()
             scene.editor?.focusStart()
         }
     }
 
-    /// saveTitle keeps the title as the field has it once it lets the
-    /// keyboard go: until then the field may hold the last letter typed
-    /// back from the title, and the title saved without it would come
-    /// back over it.
     private func saveTitle() {
         Task { @MainActor in
             await Task.yield()
@@ -495,25 +419,17 @@ struct PageScreen: View {
         }
     }
 
-    /// keepTitle keeps the title as the field has it now, if it changed:
-    /// as the page leaves the screen, or before a copy or an export of it.
     private func keepTitle() async {
         await Self.keep(title, of: pageID, app: app)
     }
 
-    /// keep renames page id to title, if it may and the title changed.
     private static func keep(_ title: String, of id: String, app: AppModel) async {
         guard let row = app.library.page(id), row.canEdit, title != row.title else { return }
         await app.rename(row, to: title)
     }
 
-    /// goTo shows the block the window opened the page at, once the
-    /// editor is in the window and laid out: it scrolls to it then, and
-    /// plays it from at seconds in, for a link to a moment of it.
     private func goTo(_ blockID: String, at: Int, in editor: EditorController) {
         Task { @MainActor [weak editor] in
-            // Its first layout comes as the window draws it, a moment
-            // after the editor is made.
             for _ in 0..<40 {
                 guard let editor else { return }
                 let view = editor.textView
@@ -529,10 +445,8 @@ struct PageScreen: View {
     }
 }
 
-/// Breadcrumbs are the pages a page is nested in, from the top.
 struct Breadcrumbs: View {
     let path: [PageRow]
-    /// open opens a page of the path, as the desktop's breadcrumbs do.
     var open: (String) -> Void
 
     var body: some View {
@@ -550,28 +464,17 @@ struct Breadcrumbs: View {
     }
 }
 
-/// Inspector is the panel beside a page, or, with none open, the
-/// workspace agent's chat alone (noPage).
 struct Inspector: View {
     @Binding var tab: InspectorTab
     let model: PageModel?
-    /// isSheet says it is a sheet over the page, as on iPhone, rather than
-    /// a column beside it.
     var isSheet = false
     var noPage = false
-    /// pageTrailing is where the page the panel goes with ends on screen,
-    /// as its host measures it, or nil before it has.
     var pageTrailing: CGFloat?
     @Environment(SceneModel.self) private var scene
     @Environment(AppModel.self) private var app
-    /// counted is what the window was told the panel is, as it showed.
     @State private var counted = false
-    /// leading is where the panel begins on screen.
     @State private var leading: CGFloat = 0
 
-    /// beside says the panel is a column beside the page. Where a column
-    /// won't fit, as on iPhone Duo with its sidebar showing, iOS floats the
-    /// panel over the page, which runs on under it, its bar above.
     private var beside: Bool {
         guard let pageTrailing else { return true }
         return pageTrailing <= leading + 1
@@ -590,14 +493,10 @@ struct Inspector: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
-                // A sheet's grabber stands at its top: the tabs keep clear
-                // of it, as a sheet's own content does.
                 .padding(.top, isSheet ? 14 : 0)
                 switch tab {
                 case .outline: OutlineList(rows: model?.outline ?? [], isSheet: isSheet)
                 case .agent:
-                    // The page's agent, or the workspace agent's, of all the
-                    // user's pages, as the composer's menu chooses.
                     if scene.allPages {
                         AgentPanel(
                             model: scene.workspace, allPages: $scene.allPages, isSheet: isSheet)
@@ -615,15 +514,11 @@ struct Inspector: View {
         }
         .modifier(PanelTop(column: !isSheet && beside))
         .task { scene.workspace.start(app) }
-        // Settings, or a new folder, asked for while the panel is a sheet
-        // shows once it goes.
         .onAppear {
             counted = isSheet
             scene.panelShown(asSheet: counted)
         }
         .onChange(of: isSheet) {
-            // A window made narrow or wide turns the panel into a sheet, or
-            // back.
             scene.panelGone(asSheet: counted)
             counted = isSheet
             scene.panelShown(asSheet: counted)
@@ -635,14 +530,7 @@ struct Inspector: View {
     }
 }
 
-/// PanelTop has a panel beside the page take the room its column keeps
-/// over it for the bar, which stands by the window's edge on a display
-/// with a vertical bar and leaves it empty. A panel floating over the page
-/// keeps clear of that room: the page's bar is there, and would blur the
-/// tabs under it.
 private struct PanelTop: ViewModifier {
-    /// column says the panel is a column beside the page, and not a sheet
-    /// or a panel floating over it.
     let column: Bool
 
     func body(content: Content) -> some View {
@@ -659,18 +547,12 @@ private struct UnderNoBar: ViewModifier {
     @Environment(\.toolbarVerticalEdge) private var edge
 
     func body(content: Content) -> some View {
-        // In one line with the page's title, as the tabs' own padding
-        // leaves them.
         content
             .padding(.top, edge == nil ? 0 : 17)
             .ignoresSafeArea(.container, edges: edge == nil ? [] : .top)
     }
 }
 
-/// OutlineRow is a heading in the outline, as the core nests it for the
-/// desktop's outline too (MobileOutline): its text and level, how deep it
-/// nests, the heading it is in, and whether others are in it. Apart from
-/// the view, it is worked out on any thread (PageModel.outline).
 struct OutlineRow: Identifiable, Decodable, Hashable, Sendable {
     let id: String
     let text: String
@@ -684,7 +566,6 @@ struct OutlineRow: Identifiable, Decodable, Hashable, Sendable {
         case hasChildren = "has_children"
     }
 
-    /// rows are a page's headings, given in their order, nested.
     static func rows(_ headings: [DocNode]) -> [OutlineRow] {
         guard !headings.isEmpty, let data = try? JSONEncoder().encode(headings) else { return [] }
         var error: NSError?
@@ -693,15 +574,9 @@ struct OutlineRow: Identifiable, Decodable, Hashable, Sendable {
     }
 }
 
-/// OutlineList is the page's headings, to go to one: those under a heading
-/// nested in it and folded with it, as the desktop's outline. rows are the
-/// page's model's, worked out as its headings change; the heading the page
-/// is at, which changes as it scrolls, is read by the list of rows alone
-/// (OutlineRows).
 struct OutlineList: View {
     let rows: [OutlineRow]
     var isSheet = false
-    /// closed are the headings folded, their own headings hidden.
     @State private var closed: Set<String> = []
 
     var body: some View {
@@ -714,7 +589,6 @@ struct OutlineList: View {
         }
     }
 
-    /// visible are the rows not folded away in a heading above them.
     private func visible(_ all: [OutlineRow]) -> [OutlineRow] {
         var hidden = Set<String>()
         return all.filter { row in
@@ -727,8 +601,6 @@ struct OutlineList: View {
     }
 }
 
-/// OutlineRows lists the outline's rows shown, the one of the heading the
-/// page is at chosen, kept in view.
 private struct OutlineRows: View {
     let all: [OutlineRow]
     let shown: [OutlineRow]
@@ -739,10 +611,7 @@ private struct OutlineRows: View {
 
     var body: some View {
         let marked = mark(scene.heading)
-        // The heading the page is at shows chosen, kept in view; folded
-        // away, the heading it is in does.
         ScrollViewReader { proxy in
-            // Room for the chevrons only where a heading has some.
             let folds = all.contains(where: \.hasChildren)
             List(shown) { row in
                 line(row, current: row.id == marked, folds: folds)
@@ -758,8 +627,6 @@ private struct OutlineRows: View {
         }
     }
 
-    /// mark is the row that shows the heading the page is at, id: it, or
-    /// the heading it is folded in.
     private func mark(_ id: String?) -> String? {
         guard id != nil else { return nil }
         let visible = Set(shown.map(\.id))
@@ -792,7 +659,6 @@ private struct OutlineRows: View {
             }
             Button {
                 scene.editor?.reveal(blockID: row.id, atTop: true)
-                // As a sheet, it is in the way of the page it went to.
                 if isSheet { scene.inspectorShown = false }
             } label: {
                 Text(row.text.isEmpty ? L.outlineUntitledHeading : row.text)
@@ -805,9 +671,6 @@ private struct OutlineRows: View {
             .accessibilityAddTraits(current ? .isSelected : [])
         }
         .padding(.leading, CGFloat(row.depth) * 14)
-        // The highlight is the row's own, within the list's margins, which
-        // keep to the tabs' edges above: a row's background would run to
-        // the screen's edge.
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
@@ -816,13 +679,10 @@ private struct OutlineRows: View {
         .hoverEffect(.highlight)
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
         .listRowBackground(Color.clear)
-        // Its lines would cross its highlight.
         .listRowSeparator(current ? .hidden : .automatic)
     }
 }
 
-/// LinkKind is the kind of block a LinkSheet asks the link of: "image",
-/// "video" or "link_preview".
 struct LinkKind: Identifiable {
     let id: String
 }

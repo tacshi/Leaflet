@@ -29,14 +29,11 @@ func TestReadLinkInfo(t *testing.T) {
 	if got := ReadLinkInfo("https://x.dev", "<title>Only a title</title>"); got.Title != "Only a title" || got.Image != "" {
 		t.Errorf("got %+v", got)
 	}
-	// A picture that is not on the web is left out.
 	if got := ReadLinkInfo("https://x.dev", `<meta property="og:image" content="javascript:alert(1)">`); got.Image != "" {
 		t.Errorf("image %q", got.Image)
 	}
 }
 
-// Lowering some letters makes them longer (Ⱥ is 2 bytes, ⱥ is 3), so the
-// end of the head must be found in the page as it is.
 func TestReadLinkInfoLongerWhenLowered(t *testing.T) {
 	src := strings.Repeat("Ⱥ", 50) + "<title>Kept</title></HEAD><title>Not this</title>"
 	if got := ReadLinkInfo("https://x.dev", src); got.Title != "Kept" {
@@ -44,8 +41,6 @@ func TestReadLinkInfoLongerWhenLowered(t *testing.T) {
 	}
 }
 
-// A page in another encoding than UTF-8 gives its card its title as a
-// browser reads it, by its Content-Type or its own <meta>.
 func TestLookUpReadsThePagesEncoding(t *testing.T) {
 	useServer(t)
 	title, err := simplifiedchinese.GBK.NewEncoder().String("新闻首页")
@@ -87,8 +82,6 @@ func TestFillLinkCards(t *testing.T) {
 	}
 }
 
-// A card's page is read only as far as its head, and what is no page, as
-// its Content-Type says, not at all: its card has no info.
 func TestLookUpReadsOnlyAPagesHead(t *testing.T) {
 	useServer(t)
 	release := make(chan struct{})
@@ -101,7 +94,6 @@ func TestLookUpReadsOnlyAPagesHead(t *testing.T) {
 			_ = http.NewResponseController(w).Flush()
 			<-release
 		case "/endless":
-			// A page that goes on and on after its head.
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			n, _ := w.Write([]byte(`<head><meta property="og:title" content="Endless"></head>`))
 			chunk := []byte(strings.Repeat("<p>more</p>", 1000))

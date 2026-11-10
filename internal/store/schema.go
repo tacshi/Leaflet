@@ -84,23 +84,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(text,
 	textTriggers("recording", "recordings", "id", "transcript") +
 	textTriggers("comment", "comments", "id", "body")
 
-// textWritesTable keeps a number for each write of the text that the
-// to-dos and search read, by its kind (page, recording or comment) and ID:
-// a page's content, a recording's transcript, a comment's body. Triggers
-// keep it (textTriggers), so every write counts, another process's too, at
-// no cost to the row written, as large as it may be. write_id is drawn
-// anew with each write; indexed is the write search_index has, by n, or
-// NULL while it has none. Rows go with their text. It and search_index are
-// made from the other tables, which removing goes by (tables): they follow
-// them.
 const textWritesTable = `
 CREATE TABLE IF NOT EXISTS text_writes (
   n INTEGER PRIMARY KEY, kind TEXT NOT NULL, id TEXT NOT NULL, write_id INTEGER NOT NULL, indexed INTEGER,
   UNIQUE (kind, id));`
 
-// textTriggers keep text_writes of a kind of text, col of table by its key:
-// a row stored, or its text changed, draws a new write_id; a row removed
-// goes from text_writes and search_index.
 func textTriggers(kind, table, key, col string) string {
 	write := `INSERT INTO text_writes (kind, id, write_id) VALUES ('` + kind + `', new.` + key + `, random())
     ON CONFLICT (kind, id) DO UPDATE SET write_id = excluded.write_id;`
@@ -119,13 +107,7 @@ CREATE TRIGGER IF NOT EXISTS ` + table + `_text_delete AFTER DELETE ON ` + table
 END;`
 }
 
-// migrations bring a database an earlier version made up to this one's:
-// migrations[i] takes it from schema version i to i+1, kept in PRAGMA
-// user_version. A change to a table that exists adds one here as well as
-// changing schema; a new table needs only schema.
 var migrations = []func(context.Context, *sql.Conn) error{
-	// 1: columns added before the first release, which kept no version:
-	// databases from the releases have them, earlier ones lack them.
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"pages", "is_template", "INTEGER NOT NULL DEFAULT 0"},
@@ -133,8 +115,6 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			{"outbox", "revision", "INTEGER NOT NULL DEFAULT 0"},
 		})
 	},
-	// 2: indexes for the pages under a parent, a page's history, and what
-	// the other devices published of a page.
 	func(ctx context.Context, c *sql.Conn) error {
 		return addIndexes(ctx, c, [][3]string{
 			{"pages_parent", "pages", "parent_id, sort_key"},
@@ -142,41 +122,29 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			{"peer_contents_page", "peer_contents", "page_id, peer_id"},
 		})
 	},
-	// 3: whether each member of a page has accepted its invite.
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"page_members", "accepted", "INTEGER NOT NULL DEFAULT 1"},
 		})
 	},
-	// 4: the pages' tags, a JSON array.
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"pages", "tags", "TEXT NOT NULL DEFAULT '[]'"},
 		})
 	},
-	// 5: the template a folder's new pages, or a page's new subpages,
-	// start from.
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"folders", "default_template_id", "TEXT"},
 			{"pages", "default_template_id", "TEXT"},
 		})
 	},
-	// 6: the conflicts resolved, kept until now, as ResolveConflict no
-	// longer keeps them; a database from before conflicts has none.
 	func(ctx context.Context, c *sql.Conn) error {
 		return execIfTable(ctx, c, "conflicts", `DELETE FROM conflicts WHERE resolved_at IS NOT NULL`)
 	},
-	// 7: the text of the comments deleted, kept until now, as a deleted
-	// comment no longer keeps it (putComment).
 	func(ctx context.Context, c *sql.Conn) error {
 		return execIfTable(ctx, c, "comments", `UPDATE comments SET body = '', quote = NULL
 			WHERE deleted_at IS NOT NULL AND (body <> '' OR quote IS NOT NULL)`)
 	},
-	// 8: a write of each text there is, which the triggers keep from now
-	// on (textTriggers), and search indexes as it next runs; and an index
-	// of the server's version of each page's content this device merged,
-	// read as the pulls go without the content.
 	func(ctx context.Context, c *sql.Conn) error {
 		if _, err := c.ExecContext(ctx, textWritesTable); err != nil {
 			return err
@@ -187,15 +155,12 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			return err
 		}
 		for _, t := range [][3]string{{"page", "page_contents", "page_id"}, {"recording", "recordings", "id"}, {"comment", "comments", "id"}} {
-			if err := execIfTable(ctx, c, t[1], `INSERT OR IGNORE INTO text_writes (kind, id, write_id) SELECT '`+t[0]+`', `+t[2]+`, random() FROM `+t[1]); err != nil { // #nosec G202 -- the migration's own names.
+			if err := execIfTable(ctx, c, t[1], `INSERT OR IGNORE INTO text_writes (kind, id, write_id) SELECT '`+t[0]+`', `+t[2]+`, random() FROM `+t[1]); err != nil { // #nosec G202
 				return err
 			}
 		}
 		return nil
 	},
-	// 9: the server's time of each synced row this device took from the
-	// server and has not changed since (pulled_at). A row from before has
-	// none, and counts as changed here, as every row did until now.
 	func(ctx context.Context, c *sql.Conn) error {
 		var cols [][3]string
 		for _, t := range pulledTables {
@@ -203,9 +168,6 @@ var migrations = []func(context.Context, *sql.Conn) error{
 		}
 		return addColumns(ctx, c, cols)
 	},
-	// 10: the recordings' transcripts, indexed until now as the JSON that
-	// keeps them, are indexed again as what was said (searchedText), as
-	// search next runs.
 	func(ctx context.Context, c *sql.Conn) error {
 		if err := execIfTable(ctx, c, "search_index", `DELETE FROM search_index WHERE rowid IN
 			(SELECT n FROM text_writes WHERE kind = 'recording' AND indexed IS NOT NULL)`); err != nil {
@@ -215,9 +177,6 @@ var migrations = []func(context.Context, *sql.Conn) error{
 	},
 }
 
-// execIfTable runs a statement of a migration's on a table, when the
-// database has the table: one from before it has nothing to change, and
-// gets it from schema.
 func execIfTable(ctx context.Context, c *sql.Conn, table, query string) error {
 	var n int
 	if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil || n == 0 {
@@ -227,7 +186,6 @@ func execIfTable(ctx context.Context, c *sql.Conn, table, query string) error {
 	return err
 }
 
-// schemaObjects are the names of what schema makes.
 var schemaObjects = sync.OnceValue(func() []string {
 	made := regexp.MustCompile(`CREATE (?:VIRTUAL )?(?:TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)`)
 	var names []string
@@ -237,8 +195,6 @@ var schemaObjects = sync.OnceValue(func() []string {
 	return names
 })
 
-// upToDate reports whether the database is of this version with all that
-// schema makes, read without taking the write lock.
 func upToDate(ctx context.Context, c *sql.Conn) (bool, error) {
 	var version int
 	if err := c.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
@@ -252,11 +208,6 @@ func upToDate(ctx context.Context, c *sql.Conn) (bool, error) {
 	return !slices.ContainsFunc(schemaObjects(), func(name string) bool { return !slices.Contains(names, name) }), nil
 }
 
-// migrate creates the tables, or brings those an earlier version made up
-// to date, in one transaction that another process opening the database
-// waits for. A database up to date is left as it is: a command that only
-// reads neither waits for the write lock nor tells the app that the
-// database changed (WatchOthers).
 func migrate(db *sql.DB) error {
 	ctx := context.Background()
 	c, err := db.Conn(ctx)
@@ -286,8 +237,6 @@ func upgrade(ctx context.Context, c *sql.Conn) error {
 	if version > len(migrations) {
 		return fmt.Errorf("the database is from a newer Leaflet (schema %d; this one knows %d)", version, len(migrations))
 	}
-	// A new database gets the schema as it is; only one an earlier
-	// version made runs the migrations.
 	if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pages'`).Scan(&tables); err != nil {
 		return err
 	}
@@ -305,8 +254,6 @@ func upgrade(ctx context.Context, c *sql.Conn) error {
 	return err
 }
 
-// addColumns adds the columns, as {table, column, definition}, that their
-// tables lack; a table still to come gets them from schema.
 func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 	for _, col := range cols {
 		var tables, n int
@@ -319,15 +266,13 @@ func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 		if tables == 0 || n > 0 {
 			continue
 		}
-		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil { // #nosec G202 -- the migrations' own names and definitions.
+		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil { // #nosec G202
 			return err
 		}
 	}
 	return nil
 }
 
-// addIndexes makes the indexes, as {name, table, columns}, of the tables
-// there are; a table still to come gets its own from schema.
 func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
 	for _, ix := range indexes {
 		var n int
@@ -337,7 +282,7 @@ func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
 		if n == 0 {
 			continue
 		}
-		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil { // #nosec G202 -- the migrations' own names and columns.
+		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil { // #nosec G202
 			return err
 		}
 	}

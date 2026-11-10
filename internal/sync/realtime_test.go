@@ -14,9 +14,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// realtimePage is a page synced at revision 1, on a server whose
-// page_content srv answers and whose Realtime rt stands in for, and a
-// service signed in to it with the page open.
 func realtimePage(t *testing.T) (*Service, *contentServer, *remote.RealtimeForTest, string) {
 	t.Helper()
 	st := openStore(t)
@@ -41,7 +38,6 @@ func realtimePage(t *testing.T) (*Service, *contentServer, *remote.RealtimeForTe
 	return svc, srv, rt, p.ID
 }
 
-// listening runs svc's listen until the test ends.
 func listening(t *testing.T, svc *Service) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -57,7 +53,6 @@ func listening(t *testing.T, svc *Service) context.Context {
 	return ctx
 }
 
-// heard waits for the loop to be told to check, and checks as it would.
 func heard(t *testing.T, ctx context.Context, svc *Service) {
 	t.Helper()
 	select {
@@ -74,10 +69,6 @@ func (s *Service) isLive(id string) bool {
 	return s.live[id] != nil
 }
 
-// An open page's channel hears what another device saves, and the page
-// takes it at once; the checks every few seconds leave it out meanwhile.
-// A save of a revision the page has is not checked, and the channel goes
-// with the page.
 func TestAnOpenPageHearsItsSaves(t *testing.T) {
 	svc, srv, rt, id := realtimePage(t)
 	got := make(chan string, 4)
@@ -86,7 +77,6 @@ func TestAnOpenPageHearsItsSaves(t *testing.T) {
 	if !rt.Await(5*time.Second, func() bool { return slices.Equal(rt.Joined(), []string{pageTopic(id)}) }) {
 		t.Fatalf("joined %q", rt.Joined())
 	}
-	// Once joined, the page is checked for a save made before.
 	heard(t, ctx, svc)
 	if !svc.isLive(id) || len(got) != 0 {
 		t.Fatalf("live %v, told of %d changes", svc.isLive(id), len(got))
@@ -123,9 +113,6 @@ func TestAnOpenPageHearsItsSaves(t *testing.T) {
 	}
 }
 
-// A page whose channel Realtime refuses the person, as on a project that
-// does not say who may hear it, is not live, so the checks every few
-// seconds keep to it, and is not asked for again for a while.
 func TestAPageRealtimeRefusesIsChecked(t *testing.T) {
 	old := listenRetry
 	listenRetry = 50 * time.Millisecond
@@ -142,8 +129,6 @@ func TestAPageRealtimeRefusesIsChecked(t *testing.T) {
 	}
 }
 
-// A refusal for the moment, as by a project's Realtime still waking, is
-// asked again soon; one of the person, a while after.
 func TestRefusedFor(t *testing.T) {
 	if d := refusedFor(&remote.RealtimeError{Reason: "MissingPartition: Realtime was unable to find the expected messages partition"}); d != listenRetry {
 		t.Errorf("for the moment: %v", d)
@@ -153,8 +138,6 @@ func TestRefusedFor(t *testing.T) {
 	}
 }
 
-// A connection that drops leaves the pages to the checks, and is made
-// again soon, joining them again.
 func TestRealtimeConnectsAgain(t *testing.T) {
 	old := listenRetry
 	listenRetry = 50 * time.Millisecond
@@ -173,15 +156,12 @@ func TestRealtimeConnectsAgain(t *testing.T) {
 	if !svc.isLive(id) {
 		t.Error("the page joined again is not live")
 	}
-	// The server closes its channel: it is joined again too.
 	rt.CloseChannel(pageTopic(id))
 	if !rt.Await(5*time.Second, func() bool { return len(rt.Sent("phx_join")) == 3 && len(rt.Joined()) == 1 }) {
 		t.Fatalf("%d joins once the channel closed", len(rt.Sent("phx_join")))
 	}
 }
 
-// The loop checks a page as Realtime tells of its saves, with no check
-// every few seconds to bring it.
 func TestTheLoopHearsSaves(t *testing.T) {
 	old := watchEvery
 	watchEvery = time.Hour
@@ -209,9 +189,6 @@ func TestTheLoopHearsSaves(t *testing.T) {
 	}
 }
 
-// A save heard while the server rests after failing a check is left to the
-// passes, as a check every few seconds is: heard during an outage, each
-// would ask it again.
 func TestAHeardSaveWaitsWhileTheServerRests(t *testing.T) {
 	svc, srv, _, id := realtimePage(t)
 	gets := 0

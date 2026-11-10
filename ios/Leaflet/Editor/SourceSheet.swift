@@ -1,21 +1,15 @@
 import LeafletCore
 import SwiftUI
 
-/// SourceSheet edits a formula's TeX or a diagram's Mermaid, as the
-/// desktop's dialog does.
 struct SourceSheet: View {
     let node: DocNode
-    /// save gives the block's new data.
     let save: ([String: JSONValue]) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var text = ""
-    /// original is the source as the sheet opened with it.
     @State private var original: String?
 
     private var diagram: Bool { node.type == "diagram" }
-    /// key is the data the source is kept under, as the core has it
-    /// (mobile.SourceKey).
     private var key: String { MobileSourceKey(node.type) }
 
     var body: some View {
@@ -56,9 +50,6 @@ struct SourceSheet: View {
     private var dirty: Bool { original.map { $0 != text } ?? false }
 }
 
-/// CancelButton is a sheet's Cancel, which asks before throwing away what
-/// was changed in it, while dirty: the sheet then keeps it from a swipe
-/// down too (interactiveDismissDisabled).
 struct CancelButton: View {
     let dirty: Bool
     @Environment(\.dismiss) private var dismiss
@@ -75,17 +66,12 @@ struct CancelButton: View {
     }
 }
 
-/// CodeTextEditor is a text area for source: monospaced, with no smart
-/// dashes, quotes or corrections, which would break "-->" or a TeX
-/// command.
 struct CodeTextEditor: UIViewRepresentable {
     @Binding var text: String
     var focused = false
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
-        // Scaled with the text size chosen in Settings, and again as it
-        // changes: the callout style's size at the default size.
         view.font = UIFontMetrics(forTextStyle: .callout).scaledFont(
             for: .monospacedSystemFont(ofSize: 16, weight: .regular))
         view.adjustsFontForContentSizeCategory = true

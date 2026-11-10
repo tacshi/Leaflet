@@ -34,8 +34,6 @@ func (a *App) pageView(c *ui.Context) {
 		}
 		tools(c, func() {
 			if !a.rec.Active() && !ps.editor.ReadOnly {
-				// With more than one provider set up, recording asks which
-				// transcribes it: there is no default.
 				record := iconButton(c, "record", "record", locales.PageRecord())
 				if len(recording.Choices(a.settings.Stt, a.speechKeys())) > 1 {
 					record.PopoverMenuButton(func(m *ui.Menu) {
@@ -45,9 +43,6 @@ func (a *App) pageView(c *ui.Context) {
 					a.startRecording(ps.id, "")
 				}
 			}
-			// A public link needs no server, so every page but a template
-			// can be shared. While its link is live the button is a globe
-			// in the accent color: on the web, not pressed.
 			if !p.Template {
 				live := a.pub != nil && a.pub.page == ps.id && a.pub.state == "live"
 				icon, label := "share", locales.PageShare()
@@ -67,9 +62,6 @@ func (a *App) pageView(c *ui.Context) {
 			a.panelToggle(c)
 		})
 	})
-	// The page menu's choice runs as the title bar draws: Delete closes
-	// the page and Duplicate opens another, so the next frame draws what
-	// is open now.
 	if a.page != ps {
 		if a.win != nil {
 			a.win.Invalidate()
@@ -83,7 +75,6 @@ func (a *App) pageView(c *ui.Context) {
 				a.fullDiagram(c, n)
 				return
 			}
-			// The block went: by undo, an agent or another device.
 			a.leaveFullDiagram()
 		}
 		a.scrollToBlock(c)
@@ -110,7 +101,6 @@ func (a *App) pageView(c *ui.Context) {
 						a.emptyActions(c)
 					}
 					a.inlinePrompt(c)
-					// Clicking below the last block writes at the end.
 					tail := ui.Box(c.Key("page-tail")).Height(220).FillWidth().Cursor(ui.CursorText)
 					if tail.Clicked() && !ps.editor.ReadOnly {
 						a.caretAtEnd()
@@ -118,7 +108,6 @@ func (a *App) pageView(c *ui.Context) {
 				})
 			})
 		})
-		// One bar at a time, and none under a toast.
 		if sess.Running {
 			a.runningBar(c, sess)
 		} else if run := sess.Latest(); run != nil && time.Since(run.At) < 10*time.Minute && run.Status != "running" && time.Now().After(a.toastUntil) {
@@ -128,14 +117,10 @@ func (a *App) pageView(c *ui.Context) {
 	a.miniPlayer(c)
 }
 
-// breadcrumbs is MyGo's path of the page: its folder, the pages above it,
-// and it, where a click on the folder shows it open in the sidebar's
-// Pages tab and one on a page above opens that page. Its marks follow it.
 func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	var path []string
 	var open []func()
-	// The folder is the page's at the top's: a subpage is in none.
 	ancestors := a.ancestors(p.ID)
 	top := p
 	if len(ancestors) > 0 {
@@ -160,8 +145,6 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 		if crumbs.Changed() && chosen >= 0 && chosen < len(open) {
 			open[chosen]()
 		}
-		// What the page is, as icons; that it is shared with the user
-		// is in its byline.
 		mark := func(icon, label string) {
 			ui.Icon(c, theme.Icon(icon)).FontSize(14).TextColor(pal.TextMuted).Shrink(0).Label(label).Tooltip(label)
 		}
@@ -174,9 +157,6 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	})
 }
 
-// syncStatus shows an icon only when saving needs the user: offline with
-// edits waiting, or a sync that failed. A page that saved says so in its
-// byline; the account row says how syncing goes.
 func (a *App) syncStatus(c *ui.Context) {
 	pal := theme.Of(c)
 	if !a.syncOn() {
@@ -215,8 +195,6 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	ps := a.page
 	size := float32(a.settings.TextSize) * 2.15
-	// A text area, so a long title wraps rather than scrolls out of view.
-	// It holds one line: Enter, and Down at its end, go on to the page.
 	in := ui.TextAreaBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Lines(1, 8).FillWidth().
 		Placeholder(locales.CommonUntitled()).
 		Font(theme.PageFamily(ps.title)).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
@@ -227,7 +205,7 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 				ps.titleLeave = true
 				a.win.Invalidate()
 			}
-			return leave || k.Key == ui.KeyEnter // no line breaks in a title
+			return leave || k.Key == ui.KeyEnter
 		})
 	if ps.focusTitle > 0 {
 		if in.Focused() {
@@ -241,12 +219,10 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 		}
 	}
 	if in.Changed() {
-		// A pasted title keeps to one line.
 		if strings.ContainsAny(ps.title, "\r\n") {
 			ps.title = strings.Join(strings.Fields(ps.title), " ")
 			a.win.Invalidate()
 		}
-		// Rename shortly after typing stops, as the content saves.
 		a.saveTitleSoon()
 	}
 	start, end := in.TextSelection()
@@ -254,7 +230,6 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	if ps.titleLeave {
 		ps.titleLeave = false
 		a.saveTitle()
-		// A page left with no blocks gets one to type in.
 		if ch := ps.editor.Content.Children; len(ch) > 0 {
 			ps.editor.PlaceCaret(ch[0].ID, 0)
 			ps.editor.Focus()
@@ -264,9 +239,6 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	}
 }
 
-// saveTitleSoon renames the open page shortly after its title's typing
-// stops, as its content saves; a page closed meanwhile saved its title
-// as it closed.
 func (a *App) saveTitleSoon() {
 	ps := a.page
 	if ps.titleTimer != nil {
@@ -291,7 +263,6 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	row := ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Wrap()
 	hovered := row.Hovered()
 	row.Children(func() {
-		// The page keeps who created it, not who edited it last.
 		when := locales.PageBylineEditedAt(humanTime(p.UpdatedAt))
 		if a.page.live.Dirty() {
 			when = locales.PageBylineSaving()
@@ -310,8 +281,6 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	})
 }
 
-// sharedWith counts who the open page is shared with: its members but
-// the user, who is among them as its owner even on a page only synced.
 func (a *App) sharedWith() int {
 	n := 0
 	for _, m := range a.page.members {
@@ -322,10 +291,6 @@ func (a *App) sharedWith() int {
 	return n
 }
 
-// bylineTags are the page's tags in its byline, a click on one showing
-// its pages in the sidebar. On a page the user may change, a button shown
-// while the byline is hovered edits them in MyGo's token field, which
-// saves each change and closes as it loses the focus.
 func (a *App) bylineTags(c *ui.Context, p store.Page, hovered bool) {
 	pal := theme.Of(c)
 	ps := a.page
@@ -363,7 +328,6 @@ func (a *App) bylineTags(c *ui.Context, p store.Page, hovered bool) {
 		return
 	}
 	tools(c, func() {
-		// Shown as Tab reaches it too, as nothing else adds a tag.
 		b := iconButton(c, "add-tag", "tag", locales.PageAddTag()).Size(24, 24).Padding(4)
 		if !hovered && !b.Focused() {
 			b.Opacity(0)
@@ -383,11 +347,8 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// humanTime says when t was, as of now (locales.When).
 func humanTime(t time.Time) string { return locales.When(t, time.Now()) }
 
-// caretAtEnd puts the caret at the end of the page, after a new paragraph
-// when the last block has no text or there is no block.
 func (a *App) caretAtEnd() {
 	ed := a.page.editor
 	var last *doc.Node
@@ -407,13 +368,10 @@ func (a *App) caretAtEnd() {
 	ed.Focus()
 }
 
-// emptyActions are the ways to start an empty page.
 func (a *App) emptyActions(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Column(c.Key("empty")).Gap(6).Margin(18, 0, 0).AlignItems(ui.Start).Children(func() {
 		ui.Text(c, locales.PageStartWith()).FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(0, 0, 4, 2)
-		// A row with a menu shows its button while hovered, as the
-		// sidebar's rows do.
 		row := func(key, icon, label, hint string, fn func(), menu func(m *ui.Menu)) {
 			b := ui.ButtonBase(c.Key(key)).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FillWidth().MaxWidth(420)
 			hovered := b.Hovered()
@@ -451,17 +409,12 @@ func (a *App) emptyActions(c *ui.Context) {
 		}, nil)
 		row("subpage", "file-plus", locales.PageAddSubpage(), locales.PageAddSubpageHint(), func() { a.addSubpageBlock() }, nil)
 		row("upload", "upload", locales.PageUpload(), locales.PageUploadHint(), func() { a.uploadIntoPage() }, nil)
-		// A template starts from the others, not from itself.
 		if p := a.pageByID(a.page.id); p != nil && !p.Template {
 			a.templateActions(c, row)
 		}
 	})
 }
 
-// panelToggle shows or hides the panel. The toggle stays in the main
-// area's title bar while the panel is open, leaving the panel's top bar to
-// its tabs: on Windows and Linux the window controls take the bar's right
-// end.
 func (a *App) panelToggle(c *ui.Context) {
 	label := locales.PageShowPanel()
 	if a.panelOpen {
@@ -477,24 +430,18 @@ func (a *App) panelToggle(c *ui.Context) {
 	}
 }
 
-// undoRun takes back an agent's run of session sessID, the open page's or
-// the workspace's, or says why it could not: the run is then left as it
-// was.
 func (a *App) undoRun(sessID string, run *agents.Run) {
 	if err := a.hub.UndoRun(sessID, run.ID); err != nil {
 		a.toast(locales.PageUndoRunFailed(run.AgentName, err.Error()))
 	}
 }
 
-// redoRun makes an undone run's edits again, or says why it could not:
-// the run then stays undone.
 func (a *App) redoRun(sessID string, run *agents.Run) {
 	if err := a.hub.RedoRun(sessID, run.ID); err != nil {
 		a.toast(locales.PageRedoRunFailed(run.AgentName, err.Error()))
 	}
 }
 
-// runBar offers to undo the latest agent run.
 func (a *App) runBar(c *ui.Context, run *agents.Run) {
 	pal := theme.Of(c)
 	if run.Error != "" || a.dialogs.hideRun == run.ID {
@@ -505,8 +452,6 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 		ui.Icon(c, theme.Icon("sparkles")).FontSize(14)
 		text := locales.PageRunEdited(run.AgentName, len(uniq(run.BlockIDs())))
 		if len(run.BlockIDs()) == 0 && len(run.Edits) > 0 {
-			// A run that changed pages, not this one's blocks, says what it
-			// did last.
 			text = locales.PageRunDid(run.AgentName, run.Edits[len(run.Edits)-1].Summary)
 		}
 		if run.Undone {
@@ -546,8 +491,6 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 			run = r
 		}
 	}
-	// A run from Ask agent shows how it goes in its own prompt, and one
-	// from the chat in the chat, while it is open.
 	ip := a.dialogs.inline
 	switch {
 	case run == nil, ip != nil && ip.runID == run.ID:
@@ -557,7 +500,6 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	}
 	bar := ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).
 		Background(pal.Surface).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center)
-	// A run on this device can be stopped; one on the server goes on.
 	stoppable := run.Stoppable()
 	if stoppable {
 		bar.Padding(6, 6, 6, 14)
@@ -571,9 +513,6 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	})
 }
 
-// runProgress is what a running agent is doing: what it does while a call
-// takes a while, as searching the web, else its latest edit, or working
-// while it has made none.
 func runProgress(run *agents.Run, working string) string {
 	if run.Activity != "" {
 		return run.Activity
@@ -596,8 +535,6 @@ func uniq(ids []string) []string {
 	return out
 }
 
-// pageNotices shows conflicts on the open page, or that its content
-// could not be read.
 func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	if a.page.live.Unreadable() {
 		notice(c, "warn", "triangle-alert", locales.PageUnreadable(), nil)

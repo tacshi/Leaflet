@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// memStore is a Store in memory, which counts what it is asked.
 type memStore struct {
 	secrets map[string][]byte
 	reads   int
@@ -34,8 +33,6 @@ func (m *memStore) Delete(name string) error {
 	return nil
 }
 
-// A secret is read from the store once a run, missing ones too, and one
-// not there is already deleted.
 func TestSecretsReadOnce(t *testing.T) {
 	m := &memStore{secrets: map[string][]byte{}}
 	Use(m)
@@ -65,7 +62,6 @@ func TestSecretsReadOnce(t *testing.T) {
 	}
 }
 
-// Without a store, nothing is kept, and nothing panics.
 func TestNoStore(t *testing.T) {
 	Use(nil)
 	if _, err := Get("key"); err == nil {
@@ -76,7 +72,6 @@ func TestNoStore(t *testing.T) {
 	}
 }
 
-// failingStore fails each Get with err.
 type failingStore struct {
 	memStore
 	err error
@@ -87,8 +82,6 @@ func (f *failingStore) Get(string) ([]byte, error) {
 	return nil, f.err
 }
 
-// Only the user's refusal is kept for the run: another failure, such as
-// the iOS keychain's before the device is first unlocked, is asked again.
 func TestOnlyRefusalsKept(t *testing.T) {
 	t.Cleanup(func() { Use(nil) })
 	for _, c := range []struct {
@@ -114,8 +107,6 @@ func TestOnlyRefusalsKept(t *testing.T) {
 	}
 }
 
-// The status an error ends with is read, and the user's refusal of the
-// prompt, failed or cancelled, becomes ErrDenied, still the error it was.
 func TestDenied(t *testing.T) {
 	for _, c := range []struct {
 		err    error

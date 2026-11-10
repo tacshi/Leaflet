@@ -2,8 +2,6 @@ package doc
 
 import "testing"
 
-// A file's kind goes by its extension, in any case, as a mime type is
-// often missing; an .mp4 or .webm says itself whether it is audio.
 func TestFilePreviewKind(t *testing.T) {
 	for _, c := range []struct{ name, mime, want string }{
 		{"a.PNG", "", FileImage}, {"a.jpeg", "", FileImage},
@@ -23,7 +21,6 @@ func TestFilePreviewKind(t *testing.T) {
 	}
 }
 
-// A player is told what a file is by the app, never by the file.
 func TestFileMediaType(t *testing.T) {
 	for _, c := range []struct{ name, mime, want string }{
 		{"a.mp3", "", "audio/mpeg"}, {"a.m4a", "", "audio/mp4"}, {"a.mp4", "", "video/mp4"},
@@ -36,7 +33,6 @@ func TestFileMediaType(t *testing.T) {
 	}
 }
 
-// Audio is what transcribes.
 func TestTranscribable(t *testing.T) {
 	if !Transcribable("call.m4a", "") || !Transcribable("call.mp4", "audio/mp4") || Transcribable("film.mp4", "") || Transcribable("a.txt", "") {
 		t.Error("wrong files transcribable")

@@ -111,7 +111,6 @@ while (($#)); do
 	esac
 	shift
 done
-# Both, unless one is asked for.
 PICKED=true
 if ! $MAC && ! $WIN; then
 	MAC=true
@@ -128,7 +127,6 @@ if $UPLOAD && [[ -z "$VERSION" ]]; then
 fi
 [[ -n "$VERSION" ]] || VERSION="$(config_value version)"
 check_version "$VERSION"
-# The paths given are from where this was run, not ROOT_DIR.
 OUT_DIR="$(abs_path "$OUT_DIR")"
 if [[ -n "$CHANGELOG" ]]; then
 	CHANGELOG="$(abs_path "$CHANGELOG")"
@@ -136,9 +134,6 @@ if [[ -n "$CHANGELOG" ]]; then
 	CHANGELOG="$(cd "$(dirname "$CHANGELOG")" && pwd)/$(basename "$CHANGELOG")"
 fi
 
-# Each platform's architectures: those --arch names that it has, or all.
-# Arrays that may be empty expand as ${a[@]+"${a[@]}"}: macOS's bash 3.2
-# takes an empty "${a[@]}" for an unbound variable under set -u.
 MAC_ARCHES=()
 WIN_ARCHES=()
 for arch in ${ARCHES[@]+"${ARCHES[@]}"}; do
@@ -169,7 +164,6 @@ if $MAC; then
 	for tool in xcrun security; do
 		command -v "$tool" >/dev/null 2>&1 || die "needs $tool"
 	done
-	# Before the long builds: the Mac apps ship leaflet-speech.
 	check_speech
 	DEVELOPER_ID_APPLICATION="$(signing_identity)"
 	BUILD_ARGS+=(-sign "$DEVELOPER_ID_APPLICATION")
@@ -187,7 +181,6 @@ if $WIN; then
 	utf8_locale
 	WINDOWS_CERTIFICATE="$(windows_certificate)"
 	if [[ -n "$WINDOWS_CERTIFICATE" ]]; then
-		# In full, for scripts/sign-windows.sh, which runs in ROOT_DIR.
 		export LEAFLET_WINDOWS_CERTIFICATE="$WINDOWS_CERTIFICATE"
 		CONFIG+=("windows.signCommand=scripts/sign-windows.sh %1")
 	elif $UPLOAD && ! $ALLOW_UNSIGNED; then
@@ -198,9 +191,6 @@ if $WIN; then
 fi
 UPDATE_KEY="$(update_key)"
 [[ -z "$UPDATE_KEY" ]] || CONFIG+=("updates.privateKey=$UPDATE_KEY")
-# Uploaded here after the checks below, not by mygo build -upload, which
-# uploads as it finishes. A published release is refused before the long
-# builds, and again as they are uploaded.
 if $UPLOAD; then
 	check_gh
 	check_draft "$VERSION"
@@ -209,13 +199,8 @@ if $UPLOAD; then
 	check_draft_commit "$VERSION" "$COMMIT"
 fi
 
-# The version, the changelog, the update key's file, notarization and how
-# Windows builds are signed go into mygo.json for this build only: notarizing
-# would fail the ad hoc debug builds, which read it too.
 patch_config "${CONFIG[@]}"
 
-# The Mac's speech helper, for each architecture the Mac apps run on: a
-# universal app takes both.
 if $MAC; then
 	SPEECH_ARCHES=()
 	for arch in "${MAC_ARCHES[@]}"; do
@@ -227,7 +212,6 @@ if $MAC; then
 	"$ROOT_DIR/scripts/build-speech.sh" "${SPEECH_ARCHES[@]}"
 fi
 
-# The command line, which the Windows apps ship beside them.
 if $WIN; then
 	for arch in "${WIN_ARCHES[@]}"; do build_cli "$(config_value name)" "$VERSION" "$(goarch "$arch")"; done
 fi
@@ -238,10 +222,6 @@ go tool mygo build -platform "$(
 	echo "${PLATFORMS[*]}"
 )" -o "$OUT_DIR" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
 
-# MyGo names installers "leaflet-<version>-<arch>.dmg" ("leaflet-<version>.dmg"
-# for universal) and "leaflet-setup-<version>-<arch>.exe", in a folder per
-# platform. Each is checked, and uploaded under that name, before it is
-# moved out beside those folders under the usual name.
 BUILT=()
 NAMES=()
 DIRS=()

@@ -1,9 +1,3 @@
-# Leaflet's sign-in with Supabase: its redirect page, its token exchange, and
-# the iOS app's site association.
-# Deploy from this folder:
-#   npx wrangler login
-#   npx wrangler secret put CLIENT_SECRET   # the OAuth app's client secret
-#   npx wrangler deploy
 name = "leaflet-auth"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
@@ -11,14 +5,9 @@ workers_dev = false
 routes = [{ pattern = "leaflet-auth.capyvibe.app", custom_domain = true }]
 
 [vars]
-# Leaflet's Supabase OAuth app (internal/supabaseapi.ClientID).
 CLIENT_ID = "a587f79b-48d7-41c1-b5ce-cbf87d11a491"
-# The Apple team that signs the iOS app, for
-# /.well-known/apple-app-site-association; left empty, that 404s.
 APPLE_TEAM_ID = "X5X4TD477G"
 
-# /token, at most 30 exchanges a minute from one address: the app makes a
-# few an hour, a sign-in and its refreshes.
 [[ratelimits]]
 name = "TOKEN_LIMIT"
 namespace_id = "1001"
@@ -26,6 +15,5 @@ namespace_id = "1001"
   limit = 30
   period = 60
 
-# Its logs, with the failures it meets, in the Workers dashboard.
 [observability]
 enabled = true

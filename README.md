@@ -112,6 +112,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
   vLLM, which run agents offline.
+- Agents run from your device, signed in or not. Each device keeps its own
+  providers, a cloud one's API key in the device's keychain: add a provider
+  on each device you use it on.
 - Agents outside the app, such as Claude Code, Codex and Cursor, work on
   pages through [`leaflet mcp`](#agents-outside-the-app-mcp).
 - A [`leaflet` command](#command-line) finds, reads, makes and files pages
@@ -128,7 +131,8 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   choose, with a 15-second skip each way, and the system's media controls and
   keys drive it.
 - Real-time transcription with Soniox, or any OpenAI-compatible
-  `/audio/transcriptions` endpoint, including one on your own network.
+  `/audio/transcriptions` endpoint, on your own network or in the cloud:
+  each is called from your device, with its key in the device's keychain.
 - Transcription with speakers through MOSS, with a MOSI API key kept on the
   device: recordings once they stop, and audio files.
 - Transcription on the device itself, offline and without a key, with the
@@ -167,11 +171,10 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   it, and release builds need it, as they need Xcode to sign and notarize.
   Windows installers need NSIS.
 - iCloud sync needs iCloud Drive turned on.
-- Sync through a server and cloud models need a
-  [Supabase](https://supabase.com) account: **Continue with Supabase**
-  finds or creates a project in it and sets it up from
-  [`supabase/`](supabase/README.md). Without one, Leaflet runs on your
-  devices alone.
+- Sync through a server needs a [Supabase](https://supabase.com) account:
+  **Continue with Supabase** finds or creates a project in it and sets it
+  up from [`supabase/`](supabase/README.md). Without one, Leaflet runs on
+  your devices alone, agents and transcription too.
 
 ## Install
 
@@ -192,9 +195,9 @@ go tool mygo dev
 ```
 
 Without a server, Leaflet runs on this device only: pages, editing,
-comments, public links, local models and transcription servers on your
-network all work, and sign-in, sync, cloud models and cloud transcription
-are hidden or explained in place.
+comments, public links, agents and transcription all work, with the
+providers and keys added on the device, and sign-in and sync are hidden or
+explained in place.
 
 Every build can sign in with Supabase: the OAuth app's client ID is built
 in, and its secret stays in Leaflet's sign-in Worker (see
@@ -374,10 +377,13 @@ make check                                   # gofmt, golangci-lint, govulncheck
 make ios-check                               # swift-format, SwiftLint, osv-scanner and mobsfscan
 make clean                                   # remove build/ and the binary go build leaves
 scripts/check-migrations.sh                  # every migration, in order, on Supabase's Postgres (Docker)
-cd supabase/functions && deno test _shared/  # the Edge Functions' shared code
+cd supabase/functions && deno test --frozen  # the account Edge Function
 ```
 
-The editor's tests run its view headless with `ui.NewTester`.
+The editor's tests run its view headless with `ui.NewTester`. Golden tests
+read what the code should make from `testdata/golden` in their package;
+after a change that is meant to alter it, `go test ./internal/doc -update`
+(a package at a time) writes the new values there.
 
 The app's texts are MyGo catalogs in [`locales/`](locales), one file per
 language (`en.json`, `zh-Hans.json`, `ja.json`), from which `go tool mygo
@@ -412,7 +418,7 @@ rules.
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |
 | `internal/supabaseapi` | The Supabase Management API, signed in to with the person's own account |
-| `internal/provision` | Finding, creating and setting up their Leaflet project: migrations and Edge Functions |
+| `internal/provision` | Finding, creating and setting up their Leaflet project: migrations and the Edge Function |
 | `internal/oauth` | The part of a browser sign-in on this device: loopback redirect and PKCE |
 | `internal/icloud` | The Leaflet folder in iCloud Drive: its files, written whole, and asking iCloud to download them |
 | `internal/keychain` | The app's secrets in the system keychain, read at most once a run |
@@ -424,7 +430,7 @@ rules.
 | `internal/theme` | Colors, fonts and icons |
 | `locales` | The app's texts in each language, and the Go code generated from them |
 | `scripts` | Debug and release builds, publishing to GitHub Releases, and the migrations' check |
-| `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
+| `supabase` | Migrations (tables, row-level security, RPCs, Vault) and the `account` Edge Function |
 | `worker` | The sign-in Worker on Cloudflare: the OAuth redirect page and the token exchange that holds the client secret |
 | `docs` | The protocol, user stories and the icon's sources |
 | `ios` | The iPhone and iPad app: SwiftUI and UIKit, its XcodeGen project and build scripts |

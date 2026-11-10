@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// Foundation answers for a file outside iCloud Drive with an error, not
-// a crash.
 func TestStartDownloadOutsideICloud(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {

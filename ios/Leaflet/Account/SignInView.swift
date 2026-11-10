@@ -1,10 +1,6 @@
 import AuthenticationServices
 import SwiftUI
 
-/// SignInView signs in with Supabase, to the Leaflet project the desktop
-/// app set up: Supabase's sign-in page opens in a web session, which ends
-/// at the Worker's redirect (internal/supabaseapi.Auth); the core then
-/// finds the project and signs in to it.
 struct SignInView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
@@ -12,13 +8,8 @@ struct SignInView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var failure: String?
-    /// waiting is a sign-in that removes changes not uploaded yet, to ask
-    /// about.
     @State private var waiting: SignedIn?
 
-    /// callback is the OAuth app's redirect, which the web session takes
-    /// without loading it: the Associated Domains entitlement ties the app
-    /// to this host for webcredentials.
     static let callback = ASWebAuthenticationSession.Callback.https(
         host: "leaflet-auth.capyvibe.app", path: "/auth/supabase")
 
@@ -67,9 +58,6 @@ struct SignInView: View {
             isPresented: Binding(get: { waiting != nil }, set: { if !$0 { waiting = nil } }),
             presenting: waiting
         ) { asked in
-            // The sign-in asked about comes as the alert gives it: the
-            // alert lets waiting go as it closes, before a button's task
-            // runs.
             Button(L.commonCancel, role: .cancel) {
                 Task { await confirm(asked, anyway: false) }
             }
@@ -97,7 +85,6 @@ struct SignInView: View {
             }
             await signedIn(done.email)
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            // Closing Supabase's page is no failure.
         } catch {
             failure = error.localizedDescription
         }

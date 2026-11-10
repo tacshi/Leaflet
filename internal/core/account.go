@@ -16,27 +16,15 @@ import (
 	"leaflet/locales"
 )
 
-// Signing in and out: the account whose pages this device keeps, and the
-// person's own Supabase project Leaflet syncs through, which signing in
-// with Supabase finds, or creates, and sets up.
-
-// managementKey keeps the Supabase account's sign-in, so a newer Leaflet
-// can bring the project up to date.
 const managementKey = "supabase.management"
 
-// updating is held while UpdateProject runs, as the iOS app starts the
-// core again each time it comes to the front.
 var updating sync.Mutex
 
-// ReplacesAccount reports whether signing in as user removes the pages of
-// another account this device keeps.
 func (c *Core) ReplacesAccount(user *store.User) bool {
 	prev := c.Store.CachedAccount()
 	return prev != "" && prev != user.ID
 }
 
-// LostBySigningIn counts the changes signing in as user removes: those of
-// another account this device keeps the pages of, which never went up.
 func (c *Core) LostBySigningIn(user *store.User) int {
 	if !c.ReplacesAccount(user) {
 		return 0
@@ -44,18 +32,12 @@ func (c *Core) LostBySigningIn(user *store.User) int {
 	return c.unsynced()
 }
 
-// stopRuns stops the agents' runs before the account's pages go: one that
-// ended after would store them again.
 func (c *Core) stopRuns() {
 	if c.Hub != nil {
 		c.Hub.Forget()
 	}
 }
 
-// unsynced counts the changes here not uploaded yet: the outbox's, and the
-// recordings whose audio is still being recorded, saved or transcribed,
-// which the outbox gets only once they finish. Removing the account's
-// pages would remove that audio too.
 func (c *Core) unsynced() int {
 	n := c.Store.PendingCount()
 	if c.Rec != nil {
@@ -64,17 +46,7 @@ func (c *Core) unsynced() int {
 	return n
 }
 
-// UseAccount makes user the session, once signed in: the previous
-// account's pages go first, if it was another's, with their changes not
-// uploaded yet only when drop says the user agreed. Pages sync one way at
-// a time, the server's now, so iCloud sync turns off, in the settings too,
-// which then show it off once signed out again. It fails with
-// store.ErrUnsynced when a change was stored since the count, by leaflet
-// mcp, to ask again.
 func (c *Core) UseAccount(user *store.User, drop bool) error {
-	// The previous account's agents stop, and their chats go, as its pages
-	// do: with drop here, else as the session loads (store.LoadSession),
-	// which leaves them while a change of theirs waits to go up.
 	replaces := c.ReplacesAccount(user)
 	if replaces && (drop || c.Store.PendingCount() == 0) {
 		c.stopRuns()
@@ -91,19 +63,12 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 		c.saveSettings(s)
 	}
 	_, err := c.Store.LoadSession(user)
-	// Again once the chats are gone from the store, as Leave does.
 	if replaces && err == nil {
 		c.stopRuns()
 	}
 	return err
 }
 
-// Leave signs out and clears this device with clear, as
-// store.ForgetSyncedAccount, ForgetAccount or Wipe, between sync passes.
-// With synced, it does neither while a change waits to go up, and returns
-// how many do; clear checks again as it removes, for a change that leaflet
-// mcp stores meanwhile, and so clears before signing out. The session is
-// then the device's own, once store.LoadSession(nil) loads it.
 func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) {
 	c.Sync.Hold(func() {
 		if synced {
@@ -117,9 +82,6 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 			unsynced, err = max(c.unsynced(), 1), nil
 			return
 		}
-		// Again once the chats are gone from the store: one the app read
-		// back from it in between, as the workspace agent's it draws,
-		// would stay with the next account.
 		c.stopRuns()
 		c.revokeDevice(device)
 		c.Remote.SignOut()
@@ -128,10 +90,6 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 	return unsynced, err
 }
 
-// revokeDevice revokes the row of this device, as it leaves the account
-// under an ID it forgets: kept, each sign-in here would count as one more
-// of the devices an account may have. It is best tried: signing out goes on
-// without the server, and a device not registered yet has no row.
 func (c *Core) revokeDevice(id string) {
 	if id == "" || !c.Remote.SignedIn() {
 		return
@@ -143,8 +101,6 @@ func (c *Core) revokeDevice(id string) {
 	}
 }
 
-// ForgetProject forgets the project chosen and the Supabase account's
-// sign-in, on signing out: signing in again finds the project anew.
 func (c *Core) ForgetProject() {
 	if c.Remote.Fixed() {
 		return
@@ -157,9 +113,6 @@ func (c *Core) ForgetProject() {
 	_ = c.Remote.Use(remote.Settings{})
 }
 
-// SignInWithSupabase signs in to the person's Supabase account through
-// the browser: opened hears Supabase's sign-in page, which OpenURL then
-// opens. AdoptProject keeps the sign-in for UpdateProject.
 func (c *Core) SignInWithSupabase(ctx context.Context, opened func(url string)) (*supabaseapi.Client, error) {
 	api, err := supabaseapi.SignIn(ctx, func(u string) {
 		if opened != nil {
@@ -175,8 +128,6 @@ func (c *Core) SignInWithSupabase(ctx context.Context, opened func(url string)) 
 	return api, nil
 }
 
-// keepManagementOf keeps the Supabase account's sign-in in the keychain,
-// as it is now and as it rotates, for UpdateProject.
 func keepManagementOf(api *supabaseapi.Client) {
 	api.OnRefresh = keepManagement
 	keepManagement(api.RefreshToken())
@@ -188,18 +139,12 @@ func keepManagement(refresh string) {
 	}
 }
 
-// Steps of ConnectProject, which its progress hears.
 const (
 	StepStarting = "starting"
 	StepSetup    = "setup"
 	StepSigning  = "signing"
 )
 
-// ConnectProject sets p up for this version of Leaflet, once it is up, and
-// signs in to it as its owner. It returns the session pending, which
-// AdoptProject makes the project and session the device's, or
-// Remote.Discard drops. progress hears each step as it starts, and how
-// many of the setup's steps are done.
 func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, progress func(step string, done, all int)) (*remote.Pending, error) {
 	if progress == nil {
 		progress = func(string, int, int) {}
@@ -212,9 +157,6 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 		}
 	}
 	progress(StepSetup, 0, 0)
-	// Sign-ups it could not close yet, or a Realtime not ready, leave the
-	// project set up but for them: the sign-in goes on, and the next start
-	// does the rest.
 	switch err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); {
 	case err == nil:
 		c.projectUpdated(p.Ref)
@@ -232,10 +174,6 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 	return c.signInAsOwner(ctx, api, p, project, secret)
 }
 
-// AdoptProject makes pending, as ConnectProject returned it, the device's
-// project and session, and keeps api, the Supabase account's sign-in, for
-// UpdateProject. Only then: a sign-in that fails or is cancelled before
-// leaves the project in use with the sign-in kept for it.
 func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*store.User, error) {
 	user, err := c.Remote.Adopt(pending)
 	if err != nil {
@@ -245,15 +183,10 @@ func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*
 	c.mgmtMu.Lock()
 	c.mgmt = api
 	c.mgmtMu.Unlock()
-	// Another project's, perhaps: read again.
 	c.signInEnded.Store(0)
 	return user, nil
 }
 
-// signInAsOwner signs in to p as the person signed in to Supabase, who
-// owns it: the one member of its organization. A project whose owner is
-// someone else, as one in an organization they were added to, is refused:
-// being able to manage it does not make them its owner in Leaflet.
 func (c *Core) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, project remote.Settings, secret string) (*remote.Pending, error) {
 	email, name, err := provision.Owner(ctx, api, p.OrganizationSlug)
 	if err != nil {
@@ -269,12 +202,8 @@ func (c *Core) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p sup
 	return c.Remote.SignInAsOwner(ctx, project, secret, email, name)
 }
 
-// projectUpdatedKey keeps, by a project's ref, the Signature of the build
-// that last brought it up to date from this device.
 func projectUpdatedKey(ref string) string { return "project.updated." + ref }
 
-// projectUpdated keeps that this build brought the project of ref up to
-// date.
 func (c *Core) projectUpdated(ref string) {
 	sig, err := provision.Signature()
 	if err == nil {
@@ -286,14 +215,8 @@ func (c *Core) projectUpdated(ref string) {
 	c.projectSignIn(ref, false)
 }
 
-// projectSignInKey keeps, by a project's ref, that the Supabase account's
-// sign-in kept for it ended while the project still waited to be brought
-// up to date: nothing brings it up to date until the person signs in to
-// Supabase again (RenewProject), which the app then asks for.
 func projectSignInKey(ref string) string { return "project.signin_ended." + ref }
 
-// projectSignIn keeps whether the project of ref waits for the person to
-// sign in to Supabase again.
 func (c *Core) projectSignIn(ref string, ended bool) {
 	if ref == "" {
 		return
@@ -310,11 +233,6 @@ func (c *Core) projectSignIn(ref string, ended bool) {
 	c.signInEnded.Store(0)
 }
 
-// ProjectNeedsSignIn reports whether the project in use waits to be
-// brought up to this version of Leaflet for the person to sign in to
-// Supabase again, as the sign-in kept for that ended: revoked, or left
-// unused too long. The app draws it each frame, so it is read from the
-// store once, until it changes.
 func (c *Core) ProjectNeedsSignIn() bool {
 	ref := c.Remote.Project().Ref
 	if ref == "" || !c.Remote.SignedIn() {
@@ -335,10 +253,6 @@ func (c *Core) ProjectNeedsSignIn() bool {
 	return ended
 }
 
-// RenewProject brings the project in use up to this version of Leaflet
-// with api, the Supabase account signed in to again, and keeps that
-// sign-in for UpdateProject, in place of the one that ended. An account
-// that can't manage the project fails, and nothing is kept of it.
 func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error {
 	ref := c.Remote.Project().Ref
 	if ref == "" || !c.Remote.SignedIn() {
@@ -346,9 +260,6 @@ func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error 
 	}
 	updating.Lock()
 	defer updating.Unlock()
-	// Sign-ups it could not close yet, or a Realtime not ready, leave the
-	// project set up but for them, as when signing in: the sign-in is
-	// kept, and the next start does the rest with it.
 	switch err := provision.Setup(ctx, api, ref, nil); {
 	case err == nil:
 		c.projectUpdated(ref)
@@ -365,11 +276,6 @@ func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error 
 	return nil
 }
 
-// projectOutOfDate reports whether the project in use may lack what this
-// version of Leaflet brings it: signed in to it, with the Supabase
-// account's sign-in kept, and not brought up to date by this build yet.
-// Each Setup renews that sign-in, whose refresh token rotates, and makes
-// a few calls more: they wait for a build that has something new.
 func (c *Core) projectOutOfDate() bool {
 	ref := c.Remote.Project().Ref
 	if ref == "" || !c.Remote.SignedIn() {
@@ -383,15 +289,8 @@ func (c *Core) projectOutOfDate() bool {
 	return done != sig
 }
 
-// UpdateProject brings the project up to this version of Leaflet, when a
-// newer one adds migrations or changes the functions, with the Supabase
-// account's sign-in kept from signing in. One already running does it
-// for this one too: two at once would renew the same sign-in, and the
-// one that loses forgets it.
 func (c *Core) UpdateProject() { _ = c.updateProject() }
 
-// updateProject is UpdateProject, and reports whether it is worth trying
-// again: it failed, but for the Supabase sign-in gone.
 func (c *Core) updateProject() (again bool) {
 	if !updating.TryLock() {
 		return false
@@ -403,17 +302,12 @@ func (c *Core) updateProject() (again bool) {
 	}
 	raw, err := keychain.Get(managementKey)
 	if errors.Is(err, keychain.ErrNotFound) || err == nil && len(raw) == 0 {
-		// Signed in without the Supabase account, as to a server of one's
-		// own: there is nothing to bring up to date with.
 		return false
 	}
 	if err != nil {
 		log.Printf("update project %s: the Supabase sign-in: %v", ref, err)
 		return false
 	}
-	// The sign-in this run used last, with its access token, while it is
-	// still the one kept: a refresh token renewed for it is kept as it
-	// rotates (keepManagement), so the next try does not renew it again.
 	c.mgmtMu.Lock()
 	api := c.mgmt
 	if api == nil || api.RefreshToken() != string(raw) {
@@ -435,8 +329,6 @@ func (c *Core) updateProject() (again bool) {
 			if err := keychain.Delete(managementKey); err != nil {
 				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
 			}
-			// Nothing brings the project up to date now until the person
-			// signs in to Supabase again: the app asks them to.
 			c.projectSignIn(ref, true)
 			return false
 		}
@@ -446,18 +338,8 @@ func (c *Core) updateProject() (again bool) {
 	return false
 }
 
-// projectRetries are the waits before trying again to bring the project up
-// to date, after the first try failed, as offline as the app started;
-// tests shorten them.
 var projectRetries = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
 
-// keepProjectUpdated brings the project up to date as the app starts, and
-// tries again a few times later if that failed. With hold, the changes
-// wait to go up for the first try alone: a project that can't be reached
-// then is most likely up to date already, and holding them back longer
-// would leave them on this device. Start runs it as a run of the app first
-// starts, and again as it starts later while the project is still not up
-// to date and no run of tries is under way.
 func (c *Core) keepProjectUpdated(hold bool) {
 	again := c.updateProject()
 	if hold {

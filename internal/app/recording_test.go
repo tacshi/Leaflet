@@ -3,8 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -21,8 +19,6 @@ import (
 	"leaflet/locales"
 )
 
-// A click on a line of a transcript plays the recording from the line,
-// once its audio loads, and the menu copies the transcript.
 func TestTranscriptLinePlays(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -35,8 +31,6 @@ func TestTranscriptLinePlays(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Recording"}}
-	// The audio loads on its own goroutine; what it hands back runs in a
-	// frame, as Window.Update runs it on the main thread.
 	var mu sync.Mutex
 	var posted []func()
 	a.post = func(fn func()) {
@@ -74,7 +68,6 @@ func TestTranscriptLinePlays(t *testing.T) {
 	}
 }
 
-// A page's recordings stop playing and let their audio go as it closes.
 func TestClosingPageDropsPlayers(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -90,7 +83,6 @@ func TestClosingPageDropsPlayers(t *testing.T) {
 	}
 }
 
-// A recording whose block is deleted, or undone, stops playing.
 func TestDeletedRecordingStopsPlaying(t *testing.T) {
 	a := templatesApp(t)
 	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Recording"}}
@@ -112,7 +104,6 @@ func TestDeletedRecordingStopsPlaying(t *testing.T) {
 	}
 }
 
-// Audio that could not load says why.
 func TestPlaybackFailureShows(t *testing.T) {
 	a := templatesApp(t)
 	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, Status: "ready"}
@@ -128,8 +119,6 @@ func TestPlaybackFailureShows(t *testing.T) {
 	}
 }
 
-// On a page that can't be changed, a recording's menu only copies its
-// transcript.
 func TestRecordingMenuOnAViewOnlyPage(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -165,13 +154,11 @@ func TestRecordingMenuOnAViewOnlyPage(t *testing.T) {
 	}
 }
 
-// Summarize asks the agent in the app's language, in a short message, as
-// the agent reads the transcript with the block.
 func TestSummarizeRecording(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.post = func(func()) {}
-	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, SttProvider: "soniox", Status: "ready",
@@ -200,16 +187,16 @@ func TestSummarizeRecording(t *testing.T) {
 	}
 }
 
-// Saving the Soniox key on the server empties its field alone: an
-// endpoint's key typed beside it stays.
 func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{}"))
-	}))
-	t.Cleanup(hs.Close)
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
 	a := templatesApp(t)
-	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
 	a.rec = recording.NewController(a.st, a.backend)
+	a.speech.keyLoaded = true
+	if recording.SetUp("soniox", a.settings.Stt, a.speechKeys()) {
+		t.Fatal("Soniox is set up with no key here")
+	}
 	posted := make(chan func(), 1)
 	a.post = func(fn func()) { posted <- fn }
 	a.speech.key, a.speech.soniox = "endpoint-key", "soniox-key"
@@ -218,39 +205,66 @@ func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
 	if a.speech.soniox != "" || a.speech.key != "endpoint-key" {
 		t.Errorf("soniox %q, endpoint key %q", a.speech.soniox, a.speech.key)
 	}
+	if recording.LocalSonioxKey() != "soniox-key" || !recording.SetUp("soniox", a.settings.Stt, a.speechKeys()) {
+		t.Errorf("kept %q, keys %+v", recording.LocalSonioxKey(), a.speechKeys())
+	}
 }
 
-// The endpoint key typed is kept in the keychain once typing pauses, the
-// last typed alone, and an emptied one is removed.
+func TestEndpointKeyFieldFollowsTheOrigin(t *testing.T) {
+	s := &speechState{
+		key: "ek", keyURL: "https://api.example.com/v1",
+		kept: recording.KeptKey{Key: "ek", Address: "https://api.example.com/v1"},
+	}
+	s.keyAt("https://api.example.com/v2")
+	if s.key != "ek" {
+		t.Errorf("another path: %q", s.key)
+	}
+	s.keyAt("https://api.example.co")
+	if s.key != "" {
+		t.Errorf("another origin shows %q", s.key)
+	}
+	s.key = "typed"
+	s.keyAt("https://api.example.co/v1")
+	if s.key != "typed" {
+		t.Errorf("typed for it: %q", s.key)
+	}
+	s.keyAt("https://api.example.com/v1")
+	if s.key != "ek" {
+		t.Errorf("changed back: %q", s.key)
+	}
+}
+
 func TestEndpointKeyKeptOncePaused(t *testing.T) {
 	keychain.Use(keys{})
 	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
 	a := templatesApp(t)
+	const url = "https://api.example.com/v1"
 	kept := func(want string) {
 		t.Helper()
-		for end := time.Now().Add(3 * time.Second); recording.EndpointKey() != want; {
+		for end := time.Now().Add(3 * time.Second); recording.EndpointKey(url) != want; {
 			if time.Now().After(end) {
-				t.Fatalf("kept %q, want %q", recording.EndpointKey(), want)
+				t.Fatalf("kept %q, want %q", recording.EndpointKey(url), want)
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	for _, k := range []string{"s", "sk", "sk-1"} {
-		a.keepEndpointKey(k)
+		a.keepEndpointKey(url, k)
 	}
-	if got := recording.EndpointKey(); got != "" {
+	if got := recording.EndpointKey(url); got != "" {
 		t.Errorf("kept %q as it was typed", got)
 	}
 	kept("sk-1")
-	a.keepEndpointKey("")
+	if got := recording.EndpointKey("https://elsewhere.example.com/v1"); got != "" {
+		t.Errorf("another origin gets %q", got)
+	}
+	a.keepEndpointKey(url, "")
 	kept("")
 	if _, err := keychain.Get("stt.endpoint.key"); !errors.Is(err, keychain.ErrNotFound) {
 		t.Errorf("an emptied key stays: %v", err)
 	}
 }
 
-// A recording block shows its transcript as it is once the recordings
-// change, though it reads it once for the frames between.
 func TestRecordingBlockFollowsChanges(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Call"})
@@ -272,8 +286,6 @@ func TestRecordingBlockFollowsChanges(t *testing.T) {
 	}
 }
 
-// A long transcript shows its first lines in a window until it is opened,
-// and closes again; a short one shows whole.
 func TestLongTranscriptFolds(t *testing.T) {
 	a := templatesApp(t)
 	var segs []store.Segment
@@ -308,8 +320,6 @@ func TestLongTranscriptFolds(t *testing.T) {
 	}
 }
 
-// The menu renames a recording block, as one step to undo, and deletes it,
-// which Undo brings back with its recording.
 func TestRenameAndDeleteRecording(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -340,7 +350,7 @@ func TestRenameAndDeleteRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	tt.Frame() // the name is selected as the field takes the focus
+	tt.Frame()
 	tt.Type("Standup")
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
@@ -373,9 +383,6 @@ func TestRenameAndDeleteRecording(t *testing.T) {
 	}
 }
 
-// A recording's notice closes with its ×, for good, on a page that can be
-// changed: a warning over its transcript, as a live stream ending early
-// leaves, and its status says it is ready.
 func TestRecordingNoticeCloses(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -406,8 +413,6 @@ func TestRecordingNoticeCloses(t *testing.T) {
 	}
 }
 
-// While it records, a block shows the last two lines of the words heard:
-// as more come, it keeps its height.
 func TestLiveTextKeepsTwoLines(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)

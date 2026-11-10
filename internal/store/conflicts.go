@@ -8,23 +8,19 @@ import (
 	"leaflet/internal/doc"
 )
 
-// ConflictRow is a block both sides changed while apart.
 type ConflictRow struct {
-	ID      string
-	PageID  string
-	BlockID string
-	// LocalNode or RemoteNode is nil for a block that side deleted and the
-	// other edited, which was kept.
+	ID             string
+	PageID         string
+	BlockID        string
 	LocalNode      *doc.Node
 	RemoteNode     *doc.Node
-	Kept           string // local | remote
+	Kept           string
 	LocalEditedAt  time.Time
 	RemoteEditedAt time.Time
 	CreatedAt      time.Time
 	ResolvedAt     time.Time
 }
 
-// AddConflict records a merge conflict.
 func (s *Store) AddConflict(pageID string, c doc.Conflict) error {
 	if err := addConflicts(s.db, pageID, []doc.Conflict{c}); err != nil {
 		return err
@@ -33,19 +29,11 @@ func (s *Store) AddConflict(pageID string, c doc.Conflict) error {
 	return nil
 }
 
-// addConflicts records the conflicts of a merge of a page, for the methods
-// that store the merge to record them in its transaction: recorded apart,
-// a merge stored without them would never meet them again.
 func addConflicts(q querier, pageID string, conflicts []doc.Conflict) error {
 	_, err := insertConflicts(q, pageID, conflicts)
 	return err
 }
 
-// insertConflicts records conflicts of a page and returns the IDs of those
-// it recorded. One the same as a conflict of the page not yet handled, or
-// handled lately (resolvedKept), the same block with the same two sides,
-// is that one met again, as a merge tried again meets it, and is not
-// recorded twice, nor shown again once dismissed.
 func insertConflicts(q querier, pageID string, conflicts []doc.Conflict) ([]string, error) {
 	now := time.Now().UnixMilli()
 	since := now - resolvedKept.Milliseconds()
@@ -78,11 +66,6 @@ func insertConflicts(q querier, pageID string, conflicts []doc.Conflict) ([]stri
 	return ids, nil
 }
 
-// HoldConflicts records the conflicts of a merge before it goes to the
-// server, as once the server has it the side each conflict lost is
-// nowhere else, whether or not this device then stores the merge. It
-// returns the IDs of those it recorded, for DropConflicts to take back
-// should the server not take the merge.
 func (s *Store) HoldConflicts(pageID string, conflicts []doc.Conflict) ([]string, error) {
 	if len(conflicts) == 0 {
 		return nil, nil
@@ -102,9 +85,6 @@ func (s *Store) HoldConflicts(pageID string, conflicts []doc.Conflict) ([]string
 	return ids, nil
 }
 
-// DropConflicts takes back the conflicts HoldConflicts recorded, of a merge
-// the server did not take: the merge tried again meets its own. One the
-// user dismissed meanwhile stays dismissed, and is not met again.
 func (s *Store) DropConflicts(ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -124,8 +104,6 @@ func (s *Store) DropConflicts(ids []string) error {
 	return nil
 }
 
-// Conflicts returns the unresolved conflicts, newest first, but those of
-// pages deleted, which come back with their pages.
 func (s *Store) Conflicts() ([]ConflictRow, error) {
 	rows, err := s.db.Query(`SELECT id, page_id, block_id, local_node, remote_node, kept, local_edited_at, remote_edited_at, created_at FROM conflicts
 		WHERE resolved_at IS NULL AND page_id NOT IN (SELECT id FROM pages WHERE deleted_at IS NOT NULL) ORDER BY created_at DESC`)
@@ -134,7 +112,6 @@ func (s *Store) Conflicts() ([]ConflictRow, error) {
 		var local, remote string
 		var le, re, cr int64
 		err := sc.Scan(&c.ID, &c.PageID, &c.BlockID, &local, &remote, &c.Kept, &le, &re, &cr)
-		// A deleted side is stored as null.
 		_ = json.Unmarshal([]byte(local), &c.LocalNode)
 		_ = json.Unmarshal([]byte(remote), &c.RemoteNode)
 		c.LocalEditedAt, c.RemoteEditedAt, c.CreatedAt = time.UnixMilli(le), time.UnixMilli(re), time.UnixMilli(cr)
@@ -142,10 +119,6 @@ func (s *Store) Conflicts() ([]ConflictRow, error) {
 	})
 }
 
-// ResolveConflict lets a conflict handled go: it is no longer listed, and
-// a merge tried again that meets it does not record it again
-// (insertConflicts). It is kept for that resolvedKept, and those handled
-// before go: kept, each conflict ever met would stay with its two blocks.
 func (s *Store) ResolveConflict(id string) error {
 	now := time.Now().UnixMilli()
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -162,6 +135,4 @@ func (s *Store) ResolveConflict(id string) error {
 	return nil
 }
 
-// resolvedKept is how long a conflict handled is kept, for a merge tried
-// again, as a save whose answer did not come is, to know it.
 const resolvedKept = 30 * 24 * time.Hour

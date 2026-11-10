@@ -1,5 +1,3 @@
-# Apple's icon tile: a continuous-curvature squircle (superellipse) on the
-# macOS grid, 824 wide at 100,100 on a 1024 canvas.
 import math
 cx, cy, r, n = 512, 512, 412, 4.6
 pts = []

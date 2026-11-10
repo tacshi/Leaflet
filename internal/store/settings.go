@@ -6,45 +6,31 @@ import (
 	"strings"
 )
 
-// SttSettings are the speech-to-text choice and recording options, which
-// the server mirrors in stt_settings.
 type SttSettings struct {
-	// Provider is soniox | moss | openai-compatible | on-device, the
-	// device's own engine.
-	Provider       string `json:"provider"`
-	ModelSize      string `json:"model_size"`
-	RunOn          string `json:"run_on"`   // auto | gpu | cpu
-	Language       string `json:"language"` // auto, or an ISO 639-1 code
-	LiveTranscript bool   `json:"live_transcript"`
-	SpeakerLabels  bool   `json:"speaker_labels"`
-	BaseURL        string `json:"base_url"`
-	Model          string `json:"model"`
-	ProviderID     string `json:"provider_id,omitempty"`
-	SonioxModel    string `json:"soniox_model"`
-	// SonioxOnServer says a Soniox key was saved on the server from this
-	// device, signed in.
-	SonioxOnServer bool     `json:"soniox_on_server,omitempty"`
+	Provider       string   `json:"provider"`
+	ModelSize      string   `json:"model_size"`
+	RunOn          string   `json:"run_on"`
+	Language       string   `json:"language"`
+	LiveTranscript bool     `json:"live_transcript"`
+	SpeakerLabels  bool     `json:"speaker_labels"`
+	BaseURL        string   `json:"base_url"`
+	Model          string   `json:"model"`
+	SonioxModel    string   `json:"soniox_model"`
 	LanguageHints  []string `json:"language_hints"`
 }
 
-// ModelChoice is a provider and one of its models.
 type ModelChoice struct {
 	ProviderID string
 	Model      string
 }
 
-// Encode writes "providerId|model".
 func (m ModelChoice) Encode() string { return m.ProviderID + "|" + m.Model }
 
-// DecodeModelChoice reads "providerId|model".
 func DecodeModelChoice(raw string) (ModelChoice, bool) {
 	p, m, ok := strings.Cut(raw, "|")
 	return ModelChoice{p, m}, ok
 }
 
-// Fonts are the families pages are set in, each a family the system or
-// the app has, or "" for Leaflet's own: Latin for text in general, Chinese
-// and Japanese for the characters of those languages, and Code for code.
 type Fonts struct {
 	Latin    string `json:"latin,omitempty"`
 	Chinese  string `json:"chinese,omitempty"`
@@ -52,37 +38,27 @@ type Fonts struct {
 	Code     string `json:"code,omitempty"`
 }
 
-// Settings are the app's settings on this device.
 type Settings struct {
-	Theme string `json:"theme"` // system | light | sepia | dark
-	// Accent is a name of theme.Accents, or "system" or "" for the
-	// desktop's, Blue where it has none.
-	Accent   string  `json:"accent,omitempty"`
-	TextSize float64 `json:"text_size"`
-	Fonts    Fonts   `json:"fonts"`
-	// Language is the tag of the language the app shows, as App.SetLocale
-	// keeps it, or "" to follow the system's.
-	Language             string `json:"language,omitempty"`
-	DefaultModel         string `json:"default_model,omitempty"`
-	AgentsReadOtherPages bool   `json:"agents_read_other_pages"`
-	// AgentsUseWeb lets agents search the web and read pages of it.
-	AgentsUseWeb    bool `json:"agents_use_web"`
-	AllPagesOffline bool `json:"all_pages_offline"`
-	// WorkOffline treats the app as offline even with a connection.
-	WorkOffline bool `json:"work_offline"`
-	// ICloudSync syncs pages through the Leaflet folder in iCloud Drive.
+	Theme                   string      `json:"theme"`
+	Accent                  string      `json:"accent,omitempty"`
+	TextSize                float64     `json:"text_size"`
+	Fonts                   Fonts       `json:"fonts"`
+	Language                string      `json:"language,omitempty"`
+	DefaultModel            string      `json:"default_model,omitempty"`
+	AgentsReadOtherPages    bool        `json:"agents_read_other_pages"`
+	AgentsUseWeb            bool        `json:"agents_use_web"`
+	AllPagesOffline         bool        `json:"all_pages_offline"`
+	WorkOffline             bool        `json:"work_offline"`
 	ICloudSync              bool        `json:"icloud_sync,omitempty"`
-	KeepAudioOnDevice       string      `json:"keep_audio_on_device"` // until_uploaded | 30_days | always
+	KeepAudioOnDevice       string      `json:"keep_audio_on_device"`
 	UploadAudioOverCellular bool        `json:"upload_audio_over_cellular"`
 	Stt                     SttSettings `json:"stt"`
 	SidebarOpen             bool        `json:"sidebar_open"`
-	// SidebarTab is the sidebar's tab shown: Pages, Tags or To-dos.
-	SidebarTab   int     `json:"sidebar_tab,omitempty"`
-	SidebarWidth float32 `json:"sidebar_width,omitempty"`
-	PanelWidth   float32 `json:"panel_width,omitempty"`
+	SidebarTab              int         `json:"sidebar_tab,omitempty"`
+	SidebarWidth            float32     `json:"sidebar_width,omitempty"`
+	PanelWidth              float32     `json:"panel_width,omitempty"`
 }
 
-// DefaultSettings are the settings of a new install.
 func DefaultSettings() Settings {
 	return Settings{
 		Theme: "system", TextSize: 17, AgentsReadOtherPages: true, AgentsUseWeb: true,
@@ -95,7 +71,6 @@ func DefaultSettings() Settings {
 	}
 }
 
-// Default returns the default model choice, if one is set.
 func (s Settings) Default() (ModelChoice, bool) {
 	if s.DefaultModel == "" {
 		return ModelChoice{}, false
@@ -103,7 +78,6 @@ func (s Settings) Default() (ModelChoice, bool) {
 	return DecodeModelChoice(s.DefaultModel)
 }
 
-// Settings reads the settings, filling in defaults.
 func (s *Store) Settings() Settings {
 	out := DefaultSettings()
 	if raw, ok := s.Value("settings"); ok {
@@ -118,8 +92,6 @@ func (s *Store) Settings() Settings {
 	if !slices.Contains([]string{"soniox", "moss", "openai-compatible", "on-device"}, out.Stt.Provider) {
 		out.Stt.Provider = "openai-compatible"
 	}
-	// A default whose provider is gone, as one removed on another device,
-	// is none: the next provider added becomes the default.
 	if def, ok := out.Default(); ok {
 		var n int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM model_providers WHERE id = ?`, def.ProviderID).Scan(&n); err == nil && n == 0 {
@@ -129,7 +101,6 @@ func (s *Store) Settings() Settings {
 	return out
 }
 
-// SaveSettings writes the settings.
 func (s *Store) SaveSettings(v Settings) error {
 	raw, err := json.Marshal(v)
 	if err != nil {

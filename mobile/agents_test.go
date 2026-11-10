@@ -34,7 +34,7 @@ func TestTestProvider(t *testing.T) {
 
 	test := func(provider providerJSON) providerTest {
 		t.Helper()
-		in, _ := json.Marshal(provider) // #nosec G117 -- test keys only.
+		in, _ := json.Marshal(provider) // #nosec G117
 		raw, err := c.TestProvider(string(in))
 		if err != nil {
 			t.Fatal(err)
@@ -44,7 +44,6 @@ func TestTestProvider(t *testing.T) {
 		return out
 	}
 
-	// A cloud provider's key typed in is tried from here, signed in or not.
 	got := test(providerJSON{Preset: "deepseek", BaseURL: srv.URL + "/v1", APIKey: "sk-test", DefaultModel: "deepseek-v4-flash"})
 	if !got.OK || !got.SupportsTools {
 		t.Fatalf("test with a key: %+v", got)
@@ -53,19 +52,15 @@ func TestTestProvider(t *testing.T) {
 		t.Fatalf("chat models: %v", got.Models)
 	}
 
-	// Without one there is nothing to try it with.
 	if got := test(providerJSON{Preset: "deepseek", BaseURL: srv.URL + "/v1"}); got.OK || got.Message == "" {
 		t.Fatalf("test without a key: %+v", got)
 	}
 }
 
-// The app's form never holds a key kept here: a model server moved to
-// another address without one typed is refused, with why, and keeps its
-// key and its address, rather than lose the key at the save.
 func TestMovedLocalProviderKeepsItsKey(t *testing.T) {
 	c, _ := open(t)
 	save := func(p providerJSON) error {
-		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		in, _ := json.Marshal(p) // #nosec G117
 		return c.SaveProvider(string(in))
 	}
 	providers := func() []providerJSON {
@@ -97,7 +92,7 @@ func TestMovedLocalProviderKeepsItsKey(t *testing.T) {
 func TestSaveCloudProviderSignedOut(t *testing.T) {
 	c, _ := open(t)
 	save := func(p providerJSON) error {
-		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		in, _ := json.Marshal(p) // #nosec G117
 		return c.SaveProvider(string(in))
 	}
 	deepseek := providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash"}
@@ -112,19 +107,16 @@ func TestSaveCloudProviderSignedOut(t *testing.T) {
 	raw, _ := c.Providers()
 	var ps []providerJSON
 	_ = json.Unmarshal([]byte(raw), &ps)
-	if len(ps) != 1 || !ps[0].IsLocal || !ps[0].HasKey || ps[0].Name != "DeepSeek" {
+	if len(ps) != 1 || ps[0].IsLocal || !ps[0].HasKey || ps[0].Name != "DeepSeek" {
 		t.Fatalf("providers: %+v", ps)
 	}
 
-	// Changed without its key, it keeps the one it has.
 	ps[0].DefaultModel = "deepseek-v4-pro"
 	if err := save(ps[0]); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = c.Providers()
 	_ = json.Unmarshal([]byte(raw), &ps)
-	// Moved to another server it takes a key of its own, not the one it
-	// has, which stays with its address.
 	moved := ps[0]
 	moved.BaseURL = "https://proxy.example/v1"
 	if err := save(moved); err == nil {
@@ -144,7 +136,7 @@ func TestSaveCloudProviderSignedOut(t *testing.T) {
 
 func TestRemoveProviderStopsBeingTheDefault(t *testing.T) {
 	c, _ := open(t)
-	in, _ := json.Marshal(providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-test"}) // #nosec G117 -- test keys only.
+	in, _ := json.Marshal(providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-test"}) // #nosec G117
 	if err := c.SaveProvider(string(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +162,7 @@ func TestChatGPTPresetAndSave(t *testing.T) {
 	if !slices.ContainsFunc(presets, func(p presetJSON) bool { return p.ID == "chatgpt" && p.Auth == "account" }) {
 		t.Fatalf("no ChatGPT preset: %+v", presets)
 	}
-	// Nothing to save before signing in; the address is the preset's, so
-	// the form needs none.
-	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"}) // #nosec G117 -- test keys only.
+	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"}) // #nosec G117
 	if err := c.SaveProvider(string(in)); err == nil || err.Error() != locales.SettingsChatGPTSignInFirst() {
 		t.Fatalf("saved ChatGPT without a sign-in: %v", err)
 	}
@@ -185,12 +175,10 @@ func TestClosingTheChatGPTPageKeepsTheSignIn(t *testing.T) {
 	c, _ := open(t)
 	c.chatgpt.attempt = 1
 	c.chatgpt.g = agents.NewChatGPT(agents.ChatGPTAccount{Email: "a@example.com"})
-	// The page closed after OpenAI answered: the sign-in stays to save.
 	c.CancelChatGPTSignIn(1)
 	if c.madeChatGPT() == nil {
 		t.Fatal("closing the page forgot the sign-in made")
 	}
-	// The form closed without saving: it goes.
 	c.ForgetChatGPTSignIn(1)
 	if c.madeChatGPT() != nil {
 		t.Fatal("the form closed and kept the sign-in")
@@ -200,8 +188,6 @@ func TestClosingTheChatGPTPageKeepsTheSignIn(t *testing.T) {
 func TestALateCancelLeavesTheNextChatGPTSignIn(t *testing.T) {
 	c, _ := open(t)
 	s := &c.chatgpt
-	// The page of the first sign-in closed, and the person signed in
-	// again before its cancel came: the second one is under way.
 	cancelled := false
 	s.attempt = 2
 	s.cancel, s.done = func() { cancelled = true }, make(chan struct{})
@@ -214,7 +200,6 @@ func TestALateCancelLeavesTheNextChatGPTSignIn(t *testing.T) {
 	if !cancelled || s.done != nil {
 		t.Fatal("the second sign-in's own cancel left it")
 	}
-	// One made is forgotten only by its own attempt, too.
 	s.g = agents.NewChatGPT(agents.ChatGPTAccount{Email: "a@example.com"})
 	c.ForgetChatGPTSignIn(1)
 	if c.madeChatGPT() == nil {
@@ -228,7 +213,7 @@ func TestSelectAgentPicksTheChatsAgent(t *testing.T) {
 		{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-a"},
 		{Preset: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-6-luna", APIKey: "sk-b"},
 	} {
-		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		in, _ := json.Marshal(p) // #nosec G117
 		if err := c.SaveProvider(string(in)); err != nil {
 			t.Fatal(err)
 		}
@@ -250,8 +235,6 @@ func TestSelectAgentPicksTheChatsAgent(t *testing.T) {
 	}
 }
 
-// An agent run whose edits can't be taken back, as on content that can't
-// be read, says why to the app, and stays as it was.
 func TestUndoRunThatFailsSaysWhy(t *testing.T) {
 	c, _ := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
@@ -276,15 +259,12 @@ func TestUndoRunThatFailsSaysWhy(t *testing.T) {
 	})
 }
 
-// Ask says why a run could not start, rather than returning an ID the
-// page's runs never have; one that starts is among them.
 func TestAskFailsToStart(t *testing.T) {
 	c, _ := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
 	if id, err := c.Ask(row.ID, "inline", "sum it up", `[]`, "", "", ""); err == nil || id != "" {
 		t.Fatalf("asked with no agent: %q, %v", id, err)
 	}
-	// A model server that answers once the test is done with the run.
 	answer := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-answer
@@ -317,9 +297,6 @@ func TestAskFailsToStart(t *testing.T) {
 	}
 }
 
-// An answer in words is the blocks of its Markdown, for the editor to put
-// after the block it was asked about, as the desktop's Insert puts it; a
-// run that edited the page gives none.
 func TestReplyBlocksAreTheAnswersMarkdown(t *testing.T) {
 	c, _ := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
@@ -347,8 +324,6 @@ func TestReplyBlocksAreTheAnswersMarkdown(t *testing.T) {
 	}
 }
 
-// A run's edits say which pages they made, an edit each, for the app to
-// open them from.
 func TestAgentStateNamesThePagesMade(t *testing.T) {
 	c, _ := open(t)
 	c.q.do(func() {
@@ -370,9 +345,6 @@ func TestAgentStateNamesThePagesMade(t *testing.T) {
 	}
 }
 
-// An agent's comment says who else had it written, by their name among
-// the page's members, as the desktop's comments do; one the user asked
-// for, and any that is no agent's, says nothing.
 func TestCommentsSayWhoAskedTheAgent(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Plan"}`)

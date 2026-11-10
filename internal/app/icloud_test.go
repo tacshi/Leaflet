@@ -6,10 +6,6 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// The iCloud watcher ignores this device's own writes and copies of
-// files; once a pass gives the device a new ID, it ignores the writes
-// under the new one, and no longer the old one's, which another device
-// writes as now.
 func TestICloudWatcherFollowsTheDeviceID(t *testing.T) {
 	a := templatesApp(t)
 	old := a.st.DeviceID()

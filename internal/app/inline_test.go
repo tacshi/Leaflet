@@ -14,9 +14,6 @@ import (
 	"leaflet/locales"
 )
 
-// As an agent asked inline writes on past the window, the page stays
-// where the user has it, for them to scroll: neither what it writes nor
-// the caret, left where the user asked, moves it.
 func TestInlineRunLeavesTheScrollToTheUser(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
@@ -35,7 +32,6 @@ func TestInlineRunLeavesTheScrollToTheUser(t *testing.T) {
 	a.reloadAll()
 	a.openPage(p.ID)
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
-	// The caret stays where the user asked, in the first block.
 	a.page.editor.PlaceCaret("b0", 0)
 	a.page.editor.Focus()
 	tt.Frame()
@@ -58,7 +54,6 @@ func TestInlineRunLeavesTheScrollToTheUser(t *testing.T) {
 	if a.page.scroll.Y != 0 {
 		t.Errorf("the page scrolled to %v as the agent wrote", a.page.scroll.Y)
 	}
-	// The user scrolls down to read on; the page stays there.
 	a.page.scroll.Y = 400
 	tt.Frame()
 	tt.Frame()
@@ -67,9 +62,6 @@ func TestInlineRunLeavesTheScrollToTheUser(t *testing.T) {
 	}
 }
 
-// An agent's reply in words goes into the page after the block it was
-// asked about, its Markdown read as blocks, or at the end once that block
-// has gone.
 func TestInsertReply(t *testing.T) {
 	a := templatesApp(t)
 	first, second := textNode("First"), textNode("Second")
@@ -95,8 +87,6 @@ func TestInsertReply(t *testing.T) {
 	}
 }
 
-// Asking inline sends nothing empty. Asked with no agent to run it, the
-// prompt stops working and says why, staying open for that to be read.
 func TestSendInline(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)

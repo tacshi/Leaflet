@@ -1,29 +1,20 @@
 import AuthenticationServices
 import SwiftUI
 
-/// AccountSection is Settings › Account, as the desktop's: the name shown
-/// on the user's comments and edits, the account and the Supabase project
-/// Leaflet syncs through, with Sign Out, or signing in with Supabase.
 struct AccountSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var account: AccountInfo?
     @Environment(SettingsPrompt.self) private var prompt
     @State private var signingOut = false
-    /// renewing is set while the person signs in to Supabase again and
-    /// the project is brought up to date.
     @State private var renewing = false
     @Environment(\.webAuthenticationSession) private var webSession
     @State private var failure: String?
-    /// name is the name as typed, saved as Return or leaving the field
-    /// does on the desktop.
     @State private var name = ""
     @FocusState private var naming: Bool
 
     var body: some View {
         Section {
-            // Up to as wide as the desktop's, for its placeholder to show
-            // whole where there is room.
             FieldRow(label: L.settingsName, desc: L.settingsNameDesc, maxWidth: 220) {
                 TextField(L.settingsName, text: $name, prompt: Text(L.settingsYourName))
                     .textContentType(.name)
@@ -33,8 +24,6 @@ struct AccountSection: View {
             }
             .onChange(of: naming) { if !naming { saveName() } }
             .onDisappear(perform: saveName)
-            // One row, as the desktop's: who is signed in, with Sign Out
-            // beside it, or what signing in does, opening it.
             if let account, account.signedIn {
                 ActionRow(
                     label: L.settingsSignedIn,
@@ -49,9 +38,6 @@ struct AccountSection: View {
                         .buttonStyle(.borderless)
                     }
                 }
-                // The sign-in that brings the project up to a new version
-                // of Leaflet ended: only signing in to Supabase again does
-                // it now.
                 if account.projectNeedsSignIn || renewing {
                     ActionRow(
                         label: L.settingsProjectSignIn, desc: L.settingsProjectSignInDesc
@@ -75,8 +61,6 @@ struct AccountSection: View {
                 .disabled(app.client == nil)
             }
         } header: {
-            // On the header, a view of its own: on the section, it would go
-            // on each of its rows, a read of the account each.
             Text(L.settingsSectionAccount)
                 .task(id: app.status?.signedIn) {
                     account = try? await app.client?.account()
@@ -87,8 +71,6 @@ struct AccountSection: View {
         }
     }
 
-    /// saveName keeps the name typed; the field then shows the account's
-    /// name as saved, as the desktop's does.
     private func saveName() {
         let typed = name.trimmingCharacters(in: .whitespaces)
         guard let client = app.client, !typed.isEmpty, typed != app.status?.displayName else {
@@ -107,8 +89,6 @@ struct AccountSection: View {
         }
     }
 
-    /// renewProject signs in to Supabase again in a web session, as
-    /// SignInView does, for the core to bring the project up to date.
     private func renewProject() async {
         guard let client = app.client else { return }
         renewing = true
@@ -121,7 +101,6 @@ struct AccountSection: View {
             try await client.finishProjectSignIn(begun, callback: answer)
             app.show(Toast(message: L.settingsProjectUpdated))
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            // Closing Supabase's page is no failure.
         } catch {
             failure = error.localizedDescription
         }
@@ -136,7 +115,6 @@ struct AccountSection: View {
         do {
             let left = try await client.signOut(anyway: anyway)
             if left > 0 {
-                // The changes that could not go up first, asked about.
                 prompt.ask(
                     SettingsPrompt.Ask(
                         title: L.settingsSignOutAnyway,
@@ -153,15 +131,11 @@ struct AccountSection: View {
     }
 }
 
-/// DevicesSection is Settings › Devices, above Your data: the devices
-/// signed in to the account, the one active last first, each but this one
-/// to sign out.
 struct DevicesSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var devices: [Device]?
     @State private var failure: String?
-    /// signingOut is the device being signed out.
     @State private var signingOut: String?
 
     var body: some View {
@@ -183,8 +157,6 @@ struct DevicesSection: View {
                 Text(L.settingsDevicesLoading).foregroundStyle(.secondary)
             }
         } header: {
-            // On the header, as the account's section has it: on the
-            // section, each device's row would read them all again.
             Text(L.settingsDevices)
                 .task { await load() }
         }
@@ -218,23 +190,15 @@ struct DevicesSection: View {
     }
 }
 
-/// DataSection is Settings › Your data, last: every page exported as a zip
-/// of Markdown files, to save where the user picks, and, signed in,
-/// deleting the account once DELETE is typed, as on the desktop.
 struct DataSection: View {
     let signedIn: Bool
-    /// left runs once the account is deleted and this device signed out.
     let left: () async -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @Environment(SettingsPrompt.self) private var prompt
     @State private var exporting = false
-    /// folder is the export's own folder, which goes once the zip is
-    /// moved out of it, or not kept.
     @State private var folder: URL?
     @State private var deleting = false
-    /// note says how the export or deleting went; failed, in the danger
-    /// color.
     @State private var note: String?
     @State private var failed = false
 
@@ -274,7 +238,6 @@ struct DataSection: View {
         exporting = true
         note = nil
         defer { exporting = false }
-        // A folder of its own each time, which the move then empties.
         let dir = FileManager.default.temporaryDirectory.appending(
             path: "Export-" + UUID().uuidString, directoryHint: .isDirectory)
         clear()
@@ -307,12 +270,9 @@ struct DataSection: View {
                     }
                     clear()
                 },
-                // The zip the user did not keep goes, with its folder.
                 cancelled: { clear() }))
     }
 
-    /// clear takes the export's folder away, and the zip if it is still
-    /// in it.
     private func clear() {
         if let folder { try? FileManager.default.removeItem(at: folder) }
         folder = nil
@@ -328,8 +288,6 @@ struct DataSection: View {
             say(L.settingsAccountDeleted)
         } catch {
             say(error.localizedDescription, failed: true)
-            // Deleted with this device's pages left behind, the account has
-            // gone all the same; still signed in, it hasn't.
             await app.refreshStatus()
             if app.status?.signedIn ?? true { return }
         }

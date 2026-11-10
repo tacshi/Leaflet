@@ -18,26 +18,17 @@ import (
 	"leaflet/internal/store"
 )
 
-// storageServer is Storage and PostgREST on a fake server: it takes objects
-// as Storage does, by their keys, or holds them until released; and keeps
-// the requests and rows it heard.
 type storageServer struct {
 	mu       gosync.Mutex
 	objects  []string
 	requests []string
 	rows     map[string][]map[string]any
-	// hold, while set, keeps each upload unanswered until it closes.
-	hold chan struct{}
-	// unread leaves the object of a key with this in it unread, as a
-	// connection that stopped, until closing ends.
-	unread  string
-	closing chan struct{}
-	// refuse has it refuse every key.
-	refuse bool
-	// reads, while set, keeps each read unanswered, once an upload began,
-	// until it closes; began says one did.
-	reads chan struct{}
-	began bool
+	hold     chan struct{}
+	unread   string
+	closing  chan struct{}
+	refuse   bool
+	reads    chan struct{}
+	began    bool
 }
 
 var validKey = regexp.MustCompile(`^[A-Za-z0-9_/!.*'() &$=@;:+,?-]*$`)
@@ -98,7 +89,6 @@ func (s *storageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "[]")
 }
 
-// asked counts the requests of a method and path.
 func (s *storageServer) asked(request string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -111,7 +101,6 @@ func (s *storageServer) asked(request string) int {
 	return n
 }
 
-// stored are the objects it took.
 func (s *storageServer) stored() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -124,7 +113,6 @@ func (s *storageServer) rowsOf(table string) []map[string]any {
 	return s.rows[table]
 }
 
-// uploading is a service signed in to a storageServer, joined to its space.
 func uploading(t *testing.T, st *store.Store) (*Service, *storageServer) {
 	t.Helper()
 	srv := &storageServer{closing: make(chan struct{})}
@@ -137,8 +125,6 @@ func uploading(t *testing.T, st *store.Store) (*Service, *storageServer) {
 	return New(st, remote.SignedInForTest(hs.URL, st, "u1")), srv
 }
 
-// shortened sets how long a push waits for an upload, and how long one
-// goes on unread, for a test.
 func shortened(t *testing.T, wait, stall time.Duration) {
 	t.Helper()
 	oldWait, oldStall := uploadWait, uploadStall
@@ -164,7 +150,6 @@ func addedFile(t *testing.T, st *store.Store, name string, size int64) store.Fil
 	return f
 }
 
-// awaitUpload waits for the upload under way to end.
 func awaitUpload(t *testing.T, svc *Service) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -182,7 +167,6 @@ func awaitUpload(t *testing.T, svc *Service) {
 	}
 }
 
-// awaitRuns waits for an upload to be under way.
 func awaitRuns(t *testing.T, svc *Service, entity string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -194,7 +178,6 @@ func awaitRuns(t *testing.T, svc *Service, entity string) {
 	}
 }
 
-// attempts counts the failures of an entry in the queue.
 func attempts(t *testing.T, st *store.Store, entity, id string) int {
 	t.Helper()
 	entries, err := st.Pending()
@@ -210,9 +193,6 @@ func attempts(t *testing.T, st *store.Store, entity, id string) int {
 	return 0
 }
 
-// A file an earlier version queued under its name, which Storage refuses
-// every time, goes up by itself: under a key Storage takes, with its row in
-// the same push, under that key too, and its name as it was.
 func TestAFileQueuedUnderARefusedKeyGoesUp(t *testing.T) {
 	st := openStore(t)
 	f := addedFile(t, st, "plan.pdf", 0)
@@ -247,8 +227,6 @@ func TestAFileQueuedUnderARefusedKeyGoesUp(t *testing.T) {
 	}
 }
 
-// A file added now goes up as it is, whatever its name, with the name in
-// its row.
 func TestAFileNamedBeyondASCIIGoesUp(t *testing.T) {
 	st := openStore(t)
 	f := addedFile(t, st, "报告 #1.pdf", 0)
@@ -267,8 +245,6 @@ func TestAFileNamedBeyondASCIIGoesUp(t *testing.T) {
 	}
 }
 
-// A key Storage refuses all the same is refused for good: sent again soon,
-// it would go whole each time for the same answer.
 func TestARefusedKeyWaitsTheLongest(t *testing.T) {
 	st := openStore(t)
 	f := addedFile(t, st, "plan.pdf", 0)
@@ -294,8 +270,6 @@ func TestARefusedKeyWaitsTheLongest(t *testing.T) {
 	}
 }
 
-// Removing a deleted file's object under a key Storage refuses is done:
-// no object was ever there.
 func TestRemovingAnObjectUnderARefusedKeyIsDone(t *testing.T) {
 	st := openStore(t)
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -310,9 +284,6 @@ func TestRemovingAnObjectUnderARefusedKeyIsDone(t *testing.T) {
 	}
 }
 
-// An upload that takes longer than a push waits holds up neither the queue
-// nor the pull, and is not started again by the passes meanwhile. As it
-// ends it leaves the queue, and has a pass take its row up.
 func TestASlowUploadHoldsUpNothing(t *testing.T) {
 	shortened(t, 20*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -361,8 +332,6 @@ func TestASlowUploadHoldsUpNothing(t *testing.T) {
 	}
 }
 
-// An upload the server stopped taking gives way to the next, and waits
-// its turn as a failure does.
 func TestAStalledUploadGivesWay(t *testing.T) {
 	shortened(t, 10*time.Millisecond, 200*time.Millisecond)
 	retryBase = time.Minute
@@ -390,8 +359,6 @@ func TestAStalledUploadGivesWay(t *testing.T) {
 	}
 }
 
-// A deleted file's object is removed only once its upload has ended: the
-// removal would come first, and the upload put the object back.
 func TestRemovalWaitsForAnUploadUnderWay(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -423,8 +390,6 @@ func TestRemovalWaitsForAnUploadUnderWay(t *testing.T) {
 	}
 }
 
-// Stop ends the upload under way too, counting no failure: the next pass
-// sends it again.
 func TestStopEndsAnUpload(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -441,7 +406,6 @@ func TestStopEndsAnUpload(t *testing.T) {
 	}
 }
 
-// An upload ends with the session it began in, counting no failure.
 func TestAnotherSessionEndsAnUpload(t *testing.T) {
 	shortened(t, 10*time.Millisecond, 2*time.Second)
 	st := openStore(t)
@@ -458,8 +422,6 @@ func TestAnotherSessionEndsAnUpload(t *testing.T) {
 	}
 }
 
-// Signing out waits for an upload a push left to go on, and for the row
-// that waited for it: the queue is empty as it counts what has not gone.
 func TestDrainWaitsForAnUploadToEnd(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -476,9 +438,6 @@ func TestDrainWaitsForAnUploadToEnd(t *testing.T) {
 	}
 }
 
-// An upload that ends while the pass that left it is still pulling is
-// over by the time the pass is: the row that waited for it goes all the
-// same, however slow the pull.
 func TestDrainTakesARowAfterAnUploadThatEndedInThePass(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -506,7 +465,6 @@ func TestDrainTakesARowAfterAnUploadThatEndedInThePass(t *testing.T) {
 	}
 }
 
-// Files that each take longer than a push waits all go.
 func TestDrainTakesUploadsInTurn(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	st := openStore(t)
@@ -524,8 +482,6 @@ func TestDrainTakesUploadsInTurn(t *testing.T) {
 	}
 }
 
-// An upload the server stopped taking ends the wait, long before its limit:
-// signing out then asks about what has not gone.
 func TestDrainEndsWithAStalledUpload(t *testing.T) {
 	shortened(t, 10*time.Millisecond, 200*time.Millisecond)
 	st := openStore(t)
@@ -544,8 +500,6 @@ func TestDrainEndsWithAStalledUpload(t *testing.T) {
 	}
 }
 
-// An upload that goes on moving past the limit is left to, and signing out
-// asks about it.
 func TestDrainWaitsNoLongerThanItsLimit(t *testing.T) {
 	shortened(t, 10*time.Millisecond, time.Minute)
 	old := drainWait

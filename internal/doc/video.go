@@ -13,26 +13,13 @@ import (
 	"strings"
 )
 
-// Video is the video a link to a video site points to, or the video file.
 type Video struct {
-	// Provider is the site: "youtube", "vimeo", "bilibili", "dailymotion"
-	// or "niconico"; or "file".
 	Provider string
-	// ID is the video's ID on its site, or a file's link without its time.
-	// A Bilibili video's is its BV ID, or its av number as av170001.
-	ID string
-	// Hash is the key in the link of an unlisted Vimeo video.
-	Hash string
-	// Part is which of a Bilibili video's parts the link is to, from the
-	// second; 0 is its first.
-	Part int
-	// CID is a Bilibili part's own ID, which its players need beside the
-	// video's to play it in another site's page, without asking Bilibili
-	// for it, which turns such a page away: as the embed code Bilibili
-	// gives names it, or as its parts list it (ReadPart); 0 until known.
-	CID int64
-	// Start is how many seconds in the link says to start.
-	Start int
+	ID       string
+	Hash     string
+	Part     int
+	CID      int64
+	Start    int
 }
 
 var (
@@ -42,20 +29,12 @@ var (
 	bilibiliID    = regexp.MustCompile(`^(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9][0-9]*)$`)
 	dailymotionID = regexp.MustCompile(`^[xk][0-9A-Za-z]+$`)
 	niconicoID    = regexp.MustCompile(`^(?:sm|so|nm)[1-9][0-9]*$`)
-	// A time as the sites' links give it: 90, 90s or 1h2m3s.
-	linkTime = regexp.MustCompile(`^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$`)
+	linkTime      = regexp.MustCompile(`^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$`)
 )
 
-// VideoPlayers are the origins of the sites' players, which a page that
-// plays videos frames. Bilibili's sends a phone's or a tablet's browser,
-// as the iOS app's web views are, on to its mobile player on
-// www.bilibili.com.
 const VideoPlayers = "https://www.youtube-nocookie.com https://player.vimeo.com https://player.bilibili.com " +
 	"https://www.bilibili.com https://geo.dailymotion.com https://embed.nicovideo.jp"
 
-// ShortVideoLink reports whether link is a share link that names a video
-// only once followed, as Bilibili's app shares b23.tv/<code>; web.VideoLink
-// follows it.
 func ShortVideoLink(link string) bool {
 	u, err := url.Parse(strings.TrimSpace(link))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -66,13 +45,8 @@ func ShortVideoLink(link string) bool {
 	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.") == "b23.tv" && len(parts) == 1 && !video
 }
 
-// VideoExts are the kinds of video file a video block plays, by extension.
 var VideoExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".webm": true, ".ogv": true}
 
-// ParseVideoURL reads the video a link to YouTube, Vimeo, Bilibili,
-// Dailymotion or Niconico points to: a watch page, a short link, a Short,
-// a live stream or a player's own link. Any other web link to a video
-// file, as its extension says, is that file.
 func ParseVideoURL(s string) (Video, bool) {
 	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -102,9 +76,6 @@ func ParseVideoURL(s string) (Video, bool) {
 			return Video{Provider: "youtube", ID: id, Start: startOf(t)}, true
 		}
 	case "vimeo.com", "player.vimeo.com":
-		// The ID is the last number in the path, as in vimeo.com/76979871,
-		// vimeo.com/channels/staffpicks/76979871 and
-		// player.vimeo.com/video/76979871; an unlisted video's key follows it.
 		for i := len(parts) - 1; i >= 0; i-- {
 			if !vimeoID.MatchString(parts[i]) {
 				continue
@@ -124,10 +95,6 @@ func ParseVideoURL(s string) (Video, bool) {
 			return v, true
 		}
 	case "bilibili.com", "m.bilibili.com", "player.bilibili.com", "b23.tv":
-		// A video's page is video/ and its ID, after a language or s/ on
-		// some, as bilibili.com/zh-Hans/video/BV1GJ411x7h7; a short link
-		// is b23.tv and the ID; the player takes the ID, or the av number
-		// alone, in its query.
 		id := ""
 		switch i := slices.Index(parts, "video"); {
 		case host == "b23.tv":
@@ -142,13 +109,11 @@ func ParseVideoURL(s string) (Video, bool) {
 		case i >= 0 && i+1 < len(parts):
 			id = parts[i+1]
 		}
-		// Bilibili takes a BV ID's prefix in any case, sending on to BV.
 		if len(id) > 2 && strings.EqualFold(id[:2], "bv") {
 			id = "BV" + id[2:]
 		}
 		if bilibiliID.MatchString(id) {
 			v := Video{Provider: "bilibili", ID: id}
-			// Older players' links name the part page.
 			part := q.Get("p")
 			if part == "" {
 				part = q.Get("page")
@@ -159,7 +124,6 @@ func ParseVideoURL(s string) (Video, bool) {
 			if cid, _ := strconv.ParseInt(q.Get("cid"), 10, 64); cid > 0 {
 				v.CID = cid
 			}
-			// A time shared from the player has a fraction of a second.
 			t, _, _ := strings.Cut(q.Get("t"), ".")
 			v.Start = startOf(t)
 			return v, true
@@ -178,7 +142,6 @@ func ParseVideoURL(s string) (Video, bool) {
 		case len(parts) == 3 && parts[0] == "embed" && parts[1] == "video":
 			id = parts[2]
 		}
-		// An old link has the title after the ID, as x7tgad0_a-title.
 		id, _, _ = strings.Cut(id, "_")
 		if dailymotionID.MatchString(id) {
 			t := q.Get("start")
@@ -209,14 +172,11 @@ func ParseVideoURL(s string) (Video, bool) {
 	return Video{}, false
 }
 
-// startOf reads a link's time in seconds, or 0.
 func startOf(t string) int {
 	s, _ := linkSeconds(t)
 	return s
 }
 
-// linkSeconds reads a link's time in seconds, and whether it is one: a
-// time past what an int32 holds, which no video lasts, is none.
 func linkSeconds(t string) (int, bool) {
 	m := linkTime.FindStringSubmatch(strings.ToLower(t))
 	if m == nil {
@@ -238,13 +198,11 @@ func linkSeconds(t string) (int, bool) {
 	return int(s), true
 }
 
-// At is the video from seconds into it.
 func (v Video) At(sec int) Video {
 	v.Start = max(sec, 0)
 	return v
 }
 
-// WatchURL is the video's page on its site, or the file, from its start.
 func (v Video) WatchURL() string {
 	switch v.Provider {
 	case "file":
@@ -291,9 +249,6 @@ func (v Video) WatchURL() string {
 	return u
 }
 
-// PlayerURL is the site's player for the video, to frame in a page, or the
-// file. With autoplay, the player starts playing as it loads, where its
-// site lets it, as when the user asked for it by clicking play.
 func (v Video) PlayerURL(autoplay bool) string {
 	play := ""
 	if autoplay {
@@ -315,7 +270,6 @@ func (v Video) PlayerURL(autoplay bool) string {
 		}
 		return u
 	case "bilibili":
-		// Bilibili's player plays as it loads unless told not to.
 		q := url.Values{"autoplay": {"0"}, "high_quality": {"1"}}
 		if autoplay {
 			q.Set("autoplay", "1")
@@ -325,9 +279,6 @@ func (v Video) PlayerURL(autoplay bool) string {
 		} else {
 			q.Set("bvid", v.ID)
 		}
-		// Given its part, the player needs to ask for nothing but what it
-		// plays, as Bilibili's own embed code has it, which a phone's
-		// player, framed, can't otherwise.
 		if aid, ok := bilibiliAID(v.ID); ok && v.CID > 0 {
 			q.Set("aid", strconv.FormatInt(aid, 10))
 			q.Set("cid", strconv.FormatInt(v.CID, 10))
@@ -346,16 +297,12 @@ func (v Video) PlayerURL(autoplay bool) string {
 		}
 		return u
 	case "niconico":
-		// Niconico's player waits for its own play button, whatever it is
-		// told.
 		u := "https://embed.nicovideo.jp/watch/" + v.ID
 		if v.Start > 0 {
 			u += "?from=" + strconv.Itoa(v.Start)
 		}
 		return u
 	}
-	// The page around the player seeks it by message, which YouTube's
-	// takes only with its API on.
 	u := "https://www.youtube-nocookie.com/embed/" + v.ID + "?" + play + "playsinline=1&rel=0&enablejsapi=1"
 	if v.Start > 0 {
 		u += "&start=" + strconv.Itoa(v.Start)
@@ -363,8 +310,6 @@ func (v Video) PlayerURL(autoplay bool) string {
 	return u
 }
 
-// InfoURL is where the site tells the video's title and picture, as
-// ReadInfo reads them, or "" for a file, which has no site to ask.
 func (v Video) InfoURL() string {
 	v = v.At(0)
 	switch v.Provider {
@@ -373,8 +318,6 @@ func (v Video) InfoURL() string {
 	case "vimeo":
 		return "https://vimeo.com/api/oembed.json?width=1280&url=" + url.QueryEscape(v.WatchURL())
 	case "bilibili":
-		// Its parts' list, as ReadPart reads it: its view of the video
-		// turns away who has not been to the site first.
 		if n, ok := strings.CutPrefix(v.ID, "av"); ok {
 			return "https://api.bilibili.com/x/player/pagelist?aid=" + n
 		}
@@ -387,8 +330,6 @@ func (v Video) InfoURL() string {
 	return "https://www.youtube.com/oembed?format=json&url=" + url.QueryEscape(v.WatchURL())
 }
 
-// ReadInfo reads the video's title and picture from what its InfoURL
-// answered: oEmbed's JSON, or Bilibili's or Niconico's own.
 func (v Video) ReadInfo(data []byte) (title, thumbnail string, err error) {
 	switch v.Provider {
 	case "bilibili":
@@ -419,7 +360,6 @@ func (v Video) ReadInfo(data []byte) (title, thumbnail string, err error) {
 	return strings.TrimSpace(o.Title), o.Thumbnail, nil
 }
 
-// FileName is a video file's name, as its link ends, or "".
 func (v Video) FileName() string {
 	if v.Provider != "file" {
 		return ""
@@ -431,17 +371,12 @@ func (v Video) FileName() string {
 	return path.Base(u.Path)
 }
 
-// BilibiliPart is a part of a Bilibili video, as its site lists it: its
-// cid, its title, which a video of one part has as its own, and a picture
-// of its first frame.
 type BilibiliPart struct {
 	CID     int64
 	Title   string
 	Picture string
 }
 
-// ReadPart reads the part of a Bilibili video v is of from its parts'
-// list, as InfoURL answers.
 func (v Video) ReadPart(data []byte) (BilibiliPart, error) {
 	var r struct {
 		Code    int    `json:"code"`
@@ -461,8 +396,6 @@ func (v Video) ReadPart(data []byte) (BilibiliPart, error) {
 	}
 	for _, p := range r.Data {
 		if p.Page == max(v.Part, 1) && p.CID > 0 {
-			// Its pictures' links are http, which their servers answer as
-			// https too.
 			pic := p.FirstFrame
 			if rest, ok := strings.CutPrefix(pic, "http://"); ok {
 				pic = "https://" + rest
@@ -473,8 +406,6 @@ func (v Video) ReadPart(data []byte) (BilibiliPart, error) {
 	return BilibiliPart{}, fmt.Errorf("bilibili: no part %d", max(v.Part, 1))
 }
 
-// bilibiliAID is the av number of a Bilibili video's ID: an av ID's own,
-// or what a BV ID encodes, as Bilibili's own pages decode it.
 func bilibiliAID(id string) (int64, bool) {
 	if n, ok := strings.CutPrefix(id, "av"); ok {
 		aid, err := strconv.ParseInt(n, 10, 64)
@@ -499,8 +430,6 @@ func bilibiliAID(id string) (int64, bool) {
 	return n&maskCode ^ xorCode, true
 }
 
-// Thumbnail is the video's picture where it follows from the ID alone, as
-// a YouTube video's does, or "".
 func (v Video) Thumbnail() string {
 	if v.Provider == "youtube" {
 		return "https://i.ytimg.com/vi/" + v.ID + "/hqdefault.jpg"
@@ -508,8 +437,6 @@ func (v Video) Thumbnail() string {
 	return ""
 }
 
-// VideoNode is a video block for a link to a video on a site Leaflet
-// plays, or to a video file.
 func VideoNode(link, title string) (*Node, error) {
 	link = strings.TrimSpace(link)
 	if _, ok := ParseVideoURL(link); !ok {

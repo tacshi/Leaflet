@@ -1,11 +1,6 @@
 import LeafletCore
 import UIKit
 
-/// EditingRules follow the desktop's editor as keys go in: Enter splits a
-/// block or ends a list, Backspace at a block's start turns it into text
-/// or joins it to the one before, Tab nests it, Markdown typed becomes the
-/// blocks and formats it stands for, and a mention is one unit. A rule
-/// that takes a key changes the text itself, in place of the keyboard.
 @MainActor
 final class EditingRules {
     private unowned let editor: EditorController
@@ -16,25 +11,16 @@ final class EditingRules {
 
     init(_ editor: EditorController) { self.editor = editor }
 
-    /// shouldChange applies the rules to a change the text view is about to
-    /// make, and reports whether to let it through as it is.
     func shouldChange(_ range: NSRange, _ s: String) -> Bool {
-        // An edit that empties the page's last paragraph leaves no
-        // character to hold its block, which the trailing block keeps.
         if s.isEmpty, range.length > 0, NSMaxRange(range) == storage.length,
             text.paragraph(at: range.location).range.location == range.location
         {
             text.emptied = text.blockAt(range.location)
         }
-        // Undo and redo put back what was: a rule taking one for an edit,
-        // as Backspace at a list item's start, would refuse it, and leave
-        // the steps before it where the text no longer is, which undone
-        // there crashed the app.
         if edits.bypass || edits.undoing { return true }
         edits.inEdit += 1
         defer { edits.inEdit -= 1 }
         let allowed = follow(range, s)
-        // A rule changed the text itself, in place of the keyboard's edit.
         if !allowed {
             text.emptied = nil
             edits.tellKeyboard()
@@ -42,8 +28,6 @@ final class EditingRules {
         return allowed
     }
 
-    /// follow applies the editing rules to an edit the keyboard is making,
-    /// and reports whether to let it through as it is.
     private func follow(_ range: NSRange, _ s: String) -> Bool {
         let menus = editor.caretMenu
         if let menu = menus.menu, s == "\n" || s == "\t" {
@@ -52,12 +36,8 @@ final class EditingRules {
                 return false
             }
             menus.close()
-            // Return or Tab before the menu has its items is the key's
-            // own; once it has none to pick, it only closes the menu.
             if menu.loaded { return false }
         }
-        // A mention is one unit, as on the desktop: an edit that cuts one
-        // takes all of it, and what is typed inside one goes after it.
         if s != "\n", s != "\t" {
             let whole = text.widenToMentions(range)
             if whole != range {
@@ -84,10 +64,6 @@ final class EditingRules {
             let ns = storage.string as NSString
             let sel = textView.selectedRange
             if ns.character(at: range.location) == 0x0A, sel.length == 0 {
-                // Backspace at a block's start deletes the separator
-                // before it, the caret after it: the rules go by the block
-                // the caret is in. Delete at a block's end deletes the
-                // same separator, the caret before it.
                 if sel.location == NSMaxRange(range) {
                     let (caretPara, caretInfo) = text.paragraph(at: NSMaxRange(range))
                     if caretPara.location == NSMaxRange(range) {
@@ -105,11 +81,7 @@ final class EditingRules {
             break
         }
         if !info.isText {
-            // A selection that reaches past the block takes what is typed
-            // in its place.
             if NSMaxRange(range) > NSMaxRange(para) { return replaceSelection(range, para, s) }
-            // Text typed by a block without text, or on it chosen whole, as
-            // Backspace and Delete choose it, goes in a new block after it.
             edits.insertParagraph(after: para, info: BlockInfo.paragraph(), text: s)
             return false
         }
@@ -118,10 +90,6 @@ final class EditingRules {
         }
         if dividerShortcut(s, range, para, info) { return false }
         let clipboard = editor.clipboard
-        // A paste goes in at the caret or over the selection. Text put in
-        // place of other text is the keyboard's own, a word corrected, a
-        // text replacement's phrase or a composition's end, and goes in as
-        // typed: a link among it is not one for the word it replaces.
         let pasting =
             info.type != "code" && (s as NSString).length > 1
             && (range.length == 0 || range == textView.selectedRange)
@@ -136,8 +104,6 @@ final class EditingRules {
         let format = editor.format
         let length = (s as NSString).length
         if s.utf16.contains(where: { [0x0A, 0x0D, 0x2029, 0x85].contains($0) }) {
-            // Lines pasted, or written by dictation or Writing Tools: a
-            // code block keeps them as its line breaks, in its one block.
             var lines = DocumentMapper.lines(s)
             if info.type == "code" {
                 lines = lines.replacingOccurrences(of: "\n", with: String(lineBreak))
@@ -163,11 +129,6 @@ final class EditingRules {
         return true
     }
 
-    /// replaceSelection puts s, typed or pasted, in place of range, chosen
-    /// from the block without text of para, as all of a page that starts
-    /// with a picture: what is chosen goes, and s goes in where it was as
-    /// the rules have it there, as text, lines or blocks. Chosen from the
-    /// picture's end, the picture and its line's end stay.
     private func replaceSelection(_ range: NSRange, _ para: NSRange, _ s: String) -> Bool {
         var gone = range
         if gone.location == NSMaxRange(para) {
@@ -180,13 +141,6 @@ final class EditingRules {
         return false
     }
 
-    /// deleteAtEnd follows Delete at the end of a block, which joins the
-    /// block after it to it, as the core's rules have it (mobile.Delete): a
-    /// block without text, after or before, is chosen first, to go with
-    /// another Delete, as Backspace does. The block after it is the next
-    /// that shows, past those a closed toggle or a folded heading hides,
-    /// as on the desktop; with none, as after a closed toggle last on the
-    /// page, Delete does nothing.
     private func deleteAtEnd(_ para: NSRange, _ info: BlockInfo) -> Bool {
         guard let after = shownAfter(para) else { return false }
         let (next, nextInfo) = after
@@ -196,16 +150,12 @@ final class EditingRules {
         case "selectThis":
             textView.selectedRange = para
         default:
-            // Right after a block that folds nothing away, the key joins
-            // the two itself.
             guard next.location > NSMaxRange(para) + 1 || info.isCollapsed else { return true }
             joinPast(next, into: para)
         }
         return false
     }
 
-    /// Line is what Enter does, as the core's rules say (mobile.Enter): an
-    /// action, and the new block's type and data.
     private struct Line: Decodable {
         var action: String
         var type: String?
@@ -213,14 +163,8 @@ final class EditingRules {
         var unfold: Bool?
     }
 
-    /// enter follows Enter at range in the block of para, as the core's
-    /// rules have it, the desktop's (mobile.Enter): it splits the block,
-    /// ends an empty one, or puts a line before it at its start. It makes
-    /// the change itself, and lets the key through only should the core
-    /// say nothing.
     private func enter(_ range: NSRange, _ para: NSRange, _ info: BlockInfo) -> Bool {
         let caret = range.location
-        // A paragraph of a Markdown fence becomes its block first.
         if info.type == "paragraph", range.length == 0, caret == NSMaxRange(para), para.length >= 2,
             fenceEnter(para, info)
         {
@@ -250,21 +194,12 @@ final class EditingRules {
         case "before":
             edits.insert("\n", replacing: range)
             let next = textView.selectedRange.location
-            // Enter at the start makes an empty block before the text,
-            // which keeps its block.
             let before = new(info.depth)
             storage.addAttribute(
                 .leafletBlock, value: before, range: NSRange(location: para.location, length: 1))
-            // The text keeps its block. The one normalize gave it for a
-            // moment, as the line went in before it, is no step to undo:
-            // undone first, it would leave the text a new ID, and no type.
             edits.setBlock(info, at: next, undoable: false)
-            // Before a heading that ends a folded section, the new line
-            // would join it, out of sight.
             editor.layout.keepShown(before.id)
         default:
-            // Split the block: the text after the caret goes in a new one,
-            // first in the blocks it holds, or after them.
             let inside = line.action == "inside"
             let after = new(info.depth + (inside ? 1 : 0))
             if !inside, holds {
@@ -274,8 +209,6 @@ final class EditingRules {
             edits.insert("\n", replacing: range)
             let next = textView.selectedRange.location
             if line.unfold == true {
-                // A new line after a folded heading starts its section,
-                // which shows.
                 edits.setBlock(info.setting("collapsed", .bool(false)), at: para.location)
             }
             edits.setBlock(after, at: next)
@@ -284,24 +217,17 @@ final class EditingRules {
         return false
     }
 
-    /// folded reports whether info is a toggle or a heading folded.
     private func folded(_ info: BlockInfo) -> Bool {
         (info.type == "toggle_list" || info.type == "heading")
             && info.data["collapsed"]?.bool == true
     }
 
-    /// CodeLine is what Enter does in code, as the core's rules say
-    /// (mobile.CodeEnter).
     private struct CodeLine: Decodable {
         var leave: Bool?
         var keep: Int?
         var insert: String?
     }
 
-    /// codeEnter breaks a code block's line at range, the new line indented
-    /// as the one it leaves, as on the desktop (mobile.CodeEnter). Enter on
-    /// the second blank line at its end leaves the block, without the blank
-    /// lines, for the empty paragraph after it, or a new one.
     private func codeEnter(_ range: NSRange, _ para: NSRange, _ info: BlockInfo) {
         let br = String(lineBreak)
         let code = (storage.string as NSString).substring(with: para)
@@ -314,7 +240,6 @@ final class EditingRules {
             let line = (made.insert ?? "\n").replacingOccurrences(of: "\n", with: br)
             return edits.insert(line, replacing: range)
         }
-        // The two blank lines and the breaks before them go.
         let kept = NSRange(location: para.location, length: made.keep ?? 0)
         edits.delete(NSRange(location: NSMaxRange(kept), length: para.length - kept.length))
         let (next, nextInfo) = text.paragraph(at: NSMaxRange(kept) + 1)
@@ -329,10 +254,6 @@ final class EditingRules {
             info: BlockInfo(id: BlockInfo.newID(), type: "paragraph", depth: info.depth), text: "")
     }
 
-    /// fenceEnter turns a paragraph of a Markdown fence, as "```go", into a
-    /// code block in that language as Enter goes at its end, as on the
-    /// desktop (mobile.FenceEnter); "```mermaid" makes a diagram and "$$"
-    /// math, opened to write. It reports whether it did.
     private func fenceEnter(_ para: NSRange, _ info: BlockInfo) -> Bool {
         let line = (storage.string as NSString).substring(with: para)
         guard line.contains("`") || line.contains("$") else { return false }
@@ -350,8 +271,6 @@ final class EditingRules {
             edits.setBlock(
                 info.with(type: "code", data: ["language": .string(f.language ?? "")]),
                 at: para.location)
-            // A code block last on the page has a line after it, to leave
-            // it by.
             if para.location == storage.length
                 || NSMaxRange(text.paragraph(at: para.location).range) == storage.length
             {
@@ -370,16 +289,11 @@ final class EditingRules {
         return true
     }
 
-    /// hasNested reports whether blocks are nested in the block of the
-    /// paragraph para.
     private func hasNested(_ para: NSRange, _ info: BlockInfo) -> Bool {
         guard NSMaxRange(para) < storage.length else { return false }
         return text.paragraph(at: NSMaxRange(para) + 1).info.depth > info.depth
     }
 
-    /// isLast reports whether the block of the paragraph para is the last
-    /// of the blocks in the one it is in: no block after it at its depth
-    /// before one shallower.
     private func isLast(_ para: NSRange, _ info: BlockInfo) -> Bool {
         var at = NSMaxRange(para)
         while at < storage.length {
@@ -390,9 +304,6 @@ final class EditingRules {
         return true
     }
 
-    /// splitAfterNested splits a closed toggle at range: the text after
-    /// the caret goes in a new block, new, after the blocks folded in it,
-    /// which stay in it, as on the desktop.
     private func splitAfterNested(_ range: NSRange, _ para: NSRange, _ new: BlockInfo) {
         if range.length > 0 { edits.delete(range) }
         let caret = range.location
@@ -415,9 +326,6 @@ final class EditingRules {
         textView.selectedRange = NSRange(location: start, length: 0)
     }
 
-    /// backspaceAtPageStart follows Backspace with the caret at the start
-    /// of the page, which UIKit asks no rule about, and reports whether it
-    /// took it.
     func backspaceAtPageStart() -> Bool {
         guard textView.isEditable, textView.markedTextRange == nil,
             textView.selectedRange == NSRange(location: 0, length: 0)
@@ -428,11 +336,6 @@ final class EditingRules {
         return true
     }
 
-    /// roomToCompose puts the caret in a new paragraph after a block
-    /// without text it is by, as a composition starts there (Chinese,
-    /// Japanese or Korean input): text typed by such a block goes in a new
-    /// block after it, which the rules can't do for marked text, the
-    /// keyboard keeping it where it began.
     func roomToCompose() {
         guard textView.isEditable, textView.markedTextRange == nil else { return }
         let (para, info) = text.paragraph(at: textView.selectedRange.location)
@@ -440,17 +343,8 @@ final class EditingRules {
         edits.insertParagraph(after: para, info: BlockInfo.paragraph(), text: "")
     }
 
-    /// backspaceAtStart follows Backspace at the start of the block of
-    /// para, as the core's rules have it (mobile.Backspace): a list item, a
-    /// quote or a heading turns into text, or goes out of the list it is
-    /// in, as does a paragraph last in a toggle; else the block joins the
-    /// one before, a block without text before it chosen first. The block
-    /// before it is the one that shows, past those a closed toggle or a
-    /// folded heading hides, as on the desktop.
     private func backspaceAtStart(_ para: NSRange, _ info: BlockInfo) -> Bool {
         if !info.isText {
-            // The caret before a block without text: it goes out of the
-            // list it is in, or the caret back into the block before.
             if info.depth > 0 {
                 edits.setBlock(info.with(depth: info.depth - 1), at: para.location)
             } else if let prev = shownBefore(para) {
@@ -469,20 +363,14 @@ final class EditingRules {
             edits.setBlock(info.with(depth: info.depth - 1), at: para.location)
         case "plain":
             edits.setBlock(info.with(type: "paragraph", data: [:]), at: para.location)
-            // A heading that ended a folded section would now join it.
             editor.layout.keepShown(info.id)
         case "remove":
-            // An empty block after an image goes.
             if let prev { edits.delete(NSRange(location: NSMaxRange(prev.range), length: 1)) }
         case "selectBefore":
-            // The image is chosen first, to be deleted with another
-            // Backspace.
             if let prev { textView.selectedRange = prev.range }
         case "nothing":
             break
         default:
-            // Right after a block that folds nothing away, the key joins
-            // the two itself.
             guard let prev,
                 NSMaxRange(prev.range) + 1 < para.location || prev.info.isCollapsed
             else { return true }
@@ -491,8 +379,6 @@ final class EditingRules {
         return false
     }
 
-    /// shownBefore is the paragraph before para that shows, past those
-    /// folded away, or nil at the page's start.
     private func shownBefore(_ para: NSRange) -> (range: NSRange, info: BlockInfo)? {
         guard para.location > 0 else { return nil }
         let prev = text.paragraph(at: para.location - 1)
@@ -503,8 +389,6 @@ final class EditingRules {
         return all[..<i].last { !folded.contains($0.info.id) }.map { ($0.range, $0.info) }
     }
 
-    /// shownAfter is the paragraph after para that shows, past those
-    /// folded away, or nil when none does.
     private func shownAfter(_ para: NSRange) -> (range: NSRange, info: BlockInfo)? {
         guard NSMaxRange(para) < storage.length else { return nil }
         let next = text.paragraph(at: NSMaxRange(para) + 1)
@@ -515,15 +399,6 @@ final class EditingRules {
         return all[(i + 1)...].first { !folded.contains($0.info.id) }.map { ($0.range, $0.info) }
     }
 
-    /// joinPast joins the block of para to the block of prev, the one
-    /// before it that shows, past the blocks a fold hides between them, as
-    /// the desktop joins them: its text goes at the end of prev's, the
-    /// blocks nested in it come out a level, after the folded ones, which
-    /// stay folded, and the caret goes where the two texts meet. Joined by
-    /// the key, it would go into the last of the folded blocks, out of
-    /// sight. What showed after the block joined still shows: a heading
-    /// joined to a folded one ended its section, which now goes on past
-    /// what came after it, and unfolds.
     private func joinPast(_ para: NSRange, into prev: NSRange) {
         let all = text.paragraphs()
         let p = BlockText.index(all, at: prev.location)
@@ -544,9 +419,6 @@ final class EditingRules {
         textView.selectedRange = NSRange(location: NSMaxRange(prev), length: 0)
     }
 
-    /// markdownShortcut turns "#", "-", "1.", "[]", ">", "```" and the like,
-    /// as a space is typed after them at a block's start, into the block
-    /// they stand for, as the core's rules have it, the desktop's.
     private func markdownShortcut(
         _ range: NSRange, _ para: NSRange, _ info: BlockInfo, typing space: String
     ) -> Bool {
@@ -564,8 +436,6 @@ final class EditingRules {
         return true
     }
 
-    /// dividerShortcut turns a paragraph of "--" and a third "-" typed,
-    /// full-width too, into a divider, as the core's rules have it.
     private func dividerShortcut(
         _ typed: String, _ range: NSRange, _ para: NSRange, _ info: BlockInfo
     ) -> Bool {
@@ -584,14 +454,10 @@ final class EditingRules {
         return true
     }
 
-    /// inlineShortcut turns **bold**, *italic*, `code` and ~~strike~~ typed
-    /// in full, its closing marker ending at end, into their formats, as the
-    /// core's rules have it, the desktop's. It reports whether it did.
     func inlineShortcut(_ end: Int) -> Bool {
         let (para, info) = text.paragraph(at: end)
         guard info.isText, info.type != "code", end <= NSMaxRange(para) else { return false }
         let upTo = NSRange(location: para.location, length: end - para.location)
-        // The mentions' runs, for a marker in one to be no marker.
         var mentions: [[Int]] = []
         storage.enumerateAttribute(.leafletMention, in: upTo) { v, r, _ in
             if v != nil {
@@ -627,16 +493,12 @@ final class EditingRules {
         edits.bypass = false
         let after = NSRange(location: whole.location, length: m.close - m.inner)
         edits.registerUndo(undo, range: after, before: before, trailing: text.trailing)
-        // What is typed after the closing marker is plain again.
         editor.format.plainAt = NSMaxRange(after)
         textView.selectedRange = NSRange(location: NSMaxRange(after), length: 0)
         edits.tellKeyboard()
         return true
     }
 
-    /// InlineMatch is a marker pair the core's InlineShortcut found, in
-    /// UTF-16 offsets in the block: the opening marker from open to inner,
-    /// the text to format to close, and the closing marker to end.
     private struct InlineMatch: Decodable {
         var open: Int
         var inner: Int

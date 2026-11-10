@@ -14,11 +14,8 @@ import (
 	"leaflet/locales"
 )
 
-// An embed's ID goes into the wrapper's script as a string it cannot end.
 func TestEmbedPageQuotesID(t *testing.T) {
 	page := rendered.EmbedPage("x</script><script>window.mygo.call(1)//\u2028", "<p>hi</p>", "#ffffff", false, true)
-	// The frame's HTML is in an attribute, so the wrapper's own script is
-	// the only one.
 	if n := strings.Count(page, "<script>"); n != 1 {
 		t.Errorf("%d scripts in the wrapper: %s", n, page)
 	}
@@ -30,8 +27,6 @@ func TestEmbedPageQuotesID(t *testing.T) {
 	}
 }
 
-// The frame's policy and WebRTC guard come before anything of the embed's,
-// even a "<head>" the embed only mentions.
 func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
 	csp := `<meta http-equiv="Content-Security-Policy" content="` + rendered.EmbedCSP + `">`
 	got := rendered.EmbedFrame(`<!-- <head> --><script>new RTCPeerConnection()</script>`, "dark", true)
@@ -44,7 +39,6 @@ func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
 	if !strings.HasSuffix(got, `<!-- <head> --><script>new RTCPeerConnection()</script>`) {
 		t.Errorf("embed's HTML not last: %q", got)
 	}
-	// A doctype stays first, keeping the embed's rendering mode.
 	got = rendered.EmbedFrame("\n<!DOCTYPE html><html><head><title>t</title></head><body>b</body></html>", "light", true)
 	if !strings.HasPrefix(got, "<!DOCTYPE html>"+csp+rendered.EmbedNoRTC) || !strings.HasSuffix(got, "<html><head><title>t</title></head><body>b</body></html>") {
 		t.Errorf("frame with doctype: %q", got)
@@ -54,8 +48,6 @@ func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
 	}
 }
 
-// A view that gives the page the wheel, as math's, has no script for it:
-// the frame keeps its theme, policy and fit, and neither passes the wheel.
 func TestEmbedPageWithoutWheel(t *testing.T) {
 	page := rendered.EmbedPage("m", "<p>x</p>", "#000000", true, false)
 	if strings.Contains(page, `addEventListener("wheel"`) || strings.Contains(page, "deltaMode") {
@@ -67,14 +59,11 @@ func TestEmbedPageWithoutWheel(t *testing.T) {
 		!strings.Contains(frame, "leafletSize") || strings.Contains(frame, "leafletWheel") {
 		t.Errorf("frame %q", frame)
 	}
-	// The size still reaches the app.
 	if !strings.Contains(page, `"Embeds.Size"`) {
 		t.Errorf("the wrapper passes no size: %s", page)
 	}
 }
 
-// What an embed said about itself goes with its block, while a block still
-// in the page keeps it.
 func TestDropEmbedsForgetsDeletedBlocks(t *testing.T) {
 	ed := editor.New(doc.Empty(), nil)
 	ed.Edit(func(c *doc.Content) {
@@ -100,10 +89,6 @@ func TestDropEmbedsForgetsDeletedBlocks(t *testing.T) {
 	}
 }
 
-// A block's web view and a diagram's full screen one have keys no block's
-// ID can make alike: a block whose ID starts as a full screen key does
-// keeps its view in the page, whether or not a block has the ID after
-// it, apart from that block's full screen view.
 func TestEmbedViewKeysNameOneBlockEach(t *testing.T) {
 	if blockView("full:x") == fullView("x") {
 		t.Fatal("a block's view and another's full screen view have one key")
@@ -134,8 +119,6 @@ func TestEmbedViewKeysNameOneBlockEach(t *testing.T) {
 	}
 }
 
-// A block whose web view could not be made says why, from what was kept
-// of the failure, rather than trying to make one at every frame.
 func TestEmbedViewNotMadeSaysWhy(t *testing.T) {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedFailed: map[string]string{"e1": "no WebView2"}}
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -149,8 +132,6 @@ func TestEmbedViewNotMadeSaysWhy(t *testing.T) {
 	}
 }
 
-// The embed dialog inserts only with HTML to embed, and says in the app's
-// words what else keeps it from inserting it, as HTML too long.
 func TestEmbedDialogSaysWhatIsWrong(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Demo"})
@@ -185,9 +166,6 @@ func TestEmbedDialogSaysWhatIsWrong(t *testing.T) {
 	}
 }
 
-// An embed scrolls the page by the wheel it leaves only while the pointer
-// is over its view, and once a frame, however often it asks: one could
-// otherwise scroll the page as it likes.
 func TestEmbedScrollsOnlyUnderThePointer(t *testing.T) {
 	ps := &pageState{}
 	ps.scroll.MaxY = 10_000
@@ -218,8 +196,6 @@ func TestEmbedScrollsOnlyUnderThePointer(t *testing.T) {
 	}
 }
 
-// A block's web view is made only within a window's height of the window,
-// and let go three away; one not laid out yet waits for the next frame.
 func TestEmbedViewsNearTheWindow(t *testing.T) {
 	for _, tc := range []struct {
 		r         ui.Rect
@@ -242,8 +218,6 @@ func TestEmbedViewsNearTheWindow(t *testing.T) {
 	}
 }
 
-// An embed's web view runs NoRTC first in every frame of its page, those
-// the embed makes too.
 func TestEmbedViewsTakeWebRTCFromEveryFrame(t *testing.T) {
 	o := embedViewOptions(ui.RGBA(1, 2, 3, 1), true)
 	if o.Page.PreloadScript != rendered.NoRTC || !o.Page.PreloadAllFrames || !o.ScrollToContainer || o.BackgroundColor != "#010203" {

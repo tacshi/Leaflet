@@ -1,5 +1,3 @@
-// Package starters holds the templates that come with Leaflet, which the
-// desktop app and the iOS core both offer to start pages from.
 package starters
 
 import (
@@ -7,16 +5,12 @@ import (
 	"leaflet/locales"
 )
 
-// A Starter is a template that comes with Leaflet, in the app's language
-// when it is used. It shows until the user has a template of its title, as
-// editing it makes. Icon names a Lucide icon.
 type Starter struct {
 	Key, Icon   string
 	Title, Hint func() string
 	Blocks      func() []map[string]any
 }
 
-// All are the templates that come with Leaflet.
 func All() []Starter {
 	heading := func(s string) map[string]any { return map[string]any{"type": "heading", "level": 2.0, "text": s} }
 	empty := func(typ string) map[string]any { return map[string]any{"type": typ, "text": ""} }
@@ -57,7 +51,6 @@ func All() []Starter {
 	}
 }
 
-// Nodes are a starter's blocks.
 func (s Starter) Nodes() []*doc.Node {
 	var out []*doc.Node
 	for _, spec := range s.Blocks() {

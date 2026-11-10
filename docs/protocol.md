@@ -35,8 +35,7 @@ metadata:
   content gives a block without one, or with one an earlier block or the
   page (`root`) has, its ID and how many blocks had it so far: the second
   `a` is `a-2`, the first block without one `block-1`, skipping IDs the
-  page has. Every reader makes the same (`doc.Decode`, `normalizeContent`),
-  so a merge matches the blocks up rather than keeping each reader's copy.
+  page has. Every reader makes the same (`doc.Decode`), so a merge matches the blocks up rather than keeping each reader's copy.
 - `meta.blocks[id]` is the last time (ms since epoch) that block's own content,
   type, or position changed. `meta.deleted[id]` is a tombstone.
 - Until CRDTs land, two versions of a page merge **last-write-wins per block**
@@ -91,9 +90,8 @@ Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
 and `color` and `background`, the text's color and highlight as hex
 (`"#rrggbbaa"`). In agents' inline Markdown they are
 `<span style="color:#ef4444ff;background:#eab30840">text</span>`, either
-alone, not nested: `read_page` shows them so, and both `internal/doc` and
-`_shared/blocks.ts` read them back. A tag with anything but hex colors
-stays text. Markdown for people, an export or a copy, leaves them out, as
+alone, not nested: `read_page` shows them so, and `internal/doc` reads
+them back. A tag with anything but hex colors stays text. Markdown for people, an export or a copy, leaves them out, as
 MyGo's rich text does.
 A page mention is the page's title with `href` `leaflet://page/<id>` and a
 `mention` of kind `page`; in agents' inline Markdown it is
@@ -106,16 +104,16 @@ Markdown export writes one to a video in the exported pages as the
 video's own page at that time.
 A person or an agent mentioned is `@` and their name with a `mention` of
 kind `user` or `agent`; in agents' inline Markdown it is
-`[@Name](mention:user:<id>)` or `[@Name](mention:agent:<id>)`, which both
-`internal/doc` and `_shared/blocks.ts` write and read back as the mention.
+`[@Name](mention:user:<id>)` or `[@Name](mention:agent:<id>)`, which
+`internal/doc` writes and reads back as the mention.
 Leaflet shows it as a chip, opens the page on a click, and writes the page's
 current title into it when the page opens.
 
 ## 2. Agent tools
 
 Every surface (inline `@`, selection, sidebar chat, comment `@`) runs the same
-loop with the same tools. Tool definitions live in
-`internal/agents/tools.go` and `supabase/functions/_shared/tools.ts`.
+loop with the same tools, on the device (§4). Tool definitions live in
+`internal/agents/tools.go`.
 `leaflet mcp` (`internal/mcp`) offers the same page tools, each with a
 `page_id`, to agents outside the app.
 
@@ -176,22 +174,21 @@ says where whatever other keys the position has.
 | `delete_blocks` | `ids: [...]` | `{ deleted_ids: [...] }` |
 | `create_subpage` | `title`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (inside this page, its subpage block inserted at the end of this page: an `insert` op, then `create_page`) |
 | `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is). Only on a page no one else writes or reads, as for reading other pages: a page of the user's own made from one someone else shares, comments on as a guest or reads by a public link could take what they wrote into the user's pages, where the workspace agent reads it as theirs. On one, the agent makes a subpage instead. After the run, or an earlier turn of its conversation, read such a page with `read_other_page`, it and `create_subpage` refuse (below) |
-| `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on): at most 500, fewer where they would take more of the result than a model reads at once (60,000 UTF-16 units, each page's JSON counted at the most either side writes it) |
+| `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on): at most 500, fewer where they would take more of the result than a model reads at once (60,000 UTF-16 units of its JSON) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
 | `list_folders` | — | `{ folders: [{id, name}] }` (the user's own, only when cross-page reading is on). It spends the run's one free `read_web_page`, leaving the run as a first `read_web_page` does: from then on `read_web_page` goes only to the URLs the user gave and those found already, and the run counts as guarded. It closes no web, and is not reading the user's pages |
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
 | `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
 
-`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`,
-the same on the client and the server: `text` only for text blocks and
+`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`:
+`text` only for text blocks and
 code (a code block's is its code, not markdown); `chart` is
 `{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
 `image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
 `{url, title, description}`; `file` `{name, mime, size, notes?}`; `recording`
 `{recording_id, title, duration_ms}`, as far as the block has them, with
-its `transcript` when it has one, and the recording is the page's; the
-server adds the recording's `status`, and its `duration_ms` when the block
-has none; and a subpage block's `page_id`. The tools' views of a page give a
+its `transcript` when it has one, and the recording is the page's; and a
+subpage block's `page_id`. The tools' views of a page give a
 `link` its `url` alone, and a `video` no `title`: a card's title and
 description are what the linked page says of itself, and a video's title is
 its uploader's, which the apps fill in from its site, the web's writing,
@@ -231,7 +228,7 @@ on it, it has no public link) makes no page of the user's own after it:
 else writes or reads: a page of the user's own made now could take what
 they wrote into the user's own pages." So does every later turn of its
 conversation, which may hold what it read: a turn records it as
-`read_others: true` (`ai_jobs.result`, and the app's chat), judged over the
+`read_others: true` (its job's `result`, §4, and the app's chat), judged over the
 whole conversation, a turn undone or failed left out. A run whose
 conversation has earlier turns whose URL guard was on (`guarded`: they read
 the web) keeps to the URLs it may write after reading the web, below, from
@@ -282,8 +279,7 @@ page links already. It reads YouTube's captions as the youtube-transcript-api
 project does (the watch page's key, then the player API as the Android app,
 then the chosen track) and Vimeo's from the player's `config`, preferring
 the creator's captions in the language spoken, then the site's own speech
-recognition (`internal/web/captions.go`, `_shared/captions.ts`; both read
-`testdata/captions.json` alike). Captions are joined into passages: one
+recognition (`internal/web/captions.go`). Captions are joined into passages: one
 ends at a sentence's end once it is six seconds long, and at twenty seconds.
 Once a run reads another page, it reads only a video that was on the page as
 the run began or is in the instruction. Bilibili gives subtitles only to
@@ -327,9 +323,9 @@ an error the model is told, as a refusal is: the run goes on.
 
 ## 3. Ops
 
-Each applied tool call produces one or more ops. Ops are what the server
-streams to the client, what the client applies to the open editor, and what
-"Undo run" inverts. They carry enough to be inverted by block ID.
+Each applied tool call produces one or more ops. Ops are what a run
+applies to the open editor as its calls are made, what its job keeps, and
+what "Undo run" inverts. They carry enough to be inverted by block ID.
 
 ```json
 { "op": "insert",  "position": { "after": "a1b2c3" }, "nodes": [NodeJSON] }
@@ -347,8 +343,8 @@ streams to the client, what the client applies to the open editor, and what
 inside a page, or at the top level, in a folder or none; `card` is where
 the page's card was in the page it left, for Undo to put it back there,
 none for the end. A page op's `title` is the page's, after the op, `""` for
-an untitled one, which the app names in the user's language. The server's
-`create_page` has the page's `space_id` and `sort_key`, the app's of a run
+an untitled one, which the app names in the user's language. A workspace
+run's `create_page` has the page's `space_id` and `sort_key`, that of a run
 on a page none. The page ops (those above from
 `create_page`, and `delete_page` and `delete_folder`, which only Undo makes)
 change the pages around a page rather than its blocks. Undo makes each
@@ -361,9 +357,9 @@ goes back where it was. A folder the run made stays where the user has
 filed a page, a file or a folder in it since; a page `rename_page` gave
 a title to had none when `previous` is `""`, though shown as "Untitled".
 A page or a folder the run made that the user deleted since stays
-deleted: Undo leaves it so, and Redo after that Undo too. A run of the
-app's own made its changes on the device, none of them to come with a
-sync: what the user changed since is passed over as soon as Undo finds it.
+deleted: Undo leaves it so, and Redo after that Undo too. A run made its
+changes on the device, none of them to come with a sync: what the user
+changed since is passed over as soon as Undo finds it.
 
 A `create_page` op's `parent_id` is null for a page of its own, made at the
 top level, in `folder_id` when it has one. A run that only makes pages has
@@ -373,180 +369,65 @@ pages away by. A job keeps a `create_page` op without its `content`, which
 is the page's own, and would outlast it once it is deleted for good: Undo
 takes a page away by its ID.
 
-## 4. Agent run (cloud model)
+## 4. Agent run
 
-1. Client flushes unsynced edits of the page, then inserts an `ai_jobs` row:
-   `{ id, page_id, user_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "queued", request: { instruction, selection_text?, allow_cross_page, allow_web } }`.
-2. Client calls `POST /functions/v1/agent` with `{ "job_id": "…" }` and the
-   user's JWT. The response is NDJSON, one event per line:
-   - `{ "type": "status", "status": "running" }`, and again every 15 s
-     while the run goes on, so that nothing between closes a quiet stream
-   - `{ "type": "op", "op": Op, "summary": "Inserted a chart" }`, an event
-     for each op, its summary the op's own edit
-   - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
-     streams, a piece at a time; a new `round` (after tool calls) starts it
-     again.
-   - `{ "type": "call", "tool": "web_search", "args": { "query": "…" } }`, as a
-     call that reads the web starts (`read_web_page`'s with its `url`), for
-     the app to say what the run is doing
-   - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }], "kept_to_page": true, "guarded": false }`,
-     `kept_to_page` saying the run read nothing beyond its page, and
-     `guarded` that its URL guard was on (it read beyond its page or the
-     web, or followed turns that did), so its reply may carry what it read:
-     the app puts the pictures of such a reply in a page as links. A run
-     that read, or follows turns that read, a page someone else writes or
-     reads adds `"read_others": true`, as `ai_jobs.result` has it: the
-     app's chat keeps it, for its next turn on a model on the device, whose
-     job the server has no row of
-   - `{ "type": "error", "message": "…" }`
-3. The worker loads the page, focus blocks, the last 10 turns of the
-   conversation, and (if allowed) titles of other pages; calls the model with
-   the tools above, up to 12 rounds, as the app's own runs do: at most 50
-   calls of one answer run (the rest are refused, for the next), one run
+A run happens on the device it is asked on, whatever its provider: a cloud
+one is called from there with the key in the device's keychain, a ChatGPT
+plan with the sign-in kept there, and a local server as it is, offline
+too. Providers and their keys are the device's own: none goes to the
+server, and each device adds its own. A provider an earlier version kept
+on the server stays listed on a device, and runs once its key is pasted
+there. The server has no part in a run, but for the public links' leases a
+run reads (§2, §7).
+
+1. The app saves what is typed in the page, and the run reads the page as
+   it is open, or as it is stored, with the focus blocks, the selection,
+   the comment thread of a `comment` run, and the last 20 messages of the
+   conversation.
+2. It calls the model with the tools above (§2), up to 12 rounds: at most
+   50 calls of one answer run (the rest are refused, for the next), one run
    writes at most 5,000 blocks, and a model that answers 429 or 5xx is asked
-   once more, after its `Retry-After` (30 s at most) or 2 s, when nothing of
-   that answer came yet; validates and applies each call; streams the op;
-   finally writes a `page_history` row (`reason: "agent_run"`, the
-   content from before the run) and then saves `page_content`, updates the
-   job (`status: done`, `result: { reply, ops, edits, kept_to_page, guarded }`), and for the
-   `comment` surface inserts the reply as a comment by the agent. A
-   `page_history` row that can't be written stops the save: no edits are
-   saved that the page can't go back from. A run that fails after it changed
-   the page saves what it changed, as above, and its job is `status: failed`
-   with the `error`; only when that save went through does the job have
-   `result: { reply: "", ops, edits }` too, so the client can undo it. One
-   whose save failed as well says so in its `error`. When the page was saved
-   since the run read it, the worker applies its ops to that version, but
-   only those on blocks it has as the run read them (by `meta.blocks` and
-   `meta.deleted`): a client with the page open saved the ops as they
-   streamed, and a block changed since keeps what a person wrote over it.
-   A run's time is its worker's: a worker serves requests through the first
-   half of its wall clock (150 s on the free plan, 400 s on paid ones) and
-   all it runs stops at the end of it, so a run stops calling the model at
-   its deadline, or sooner on a worker already that old. As the platform
-   says it will shut the worker down (`beforeunload`), the run ends at once
-   as a failed one does, with the error "The platform stopped the run before
-   it finished.", saving what it changed. One stopped with no word cannot
-   say so: as it works its ops go on its job every 10 seconds, with
-   `status: running`, as `result: { reply: "", ops, edits }`, and the
-   caller's next run marks the job failed, keeping them. A result past the
-   job's bound ends it `done` with `ops` and `edits` empty, the app having
-   them as they streamed.
-4. The client applies streamed ops to the open editor as one undo step.
+   once more, after its `Retry-After` (30 s at most) or 2 s, when that
+   answer put nothing in the page. A run has 10 minutes, and the user may
+   stop it sooner.
+3. Each call is validated and applied, and its op (§3) goes to the open
+   editor as it is made, the blocks of a call that writes showing as they
+   stream in: all of a run's ops are one undo step. A page that is not open
+   gets them in its stored content as the run ends.
+4. Before its first op reaches the page, the run keeps the page as it was
+   in `page_history` (`reason: "agent_run"`). A snapshot that can't be kept
+   stops the edits: none is stored that the page can't go back from. A run
+   that fails, runs out of time or is stopped keeps what it changed, for
+   Undo.
+5. The run's job stays on the device, in its own `ai_jobs` table, which
+   does not sync:
+   `{ id, page_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "done"|"failed", request: { instruction, selection_text?, allow_cross_page, allow_web, agent_name }, result: { reply, ops, edits: [{ summary, block_ids, page_id? }], read_others }, error? }`.
+   The app's chat keeps each turn's `kept_to_page` (the run read nothing
+   beyond its page), `guarded` (its URL guard was on: it read beyond its
+   page or the web, or followed turns that did, so the app puts the
+   pictures of its reply in a page as links) and `read_others`, for the
+   turns after it (§2). On the `comment` surface the reply goes in as a
+   comment by the agent.
 
-A workspace run's job is of no page: `page_id` is null, `surface` is
+A workspace run's job is of no page: `page_id` is empty, `surface` is
 `workspace`, and its `request` has `open_page_id?`, the page open as the
-user asked, and `public_page_ids?`, those the app has a public link open to.
-The client first sends all of its unsynced changes, not one page's. The
-worker reads the pages of the user's own space, a page whose
-`public_link_until` is to come having a public link open too, and finds
-those someone else has, or is asked to have, with `agent_shared_pages()`,
-which reads the invites still waiting the owner's reads do not, and those
-whose cards are on the pages others read with `agent_card_pages(p_pages)`,
-the pages' content staying in the database; makes its
-changes as the caller, puts a subpage's card in and takes it out of the
-page it moves in or out of over that page's revision, keeps no page's
-history, and updates the job with
-`result: { reply, ops, edits, kept_to_page, guarded }`, its failed job too
-when it changed anything.
-
-Local models (`is_local`) run the identical loop on the client against the
-local endpoint, so they work offline.
+user asked, and `public_page_ids?`, those the app has a public link open
+to. It makes its changes through the app's own page changes, a subpage's
+card going in and out of the page it moves in or out of, and keeps no
+page's history.
 
 ## 5. Edge Functions
 
-All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
+One, `account`. It takes the user's JWT (`Authorization: Bearer`) and a
+JSON body.
 
 | function | body | response |
 | --- | --- | --- |
-| `agent` | `{ job_id }` | NDJSON stream (above) |
-| `providers` | `{ action: "save", provider: { id?, preset, name, base_url, auth_kind, api_key?, default_model } }` | `{ provider }` (no secret) |
-| | `{ action: "models", provider_id? , base_url?, api_key?, preset? }` | `{ models: [id], supports_tools?: bool }` |
-| | `{ action: "test", provider_id? , base_url?, api_key?, preset?, model }` | `{ ok, models: [id], supports_tools, message }` |
-| | `{ action: "delete", id }` | `{ ok }` |
-| `stt` | `{ action: "soniox_key" }` | `{ api_key, expires_at }` (short-lived Soniox key) |
-| | `{ action: "transcribe", recording_id, language?, provider? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
-| | `{ action: "transcribe", file_id, language?, provider? }` | `{ segments: [...] }`, saved in no row |
-| | `{ action: "transcribed", file_id }` | `{ ok }` |
-| | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
 
-`models` and `test` reach a saved provider by `provider_id`, or an unsaved one
-by its `base_url`, or the address of its `preset` without one. A provider's
-`supports_tools` is what `test` found of its `default_model`, null until then
-and again once the default changes: a test of another model answers for that
-model and leaves it as it is, and a run of another model is offered tools,
-going without them if the model refuses them.
-
-`transcribe` takes `provider`, `soniox` or `openai-compatible`, as the one
-the app picked for this transcription, in place of the provider in
-`stt_settings`, whose other fields (an endpoint's address, model and key)
-still apply: the app has no default, and its settings reach the server a
-moment after a pick. Any other provider leaves the settings' own.
-
-`transcribe` saves the transcript, and the recording's status as it goes, as
-the caller: someone who can only view the recording's page is refused (403)
-before any of their key is spent. A call takes the recording first
-(`recordings.transcribing_at`), so a second call while one has it is refused
-(409) rather than spending the key again; one left by a call the platform
-stopped is taken again once it is older than a call can run. A transcription
-that fails says so in the function's own words, in the recording's `error`
-and to the caller: what the transcriber answered, and the address it went
-to, go to the function's log only.
-
-A call has about two minutes, on every plan: its answer comes only at its
-end, and the gateway gives up on one that has not begun at 150 seconds. A
-long recording outlasts that at Soniox, which goes on with it. A
-transcription started is kept (`stt_jobs`, by recording and caller) until
-Soniox has finished it and its transcript is saved, so a call that runs out
-of time answers 504, "Soniox is still transcribing this recording…", with
-`code: "still_transcribing"`, leaves the recording `failed` with those words,
-and the next call by the same person picks it up, with no audio sent and no
-key spent again. The app asks again by itself, every 15 seconds for up to 30
-minutes. Only Soniox's own end
-of a transcription removes what went there, as Soniox keeps what it is still
-transcribing; one never asked for again, as of a recording deleted since,
-goes by Soniox's retention, in 30 days. Audio that could not reach the
-transcriber in time, or an OpenAI-compatible endpoint that outlasts a call,
-leaves nothing to pick up, and is refused as too long for the server, unless
-the call's worker cost it 10 seconds of its time or more, or was shutting
-down: that says nothing of the recording, and answers 504 with the same
-`code`, for the app to ask again, on a worker with its time.
-
-`transcribe` of a `file_id` is of an audio file in the `files` bucket: the
-app puts its segments in the block's `notes`. Someone who can only view its
-page is refused (403) before any of their key is spent, and a file that is
-not up yet, or gone, is 404. A call takes the file for its caller, whose key
-it spends (`stt_file_jobs`, by file and caller), so a second call of theirs
-is refused (409); one the platform stopped is taken again as a recording's
-is, and the call it was taken from, should it go on, leaves it to the one
-that has it now. No row holds the transcript, so what Soniox made stays there until the
-app says it has it with `transcribed`: an app stopped before the answer
-reached it asks again for nothing. Told nothing, it goes by Soniox's
-retention. `still_transcribing` is as for a recording.
-
-`transcribe` streams the audio from Storage to the transcriber as it reads
-it, never holding a recording whole, in a multipart body with no length
-(chunked, or in HTTP/2 frames), and reads it again for a second request.
-
-A provider's saved key goes only to the address it was saved for: a `save`
-that changes a provider's `preset`, or the origin of its `base_url`, without
-an `api_key` is refused (400) while it has a key, so a session can never send
-the saved key to a server of its choosing; one that makes it a local preset,
-which takes no key, drops it. An `api_key` that is not a string is refused
-(400) before anything is written. The database drops a provider's keys, and
-their Vault secrets, whenever the origin of its `base_url`, its `preset` or
-`is_local` changes, whoever writes the row (`model_providers_key_stays`),
-the origin as a URL parser reads it: a URL it reads its own way keeps a key
-only while it stays the very same. A `save` refuses (400) a `base_url` that
-is not printable ASCII, or has a backslash, which a URL parser takes for a
-slash. A local provider is never called from the server: `models`, `test`
-and a `transcribe` whose settings name one are refused (400). A key goes
-only where its row is as it goes: a `save` whose provider another save moved
-between its write of the row and of its key leaves the key off the other's
-address, and is refused (409), to be saved again; and `models`, `test`, a
-run or a `transcribe` whose provider a save moved as it read it sends
-nothing, the run failing, and the rest refused (409), to be asked again.
+A project keeps the `agent`, `providers` and `stt` functions an earlier
+build deployed, for the devices still on that build: a newer build deploys
+`account` alone, leaves the others in place, and calls none of them.
 
 ## 6. Sync
 
@@ -713,11 +594,6 @@ nothing, the run failing, and the rest refused (409), to be asked again.
   10 minutes, and on the first pass after its sync loop starts, with an
   upsert of its own row answered with `revoked_at`, which is how it learns
   it was revoked.
-- Model connections are deleted on the server, not marked deleted, so the
-  pull by time never brings their removal: every 10 minutes, and on the
-  first pull after the sync loop starts, a pull lists the ids of the cloud
-  ones there and removes the others here (of those stored before the list
-  was read).
 - A page stays in the space it was made in (`space_immutable`): a device
   refuses to move one under a page, or into a folder, of another space.
 
@@ -803,9 +679,9 @@ as the link starts, and every 15 minutes while it serves. As the link stops
 the app calls `lease_public_link(p_page_id, p_ending)` with the lease it
 last got, which clears it only while the page still has that lease, so a
 newer one, of the link started again, stays. While it is to come (the apps
-ask with `public_link_until=gt.now`, by the server's clock), agent runs, the
-agent function's and the apps' on other devices, which ask the server as
-they start, read none of the user's other pages into the page. A change of
+ask with `public_link_until=gt.now`, by the server's clock), agent runs on
+other devices, which ask the server as they start, read none of the user's
+other pages into the page. A change of
 it alone leaves the page's `updated_at` as it was, and pages sync without
 it. Signed out, syncing through iCloud Drive, the app says so in its
 device.json instead (§8).
@@ -817,8 +693,21 @@ any case; they sync with the row as its title does.
 `folders.default_template_id` and `pages.default_template_id` name the
 template a folder's new pages, or a page's new subpages, start from (null
 for blank ones); there is no foreign key, and a template the app can't
-find leaves new pages blank. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
-and are not selectable by clients.
+find leaves new pages blank.
+
+The app uses none of what the `agent`, `providers` and `stt` functions of
+an earlier build work through: the tables `ai_jobs` (a run's job),
+`model_providers` (a provider, whose `encrypted_secret` and `refresh_token`
+hold Vault secret IDs and are not selectable by clients), `stt_settings`,
+`stt_secrets`, `stt_jobs` and `stt_file_jobs`, their secrets in Vault, and
+the RPCs `set_provider_secret`, `get_provider_secret`, `set_stt_secret`,
+`get_stt_secret`, `has_stt_secret`, `agent_shared_pages`,
+`agent_card_pages` and `agent_search_pages`. Agents and transcription run
+on the device (§4), which keeps its providers, speech settings and keys.
+The migrations still make them, and a project keeps them and their rows as
+they are: a device still on such a build runs its agents and
+transcriptions through the functions it deployed, which read and write
+them.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.wav`, 16 kHz mono WAV), `files`
 (`{space_id}/{file_id}/{name}`, `{name}` being the file's with `_` for what Storage takes in no key: §6), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
@@ -835,14 +724,7 @@ invite's id, not the account's, `email` the address as shared, and
 `display_name` empty), `page_invites()` (the
 caller's pending invites: `page_id, title, role, inviter_name, created_at`,
 of pages not deleted), `accept_page_invite(p_page_id)`,
-`decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret,
-p_base_url, p_preset)` (authenticated; with `p_base_url` and `p_preset`, which
-may be left out, it saves or clears the key only while the provider has
-them, and raises `provider_moved` otherwise),
-`get_provider_secret(p_provider_id, p_base_url, p_preset)` (service role
-only: the key, read with the row, only while the provider still has the base
-URL and preset its caller read, and is not local; `provider_moved`
-otherwise), `release_kept_recordings(p_user_id)` (service role only: the
+`decline_page_invite(p_page_id)`, `release_kept_recordings(p_user_id)` (service role only: the
 paths of the audio that stays as the account goes, as one `text[]`, which
 no `max_rows` cuts),
 `sign_out_device(p_device_id)` (one of the caller's devices: revoked, and

@@ -1,8 +1,3 @@
-// Package icloud reads and writes the Leaflet folder in iCloud Drive,
-// which iCloud sync goes through (docs/protocol.md §8). Every device
-// writes only its own files there, so iCloud never has two versions of
-// one to keep; the folder knows nothing of pages, which internal/sync
-// reads out of what it holds.
 package icloud
 
 import (
@@ -23,32 +18,16 @@ import (
 )
 
 var (
-	// ErrUnavailable is the folder's when iCloud Drive is not on this
-	// device, or the Leaflet folder in it has gone.
-	ErrUnavailable = errors.New("icloud: iCloud Drive is not available")
-	// ErrNoAccess is the folder's when the system keeps Leaflet out of
-	// iCloud Drive.
-	ErrNoAccess = errors.New("icloud: no access to iCloud Drive")
-	// ErrOtherLibrary is the folder's when it holds another set of pages
-	// than the ones this device syncs.
+	ErrUnavailable  = errors.New("icloud: iCloud Drive is not available")
+	ErrNoAccess     = errors.New("icloud: no access to iCloud Drive")
 	ErrOtherLibrary = errors.New("icloud: the Leaflet folder holds other pages")
-	// ErrNewerFormat is a file's that a newer Leaflet wrote.
-	ErrNewerFormat = errors.New("icloud: written by a newer Leaflet")
-	// ErrNotReady is a file's that iCloud has not downloaded yet; it has
-	// been asked to.
-	ErrNotReady = errors.New("icloud: not downloaded yet")
-	// ErrDamaged is, with ErrNotReady, a file's that is here but does not
-	// parse: one iCloud is still writing, or one a crash cut short before
-	// it reached the disk, which stays so.
-	ErrDamaged = errors.New("icloud: does not parse")
+	ErrNewerFormat  = errors.New("icloud: written by a newer Leaflet")
+	ErrNotReady     = errors.New("icloud: not downloaded yet")
+	ErrDamaged      = errors.New("icloud: does not parse")
 )
 
-// Format is the folder's format, in every file it writes.
 const Format = 1
 
-// Root is the Leaflet folder in iCloud Drive, or "" where there is none.
-// LEAFLET_ICLOUD_DIR names another folder, for tests and trying sync out
-// on one machine.
 func Root() string {
 	if dir := os.Getenv("LEAFLET_ICLOUD_DIR"); dir != "" {
 		return dir
@@ -66,9 +45,6 @@ func Root() string {
 	return ""
 }
 
-// Available reports whether iCloud Drive is on this device. It looks only
-// at the folder the Leaflet folder goes in, not into it, so it asks the
-// system for no access.
 func Available() bool {
 	root := Root()
 	if root == "" {
@@ -78,11 +54,8 @@ func Available() bool {
 	return err == nil && info.IsDir()
 }
 
-// Folder is the Leaflet folder in iCloud Drive.
 type Folder struct {
 	Root string
-	// Temp is where files are written before they move into the folder:
-	// a folder of the app's own on the same disk.
 	Temp string
 }
 
@@ -91,11 +64,8 @@ var (
 	seqPattern = regexp.MustCompile(`^[0-9]{16}\.json$`)
 )
 
-// ValidID reports whether id is one of the folder's: a row or device ID.
 func ValidID(id string) bool { return idPattern.MatchString(id) }
 
-// Name checks a file's name for the folder, one path element, and returns
-// it as PortableName makes it.
 func Name(name string) (string, error) {
 	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
 		return "", fmt.Errorf("icloud: bad file name %q", name)
@@ -103,12 +73,6 @@ func Name(name string) (string, error) {
 	return PortableName(name), nil
 }
 
-// PortableName is a file's name as every system with iCloud Drive can hold
-// it, so a file named on a Mac syncs to Windows too: the characters
-// Windows takes in no name (<>:"/\|?* and control characters) become "_",
-// the dots and spaces it drops from the end go, and a name it keeps for a
-// device (CON, NUL, COM1…, with an extension or not) gets "_" before it.
-// A name that is so already is left as it is, and so is one made so.
 func PortableName(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if r < 0x20 || strings.ContainsRune(`<>:"/\|?*`, r) {
@@ -126,7 +90,6 @@ func PortableName(name string) string {
 	return name
 }
 
-// reservedName reports whether Windows keeps a name for a device.
 func reservedName(stem string) bool {
 	up := strings.ToUpper(stem)
 	switch up {
@@ -150,21 +113,16 @@ func checkID(id string) error {
 	return nil
 }
 
-// Paths in the folder, separated by slashes.
-
 func devicePath(device string) string { return "devices/" + device }
 
-// DevicePath is a device's device.json.
 func DevicePath(device string) (string, error) {
 	return devicePath(device) + "/device.json", checkID(device)
 }
 
-// BatchPath is a batch of a device's log.
 func BatchPath(device string, seq int64) (string, error) {
 	return fmt.Sprintf("%s/log/%016d.json", devicePath(device), seq), checkID(device)
 }
 
-// PagePath is a device's version of a page.
 func PagePath(device, pageID string) (string, error) {
 	if err := checkID(pageID); err != nil {
 		return "", err
@@ -172,7 +130,6 @@ func PagePath(device, pageID string) (string, error) {
 	return devicePath(device) + "/pages/" + pageID + ".json", checkID(device)
 }
 
-// FileBlobPath is a file's copy.
 func FileBlobPath(fileID, name string) (string, error) {
 	if err := checkID(fileID); err != nil {
 		return "", err
@@ -181,16 +138,12 @@ func FileBlobPath(fileID, name string) (string, error) {
 	return "blobs/files/" + fileID + "/" + n, err
 }
 
-// RecordingBlobPath is a recording's audio.
 func RecordingBlobPath(recordingID string) (string, error) {
 	return "blobs/recordings/" + recordingID + ".wav", checkID(recordingID)
 }
 
 func (f Folder) abs(rel string) string { return filepath.Join(f.Root, filepath.FromSlash(rel)) }
 
-// Check reports whether the folder can be used: ErrUnavailable when iCloud
-// Drive is not there, ErrNoAccess when the system keeps Leaflet out.
-// create makes the Leaflet folder when iCloud Drive is there without it.
 func (f Folder) Check(create bool) error {
 	if info, err := os.Lstat(filepath.Dir(f.Root)); err != nil || !info.IsDir() {
 		return access(err, ErrUnavailable)
@@ -207,7 +160,6 @@ func (f Folder) Check(create bool) error {
 	return nil
 }
 
-// access is ErrNoAccess for an error that says so, and otherwise.
 func access(err, otherwise error) error {
 	if errors.Is(err, fs.ErrPermission) {
 		return ErrNoAccess
@@ -215,11 +167,8 @@ func access(err, otherwise error) error {
 	return otherwise
 }
 
-// placeholder is the name iCloud gives a file of name it has not
-// downloaded, on macOS before 14.
 func placeholder(name string) string { return "." + name + ".icloud" }
 
-// fromPlaceholder is the name of the file a placeholder stands for.
 func fromPlaceholder(name string) (string, bool) {
 	if len(name) <= len("..icloud") || !strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".icloud") {
 		return "", false
@@ -227,11 +176,6 @@ func fromPlaceholder(name string) (string, bool) {
 	return name[1 : len(name)-len(".icloud")], true
 }
 
-// names lists a directory of the folder: the files and directories in it,
-// with those iCloud has not downloaded under their own names, each once,
-// as a file and its placeholder may be there both while iCloud brings it.
-// It leaves out what starts with a dot, as files being written do, and
-// placeholders of those. A directory that is not there has nothing in it.
 func (f Folder) names(rel string) ([]string, error) {
 	entries, err := os.ReadDir(f.abs(rel))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -256,9 +200,6 @@ func (f Folder) names(rel string) ([]string, error) {
 	return out, nil
 }
 
-// Devices lists the devices with a folder in it. Names that are no
-// device's, such as the copies iCloud makes of a folder two devices
-// made at once, are left out.
 func (f Folder) Devices() ([]string, error) {
 	names, err := f.names("devices")
 	if err != nil {
@@ -274,10 +215,6 @@ func (f Folder) Devices() ([]string, error) {
 	return out, nil
 }
 
-// Batches lists the seqs of a device's log in order, and reports whether
-// its folder holds names a device never writes there: copies iCloud made
-// of a file two devices wrote, which a second device with this one's ID
-// leaves.
 func (f Folder) Batches(device string) (seqs []int64, copies bool, err error) {
 	if err := checkID(device); err != nil {
 		return nil, false, err
@@ -300,18 +237,13 @@ func (f Folder) Batches(device string) (seqs []int64, copies bool, err error) {
 	return seqs, copies, nil
 }
 
-// Exists reports whether a file is in the folder, downloaded or not.
 func (f Folder) Exists(rel string) bool { return f.exists(f.blob(rel)) }
 
-// Stamp is what a file's metadata says of it: its time and size, which
-// change as another device writes it again, read without reading the file.
 type Stamp struct {
 	ModTime time.Time
 	Size    int64
 }
 
-// Stamp returns a file's Stamp, as it is downloaded: ok is false for one
-// not there, or not downloaded yet.
 func (f Folder) Stamp(rel string) (stamp Stamp, ok bool) {
 	info, err := os.Lstat(f.abs(rel))
 	if err != nil || notReady(info) {
@@ -329,10 +261,6 @@ func (f Folder) exists(rel string) bool {
 	return err == nil
 }
 
-// blob is where the folder has a file's copy, by its path rel: there, or,
-// while only that is there, under the name a Leaflet before PortableName
-// gave it, which PortableName makes rel's, as a Mac's "Q3: report.pdf".
-// Other paths are as they are.
 func (f Folder) blob(rel string) string {
 	if !strings.HasPrefix(rel, "blobs/files/") || f.exists(rel) {
 		return rel
@@ -350,8 +278,6 @@ func (f Folder) blob(rel string) string {
 	return rel
 }
 
-// Read reads a file, or returns fs.ErrNotExist, or ErrNotReady after
-// asking iCloud to download it.
 func (f Folder) Read(rel string) ([]byte, error) {
 	r, err := f.Open(rel)
 	if err != nil {
@@ -365,10 +291,6 @@ func (f Folder) Read(rel string) ([]byte, error) {
 	return data, nil
 }
 
-// Open opens a file to read as Read reads it, a little at a time, as a
-// recording's audio is too large to read whole: fs.ErrNotExist, or
-// ErrNotReady after asking iCloud to download it. Read to its end, it is
-// as long as it was when it opened, or fails with io.ErrUnexpectedEOF.
 func (f Folder) Open(rel string) (io.ReadCloser, error) {
 	path := f.abs(f.blob(rel))
 	info, err := os.Lstat(path)
@@ -384,16 +306,13 @@ func (f Folder) Open(rel string) (io.ReadCloser, error) {
 	if notReady(info) {
 		return nil, f.download(path)
 	}
-	file, err := os.Open(path) // #nosec G304 -- a file of the Leaflet folder, by a path checked above.
+	file, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return nil, access(err, err)
 	}
 	return &sized{file: file, left: info.Size()}, nil
 }
 
-// sized is a file read to the size it had as it opened: one iCloud cuts
-// short meanwhile ends in io.ErrUnexpectedEOF, and what it gains after is
-// not read. It reads only through Read, so io.Copy goes through the check.
 type sized struct {
 	file *os.File
 	left int64
@@ -426,10 +345,6 @@ func (f Folder) download(path string) error {
 	return ErrNotReady
 }
 
-// Download asks iCloud to download a file it has not, without waiting for
-// it, so a later Read finds it here. iCloud on iOS downloads only what it
-// is asked for, and asked one file at a time, many come one by one. A
-// file downloaded already, or not in the folder, is left as it is.
 func (f Folder) Download(rel string) {
 	rel = f.blob(rel)
 	path := f.abs(rel)
@@ -439,14 +354,10 @@ func (f Folder) Download(rel string) {
 	}
 }
 
-// header is what every file of the folder starts with.
 type header struct {
 	Format int `json:"format"`
 }
 
-// ReadJSON reads a file into v. A file that does not parse is one iCloud
-// is still writing, or one cut short, and both ErrNotReady and ErrDamaged;
-// one from a newer Leaflet is ErrNewerFormat.
 func (f Folder) ReadJSON(rel string, v any) error {
 	data, err := f.Read(rel)
 	if err != nil {
@@ -465,16 +376,10 @@ func (f Folder) ReadJSON(rel string, v any) error {
 	return nil
 }
 
-// WriteJSON writes v to a file, whole or not at all.
 func (f Folder) WriteJSON(rel string, v any) error {
 	return f.writeJSON(rel, v, rename)
 }
 
-// CreateJSON writes v to a file that is not there yet, whole or not at
-// all, as WriteJSON does, and fails with fs.ErrExist, leaving it, when one
-// is, downloaded or not: a file that another device made meanwhile is
-// never written over. Checked as the file moves into place, two devices
-// writing at once cannot both make it.
 func (f Folder) CreateJSON(rel string, v any) error {
 	if f.exists(rel) {
 		return fmt.Errorf("icloud: %s: %w", rel, fs.ErrExist)
@@ -493,9 +398,6 @@ func (f Folder) writeJSON(rel string, v any, move func(from, to string) error) e
 	})
 }
 
-// CopyIn copies a file of this device into the folder, whole or not at
-// all. A file already there stays: the folder's copies never change. One
-// of another size than the file is a copy cut short, and goes again.
 func (f Folder) CopyIn(rel, source string) error {
 	info, err := os.Stat(source)
 	if err != nil {
@@ -505,8 +407,7 @@ func (f Folder) CopyIn(rel, source string) error {
 		return nil
 	}
 	return f.write(rel, rename, func(w io.Writer) error {
-		// Opened for each try: the one before read it to the end.
-		in, err := os.Open(source) // #nosec G304 -- a file in the app's own data folder.
+		in, err := os.Open(source) // #nosec G304
 		if err != nil {
 			return err
 		}
@@ -523,20 +424,11 @@ func (f Folder) CopyIn(rel, source string) error {
 	})
 }
 
-// whole reports whether the file at rel has size bytes, or is one iCloud
-// has not downloaded, which counts as whole.
 func (f Folder) whole(rel string, size int64) bool {
 	have, err := os.Lstat(f.abs(rel))
 	return err != nil || have.Size() == size
 }
 
-// write writes a file to Temp and moves it into place with move, so a
-// device reading the folder never sees half of it. Where Temp is on
-// another disk it writes beside the file instead, under a name that starts
-// with a dot, which readers pass over. The file reaches the disk before it
-// moves, and the move before write returns: a crash after it, with the
-// database saying the file was written, must not leave it cut short or
-// gone. A move that finds a file there (renameNew) leaves both.
 func (f Folder) write(rel string, move func(from, to string) error, fill func(io.Writer) error) error {
 	path := f.abs(rel)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -559,7 +451,6 @@ func (f Folder) write(rel string, move func(from, to string) error, fill func(io
 		}
 		err = fill(tmp)
 		if err == nil {
-			// On macOS Sync is F_FULLFSYNC, past the disk's own cache.
 			err = tmp.Sync()
 		}
 		if cerr := tmp.Close(); err == nil {
@@ -581,9 +472,6 @@ func (f Folder) write(rel string, move func(from, to string) error, fill func(io
 	return access(last, last)
 }
 
-// tempPattern names the file write writes before it moves into place:
-// the file's name with a dot before it, cut short, as the disk takes no
-// name of more than 255 bytes and a file's own name may be that long.
 func tempPattern(name string) string {
 	if len(name) > 64 {
 		name = strings.ToValidUTF8(name[:64], "")
@@ -591,10 +479,8 @@ func tempPattern(name string) string {
 	return "." + name + ".*.tmp"
 }
 
-// syncDir has a move into dir reach the disk, where the system allows it:
-// Windows opens no directory to sync.
 func syncDir(dir string) {
-	d, err := os.Open(dir) // #nosec G304 -- a directory of the Leaflet folder.
+	d, err := os.Open(dir) // #nosec G304
 	if err != nil {
 		return
 	}
@@ -602,9 +488,6 @@ func syncDir(dir string) {
 	_ = d.Close()
 }
 
-// rename moves a file into place. Windows refuses while another program,
-// such as iCloud uploading the file, has it open: try again a few times.
-// Tests stand in for it.
 var rename = func(from, to string) error {
 	var err error
 	for try := 0; try < 5; try++ {
@@ -616,9 +499,6 @@ var rename = func(from, to string) error {
 	return err
 }
 
-// RemoveBlob removes a file's or a recording's copy. A file's goes with
-// the folder it is in, and so with the copies iCloud made of it there
-// ("notes 2.pdf") when two devices copied it in at once.
 func (f Folder) RemoveBlob(rel string) error {
 	dir := path.Dir(rel)
 	if path.Dir(dir) != "blobs/files" || !ValidID(path.Base(dir)) {
@@ -628,7 +508,6 @@ func (f Folder) RemoveBlob(rel string) error {
 	return access(err, err)
 }
 
-// Remove removes a file of this device's.
 func (f Folder) Remove(rel string) error {
 	path := f.abs(rel)
 	err := os.Remove(path)

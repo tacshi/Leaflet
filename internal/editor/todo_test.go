@@ -7,8 +7,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// fixClock sets the time a to-do's date is shown from to a day's noon,
-// for a test, whose dates then don't change at midnight; it returns it.
 func fixClock(t *testing.T) time.Time {
 	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.Local)
 	was := clock
@@ -23,7 +21,6 @@ func TestDueDate(t *testing.T) {
 	tt.Type("[] Send the draft")
 	n := e.Content.Children[0]
 	tt.Frame()
-	// The caret is in the to-do, so it offers a date.
 	if err := tt.Click("Due date: Add date"); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +34,6 @@ func TestDueDate(t *testing.T) {
 	if _, ok := tt.Find("Due date: Tomorrow"); !ok {
 		t.Errorf("no Tomorrow chip in %v", tt.Texts())
 	}
-	// The press on the chip went to it, not the text: the caret stays.
 	if p := e.Caret(); p.ID != n.ID || p.Off != len("Send the draft") {
 		t.Errorf("caret %v", p)
 	}
@@ -47,8 +43,6 @@ func TestDueDate(t *testing.T) {
 	}
 }
 
-// The popover changes a draft, which the to-do takes as it closes:
-// turning the months keeps it open, and chooses no day by itself.
 func TestDuePopover(t *testing.T) {
 	now := fixClock(t)
 	e, tt, _ := setup(t)
@@ -70,7 +64,6 @@ func TestDuePopover(t *testing.T) {
 			t.Fatal("the popover is still open")
 		}
 	}
-	// Opened and closed untouched, it adds no date.
 	click("Due date: Add date")
 	escape()
 	if _, _, ok := n.Due(); ok {
@@ -94,12 +87,10 @@ func TestDuePopover(t *testing.T) {
 	if due, timed, ok := n.Due(); !ok || !timed || !DueToday(due, want) || due.Hour() != dueHour || due.Minute() != 0 {
 		t.Fatalf("due %v, timed %v", due, timed)
 	}
-	// It was one step of undo.
 	e.Undo()
 	if _, _, ok := e.Content.Children[0].Due(); ok {
 		t.Fatal("undo kept the date")
 	}
-	// Today, the day the calendar starts on, is chosen by a click too.
 	n = e.Content.Children[0]
 	e.Focus()
 	tt.Frame()
@@ -111,8 +102,6 @@ func TestDuePopover(t *testing.T) {
 	}
 }
 
-// An empty to-do offers its date after its placeholder, where it would
-// be with that text typed, not over it.
 func TestDueChipAfterPlaceholder(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("[] ")
@@ -130,8 +119,6 @@ func TestDueChipAfterPlaceholder(t *testing.T) {
 	}
 }
 
-// Under the pointer without the caret, an empty to-do offers its date
-// where it does with the caret, off where a click starts typing.
 func TestDueChipStaysPut(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("Intro")
@@ -151,9 +138,6 @@ func TestDueChipStaysPut(t *testing.T) {
 	}
 }
 
-// Each to-do's calendar has its own draft: a click on the date of one
-// above, while another's calendar is open, opens its calendar, and the
-// other still takes the date it was given.
 func TestDuePopoversKeepTheirDrafts(t *testing.T) {
 	now := fixClock(t)
 	e, tt, _ := setup(t)

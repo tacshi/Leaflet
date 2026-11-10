@@ -1,8 +1,3 @@
-// Package mcp is `leaflet mcp`: a Model Context Protocol server over stdio
-// that lets agents outside the app (Claude Code, Claude Desktop, Codex,
-// Cursor) read and edit the pages on this device. It writes to the same
-// database as the app, which picks the changes up while it runs, and sync
-// sends them on.
 package mcp
 
 import (
@@ -22,11 +17,8 @@ import (
 	"leaflet/internal/store"
 )
 
-// Versions are the protocol versions the server speaks, newest first. The
-// tools it uses are the same in all of them.
 var versions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
-// Main serves the pages in the data folder dir on stdin and stdout.
 func Main(dir string, version string, in io.Reader, out io.Writer) error {
 	st, err := Open(dir)
 	if err != nil {
@@ -36,9 +28,6 @@ func Main(dir string, version string, in io.Reader, out io.Writer) error {
 	return NewServer(st, version).Serve(in, out)
 }
 
-// Open opens the pages in the data folder dir, in the session the app
-// last ran with, without the keychain: the account this device keeps
-// pages for, or this device's own.
 func Open(dir string) (*store.Store, error) {
 	st, err := store.Open(dir)
 	if err != nil {
@@ -55,28 +44,17 @@ func Open(dir string) (*store.Store, error) {
 	return st, nil
 }
 
-// Server answers one client's requests.
 type Server struct {
 	st      *store.Store
 	version string
-	// agent is the client's name, which signs its blocks and history.
-	agent string
-	// client is the name the client gave in its clientInfo, and seen when
-	// the server last wrote down that it served it.
-	client string
-	seen   time.Time
-	pages  pageTools
+	agent   string
+	client  string
+	seen    time.Time
+	pages   pageTools
 }
 
-// SeenPrefix starts the key-value settings that say when a client last
-// called a tool: SeenPrefix + its clientInfo name, lower case, is the Unix
-// time. Settings › External agents shows from them which apps work. A
-// client that only starts the server is not one: apps start their servers
-// as they open, even when they cannot go on (signed out, say).
 const SeenPrefix = "mcp_seen:"
 
-// markSeen writes down that the client calls a tool now, at most once a
-// minute: each write wakes the app, which watches the database.
 func (s *Server) markSeen() {
 	if s.client == "" || time.Since(s.seen) < time.Minute {
 		return
@@ -87,20 +65,14 @@ func (s *Server) markSeen() {
 	}
 }
 
-// NewServer serves the pages in st.
 func NewServer(st *store.Store, version string) *Server {
 	s := &Server{st: st, version: version, agent: "Agent"}
 	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]*doc.Content{}}
 	return s
 }
 
-// SetAgent names the client on what it writes, as its clientInfo does: for
-// a client that sends none, as the command line, which calls the tools
-// itself (Call).
 func (s *Server) SetAgent(name string) { s.agent = name }
 
-// Call runs the tool name with args, as tools/call does, and returns its
-// result: with an "error" when it failed.
 func (s *Server) Call(name string, args map[string]any) map[string]any {
 	return s.pages.call(name, args)
 }
@@ -124,8 +96,6 @@ type response struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
-// Serve reads one JSON-RPC message a line until in ends: a request or a
-// notification, or a batch of them.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	s.pages.app = true
 	sc := bufio.NewScanner(in)
@@ -153,10 +123,6 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	return sc.Err()
 }
 
-// batch answers a batch, as protocol 2025-03-26 has them, which the
-// server still speaks: an array of messages, answered by an array of the
-// answers to its requests, none when it holds only notifications. An
-// empty one is an invalid request.
 func (s *Server) batch(line []byte) any {
 	var msgs []json.RawMessage
 	if err := json.Unmarshal(line, &msgs); err != nil {
@@ -177,21 +143,15 @@ func (s *Server) batch(line []byte) any {
 	return out
 }
 
-// answer handles one message, and returns its answer: nil for a
-// notification.
 func (s *Server) answer(msg []byte) *response {
 	var req request
 	if err := json.Unmarshal(msg, &req); err != nil {
-		// JSON that is no request object is an invalid request, not a
-		// parse error.
 		e := &rpcError{-32700, "Parse error"}
 		if json.Valid(msg) {
 			e = &rpcError{-32600, "Invalid Request"}
 		}
 		return &response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: e}
 	}
-	// An object that is no JSON-RPC 2.0 request, without its method, is an
-	// invalid request too, answered under its ID if it has one.
 	if req.JSONRPC != "2.0" || req.Method == "" {
 		id := req.ID
 		if len(id) == 0 {
@@ -200,12 +160,9 @@ func (s *Server) answer(msg []byte) *response {
 		return &response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}
 	}
 	result, rerr := s.handle(req)
-	// Notifications get no answer.
 	if len(req.ID) == 0 {
 		return nil
 	}
-	// A request answers with a result or an error, even one named as a
-	// notification.
 	if result == nil && rerr == nil {
 		result = map[string]any{}
 	}
@@ -256,7 +213,6 @@ func (s *Server) handle(req request) (any, *rpcError) {
 			p.Arguments = map[string]any{}
 		}
 		s.markSeen()
-		// The app may have changed accounts since the last call.
 		var out map[string]any
 		if _, err := s.st.ReloadSession(); err != nil {
 			out = map[string]any{"error": err.Error()}
@@ -276,8 +232,6 @@ func (s *Server) handle(req request) (any, *rpcError) {
 	return nil, &rpcError{-32601, fmt.Sprintf("Method not found: %s", req.Method)}
 }
 
-// jsonText is a tool's result as the text the client reads: & < > as
-// they are, not escaped, since pages are full of them (embeds, code).
 func jsonText(v any) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
@@ -286,8 +240,6 @@ func jsonText(v any) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// agentName is how the client is named on what it writes: its title, or
-// its name made readable ("claude-code" is "Claude Code").
 func agentName(title, name string) string {
 	if t := strings.TrimSpace(title); t != "" {
 		return t

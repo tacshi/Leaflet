@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// addFile adds a file of name to s, as a file the user picked.
 func addFile(t *testing.T, s *Store, name string) File {
 	t.Helper()
 	source := filepath.Join(t.TempDir(), name)
@@ -23,7 +22,6 @@ func addFile(t *testing.T, s *Store, name string) File {
 	return f
 }
 
-// queued is the entry of an outbox row, with its payload.
 func queued(t *testing.T, s *Store, entity, id string) (OutboxEntry, map[string]any) {
 	t.Helper()
 	entries, err := s.Pending()
@@ -43,8 +41,6 @@ func queued(t *testing.T, s *Store, entity, id string) (OutboxEntry, map[string]
 	return OutboxEntry{}, nil
 }
 
-// A file is stored under a key Storage takes, whatever its name, which
-// stays as it was for people to read; a name Storage takes is its key.
 func TestFileKeysAreOnesStorageTakes(t *testing.T) {
 	s := open(t)
 	for name, want := range map[string]string{
@@ -69,10 +65,6 @@ func TestFileKeysAreOnesStorageTakes(t *testing.T) {
 	}
 }
 
-// A file an earlier version queued under its name, which Storage refuses,
-// gets a key of its own in its row, its row's entry and its upload, each
-// as it was queued but for that, and goes at once. One Storage takes is
-// left as it is.
 func TestRekeyFile(t *testing.T) {
 	s := open(t)
 	f := addFile(t, s, "plan.pdf")
@@ -123,10 +115,6 @@ func TestRekeyFile(t *testing.T) {
 	}
 }
 
-// A row with only some columns queued stays a change of those, with its
-// key among them, and one with none queued, as already on the server,
-// goes as a change of its key alone. One sent again as this device joined
-// an account stays so.
 func TestRekeyFileKeepsHowTheRowGoes(t *testing.T) {
 	s := open(t)
 	f := addFile(t, s, "plan.pdf")
@@ -184,9 +172,6 @@ func jsonOf(t *testing.T, v any) string {
 	return string(raw)
 }
 
-// A file sent again goes up under a key Storage takes when it goes up from
-// here. One that does not stays by the name it is stored under, where the
-// other devices find it: only its space moves.
 func TestRequeuedFileKeepsItsStoredName(t *testing.T) {
 	s := open(t)
 	f := addFile(t, s, "plan.pdf")
@@ -216,8 +201,6 @@ func TestRequeuedFileKeepsItsStoredName(t *testing.T) {
 	}
 }
 
-// A comment's body and quote are cut to what the server keeps, in
-// characters, as a longer one would be refused each time it went up.
 func TestCommentsAreCutToWhatTheServerKeeps(t *testing.T) {
 	s := open(t)
 	long := strings.Repeat("字", maxCommentLen+5)
@@ -240,8 +223,6 @@ func TestCommentsAreCutToWhatTheServerKeeps(t *testing.T) {
 	}
 }
 
-// dataVersion is what another connection sees of s's commits, on one that
-// stays open.
 func dataVersion(t *testing.T, s *Store) int64 {
 	t.Helper()
 	var v int64
@@ -251,8 +232,6 @@ func dataVersion(t *testing.T, s *Store) int64 {
 	return v
 }
 
-// Opening a database up to date writes nothing, so a command that only
-// reads does not tell the app the database changed (WatchOthers).
 func TestOpeningADatabaseUpToDateWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir)
@@ -275,8 +254,6 @@ func TestOpeningADatabaseUpToDateWritesNothing(t *testing.T) {
 	}
 }
 
-// Opening a database up to date does not wait for the write lock another
-// connection holds.
 func TestOpeningADatabaseUpToDateTakesNoLock(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir)
@@ -307,8 +284,6 @@ func TestOpeningADatabaseUpToDateTakesNoLock(t *testing.T) {
 	}
 }
 
-// A database of this version that lacks what schema makes, as a table
-// added since without a step of its own, still gets it.
 func TestOpeningADatabaseMakesWhatItLacks(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
@@ -330,9 +305,6 @@ func TestOpeningADatabaseMakesWhatItLacks(t *testing.T) {
 	}
 }
 
-// What Postgres does not keep goes as U+FFFD, in text and in encoded JSON,
-// and nothing else changes: not a NUL spelled out in text, as code shows
-// one, nor a pair of surrogates.
 func TestCleaningKeepsToWhatPostgresRefuses(t *testing.T) {
 	for in, want := range map[string]string{
 		"plain":      "plain",
@@ -375,8 +347,6 @@ func TestCleaningKeepsToWhatPostgresRefuses(t *testing.T) {
 	}
 }
 
-// A snapshot goes up with what Postgres keeps, as stored JSON, read by no
-// decoder on its way, may hold what Postgres refuses.
 func TestSnapshotsGoUpClean(t *testing.T) {
 	r := HistoryToRemote(HistoryEntry{ID: "h", PageID: "p", Content: `{"a":"b\u0000\ud83d"}`, Reason: "autosave"}, "u")
 	if got := jsonOf(t, r["content"]); got != `{"a":"b\ufffd\ufffd"}` {

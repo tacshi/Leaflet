@@ -24,9 +24,6 @@ func TestPageMentionMarkdown(t *testing.T) {
 	}
 }
 
-// A person or an agent mentioned writes as a link to mention:<kind>:<id>,
-// as the server's agents read and write it, and reads back as the mention:
-// an agent rewriting a to-do keeps who it is for.
 func TestPersonMentionMarkdown(t *testing.T) {
 	bob := &Mention{Kind: "user", ID: "u1", Name: "Bob [B]"}
 	d := Delta{{Text: "Call "}, {Text: "@Bob [B]", Attrs: Attrs{Mention: bob}}, {Text: " and "},
@@ -43,7 +40,6 @@ func TestPersonMentionMarkdown(t *testing.T) {
 	if got := FromBlocks([]*Node{todo}).Todos(); len(got) != 1 || got[0].Owner != "Bob" {
 		t.Errorf("todos %+v", got)
 	}
-	// Other mention: links are links.
 	if back := FromMarkdown("[x](mention:page:p1)"); len(back) != 1 || back[0].Attrs.Mention != nil || back[0].Attrs.Href != "mention:page:p1" {
 		t.Errorf("mention:page read as %+v", back)
 	}
@@ -67,7 +63,6 @@ func TestRefreshPageMentions(t *testing.T) {
 	}
 }
 
-// A mention takes its page's new title in the formats it had.
 func TestRefreshPageMentionsKeepsFormats(t *testing.T) {
 	a := PageMention("p1", "Old")
 	a.Bold, a.Color = true, "#ef4444"
@@ -85,10 +80,6 @@ func TestRefreshPageMentionsKeepsFormats(t *testing.T) {
 	}
 }
 
-// A copy's links to its own blocks go to the copies of those blocks, as a
-// list of a page's headings, and to the moments of its own videos; so does
-// one to a block of another page copied with it, and one to a block that
-// page no longer has goes to the page.
 func TestCopyPagesKeepsBlockLinks(t *testing.T) {
 	head := &Node{ID: "h", Type: "heading"}
 	head.SetDelta(Delta{{Text: "Part"}})
@@ -176,8 +167,6 @@ func TestBlockLink(t *testing.T) {
 	}
 }
 
-// An export or a copy names a person or an agent mentioned, as the page
-// shows them: a mention link means something only to Leaflet's agents.
 func TestReadableMarkdownNamesMentions(t *testing.T) {
 	d := Delta{{Text: "Call "}, {Text: "@Bob", Attrs: Attrs{Mention: &Mention{Kind: "user", ID: "u1", Name: "Bob"}}}, {Text: " and "},
 		{Text: "Plan", Attrs: PageMention("p1", "Plan")}}

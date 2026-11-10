@@ -7,7 +7,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// links returns the pages page id has cards for.
 func links(t *testing.T, c *Core, id string) []string {
 	t.Helper()
 	raw, err := c.OpenPage(id)
@@ -41,16 +40,12 @@ func TestSubpagesKeepTheirCards(t *testing.T) {
 	parent := create(t, c, `{"title":"Trip"}`)
 	other := create(t, c, `{"title":"Work"}`)
 
-	// A subpage made from the library gets a card at its parent's end; one
-	// the editor links itself doesn't.
 	child := create(t, c, `{"title":"Packing","link":true,"parent_id":"`+parent.ID+`"}`)
 	create(t, c, `{"title":"Inline","parent_id":"`+parent.ID+`"}`)
 	if got := links(t, c, parent.ID); len(got) != 1 || got[0] != child.ID {
 		t.Fatalf("parent links %v", got)
 	}
 
-	// Moving it takes the card along: out of the parent, open in the app,
-	// and into the other, kept only in the store.
 	if err := c.MovePage(child.ID, other.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +56,6 @@ func TestSubpagesKeepTheirCards(t *testing.T) {
 		t.Fatalf("new parent links %v", got)
 	}
 
-	// Deleting it takes its card, and Undo puts it back where it was.
 	sibling := create(t, c, `{"title":"Tickets","link":true,"parent_id":"`+other.ID+`"}`)
 	ids, err := c.DeletePage(child.ID)
 	if err != nil {

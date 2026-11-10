@@ -18,8 +18,6 @@ func bigRows(rows, cols int) [][]string {
 	return out
 }
 
-// A table's cells show as their text, without its formats, in the rows
-// and columns TableCells finds: an empty row stays, as the table has it.
 func TestPlainTableRows(t *testing.T) {
 	table, _ := TableNode([][]string{{"**A**", "B"}, {"", ""}, {"1", "[two](https://example.com)"}}, "")
 	want := [][]string{{"A", "B"}, {"", ""}, {"1", "two"}}
@@ -28,11 +26,9 @@ func TestPlainTableRows(t *testing.T) {
 	}
 }
 
-// TableCells finds each cell where TableCell does, and nil for a missing
-// one.
 func TestTableCellsMatchTableCell(t *testing.T) {
 	table, _ := TableNode(bigRows(3, 2), "")
-	table.Children = table.Children[1:] // the cell at row 0, column 0 goes
+	table.Children = table.Children[1:]
 	grid := TableCells(table)
 	for r := range 3 {
 		for c := range 2 {
@@ -46,8 +42,6 @@ func TestTableCellsMatchTableCell(t *testing.T) {
 	}
 }
 
-// SetTableRows keeps the cells whose text is the same, and changes the
-// others.
 func TestSetTableRowsKeepsCells(t *testing.T) {
 	table, _ := TableNode(bigRows(3, 2), "")
 	kept := tableCell(table, 2, 1)
@@ -61,8 +55,6 @@ func TestSetTableRowsKeepsCells(t *testing.T) {
 	}
 }
 
-// BenchmarkSetTableRows sets a table of 2000 rows of 5 cells, as an agent's
-// replace_block of a big table does.
 func BenchmarkSetTableRows(b *testing.B) {
 	rows := bigRows(2000, 5)
 	table, _ := TableNode(rows, "")
@@ -72,8 +64,6 @@ func BenchmarkSetTableRows(b *testing.B) {
 	}
 }
 
-// BenchmarkTableCells finds every cell of a table of 2000 rows of 5 cells,
-// as drawing it does each frame.
 func BenchmarkTableCells(b *testing.B) {
 	table, _ := TableNode(bigRows(2000, 5), "")
 	for b.Loop() {
@@ -81,10 +71,6 @@ func BenchmarkTableCells(b *testing.B) {
 	}
 }
 
-// A cell at a position no JSON number holds exactly, as a hostile editor
-// of a shared page can write, sizes no table from it: read as the largest
-// int, as arm64 converts it, the table's size overflowed and every reader
-// of it panicked.
 func TestHugeCellPositionsReadAsNone(t *testing.T) {
 	for _, pos := range []string{"1e19", "-1e19", "1e16", "1e308"} {
 		c, err := Decode(`{"document":{"type":"page","id":"root","children":[{"id":"t","type":"table","data":{"rowsLen":2,"colsLen":1},"children":[
@@ -121,7 +107,6 @@ func TestAsIntKeepsExactIntegers(t *testing.T) {
 	}
 }
 
-// tableCell is the cell of a table at a row and column, or nil.
 func tableCell(table *Node, row, col int) *Node {
 	for _, cell := range table.Children {
 		if cell.Int("colPosition", -1) == col && cell.Int("rowPosition", -1) == row {

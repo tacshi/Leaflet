@@ -1,8 +1,5 @@
 import UIKit
 
-/// EditorMenus are the editor's menus: the edit menu of the text chosen,
-/// with Ask agent, Comments, the formats and the colors, and the commands
-/// over the keyboard on iPhone, and in the shortcuts bar on iPad.
 @MainActor
 final class EditorMenus {
     private unowned let editor: EditorController
@@ -10,14 +7,9 @@ final class EditorMenus {
 
     init(_ editor: EditorController) { self.editor = editor }
 
-    /// editMenu is the edit menu of the text in range, made of the system's
-    /// suggested actions and the editor's.
     func editMenu(for range: NSRange, suggested: [UIMenuElement]) -> UIMenu? {
         guard textView.isEditable, range.length > 0 else {
-            // Text chosen on a page that can't change is copied.
             if range.length > 0 { return UIMenu(children: withCopyPlainText(suggested)) }
-            // At the caret in a to-do, its due date, which its chip may
-            // have no room to offer.
             let (_, info) = editor.text.paragraph(at: range.location)
             guard textView.isEditable, info.type == "todo_list" else {
                 return UIMenu(children: suggested)
@@ -31,7 +23,6 @@ final class EditorMenus {
             children: [agentMenu(), formatMenu(), colorMenu()] + withCopyPlainText(suggested))
     }
 
-    /// agentMenu asks an agent about the text chosen, or comments on it.
     private func agentMenu() -> UIMenu {
         UIMenu(
             options: .displayInline,
@@ -51,9 +42,6 @@ final class EditorMenus {
             ])
     }
 
-    /// withCopyPlainText puts Copy as Plain Text after the system's Copy
-    /// in an edit menu's actions, or first when they have no Copy: a page
-    /// of plain text, not Copy's own symbol.
     private func withCopyPlainText(_ actions: [UIMenuElement]) -> [UIMenuElement] {
         let item = UIAction(
             title: L.editorCopyPlainText, image: UIImage(systemName: "doc.plaintext")
@@ -108,8 +96,6 @@ final class EditorMenus {
             ])
     }
 
-    /// swatches are the desktop's text colors, as hex, by name, in the
-    /// language the app is in now.
     static var swatches: [(String, String)] {
         [
             (L.editorColorRed, "#ef4444"), (L.editorColorOrange, "#f97316"),
@@ -157,8 +143,6 @@ final class EditorMenus {
             ])
     }
 
-    /// blockMenu turns the block at the caret into another kind, as the
-    /// menu bar's Turn Into does.
     private func blockMenu() -> UIMenu {
         func item(
             _ title: String, _ symbol: String, _ type: String, _ data: [String: JSONValue] = [:]
@@ -184,13 +168,7 @@ final class EditorMenus {
             ])
     }
 
-    // MARK: Keyboard bar
-
-    /// installKeyboardBar puts the editor's commands over the keyboard on
-    /// iPhone, and in the shortcuts bar on iPad.
     func installKeyboardBar() {
-        // Insert offers what "/" does, and puts it in as "/" does: Turn
-        // Into is the Format menu's.
         let insert = Self.menuItem(
             LI.insert, "plus.circle",
             UIMenu(children: [
@@ -229,10 +207,6 @@ final class EditorMenus {
                 primaryAction: UIAction(title: L.commonUndo) { [weak self] _ in
                     self?.textView.undoManager?.undo()
                 })
-            // Six buttons are what the bar holds on an iPhone without
-            // folding some into a "…" menu. The keyboard goes as the page
-            // is dragged down, so it has no button of its own; short of
-            // room all the same, iOS folds the indents before Undo.
             if #available(iOS 27.0, *) {
                 undo.visibilityPriority = .high
                 for item in [outdent, indent] { item.visibilityPriority = .low }
@@ -249,9 +223,6 @@ final class EditorMenus {
         }
     }
 
-    /// menuItem is a bar item that opens menu. On iPad it is a button of
-    /// its own, as the shortcuts bar hides an item while its menu is open,
-    /// leaving a gap in the bar.
     private static func menuItem(_ title: String, _ symbol: String, _ menu: UIMenu)
         -> UIBarButtonItem
     {
@@ -263,15 +234,12 @@ final class EditorMenus {
         button.accessibilityLabel = title
         button.menu = menu
         button.showsMenuAsPrimaryAction = true
-        // The padding the bar gives its own items.
         button.widthAnchor.constraint(equalToConstant: button.intrinsicContentSize.width + 12)
             .isActive = true
         return UIBarButtonItem(customView: button)
     }
 }
 
-/// StayingMenuButton stays in view while its menu is open: the menu grows
-/// from a clear stand-in, where it would hide the button it grows from.
 private final class StayingMenuButton: UIButton {
     private let anchor = UIView()
 
@@ -306,22 +274,14 @@ private final class StayingMenuButton: UIButton {
 }
 
 extension UIViewController {
-    /// topmost is the view controller shown on top of this one.
     var topmost: UIViewController { presentedViewController?.topmost ?? self }
 }
 
-/// KeyboardBar is the editor's toolbar over the keyboard on iPhone. With no
-/// keyboard on screen, as with a hardware keyboard, the system stands it at
-/// the screen's foot, where its toolbar keeps above the home indicator. Laid
-/// out by constraints, the toolbar is as wide as the bar from the start: a
-/// toolbar sized before it has a width folds its last items into "…".
 final class KeyboardBar: UIView {
     let toolbar = UIToolbar()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // The system sizes an accessory by its intrinsic height, and adds
-        // the safe area below it when it stands at the screen's foot.
         autoresizingMask = .flexibleHeight
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)

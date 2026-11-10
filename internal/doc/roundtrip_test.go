@@ -8,13 +8,10 @@ import (
 	"leaflet/locales"
 )
 
-// readBack is blocks written as a page's Markdown and read back.
 func readBack(blocks ...*Node) []*Node {
 	return MarkdownBlocks(PageMarkdown("", FromBlocks(blocks), MarkdownOptions{}))
 }
 
-// sameShape fails t when blocks read back from their Markdown are not as
-// they were.
 func sameShape(t *testing.T, blocks ...*Node) {
 	t.Helper()
 	md := PageMarkdown("", FromBlocks(blocks), MarkdownOptions{})
@@ -29,8 +26,6 @@ func block(typ string, d Delta, kids ...*Node) *Node {
 	return n
 }
 
-// A formula with a line of $$ can't go between lines of $$: it reads back
-// as code, with nothing after it taken in.
 func TestFormulaWithALineOfDollarsReadsBack(t *testing.T) {
 	got := readBack(MathNode("x^2\n$$\ny"), textNode("paragraph", Delta{{Text: "after"}}))
 	if len(got) != 2 || got[0].Type != "code" || got[0].Delta().Plain() != "x^2\n$$\ny" || got[1].Delta().Plain() != "after" {
@@ -39,9 +34,6 @@ func TestFormulaWithALineOfDollarsReadsBack(t *testing.T) {
 	sameShape(t, MathNode("x^2\n$$y"), textNode("paragraph", Delta{{Text: "after"}}))
 }
 
-// A backtick in a link's address goes as %60, so what looks for code spans
-// before it reads links, a table's row and a toggle's summary, finds none
-// there.
 func TestBacktickInALinkReadsBack(t *testing.T) {
 	link := Attrs{Href: "https://a.b/`x"}
 	code := Attrs{Code: true}
@@ -65,8 +57,6 @@ func TestBacktickInALinkReadsBack(t *testing.T) {
 	}
 }
 
-// A row of a table that is all dashes is a row, as a cell of "-" is the
-// cell's text; only the line under the header is not.
 func TestTableRowOfDashesReadsBack(t *testing.T) {
 	table, _ := TableNode([][]string{{"a", "b"}, {"-", "--"}, {":-:", "x"}}, "")
 	got := readBack(table)
@@ -78,8 +68,6 @@ func TestTableRowOfDashesReadsBack(t *testing.T) {
 	}
 }
 
-// Spaces at the start of a paragraph's text don't indent its line, which
-// would put it in the list item before it.
 func TestLeadingSpacesDontNest(t *testing.T) {
 	item := block("bulleted_list", Delta{{Text: "item"}}, block("bulleted_list", Delta{{Text: "child"}}))
 	para := block("paragraph", Delta{{Text: "    after\n  more"}})
@@ -89,10 +77,6 @@ func TestLeadingSpacesDontNest(t *testing.T) {
 	}
 }
 
-// A line of a block's text that starts with a space of another kind, as a
-// no-break or an ideographic space, then what would start a block, is
-// text of the block: a $$ there doesn't make the blocks after it math,
-// nor a </details> end the block.
 func TestSpacesOfAnyKindBeforeABlockStart(t *testing.T) {
 	for _, space := range []string{" ", "　", "\v", "\f"} {
 		for _, start := range []string{"$$", "</details>", "| a |"} {
@@ -107,8 +91,6 @@ func TestSpacesOfAnyKindBeforeABlockStart(t *testing.T) {
 	}
 }
 
-// A ! before a link is text, not the start of a picture, at the start of
-// a block or in it.
 func TestBangBeforeALinkStaysText(t *testing.T) {
 	link := Attrs{Href: "https://x.dev/cat.png"}
 	for _, d := range []Delta{
@@ -131,9 +113,6 @@ func TestBangBeforeALinkStaysText(t *testing.T) {
 	}
 }
 
-// Code over a line break, where the next line would start a block, and a
-// </summary> in a toggle's code, read back as they were, the code
-// keeping its text.
 func TestCodeOverLinesReadsBack(t *testing.T) {
 	code := Attrs{Code: true}
 	for _, text := range []string{"<details>", "- item", "</details>", "# x", "  > quote"} {
@@ -148,8 +127,6 @@ func TestCodeOverLinesReadsBack(t *testing.T) {
 	sameShape(t, toggle, block("paragraph", Delta{{Text: "after"}}))
 }
 
-// A | in a table cell's code reads back in the cell, a backslash before
-// it too.
 func TestPipesInTableCodeReadBack(t *testing.T) {
 	table, _ := TableNode([][]string{{"`a|b`", "`a\\|b`"}, {`x\|y`, "`\\`"}}, "")
 	got := readBack(table)
@@ -161,8 +138,6 @@ func TestPipesInTableCodeReadBack(t *testing.T) {
 	}
 }
 
-// A page mention keeps the formats around its link and those of all its
-// text.
 func TestPageMentionKeepsItsFormats(t *testing.T) {
 	for md, want := range map[string]Attrs{
 		"**[Plan](leaflet://page/p1)**":     {Bold: true},
@@ -186,8 +161,6 @@ func TestPageMentionKeepsItsFormats(t *testing.T) {
 	}
 }
 
-// A page mention shows on a web page as the page's title, a person as @
-// and their name.
 func TestMentionsInHTML(t *testing.T) {
 	d := Delta{
 		{Text: "Plan", Attrs: PageMention("p1", "Plan")},
@@ -199,9 +172,6 @@ func TestMentionsInHTML(t *testing.T) {
 	}
 }
 
-// A chart's series with no name is nameless wherever the chart shows,
-// and a null label empty, not "<nil>"; a number label is written as the
-// server writes it, not as 1.25e+06.
 func TestChartWithoutSeriesName(t *testing.T) {
 	n := &Node{ID: "c", Type: "chart", Data: map[string]any{
 		"labels": []any{"a", nil, 1250000.0, []any{"x"}}, "series": []any{map[string]any{"values": []any{1.0}}},
@@ -218,8 +188,6 @@ func TestChartWithoutSeriesName(t *testing.T) {
 	}
 }
 
-// A numbered list of a thousand items and more reads back as one, while
-// a line starting with a year, as "2024.", is still a paragraph.
 func TestLongNumberedListReadsBack(t *testing.T) {
 	var items []*Node
 	for range 1002 {
@@ -234,7 +202,6 @@ func TestLongNumberedListReadsBack(t *testing.T) {
 	}
 }
 
-// A language with spaces in its name reads back from its fence.
 func TestCodeLanguageWithSpacesReadsBack(t *testing.T) {
 	n := CodeNode("x", "Objective C")
 	if l := n.Str("language"); l != "objective-c" {
@@ -247,9 +214,6 @@ func TestCodeLanguageWithSpacesReadsBack(t *testing.T) {
 	}
 }
 
-// What an embed, a video and a recording stand for in an export is in the
-// language it is written for, whatever the app shows; an embed with the
-// title a new one takes, in any language, is named only for what it is.
 func TestExportSaysBlocksInItsLanguage(t *testing.T) {
 	embed := &Node{ID: "e", Type: "embed", Data: map[string]any{"title": ""}}
 	video := &Node{ID: "v", Type: "video", Data: map[string]any{"url": "https://x.dev/a.mp4"}}
@@ -273,10 +237,6 @@ func TestExportSaysBlocksInItsLanguage(t *testing.T) {
 	}
 }
 
-// A rule is three or more of one mark, with only spaces and tabs among
-// and around them, as CommonMark and the server read one: a list item's
-// "--" or a line starting with other spaces is text, and stays text,
-// written and read again.
 func TestRulesAsCommonMarkReadsThem(t *testing.T) {
 	for _, s := range []string{"---", " * * *", "-\t-\t-", "___\t", "  ----  "} {
 		if !IsRule(s) {
@@ -309,9 +269,6 @@ func TestRulesAsCommonMarkReadsThem(t *testing.T) {
 	}
 }
 
-// Formats Markdown can't say all of are written as they read back, the
-// same Markdown each time: a mention whose first space can't be in
-// italics, and an italic over a space between two bold words.
 func TestFormatsWriteTheSameEachTime(t *testing.T) {
 	for _, md := range []string{"*[ 0](leaflet://page/0)*", "**0**_**0** **0**_", "<details>\n<summary>a\n  `x\n 000`</summary>\n</details>"} {
 		written := PageMarkdown("", FromBlocks(MarkdownBlocks(md)), MarkdownOptions{})

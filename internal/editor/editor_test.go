@@ -20,15 +20,12 @@ import (
 )
 
 type fakeHost struct {
-	picked []MenuItem
-	opened []string
-	edited []string
-	// imageFailed is whether images fail to load, rather than load forever.
+	picked      []MenuItem
+	opened      []string
+	edited      []string
 	imageFailed bool
-	// follows are the share links the editor asked to follow.
-	follows []follow
-	// slash is what the / menu offers, when not the one heading.
-	slash []MenuItem
+	follows     []follow
+	slash       []MenuItem
 }
 
 func (h *fakeHost) PageTitle(id string) string { return "Sub" }
@@ -67,7 +64,6 @@ func (h *fakeHost) OpenBlock(page, id string, at int) {
 }
 func (h *fakeHost) BlockLink(id string) string { return doc.BlockLink("this", id) }
 
-// FollowVideoLink keeps what it was asked, for the test to answer.
 func (h *fakeHost) FollowVideoLink(link string, done func(string)) {
 	h.follows = append(h.follows, follow{link, done})
 }
@@ -92,8 +88,6 @@ func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	return e, tt, host
 }
 
-// freshClipboard empties what Leaflet last copied and what Control-K
-// last killed, which are the app's, for a test and again after it.
 func freshClipboard(t *testing.T) {
 	empty := func() {
 		clip.text, clip.blocks, clip.delta, clip.token = "", nil, nil, ""
@@ -103,7 +97,6 @@ func freshClipboard(t *testing.T) {
 	t.Cleanup(empty)
 }
 
-// boxOf is a block's box in the window, as last drawn.
 func boxOf(e *Editor, id string) ui.Rect {
 	r, _ := e.box(id)
 	return r
@@ -175,7 +168,7 @@ func TestMarkdownShortcuts(t *testing.T) {
 		t.Errorf("tab did not nest: %+v", e.Content.Children)
 	}
 	tt.Key(0, ui.KeyEnter)
-	tt.Key(0, ui.KeyEnter) // an empty item ends the nesting
+	tt.Key(0, ui.KeyEnter)
 	if n := e.node(e.focus.ID); e.depth(n.ID) != 0 {
 		t.Errorf("empty item stayed nested")
 	}
@@ -207,7 +200,6 @@ func TestSlashMenu(t *testing.T) {
 	}
 }
 
-// longMenu opens a / menu too long to show whole, of two groups.
 func longMenu(t *testing.T) (*Editor, *ui.Tester) {
 	t.Helper()
 	e, tt, host := setup(t)
@@ -223,8 +215,6 @@ func longMenu(t *testing.T) (*Editor, *ui.Tester) {
 	return e, tt
 }
 
-// The arrows bring the row they move to into view, past a group's header
-// too.
 func TestMenuKeysShowTheChoice(t *testing.T) {
 	e, tt := longMenu(t)
 	top, _ := tt.Find("Item 0")
@@ -237,8 +227,6 @@ func TestMenuKeysShowTheChoice(t *testing.T) {
 	}
 }
 
-// The wheel scrolls the menu away from the choice, which stays where the
-// keys left it until they move it.
 func TestMenuScrollsByWheel(t *testing.T) {
 	e, tt := longMenu(t)
 	was, _ := tt.Find("Item 2")
@@ -256,8 +244,6 @@ func TestMenuScrollsByWheel(t *testing.T) {
 	}
 }
 
-// A space right after "/" or "@" is writing, not a search: the menu goes,
-// and Enter breaks the line, keeping what was typed.
 func TestSpaceAfterTriggerClosesTheMenu(t *testing.T) {
 	for _, typed := range []string{"ratio 1 / 2", "yes / no", "meet @ home"} {
 		e, tt, host := setup(t)
@@ -285,8 +271,6 @@ func TestSelectionAcrossBlocksDeletes(t *testing.T) {
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(0, ui.KeyBackspace)
-	// From the end of the last block up to the end of the first, the
-	// selection takes the rest, and the caret stays where it began.
 	got := texts(e)
 	if len(got) != 1 || got[0] != "paragraph:alpha" {
 		t.Fatalf("blocks %v", got)
@@ -312,7 +296,6 @@ func TestSelectionAcrossBlocksForAgent(t *testing.T) {
 	if got := e.SelectedBlocks(); !slices.Equal(got, []string{us[0].ID, us[1].ID, us[2].ID}) {
 		t.Fatalf("blocks %v", got)
 	}
-	// Up to the start of a block leaves that block out.
 	e.Select(Pos{us[0].ID, 0}, Pos{us[2].ID, 0})
 	if got := e.SelectedBlocks(); len(got) != 2 {
 		t.Fatalf("blocks %v", got)
@@ -369,7 +352,6 @@ func TestDividerShortcut(t *testing.T) {
 	if len(got) != 2 || got[0] != "divider:" || got[1] != "paragraph:after" {
 		t.Fatalf("got %q", got)
 	}
-	// Dashes inside text stay text.
 	tt.Key(0, ui.KeyEnter)
 	tt.Type("a---")
 	if got := texts(e); got[len(got)-1] != "paragraph:a---" {
@@ -415,7 +397,6 @@ func TestCopyPasteKeepsBlocks(t *testing.T) {
 	e.Select(Pos{item.ID, 0}, Pos{end.ID, 3})
 	text := e.copyText()
 	clip.text, clip.blocks = text, e.copyBlocks()
-	// Paste into an empty page of its own.
 	f := New(doc.Empty(), &fakeHost{})
 	f.PlaceCaret(f.Content.Children[0].ID, 0)
 	f.paste(text)
@@ -431,9 +412,6 @@ func TestCopyPasteKeepsBlocks(t *testing.T) {
 	}
 }
 
-// A table's cell is edited in a text area of its own, where text pasted
-// keeps its lines, and a line break in the cell is a <br> in the page's
-// Markdown, which reads back as one.
 func TestPasteLinesInTableCell(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"head"}, {"cell"}}, "")
@@ -462,8 +440,6 @@ func TestPasteLinesInTableCell(t *testing.T) {
 	}
 }
 
-// Charts are MyGo's: a bar chart's labels and values, a line chart's
-// ticks, and a pie's shares.
 func TestCharts(t *testing.T) {
 	for _, kind := range []string{"bar", "line", "pie"} {
 		e, tt, _ := setup(t)
@@ -492,7 +468,6 @@ func TestPasteVideoLink(t *testing.T) {
 	if top := e.Content.Children; len(top) != 2 || top[0].Type != "video" || top[0].Str("url") != "https://youtu.be/dQw4w9WgXcQ" || top[1].Type != "paragraph" {
 		t.Fatalf("got %v", texts(e))
 	}
-	// On a line with text the link stays text.
 	e.InsertText("see ")
 	e.paste("https://youtu.be/dQw4w9WgXcQ")
 	if got := texts(e); got[len(got)-1] != "paragraph:see https://youtu.be/dQw4w9WgXcQ" {
@@ -500,9 +475,6 @@ func TestPasteVideoLink(t *testing.T) {
 	}
 }
 
-// A video's share link pasted on an empty line goes in as a link, which
-// becomes the video the share leads to, a step to undo of its own; a line
-// changed since, or a share of no video, stays as it is.
 func TestPasteShareLink(t *testing.T) {
 	e, _, h := setup(t)
 	const share, video = "https://b23.tv/xuajGqj", "https://www.bilibili.com/video/BV1bY4G6pEEg"
@@ -520,7 +492,6 @@ func TestPasteShareLink(t *testing.T) {
 		t.Errorf("undone to %v", got)
 	}
 
-	// Typed on since, the line is the user's.
 	e.Enter()
 	e.paste(share)
 	e.InsertText(" later")
@@ -528,7 +499,6 @@ func TestPasteShareLink(t *testing.T) {
 	if got := texts(e); got[len(got)-1] != "paragraph:"+share+" later" {
 		t.Errorf("a changed line became %v", got)
 	}
-	// A share of no video stays a link.
 	e.Enter()
 	e.paste(share)
 	h.follows[2].done(share)
@@ -543,7 +513,6 @@ func TestPasteImageLink(t *testing.T) {
 	if top := e.Content.Children; len(top) != 2 || top[0].Type != "image" || top[0].Str("url") != "https://example.com/a/cover.JPG?w=600" || top[1].Type != "paragraph" {
 		t.Fatalf("got %v", texts(e))
 	}
-	// A link to a page stays text.
 	e.paste("https://example.com/a/cover")
 	if got := texts(e); got[len(got)-1] != "paragraph:https://example.com/a/cover" {
 		t.Errorf("got %v", got)
@@ -587,9 +556,6 @@ func TestEmacsKeys(t *testing.T) {
 	}
 }
 
-// Off macOS, Ctrl is the word and page key: Ctrl+Backspace takes a word,
-// not the block up to the caret, Ctrl+Left steps a word, and Ctrl+Home
-// goes to the page's start. On a Mac, the keys go as Windows sends them.
 func TestCtrlKeysOffTheMac(t *testing.T) {
 	e, tt, _ := setup(t)
 	press := func(mods ui.Modifiers, key ui.Key) {
@@ -635,8 +601,6 @@ func TestEmacsKeysInSlashMenu(t *testing.T) {
 	}
 }
 
-// code makes the page an empty code block, with the caret in it, and
-// the paragraph left after it.
 func code(t *testing.T) (*Editor, *doc.Node) {
 	t.Helper()
 	e, _, _ := setup(t)
@@ -660,7 +624,6 @@ func TestCodeTyping(t *testing.T) {
 	if len(n.Delta()) != 1 || !n.Delta()[0].Attrs.Zero() || e.Trigger() != nil {
 		t.Errorf("code took formats or a menu: %+v", n.Delta())
 	}
-	// The second blank line at the end leaves the block, without them.
 	e.Enter()
 	e.Enter()
 	if got := n.Delta().Plain(); got != "func f() {\n  **x** / @y" {
@@ -707,14 +670,12 @@ func TestFencedCode(t *testing.T) {
 	if got := e.copyText(); got != "Intro\n\n```go\nfunc a() {\n\treturn\n}\n```\n\nAfter" {
 		t.Errorf("copied %q", got)
 	}
-	// A fence typed in a paragraph and Enter start a code block.
 	f, _, _ := setup(t)
 	f.InsertText("```py")
 	f.Enter()
 	if top := f.Content.Children; len(top) != 2 || top[0].Type != "code" || top[0].Str("language") != "python" || top[0].Delta().Plain() != "" || top[1].Type != "paragraph" {
 		t.Errorf("got %v", texts(f))
 	}
-	// One before a paragraph leaves none more.
 	g, _, _ := setup(t)
 	g.InsertText("After")
 	g.PlaceCaret(g.Content.Children[0].ID, 0)
@@ -739,7 +700,6 @@ func TestCodeCopyButton(t *testing.T) {
 	if got := tt.Clipboard(); got != "x := 1" {
 		t.Errorf("clipboard %q", got)
 	}
-	// The press went to the button, not to the code: the caret stays.
 	if p := e.Caret(); p.ID != n.ID || p.Off != 6 {
 		t.Errorf("caret %v", p)
 	}
@@ -762,7 +722,6 @@ func TestCallout(t *testing.T) {
 	if n.Str("tone") != "warning" {
 		t.Errorf("tone %q", n.Str("tone"))
 	}
-	// Enter leaves it for a paragraph; Backspace at its start ends it.
 	e.Enter()
 	if top := e.Content.Children; len(top) != 2 || top[1].Type != "paragraph" {
 		t.Errorf("after Enter %v", texts(e))
@@ -772,7 +731,6 @@ func TestCallout(t *testing.T) {
 	if n.Type != "paragraph" || n.Data["tone"] != nil {
 		t.Errorf("after Backspace %+v", n.Data)
 	}
-	// A GitHub alert pasted is a callout.
 	f, _, _ := setup(t)
 	f.paste("> [!TIP]\n> Keep it short.\n> Then stop.\nAfter")
 	if c := f.Content.Children[0]; c.Type != "callout" || c.Str("tone") != "tip" || c.Delta().Plain() != "Keep it short.\nThen stop." {
@@ -785,33 +743,26 @@ func TestToggle(t *testing.T) {
 	e.SetType("toggle_list", 0)
 	tg := e.Content.Children[0]
 	e.InsertText("Details")
-	// Enter in an open toggle writes inside it.
 	e.Enter()
 	e.InsertText("Hidden")
 	if len(tg.Children) != 1 || tg.Children[0].Delta().Plain() != "Hidden" {
 		t.Fatalf("children %v", texts(e))
 	}
 	inside := tg.Children[0].ID
-	// Folding it takes its children out of the caret's way, and moves the
-	// caret out of them.
 	e.ToggleCollapsed(tg.ID)
 	if got := len(e.units()); got != 1 || e.Caret().ID != tg.ID {
 		t.Errorf("units %d, caret %v", got, e.Caret())
 	}
-	// Enter in a folded toggle starts the next toggle.
 	e.Enter()
 	if top := e.Content.Children; len(top) != 2 || top[1].Type != "toggle_list" {
 		t.Errorf("after Enter %v", texts(e))
 	}
-	// A paragraph after an open toggle nests in it with Tab.
 	e.ToggleCollapsed(tg.ID)
 	e.SetType("paragraph", 0)
 	e.Indent()
 	if len(tg.Children) != 2 || tg.Children[1].Type != "paragraph" || len(e.Content.Children) != 1 {
 		t.Errorf("after Tab %v", texts(e))
 	}
-	// Copying the folded toggle takes its children too, from between the
-	// first block and the last, as cutting does.
 	e.ToggleCollapsed(tg.ID)
 	start, end := newText("paragraph", nil), newText("paragraph", nil)
 	e.Edit(func(c *doc.Content) { c.Children = append([]*doc.Node{start}, append(c.Children, end)...) })
@@ -828,7 +779,6 @@ func TestPasteLinksAndSources(t *testing.T) {
 	if d := n.Delta(); len(d) != 1 || d[0].Attrs.Href != "https://go.dev/doc" {
 		t.Errorf("pasted link %+v", d)
 	}
-	// On selected text a link links it.
 	e.Edit(func(c *doc.Content) { n.SetDelta(doc.Delta{{Text: "the docs"}}) })
 	e.Select(Pos{n.ID, 4}, Pos{n.ID, 8})
 	e.paste("https://go.dev")
@@ -841,7 +791,6 @@ func TestPasteLinksAndSources(t *testing.T) {
 	if len(top) < 3 || top[0].Type != "diagram" || top[0].Str("source") != "graph TD\n  A-->B" || top[1].Type != "math_equation" || top[1].Str("formula") != "x^2" {
 		t.Fatalf("pasted %v", texts(f))
 	}
-	// A Mermaid fence typed and Enter make a diagram, open to write.
 	g, _, host := setup(t)
 	g.InsertText("```mermaid")
 	g.Enter()
@@ -856,7 +805,6 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	after := newText("paragraph", doc.FromMarkdown("after"))
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table, after} })
 	tt.Frame()
-	// Click the first body cell: it opens to its Markdown.
 	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
@@ -867,7 +815,6 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	tt.Key(0, ui.KeyTab)
 	tt.Frame()
 	tt.Type("**Queue** edits")
-	// Tab past the last cell adds a row and goes to its first cell.
 	tt.Key(0, ui.KeyTab)
 	tt.Frame()
 	if rows := table.Int("rowsLen", 0); rows != 3 {
@@ -880,7 +827,6 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	if rows[1][0] != "R1" || rows[1][1] != "**Queue** edits" {
 		t.Errorf("rows %q", rows)
 	}
-	// Enter on the last row leaves the table for the block after it.
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
 	if e.cellEdit != "" || e.Caret().ID != after.ID {
@@ -888,8 +834,6 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	}
 }
 
-// A table whose size another client wrote as huge moves between and adds
-// the cells it has, as it draws them.
 func TestTableWithAHugeSize(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"", ""}}, "")
@@ -912,8 +856,6 @@ func TestTableWithAHugeSize(t *testing.T) {
 	}
 }
 
-// Markdown typed into a cell a key at a time stays as typed: a "[" or a
-// "*" not closed yet is not shown escaped under the caret.
 func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"ID"}, {""}}, "")
@@ -932,7 +874,6 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	if rows := doc.TableRows(table); rows[1][0] != "[Go](https://go.dev) and **this**" {
 		t.Errorf("cell %q", rows[1][0])
 	}
-	// Undo shows the cell as it is then.
 	e.Undo()
 	tt.Frame()
 	if rows := doc.TableRows(e.Content.Children[0]); e.cellText != rows[1][0] {
@@ -940,8 +881,6 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	}
 }
 
-// Right-clicking an image or a video from the web offers to change its
-// link, an uploaded image to replace it; a block of text offers neither.
 func TestEditMedia(t *testing.T) {
 	e, tt, host := setup(t)
 	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png"}}
@@ -974,7 +913,6 @@ func TestEditMedia(t *testing.T) {
 		t.Errorf("a paragraph's menu: %v", tt.Texts())
 	}
 	tt.Key(0, ui.KeyEscape)
-	// An image that cannot load says so, rather than loading forever.
 	host.imageFailed = true
 	tt.Frame()
 	if _, ok := tt.Find("Couldn't load image"); !ok {
@@ -982,8 +920,6 @@ func TestEditMedia(t *testing.T) {
 	}
 }
 
-// A link to a video or picture shows as its block: in place of a line
-// that is only the link, after a line with words of its own.
 func TestLinkToMedia(t *testing.T) {
 	e, _, _ := setup(t)
 	clip := &doc.Node{ID: "clip", Type: "paragraph"}
@@ -1006,7 +942,6 @@ func TestLinkToMedia(t *testing.T) {
 	if e.Content.Find("clip") == nil || e.Content.Children[0].Type == "video" {
 		t.Errorf("undo: %v", e.Content.Children)
 	}
-	// A link to a page is not media.
 	e.LinkToMedia(Pos{"line", 0})
 	if len(e.Content.Children) != 4 {
 		t.Errorf("not media: %v", e.Content.Children)
@@ -1016,8 +951,6 @@ func TestLinkToMedia(t *testing.T) {
 	}
 }
 
-// chooseDrawn chooses an item of the context menu MyGo draws in the
-// window (PopoverMenu), which shows from the frame after the click.
 func chooseDrawn(tt *ui.Tester, item string) error {
 	tt.Frame()
 	if err := tt.Click(item); err != nil {
@@ -1037,8 +970,6 @@ func TestFontsChangeLayout(t *testing.T) {
 	if before == nil || before.font.Family != theme.PageFont {
 		t.Fatalf("layout before = %+v", before)
 	}
-	// Fonts every Mac has: one macOS downloads on demand, as Kaiti SC,
-	// holds up the layout for good where it is not installed.
 	theme.SetFonts("Georgia", "Hiragino Sans GB", "", "Menlo")
 	tt.Frame()
 	after := e.layoutOf(n)
@@ -1047,8 +978,6 @@ func TestFontsChangeLayout(t *testing.T) {
 	}
 }
 
-// A mention is one unit: the caret doesn't stop inside it, what is typed
-// after it isn't part of it, and Backspace takes it out whole.
 func TestMentionIsOneUnit(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hi @")
@@ -1077,10 +1006,6 @@ func TestMentionIsOneUnit(t *testing.T) {
 	}
 }
 
-// In a toggle, Backspace at the start of a heading and Enter in an empty
-// quote make them paragraphs where they are, and Shift-Tab takes a
-// paragraph out after the toggle, leaving the blocks after it inside: a
-// block other than a list never gets children.
 func TestBlocksInAToggleBecomeParagraphs(t *testing.T) {
 	e, tt, _ := setup(t)
 	h, q, p, r := newText("heading", doc.Delta{{Text: "H"}}), newText("quote", nil), para("p", "P"), para("r", "R")
@@ -1108,8 +1033,6 @@ func TestBlocksInAToggleBecomeParagraphs(t *testing.T) {
 	})
 }
 
-// Typing joins the undo step before it only in the same block, and not
-// once the caret has moved.
 func TestUndoStepsBreakWhenTheCaretMoves(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("ab")
@@ -1120,7 +1043,6 @@ func TestUndoStepsBreakWhenTheCaretMoves(t *testing.T) {
 	tt.Type("x")
 	tt.Key(0, ui.KeyLeft)
 	tt.Type("y")
-	// Typing in another block without moving there with a key.
 	e.PlaceCaret(b.ID, -1)
 	tt.Type("z")
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:abyx", "paragraph:cdz"}) {
@@ -1138,11 +1060,6 @@ func TestUndoStepsBreakWhenTheCaretMoves(t *testing.T) {
 	}
 }
 
-// A frame with a selection over many blocks takes time in proportion to
-// the blocks, not to their square: each block finds its place and depth
-// without walking the page. Eight times the blocks take about eight times
-// as long, and would take 64 times walking the page; the limit between
-// leaves room for a busy machine's timing, as CI's.
 func TestFrameWithSelectionIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times frames")
@@ -1163,8 +1080,6 @@ func TestFrameWithSelectionIsLinear(t *testing.T) {
 		for range 5 {
 			runtime.GC()
 			start := time.Now()
-			// Until the clock has moved far enough to read: Windows' moves in
-			// ticks, and reads 0 for what ends within one.
 			for runs := 1; ; runs++ {
 				tt.Frame()
 				if took := time.Since(start); took >= 200*time.Millisecond && runs >= 4 {
@@ -1181,9 +1096,6 @@ func TestFrameWithSelectionIsLinear(t *testing.T) {
 	}
 }
 
-// The / and @ menus open after Chinese or Japanese text, which puts no
-// space before them, but not inside a word; a full-width space, as their
-// input methods type, takes Markdown shortcuts.
 func TestMenusAndShortcutsInCJK(t *testing.T) {
 	for _, tc := range []struct {
 		typed string
@@ -1205,10 +1117,6 @@ func TestMenusAndShortcutsInCJK(t *testing.T) {
 	}
 }
 
-// Copied text keeps its formats, within one block too, and goes on the
-// clipboard as HTML for other apps; HTML from another app pastes as blocks
-// in its formats, but HTML without any as its text, which reads as
-// Markdown.
 func TestCopyAndPasteFormats(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("ship **v1** now")
@@ -1234,7 +1142,6 @@ func TestCopyAndPasteFormats(t *testing.T) {
 		return e.Content.Children
 	}
 	got := paste("<h2>Plan</h2><ul><li><b>Ship</b> it<ul><li>soon</li></ul></li></ul><pre>a\nb</pre>", "Plan\nShip it\nsoon\na\nb")
-	// Somewhere to go on writing after the code.
 	if len(got) != 4 || got[0].Type != "heading" || got[0].Int("level", 0) != 2 ||
 		got[1].Type != "bulleted_list" || !got[1].Delta()[0].Attrs.Bold || len(got[1].Children) != 1 ||
 		got[2].Type != "code" || got[2].Delta().Plain() != "a\nb" {
@@ -1246,9 +1153,6 @@ func TestCopyAndPasteFormats(t *testing.T) {
 	}
 }
 
-// Text colors and highlights paste as they were copied from Leaflet's
-// rich text, from another copy of Leaflet too, but not from HTML: a web
-// page's or a code editor's colors are its theme's, not the writer's.
 func TestPasteKeepsColorsOfLeafletsRichText(t *testing.T) {
 	e, tt, _ := setup(t)
 	n := newText("paragraph", doc.Delta{{Text: "red", Attrs: doc.Attrs{Color: "#ef4444"}}, {Text: " and "},
@@ -1278,8 +1182,6 @@ func TestPasteKeepsColorsOfLeafletsRichText(t *testing.T) {
 	}
 }
 
-// Copy as plain text puts only text on the clipboard, without formats or
-// Markdown, and it pastes as that text, not as the blocks it came from.
 func TestCopyPlainText(t *testing.T) {
 	e, tt, _ := setup(t)
 	item := newText("bulleted_list", doc.FromMarkdown("Day **1**"))
@@ -1297,7 +1199,6 @@ func TestCopyPlainText(t *testing.T) {
 		t.Errorf("copied %q, want %q", got, want)
 	}
 
-	// Within one block, the text selected.
 	e.Select(Pos{end.ID, 0}, Pos{end.ID, 8})
 	e.CopyPlainText()
 	if got := tt.Clipboard(); got != "end here" {
@@ -1309,7 +1210,6 @@ func TestCopyPlainText(t *testing.T) {
 		t.Errorf("pasted %+v", d)
 	}
 
-	// Nothing selected copies nothing.
 	tt.SetClipboard("before")
 	e.CopyPlainText()
 	if got := tt.Clipboard(); got != "before" {
@@ -1329,8 +1229,6 @@ func TestCaretIsAsTallAsItsText(t *testing.T) {
 	}
 }
 
-// A click during a composition ends it where it is, keeping what was
-// composed: composing on after it never writes over the block clicked.
 func TestClickEndsComposition(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("hello world")
@@ -1349,7 +1247,6 @@ func TestClickEndsComposition(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:你好hello world", "paragraph:abni"}) {
 		t.Errorf("blocks %v", got)
 	}
-	// Moving the caret from code ends it too.
 	tt.Compose("x", 1)
 	e.PlaceCaret(e.Content.Children[1].ID, 0)
 	tt.Compose("y", 1)
@@ -1359,8 +1256,6 @@ func TestClickEndsComposition(t *testing.T) {
 	}
 }
 
-// A composition and what it becomes are one step of undo, and one given
-// up is none.
 func TestCompositionIsOneUndoStep(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("a")
@@ -1384,7 +1279,6 @@ func TestCompositionIsOneUndoStep(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) || len(e.undo) != steps || len(e.redo) == 0 {
 		t.Errorf("given up: %v, %d steps, want %d; redo %d", got, len(e.undo), steps, len(e.redo))
 	}
-	// Over a selection, it is one step with what it replaced.
 	e.Select(Pos{e.Content.Children[0].ID, 0}, Pos{e.Content.Children[0].ID, 1})
 	tt.Compose("ni", 2)
 	tt.Type("你")
@@ -1392,7 +1286,6 @@ func TestCompositionIsOneUndoStep(t *testing.T) {
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) {
 		t.Errorf("after undoing over a selection %v", got)
 	}
-	// Ended by Enter, it leaves only Enter's step.
 	steps = len(e.undo)
 	e.PlaceCaret(e.Content.Children[0].ID, -1)
 	tt.Compose("ni", 2)
@@ -1402,8 +1295,6 @@ func TestCompositionIsOneUndoStep(t *testing.T) {
 	}
 }
 
-// Cmd-click opens a web or mail link, and no other: a file or another
-// app's link, as a shared page or an agent can write, would launch it.
 func TestCmdClickOpensOnlyWebLinks(t *testing.T) {
 	e, tt, _ := setup(t)
 	var blocks []*doc.Node
@@ -1422,8 +1313,6 @@ func TestCmdClickOpensOnlyWebLinks(t *testing.T) {
 	}
 }
 
-// Delete and Backspace that only move the caret, or do nothing, make no
-// step of undo, and keep the steps of redo.
 func TestNoUndoStepsThatChangeNothing(t *testing.T) {
 	div := &doc.Node{ID: "D", Type: "divider"}
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div, para("B", "b")}), &fakeHost{})
@@ -1453,7 +1342,6 @@ func TestNoUndoStepsThatChangeNothing(t *testing.T) {
 	}
 }
 
-// Lines pasted on a block selected whole are one step of undo.
 func TestPasteOnABlockIsOneUndoStep(t *testing.T) {
 	div := &doc.Node{ID: "D", Type: "divider"}
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div, para("B", "b")}), &fakeHost{})
@@ -1468,10 +1356,6 @@ func TestPasteOnABlockIsOneUndoStep(t *testing.T) {
 	}
 }
 
-// An agent's op that streams in after the user's edit is no part of that
-// edit: undoing it keeps the op, and typing on after the op is a step of
-// its own. Before any edit, the ops join the run's step, and undoing that
-// takes them back.
 func TestAgentOpsAfterAnEditOutliveItsUndo(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("Hello")
@@ -1495,8 +1379,6 @@ func TestAgentOpsAfterAnEditOutliveItsUndo(t *testing.T) {
 	}
 }
 
-// The ops that stream in past the user's edit share its one mark, so each
-// adds no step: undoing the edit keeps them all.
 func TestAgentOpsPastAnEditShareOneMark(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("Hello")
@@ -1517,7 +1399,6 @@ func TestAgentOpsPastAnEditShareOneMark(t *testing.T) {
 	}
 }
 
-// A block selected whole, without text, copies and cuts as itself.
 func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("Intro")
@@ -1544,9 +1425,6 @@ func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
 	}
 }
 
-// Lines pasted in a list item with children go between its text and its
-// children: the children follow the text after the caret, which stays in
-// its kind of block.
 func TestPasteLinesInAnItemWithChildren(t *testing.T) {
 	for _, tc := range []struct {
 		name, text string
@@ -1573,8 +1451,6 @@ func TestPasteLinesInAnItemWithChildren(t *testing.T) {
 			t.Errorf("%s: caret in %v", tc.name, e.node(e.Caret().ID).Delta().Plain())
 		}
 	}
-	// Pasted at the end of the item, the last line keeps its own kind, and
-	// the children follow it.
 	e, _, _ := setup(t)
 	item := newText("bulleted_list", doc.FromMarkdown("ab"))
 	item.Children = []*doc.Node{newText("bulleted_list", doc.FromMarkdown("kid"))}
@@ -1590,8 +1466,6 @@ func TestPasteLinesInAnItemWithChildren(t *testing.T) {
 	}
 }
 
-// A marker in a mention's title is no marker: typing the closing one
-// after it formats nothing, and never takes the mention out.
 func TestInlineShortcutSkipsMentions(t *testing.T) {
 	for _, tc := range []struct{ title, typed string }{{"A*b", "c*"}, {"A**b", "c**"}, {"x", "*y*"}, {"A`b", "c`"}} {
 		n := &doc.Node{ID: "A", Type: "paragraph"}
@@ -1611,7 +1485,6 @@ func TestInlineShortcutSkipsMentions(t *testing.T) {
 		if mentions != 1 {
 			t.Errorf("%q then %q: the mention went, %+v", tc.title, tc.typed, d)
 		}
-		// A pair outside the mention still formats.
 		if tc.typed == "*y*" {
 			if last := d[len(d)-1]; last.Text != "y" || !last.Attrs.Italic {
 				t.Errorf("*y* after a mention: %+v", d)
@@ -1622,8 +1495,6 @@ func TestInlineShortcutSkipsMentions(t *testing.T) {
 	}
 }
 
-// Indenting under a folded toggle unfolds it, and undoing it folds it
-// again.
 func TestUndoIndentFoldsTheToggleAgain(t *testing.T) {
 	tg := &doc.Node{ID: "T", Type: "toggle_list", Children: []*doc.Node{para("K", "kid")}}
 	tg.SetDelta(doc.Delta{{Text: "Toggle"}})
@@ -1642,8 +1513,6 @@ func TestUndoIndentFoldsTheToggleAgain(t *testing.T) {
 	}
 }
 
-// Outdenting code lines with no indent changes nothing: no step of undo,
-// and the steps of redo stay.
 func TestOutdentUnindentedCodeMakesNoStep(t *testing.T) {
 	c := doc.CodeNode("line", "")
 	c.ID = "C"
@@ -1658,8 +1527,6 @@ func TestOutdentUnindentedCodeMakesNoStep(t *testing.T) {
 	}
 }
 
-// Typing on a block selected whole starts a paragraph, and the typing is
-// one step of undo.
 func TestTypingOnABlockIsOneUndoStep(t *testing.T) {
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), {ID: "D", Type: "divider"}}), &fakeHost{})
 	e.PlaceCaret("D", 0)
@@ -1675,9 +1542,6 @@ func TestTypingOnABlockIsOneUndoStep(t *testing.T) {
 	}
 }
 
-// An agent's ops, and content from outside, keep the caret in the page
-// without scrolling to it: the user's view stays where it is while an
-// agent writes below.
 func TestOpsFromOutsideKeepTheView(t *testing.T) {
 	p := &doc.Node{ID: "p1", Type: "paragraph"}
 	p.SetDelta(doc.Delta{{Text: "Asked here"}})
@@ -1698,9 +1562,6 @@ func TestOpsFromOutsideKeepTheView(t *testing.T) {
 	}
 }
 
-// Typing at the end of a block taller than the window keeps the caret in
-// sight: it is the caret's line that comes into view, not the block, whose
-// top alone would show.
 func TestTypingKeepsTheCaretOfATallBlockInView(t *testing.T) {
 	freshClipboard(t)
 	e := New(doc.Empty(), &fakeHost{})
@@ -1730,8 +1591,6 @@ func TestTypingKeepsTheCaretOfATallBlockInView(t *testing.T) {
 	}
 }
 
-// A colored cell opens to its Markdown, its span in it, and keeps the
-// color when its text is edited.
 func TestColoredTableCell(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"Name"}, {`<span style="color:#ef4444ff">Blocked</span> item`}}, "")
@@ -1751,7 +1610,6 @@ func TestColoredTableCell(t *testing.T) {
 	}
 }
 
-// A long page, scrolled down, with the caret in a paragraph on the screen.
 func spacePage(t *testing.T, readOnly bool) (*Editor, *ui.Tester, *ui.ScrollState, *doc.Node) {
 	t.Helper()
 	e := New(doc.Empty(), &fakeHost{})
@@ -1781,7 +1639,7 @@ func spacePage(t *testing.T, readOnly bool) (*Editor, *ui.Tester, *ui.ScrollStat
 	if !ok {
 		t.Fatal("no caret")
 	}
-	scroll.Y += cr.Y - 150 // the caret's line in the middle of the view
+	scroll.Y += cr.Y - 150
 	tt.Frame()
 	e.ReadOnly = readOnly
 	tt.Frame()
@@ -1816,12 +1674,9 @@ func TestSpacePagesAPageThatCannotBeTypedIn(t *testing.T) {
 	}
 }
 
-// A page no one can type in keeps a word from a last line of its own, and
-// one being typed in keeps its words where they are.
 func TestReadOnlyTextWrapsPretty(t *testing.T) {
 	var pal *theme.Palette
 	ui.NewTester(func(c *ui.Context) { pal = theme.Of(c) }, 10, 10).Frame()
-	// How many lines n takes, and how many words its last one holds.
 	wrapped := func(e *Editor, n *doc.Node) (lines, last int) {
 		ls := e.layout(n, pal).layout.Lines()
 		end := ls[len(ls)-1]

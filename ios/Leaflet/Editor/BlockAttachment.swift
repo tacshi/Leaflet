@@ -1,11 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// BlockAttachment is a block without text in the editor (an image, a
-/// table, a chart), kept whole as one character of its paragraph. It only
-/// keeps the block's room in the text and draws nothing: BlockViews puts
-/// the block's view there, as TextKit's own attachment views show only
-/// once laid out a second time.
 final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
     let node: DocNode
 
@@ -15,9 +10,6 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         allowsTextAttachmentView = false
     }
 
-    /// accessibilityLabel is what VoiceOver reads for the block, as it
-    /// reads the text: an image's description, or what the block is and
-    /// its title, as the block has them.
     override var accessibilityLabel: String? {
         get {
             let d = node.data ?? [:]
@@ -30,9 +22,6 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         set {}
     }
 
-    // UIKit archives the text it copies or drags, its attachments with
-    // it, and reads it back as it is pasted or dropped: the block goes
-    // with them, as JSON.
     private static let nodeKey = "leaflet.node"
 
     override static var supportsSecureCoding: Bool { true }
@@ -56,8 +45,6 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         textContainer: NSTextContainer?, proposedLineFragment: CGRect, position: CGPoint
     ) -> CGRect {
         let width = max(proposedLineFragment.width - 4, 100)
-        // TextKit lays the page out on the main thread, where the heights
-        // blocks measured are kept.
         let node = node
         let height = MainActor.assumeIsolated { BlockCard.height(node, width: width) }
         return CGRect(x: 0, y: 0, width: width, height: height)
@@ -77,45 +64,29 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         Self.blank
     }
 
-    /// blank is what TextKit draws for the block: nothing.
     private static let blank = UIImage()
 }
 
-/// BlockViews shows the views of the blocks without text that are in
-/// view, each over its attachment's room, made once and kept while the
-/// page is open, so a web block isn't loaded again as it scrolls past.
 @MainActor
 final class BlockViews {
     private struct Shown {
         let node: DocNode
         let view: UIView
-        /// host is the SwiftUI block's, or nil for a web block's view.
         let host: UIHostingController<BlockCard>?
     }
 
     private var shown: [String: Shown] = [:]
-    /// links let subpages' cards show their pages' titles and open them.
-    /// The page gives them once the window hears of its editor, which can
-    /// be after the first cards showed: those take them then, or they
-    /// would say their pages are not found for as long as the page is open.
     var links: PageLinks? {
         didSet { refresh() }
     }
-    /// edit opens a block's editor, from its long press's menu, while the
-    /// page can be changed.
     var edit: (@MainActor (DocNode) -> Void)? {
         didSet { refresh() }
     }
-    /// editable says the page can be changed, which the blocks' views
-    /// follow as it changes: a table opens its sheet only then.
     var editable = false {
         didSet { if editable != oldValue { refresh() } }
     }
-    /// kept is how many views out of view are kept.
     private let kept = 40
 
-    /// layout places the views of the attachments in the text view's
-    /// viewport, and hides the others.
     func layout(in textView: UITextView) {
         guard let tlm = textView.textLayoutManager,
             let viewport = tlm.textViewportLayoutController.viewportRange
@@ -146,8 +117,6 @@ final class BlockViews {
                 guard !frame.isNull, frame.height > 0 else { return }
                 let view = self.view(for: attachment.node, id: info.id, in: textView)
                 let inset = textView.textContainerInset
-                // Set only when it moved: a SwiftUI block lays out again
-                // for each frame it is given.
                 let placed = frame.offsetBy(dx: inset.left, dy: inset.top)
                 if view.frame != placed { view.frame = placed }
                 if view.isHidden { view.isHidden = false }
@@ -155,10 +124,6 @@ final class BlockViews {
                 visible.insert(info.id)
             }
         }
-        // Out of view, a web block leaves the text view: WebKit pauses a
-        // page's animations and timers only out of the window, and an
-        // embed's would go on drawing, slowing scrolling. A SwiftUI block
-        // only hides, which keeps it laid out for when it comes back.
         for (id, s) in shown where !visible.contains(id) {
             if s.host == nil {
                 if s.view.superview != nil { Self.takeOut(s.view) }
@@ -174,19 +139,9 @@ final class BlockViews {
         }
     }
 
-    /// view returns the block's view, made again when the block changed,
-    /// but a video's while its link is the same. Its hosting controller
-    /// joins the page's view controller: without it, SwiftUI never tells
-    /// the block it appeared, and a picture or a video's thumbnail never
-    /// starts loading.
     private func view(for node: DocNode, id: String, in textView: UIView) -> UIView {
         if let s = shown[id] {
             if s.node == node { return s.view }
-            // A video of the same link keeps its view, given the block as
-            // it is now: made again, its player would load again from where
-            // it first started, as its notes are written, by hand or by an
-            // agent, or undone. Its height follows as it measures itself
-            // again.
             if let host = s.host, Self.samePlayer(s.node, node) {
                 host.rootView = card(node, in: textView)
                 shown[id] = Shown(node: node, view: s.view, host: host)
@@ -194,13 +149,10 @@ final class BlockViews {
             }
         }
         drop(id)
-        // A web block is its web view alone: inside a SwiftUI host in the
-        // text view, WebKit paints the page but it never shows.
         if let page = BlockCard.page(for: node) {
             let web = WebBlockView(html: page, interactive: node.type == "embed")
             web.clipsToBounds = true
             web.onHeight = { [weak textView] size in
-                // The block's room follows its page, laid out again once.
                 guard BlockHeights.set(node.id, size), let tv = textView as? EditorTextView
                 else { return }
                 tv.relayout(block: node.id)
@@ -211,7 +163,6 @@ final class BlockViews {
         }
         let host = UIHostingController(rootView: card(node, in: textView))
         host.view.backgroundColor = .clear
-        // A block draws within its room in the text, never over the text.
         host.view.clipsToBounds = true
         host.sizingOptions = []
         host.safeAreaRegions = []
@@ -226,43 +177,33 @@ final class BlockViews {
         return host.view
     }
 
-    /// placed is where block id was last put in the text view, seen or not,
-    /// or nil for a block with no view now.
     func placed(_ id: String) -> CGRect? { shown[id]?.view.frame }
 
-    /// frame is where block id shows in the text view, or nil out of view.
     func frame(of id: String) -> CGRect? {
         guard let view = shown[id]?.view, view.superview != nil, !view.isHidden else { return nil }
         return view.frame
     }
 
-    /// samePlayer says two states of a block are a video of the same link,
-    /// or the same file, which its player is made from.
     private static func samePlayer(_ old: DocNode, _ new: DocNode) -> Bool {
         guard old.id == new.id, old.type == new.type else { return false }
         return switch new.type {
         case "video": old.data?["url"] == new.data?["url"]
-        // A file's notes arrive while it plays.
         case "file": old.data?["file_id"] == new.data?["file_id"]
         default: false
         }
     }
 
-    /// card is a block's view, as the page can be changed or not.
     private func card(_ node: DocNode, in textView: UIView) -> BlockCard {
         BlockCard(
             node: node, links: links, edit: editable ? edit : nil,
             editor: (textView as? EditorTextView)?.controller,
             onHeight: { [weak textView] size in
-                // The block's room follows its view, laid out again once.
                 guard BlockHeights.set(node.id, size), let tv = textView as? EditorTextView
                 else { return }
                 tv.relayout(block: node.id)
             })
     }
 
-    /// refresh gives the blocks' views shown the page's links and edit as
-    /// they are now, keeping what each shows.
     private func refresh() {
         for s in shown.values {
             guard let host = s.host, let textView = s.view.superview else { continue }
@@ -270,11 +211,8 @@ final class BlockViews {
         }
     }
 
-    /// editable are the blocks a long press offers to edit.
     static let editable: Set = ["chart", "math_equation", "diagram", "embed"]
 
-    /// menuHit returns the block at point, in the text view's space, with
-    /// its view, when a long press there offers to edit it.
     func menuHit(_ point: CGPoint) -> (node: DocNode, view: UIView)? {
         guard editable, edit != nil else { return nil }
         for s in shown.values where Self.editable.contains(s.node.type) {
@@ -285,29 +223,19 @@ final class BlockViews {
         return nil
     }
 
-    /// owns says view is a block's.
     func owns(_ view: UIView) -> Bool {
         shown.values.contains { $0.view === view }
     }
 
-    /// shownView returns the view of the block of id, while it shows.
     func shownView(_ id: String) -> UIView? {
         guard let view = shown[id]?.view, !view.isHidden, view.superview != nil else { return nil }
         return view
     }
 
-    /// reset lets the blocks' views go, every one or those of the blocks
-    /// chosen, for each to be made again as it shows: as the theme
-    /// changes, or the text size tables' cells are in, and as the page
-    /// closes, whose view controller would keep them.
     func reset(where chosen: (DocNode) -> Bool = { _ in true }) {
         for (id, s) in shown where chosen(s.node) { drop(id) }
     }
 
-    /// takeOut takes a block's view out of the text view. An embed used
-    /// last has the focus, which goes with it: UIKit would hand it back to
-    /// the text view, which then scrolls back to its caret, away from where
-    /// the page was scrolled to.
     private static func takeOut(_ view: UIView) {
         let textView = view.superview as? EditorTextView
         textView?.refusesFocus = true

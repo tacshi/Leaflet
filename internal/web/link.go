@@ -13,7 +13,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// LinkInfo is what a web page says about itself in its head.
 type LinkInfo struct{ Title, Description, Image, Site string }
 
 var (
@@ -23,12 +22,7 @@ var (
 	attribute = regexp.MustCompile(`(?is)([a-z:_-]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
 )
 
-// ReadLinkInfo reads a page's title, description, picture and site name
-// from its Open Graph tags, or its title and description tags. A picture
-// given relative to the page is made whole.
 func ReadLinkInfo(page, src string) LinkInfo {
-	// The end of the head is found in src itself: lowering it first can
-	// change its length, so an index into the lowered copy may not fit src.
 	if loc := headEnd.FindStringIndex(src); loc != nil {
 		src = src[:loc[0]]
 	}
@@ -77,12 +71,8 @@ func ReadLinkInfo(page, src string) LinkInfo {
 	return info
 }
 
-// maxHeadBytes is the most of a page LookUp reads: its head, which comes
-// first.
 const maxHeadBytes = 1 << 20
 
-// LookUp asks link's page for its info. What its Content-Type says is no
-// page, as a picture or a PDF, has none, and is not read.
 func LookUp(link string) (LinkInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
 	defer cancel()
@@ -102,12 +92,10 @@ func LookUp(link string) (LinkInfo, error) {
 	return ReadLinkInfo(link, pageText(data, ctype)), nil
 }
 
-// Lacking reports whether n is a link card of link without its info yet.
 func Lacking(n *doc.Node, link string) bool {
 	return n.Type == "link_preview" && n.Str("url") == link && n.Str("title") == ""
 }
 
-// Unfilled are the links of content's link cards without their info.
 func Unfilled(content *doc.Content) []string {
 	var out []string
 	content.Walk(func(n, _ *doc.Node) {
@@ -118,8 +106,6 @@ func Unfilled(content *doc.Content) []string {
 	return out
 }
 
-// Fill puts info in content's cards of link that lack it, and reports
-// whether there were any.
 func (info LinkInfo) Fill(content *doc.Content, link string) bool {
 	found := false
 	content.Walk(func(n, _ *doc.Node) {
@@ -133,7 +119,6 @@ func (info LinkInfo) Fill(content *doc.Content, link string) bool {
 	return found
 }
 
-// Data is info as a link card keeps it.
 func (info LinkInfo) Data() map[string]any {
 	return map[string]any{"title": info.Title, "description": info.Description, "image": info.Image, "site": info.Site}
 }

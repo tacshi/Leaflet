@@ -12,21 +12,17 @@ import (
 	"leaflet/locales"
 )
 
-// workspaceApp is an app with an agent to ask.
 func workspaceApp(t *testing.T) *App {
 	t.Helper()
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.settings.SidebarOpen, a.settings.TextSize = true, 16
-	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	return a
 }
 
-// With no page open, the title bar has the record button and the panel's
-// toggle, nothing of a page's, and the panel its Agent tab alone: the
-// workspace agent's chat.
 func TestPanelWithNoPageIsTheWorkspaceAgents(t *testing.T) {
 	a := workspaceApp(t)
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1100, 760)
@@ -57,8 +53,6 @@ func TestPanelWithNoPageIsTheWorkspaceAgents(t *testing.T) {
 	}
 }
 
-// Beside a page, the composer's scope menu goes from the page's agent to
-// the workspace agent's, and back.
 func TestAgentTabSwitchesToAllPages(t *testing.T) {
 	a := workspaceApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -96,7 +90,6 @@ func TestAgentTabSwitchesToAllPages(t *testing.T) {
 	if a.agentScope != 0 || !tt.HasText(locales.PanelChatEmpty()) {
 		t.Fatalf("This page shows %q", tt.Texts())
 	}
-	// A chat sent from the page shows in the page's.
 	a.agentScope = 1
 	a.openPageAgent()
 	tt.Frame()
@@ -105,11 +98,8 @@ func TestAgentTabSwitchesToAllPages(t *testing.T) {
 	}
 }
 
-// Search's Ask agent, with no page open, asks the workspace agent.
 func TestSearchWithNoPageAsksTheWorkspaceAgent(t *testing.T) {
 	a := workspaceApp(t)
-	// The main thread is the test's, which does not come back for what
-	// the run sends there: run at once, it would go beside its frames.
 	a.post = func(func()) {}
 	a.openSearch()
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1100, 760)
@@ -124,8 +114,6 @@ func TestSearchWithNoPageAsksTheWorkspaceAgent(t *testing.T) {
 		t.Errorf("panel open %v, messages %+v", a.panelOpen, msgs)
 	}
 
-	// While the agent works, which takes one request at a time, the query
-	// waits in its composer rather than go nowhere.
 	a.hub.Session(agents.WorkspaceID).Running = true
 	a.openSearch()
 	tt.Frame()
@@ -139,8 +127,6 @@ func TestSearchWithNoPageAsksTheWorkspaceAgent(t *testing.T) {
 	}
 }
 
-// The workspace agent's Undo takes its run back, and an edit opens the
-// page it made.
 func TestWorkspaceEditOpensThePage(t *testing.T) {
 	a := workspaceApp(t)
 	made, err := a.st.CreatePage(store.NewPageOptions{Title: "Article"})
@@ -182,8 +168,6 @@ func TestWorkspaceEditOpensThePage(t *testing.T) {
 	}
 }
 
-// A run that made a page, changing none of this page's blocks, says what
-// it did in the page's bar, not that it edited no block.
 func TestRunBarSaysWhatAPageMakingRunDid(t *testing.T) {
 	a := workspaceApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -203,10 +187,6 @@ func TestRunBarSaysWhatAPageMakingRunDid(t *testing.T) {
 	}
 }
 
-// With no page open, the panel's shortcut shows and hides the workspace
-// agent's chat at a press, whatever tab a page left it at, and a page's
-// other tabs have none to show; a page opened from the chat, however the
-// panel was opened, opens beside it still.
 func TestPanelShortcutWithNoPage(t *testing.T) {
 	a := workspaceApp(t)
 	made, err := a.st.CreatePage(store.NewPageOptions{Title: "Article"})
@@ -244,9 +224,6 @@ func TestPanelShortcutWithNoPage(t *testing.T) {
 	}
 }
 
-// The panel a page left, as its Comments tab, is the one it shows again
-// after the screen of no page open: only a page opened from the workspace
-// agent's chat opens beside that chat.
 func TestPanelKeepsItsTabPastNoPage(t *testing.T) {
 	a := workspaceApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -270,18 +247,13 @@ func TestPanelKeepsItsTabPastNoPage(t *testing.T) {
 	}
 }
 
-// What was typed to the workspace agent, unsent, goes with the account as
-// it leaves this device, as what was typed on its pages does.
 func TestWorkspaceDraftGoesWithTheAccount(t *testing.T) {
 	a := workspaceApp(t)
-	// The settings stay with the device.
 	a.saveSettings()
 	a.draftsOf(agents.WorkspaceID).chat.draft = "My secret plans"
 	posted := make(chan func(), 8)
 	a.post = func(fn func()) { posted <- fn }
 	a.leave(a.st.ForgetAccount, false)
-	// The agents forget their chats on the main thread too, before the
-	// account's leaving ends there.
 	for a.drafts[agents.WorkspaceID] != nil {
 		select {
 		case fn := <-posted:
@@ -292,9 +264,6 @@ func TestWorkspaceDraftGoesWithTheAccount(t *testing.T) {
 	}
 }
 
-// A chat the app reads back from the store as the account leaves, as it
-// draws the workspace agent's after the agents first forgot theirs and
-// before the store is cleared, does not stay for the next account.
 func TestWorkspaceChatReadAsTheAccountLeavesGoes(t *testing.T) {
 	a := workspaceApp(t)
 	a.saveSettings()
@@ -306,8 +275,6 @@ func TestWorkspaceChatReadAsTheAccountLeavesGoes(t *testing.T) {
 	cleared := make(chan struct{})
 	a.leave(func() error {
 		defer close(cleared)
-		// The agents forget their chats on the main thread, which then
-		// draws the panel before the store is cleared.
 		(<-posted)()
 		if msgs := a.hub.Session(agents.WorkspaceID).Messages; len(msgs) != 1 {
 			t.Errorf("the chat read back %+v", msgs)

@@ -18,9 +18,6 @@ import (
 	"leaflet/locales"
 )
 
-// A printed page holds its own pictures, and no other page's; it names
-// its files, which paper can't download, and shows no player for its
-// recordings; it runs only its own scripts.
 func TestPrintedPage(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -93,8 +90,6 @@ func TestPrintedPage(t *testing.T) {
 	}
 }
 
-// The Americas' Letter regions print on Letter, the rest of the world on
-// A4, as does a locale that names no region.
 func TestPaper(t *testing.T) {
 	for locale, width := range map[string]float64{"en-US": 8.5, "fr-CA": 8.5, "es-MX": 8.5, "en-GB": 8.27, "zh-Hans-CN": 8.27, "ja-JP": 8.27, "en": 8.27, "": 8.27} {
 		if w, h := Paper(RegionOf(locale)); w != width || (w == 8.5) != (h == 11) {
@@ -106,8 +101,6 @@ func TestPaper(t *testing.T) {
 	}
 }
 
-// photo is a w×h picture of noise, as a photo is to compress, its top
-// left corner red, and alpha, if not 255, its pixels' opacity.
 func photo(w, h int, alpha uint8) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	seed := uint32(1)
@@ -133,7 +126,6 @@ func encodeJPEG(t testing.TB, img image.Image, turn uint16) []byte {
 	if turn == 0 {
 		return buf.Bytes()
 	}
-	// An EXIF orientation in an APP1 segment after the start of the image.
 	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01")
 	exif = append(exif, byte(turn>>8), byte(turn), 0, 0, 0, 0, 0, 0)
 	app1 := append([]byte{0xff, 0xe1, byte((len(exif) + 2) >> 8), byte(len(exif) + 2)}, exif...)
@@ -150,16 +142,9 @@ func decoded(t *testing.T, data []byte) image.Image {
 	return img
 }
 
-// A printed page's pictures are as wide as paper prints them sharp, and
-// no wider: a photo as a JPEG, one that is not opaque as a PNG, each
-// turned as its EXIF says to see it; a picture already that small, or
-// one that can't be read, is as it was.
-// A picture wider than it prints and thinner than that, as a line drawn
-// across a page, prints as it looks, not blank.
 func TestThinPicturesPrint(t *testing.T) {
 	line := image.NewNRGBA(image.Rect(0, 0, 3000, 1))
 	for x := range 3000 {
-		// In noise, for a smaller picture to come out smaller.
 		line.Set(x, 0, color.NRGBA{uint8(x * x * 31 >> 3), uint8(x * 7 * x >> 5), uint8(x * 113), 255})
 	}
 	var data bytes.Buffer
@@ -200,8 +185,6 @@ func TestPicturesPrintSmall(t *testing.T) {
 	} else if _, _, _, a := img.At(700, 300).RGBA(); a == 0xffff {
 		t.Error("a picture to see through printed opaque")
 	}
-	// Turned a quarter to see, a picture 3000 by 2000 is 2000 wide, and
-	// its top left corner is at the top right.
 	small, _, ok = forPrint(encodeJPEG(t, photo(3000, 2000, 255), 6))
 	img := decoded(t, small)
 	if !ok || img.Bounds().Dx() != printPixels || img.Bounds().Dy() != 2100 {
@@ -210,7 +193,6 @@ func TestPicturesPrintSmall(t *testing.T) {
 	if r, g, _, _ := img.At(printPixels-20, 20).RGBA(); r < 0xc000 || g > 0x4000 {
 		t.Errorf("a turned photo's corner is %v", img.At(printPixels-20, 20))
 	}
-	// One turned to be 1000 wide is narrow enough, and keeps its EXIF.
 	for _, kept := range [][]byte{encodeJPEG(t, photo(3000, 1000, 255), 6), encodeJPEG(t, photo(800, 600, 255), 0), []byte("\x89PNG\r\n\x1a\nnot a picture")} {
 		if _, _, ok := forPrint(kept); ok {
 			t.Errorf("a picture of %d bytes was made anew", len(kept))

@@ -3,8 +3,6 @@ import Testing
 
 @testable import Leaflet
 
-/// AccountTests drive signing in and out through the bridge, as far as
-/// they go offline: the sign-in itself needs Supabase and a device.
 @MainActor
 struct AccountTests {
     let core: ScratchCore
@@ -33,9 +31,6 @@ struct AccountTests {
         #expect(try await client.account().signedIn == false)
     }
 
-    /// Signed out, signing out does nothing: the device's pages stay. A
-    /// sign-out from an account takes a session Supabase gave, which the
-    /// core has no stand-in for here.
     @Test func signingOutWhileSignedOutKeepsThePages() async throws {
         let page = try await client.createPage(NewPage(title: "Mine"))
         #expect(try await client.signOut(anyway: true) == 0)

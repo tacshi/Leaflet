@@ -6,9 +6,6 @@ import Synchronization
 import UIKit
 import os
 
-/// PlatformBridge is what the app gives the Go core: the keychain, the
-/// network's state, the device's name, opening links, iCloud downloads
-/// and the log. The core calls it from its own threads.
 final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
     private let keychain: Keychain
     private let reachable = Reachable()
@@ -31,7 +28,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
     deinit { monitor.cancel() }
 
     func secretGet(_ name: String?) throws -> Data {
-        // No secret is no bytes: the core reads that as none.
         try keychain.get(name ?? "") ?? Data()
     }
 
@@ -47,12 +43,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
 
     func deviceName() -> String { name }
 
-    /// label names the device in Account › Devices by its model, as
-    /// "iPad Pro (13-inch) (M5)": UIDevice's name is only "iPad" since
-    /// iOS 16, for apps without an entitlement Apple grants few, and the
-    /// list says which one is this one, and when each was last active. A
-    /// model newer than DeviceKit knows goes by its kind, from its
-    /// identifier ("iPad17,9": iPad).
     static func label(of device: DeviceKit.Device) -> String {
         if case .unknown(let identifier) = device {
             let kind = identifier.prefix { $0.isLetter }
@@ -66,8 +56,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
         Task { @MainActor in UIApplication.shared.open(url) }
     }
 
-    /// useICloud gives the Leaflet folder watchICloud watches, and what
-    /// to do when another device writes to it.
     func useICloud(_ folder: URL?, onChange: @escaping @Sendable () -> Void) {
         iCloud.withLock {
             $0.folder = folder
@@ -75,10 +63,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
         }
     }
 
-    /// watchICloud watches the folder, or stops, as the core asks: only
-    /// while the app is in front. A watch asked for in the background, as
-    /// turning iCloud sync on finishes once the app went away, waits for
-    /// the app to come back, as the core's Start watches again then.
     func watchICloud(_ on: Bool) {
         let (old, new) = iCloud.withLock { w in
             let old = w.watcher
@@ -92,9 +76,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
         new?.start()
     }
 
-    /// setInFront says whether the app is in front, where alone the folder
-    /// is watched: in the background a file presenter must not stay.
-    /// Going away stops the watch.
     func setInFront(_ front: Bool) {
         iCloud.withLock { $0.inFront = front }
         if !front { watchICloud(false) }
@@ -110,8 +91,6 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
     }
 }
 
-/// ICloudWatch is the Leaflet folder in iCloud Drive and its watcher,
-/// while watching it, and whether the app is in front, as it must be to.
 private struct ICloudWatch {
     var folder: URL?
     var onChange: (@Sendable () -> Void)?
@@ -119,8 +98,6 @@ private struct ICloudWatch {
     var inFront = false
 }
 
-/// Reachable is whether the network can be reached, as the path monitor
-/// last said.
 private final class Reachable: Sendable {
     let online = Mutex(true)
 }

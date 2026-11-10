@@ -18,8 +18,6 @@ func TestMarkdownBlocksReadsAReply(t *testing.T) {
 	}
 }
 
-// A page exported as Markdown reads back as the same blocks: text that
-// looks like a block's marker stays text, and a | stays in its cell.
 func TestMarkdownExportReadsBack(t *testing.T) {
 	var blocks []*Node
 	for _, s := range []string{"```js", "# not a heading", "2*3*4", "- not an item", "1. not numbered", "> not a quote", "| not a table |", "$$", "---", "[!NOTE]"} {
@@ -59,8 +57,6 @@ func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
 	}
 }
 
-// The markers Markdown has for headings and lists all read as blocks, as
-// copying escapes them all, and a line that is a picture is one.
 func TestPasteMarkdownMarkers(t *testing.T) {
 	var got []string
 	for _, n := range ParseLines("#### Step\n###### Six\n####### seven\n#tag\n+ plus\n+ [x] done\n- [X] also\n1) one\n2024. year\n![A cat](https://x.dev/cat.png)\n![local](file:///cat.png)") {
@@ -91,8 +87,6 @@ func TestTableRowSplitsOnUnescapedPipes(t *testing.T) {
 	}
 }
 
-// shape writes blocks as lines of their type, the data that is theirs,
-// and their text, indented under what holds them, to compare trees.
 func shape(nodes []*Node) []string {
 	var out []string
 	var visit func([]*Node, string)
@@ -120,8 +114,6 @@ func shape(nodes []*Node) []string {
 	return out
 }
 
-// Every block Markdown has a way to write reads back from a page's
-// Markdown as it was, nested and empty ones too.
 func TestPageMarkdownRoundTrips(t *testing.T) {
 	n := func(typ, md string, data map[string]any, kids ...*Node) *Node {
 		x := &Node{ID: NewBlockID(), Type: typ, Data: map[string]any{}, Children: kids}
@@ -177,8 +169,6 @@ func TestPageMarkdownRoundTrips(t *testing.T) {
 	}
 }
 
-// A list item nests under the one it is indented under, by the indent
-// that item had, not by how deep it is.
 func TestParseLinesNestsByIndent(t *testing.T) {
 	for text, want := range map[string][]string{
 		"- a\n    - b\n        - c\n    - d": {`bulleted_list "a"`, `  bulleted_list "b"`, `    bulleted_list "c"`, `  bulleted_list "d"`},
@@ -196,9 +186,6 @@ func TestParseLinesNestsByIndent(t *testing.T) {
 	}
 }
 
-// Lines are blocks of their own but where a hard break, a quote's > or an
-// item's indent carries one on, and a marker ending its line is an empty
-// block of its kind.
 func TestParseLinesContinues(t *testing.T) {
 	for text, want := range map[string][]string{
 		"one\ntwo":                      {`paragraph "one"`, `paragraph "two"`},
@@ -217,8 +204,6 @@ func TestParseLinesContinues(t *testing.T) {
 	}
 }
 
-// A <details> is a toggle holding what is up to its </details>, its
-// <summary> its text, on the line or lines after or on its own line.
 func TestParseLinesToggles(t *testing.T) {
 	for text, want := range map[string][]string{
 		"<details><summary>Hi</summary>\n\nin\n</details>\nout":              {`toggle_list collapsed=true "Hi"`, `  paragraph "in"`, `paragraph "out"`},
@@ -234,12 +219,6 @@ func TestParseLinesToggles(t *testing.T) {
 	}
 }
 
-// A fence names its language in any case, and an empty diagram or
-// formula, with nothing to draw, makes no block, as a spec of one makes
-// none.
-// Bytes that are no UTF-8, as a clipboard can hold, take a character's
-// place, in a toggle's summary too, which is found by its characters and
-// cut by its bytes.
 func TestParseLinesInvalidUTF8(t *testing.T) {
 	got := ParseLines("<details>\n<summary>caf\xe9 \xe9</summary>after\n</details>")
 	if len(got) != 1 || got[0].Type != "toggle_list" || got[0].Delta().Plain() != "caf\uFFFD \uFFFD" {
@@ -264,7 +243,6 @@ func TestParseLinesFences(t *testing.T) {
 	}
 }
 
-// A picture line may have a title and a link with parentheses.
 func TestParseLinesImages(t *testing.T) {
 	for text, want := range map[string]string{
 		`![cat](https://x.dev/a.png "A cat")`:   "https://x.dev/a.png cat",
@@ -277,7 +255,6 @@ func TestParseLinesImages(t *testing.T) {
 			t.Errorf("%q read as %v", text, shape(got))
 		}
 	}
-	// A link an image block refuses, without a host's name, is text.
 	for _, text := range []string{"![a](https://:80/a.png)", "![a](http:///a.png)"} {
 		if got := ParseLines(text); len(got) != 1 || got[0].Type != "paragraph" {
 			t.Errorf("%q read as %v", text, shape(got))
@@ -285,8 +262,6 @@ func TestParseLinesImages(t *testing.T) {
 	}
 }
 
-// A line break in a table's cell is a <br>, and reads back as one; a <br>
-// of the text, or in code, stays text.
 func TestTableCellLineBreaks(t *testing.T) {
 	table, _ := TableNode([][]string{{"h"}, {"a\nb"}}, "")
 	table.Children[1].Children[0].SetDelta(Delta{{Text: "x\ny <br> "}, {Text: "a<br>b", Attrs: Attrs{Code: true}}})

@@ -1,12 +1,8 @@
 import LeafletCore
 import SwiftUI
 
-/// ChartSheet edits a chart's data, as the desktop's dialog does: its
-/// title, its kind, a line per label with a value per series, and its
-/// caption.
 struct ChartSheet: View {
     let node: DocNode
-    /// save gives the chart's new data.
     let save: ([String: JSONValue]) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
@@ -15,7 +11,6 @@ struct ChartSheet: View {
     @State private var text = ""
     @State private var caption = ""
     @State private var failure: String?
-    /// original is the chart as the sheet opened with it.
     @State private var original: [String]?
 
     private var fields: [String] { [title, kind, text, caption] }
@@ -76,8 +71,6 @@ struct ChartSheet: View {
         original = fields
     }
 
-    /// apply reads the chart as the core does, and saves it, or says what
-    /// is wrong with it.
     private func apply() {
         var error: NSError?
         let raw = MobileChartData(kind, title, caption, text, &error)
@@ -87,13 +80,10 @@ struct ChartSheet: View {
         }
         do {
             var data = try JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
-            // Who made it stays, as on the desktop.
             data["author"] = node.data?["author"]
             save(data)
             dismiss()
         } catch {
-            // The core's answer could not be read: Save says so, rather
-            // than doing nothing.
             failure = L.appErrorInternal(error: error.localizedDescription)
         }
     }

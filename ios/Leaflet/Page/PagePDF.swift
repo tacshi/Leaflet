@@ -1,34 +1,22 @@
 import UIKit
 import WebKit
 
-/// PagePDF prints a page as a PDF, as the desktop's Export › PDF does: the
-/// core's web page of it, laid out on paper by a web view no one sees.
 @MainActor
 enum PagePDF {
-    /// loadWait is how long the page waits for its pictures from the web:
-    /// past it, it prints with those that came, as on the desktop.
     static let loadWait: Duration = .seconds(20)
-    /// margin is the room around the text, in points: 0.6 inch, as on the
-    /// desktop.
     static let margin: CGFloat = 0.6 * 72
 
-    /// make prints page, on its paper, as PDF data, and removes the file
-    /// the core wrote it in.
     static func make(_ page: ExportedPDF) async throws -> Data {
         let file = URL(filePath: page.path)
         defer { try? FileManager.default.removeItem(at: file) }
         let paper = CGRect(x: 0, y: 0, width: page.width * 72, height: page.height * 72)
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WebPage.store
-        // Its formulas and diagrams are drawn by scripts, as in the blocks'
-        // web views, which take WebRTC from each frame first too.
         config.userContentController.addUserScript(
             WKUserScript(
                 source: WebBlockView.noRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false
             ))
         let view = WKWebView(frame: paper, configuration: config)
-        // In a window, out of sight, for as long as it prints: one in no
-        // window may never lay its page out.
         view.alpha = 0
         view.isUserInteractionEnabled = false
         let windows = UIApplication.shared.connectedScenes
@@ -38,9 +26,6 @@ enum PagePDF {
         defer { view.removeFromSuperview() }
         let loading = Loading()
         view.navigationDelegate = loading
-        // From its file, which the page may read alone: a page of many
-        // pictures held in a string would be in memory as many times as it
-        // is passed on.
         view.loadFileURL(file, allowingReadAccessTo: file)
         if await !loading.wait(upTo: loadWait) {
             view.stopLoading()
@@ -50,7 +35,6 @@ enum PagePDF {
 
         let renderer = UIPrintPageRenderer()
         renderer.addPrintFormatter(view.viewPrintFormatter(), startingAtPageAt: 0)
-        // The renderer takes its paper only this way.
         renderer.setValue(paper, forKey: "paperRect")
         renderer.setValue(paper.insetBy(dx: margin, dy: margin), forKey: "printableRect")
         let pages = renderer.numberOfPages
@@ -63,16 +47,12 @@ enum PagePDF {
         }
     }
 
-    /// Loading waits for the page to load, or fail, and follows no link
-    /// from it.
     @MainActor
     private final class Loading: NSObject, WKNavigationDelegate {
         private var waiting: CheckedContinuation<Void, Never>?
         private var done = false
         private var late = false
 
-        /// wait waits up to limit for the page, and reports whether it
-        /// loaded in time.
         func wait(upTo limit: Duration) async -> Bool {
             let timeout = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: limit)

@@ -19,14 +19,12 @@ import (
 	"leaflet/locales"
 )
 
-// A new conversation keeps the one before, which the panel's menu of
-// earlier conversations opens again.
 func TestEarlierConversationsInThePanel(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.settings.SidebarOpen, a.settings.TextSize = true, 16
-	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -64,14 +62,11 @@ func TestEarlierConversationsInThePanel(t *testing.T) {
 	if !tt.HasText("It is a plan for the launch.") {
 		t.Errorf("the earlier conversation did not open: %q", tt.Texts())
 	}
-	// The empty one it left is not kept.
 	if len(sess.Past) != 0 {
 		t.Errorf("%d earlier conversations", len(sess.Past))
 	}
 }
 
-// An agent's comment asked for by someone else says whose it is, so a
-// person's own words can't pass as an agent's.
 func TestAgentCommentSaysWhoAsked(t *testing.T) {
 	a := templatesApp(t)
 	a.session.UserID = "me"
@@ -95,8 +90,6 @@ func TestAgentCommentSaysWhoAsked(t *testing.T) {
 	}
 }
 
-// In the panel at its narrowest a comment's time keeps its line and all
-// its words: a long name and "via public link" give way.
 func TestCommentTimeKeepsItsLine(t *testing.T) {
 	a := templatesApp(t)
 	cm := store.Comment{ID: "c", AuthorKind: "guest", AuthorName: "Alexandra Montgomery", DeletedAt: time.Now(), CreatedAt: time.Now().Add(-45 * time.Minute)}
@@ -109,7 +102,7 @@ func TestCommentTimeKeepsItsLine(t *testing.T) {
 	if !ok {
 		t.Fatalf("no %q in %v", when, alone.Texts())
 	}
-	narrowest := panelMin - 2*(12+12) // the panel's and the card's padding
+	narrowest := panelMin - 2*(12+12)
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Column(c).Width(float32(narrowest)).Children(func() { a.commentRow(c, cm) })
 	}, 400, 300)
@@ -123,8 +116,6 @@ func TestCommentTimeKeepsItsLine(t *testing.T) {
 	}
 }
 
-// A run on this device stops from the chat's Stop, which shows in place
-// of Send while it works; it ends as a run that made no change.
 func TestStopAnAgentRun(t *testing.T) {
 	asked, done := make(chan struct{}, 1), make(chan struct{})
 	hs := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -132,7 +123,6 @@ func TestStopAnAgentRun(t *testing.T) {
 		case asked <- struct{}{}:
 		default:
 		}
-		// A model that takes its time, till the test is over.
 		select {
 		case <-r.Context().Done():
 		case <-done:
@@ -160,9 +150,8 @@ func TestStopAnAgentRun(t *testing.T) {
 	a.online = true
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.settings.SidebarOpen, a.settings.TextSize = true, 16
-	// An ID of its own, which has no key in the keychain.
 	if err := a.st.PutProvider(store.Provider{ID: "test-stop-" + t.Name(), Preset: "ollama", Name: "Ollama", BaseURL: hs.URL,
-		AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -203,16 +192,14 @@ func TestStopAnAgentRun(t *testing.T) {
 	}
 }
 
-// Typing @ in a comment lists the agents, and choosing one writes its
-// name, which runs it when the comment is posted.
 func TestCommentAgentMenu(t *testing.T) {
 	a := templatesApp(t)
 	a.rec = recording.NewController(a.st, a.backend)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.settings.SidebarOpen, a.settings.TextSize = true, 16
 	for _, p := range []store.Provider{
-		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true},
-		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true},
+		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"},
+		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen"},
 	} {
 		if err := a.st.PutProvider(p); err != nil {
 			t.Fatal(err)
@@ -248,7 +235,6 @@ func TestCommentAgentMenu(t *testing.T) {
 		t.Errorf("text %q after Enter", nc.text)
 	}
 
-	// An address is no mention; Escape closes the menu until another @.
 	tt.Type(" me@x")
 	tt.Frame()
 	if tt.HasText("Ollama") {
@@ -272,13 +258,10 @@ func TestCommentAgentMenu(t *testing.T) {
 	}
 }
 
-// An agent runs for a comment that mentions it where the comment shows it
-// marked, and not for one that only names it in an address or code; which
-// mentions count is core.Mentioned's, tested there.
 func TestAgentInCommentOnlyWhenMentioned(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -290,8 +273,6 @@ func TestAgentInCommentOnlyWhenMentioned(t *testing.T) {
 	}
 }
 
-// Show resolved stays as chosen when a comment's badge opens its thread,
-// and a search hit in a resolved thread shows the resolved ones.
 func TestShowResolvedApartFromTheFocus(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -319,7 +300,6 @@ func TestShowResolvedApartFromTheFocus(t *testing.T) {
 	}
 }
 
-// waitFor runs frames until ok, or fails.
 func waitFor(t *testing.T, tt *ui.Tester, ok func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); !ok(); {
@@ -331,8 +311,6 @@ func waitFor(t *testing.T, tt *ui.Tester, ok func() bool) {
 	}
 }
 
-// Undo of a run that cannot revert its edits, as on content that cannot
-// be read, says so, and the run stays as it was.
 func TestUndoRunThatFailsSaysSo(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -361,9 +339,6 @@ func TestUndoRunThatFailsSaysSo(t *testing.T) {
 	}
 }
 
-// A run's status line shimmers: its text drawn, a band of it brighter
-// that moves on as time does, and still where the desktop asks for less
-// motion.
 func TestStatusLineShimmers(t *testing.T) {
 	const status = "Reading the page…"
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -374,7 +349,6 @@ func TestStatusLineShimmers(t *testing.T) {
 	if !ok {
 		t.Fatal("no status line")
 	}
-	// The pixels of the line, and how many of them are inked.
 	line := func() ([]byte, int) {
 		img := tt.Image()
 		scale := float32(img.Bounds().Dx()) / 300
@@ -416,9 +390,6 @@ func TestStatusLineShimmers(t *testing.T) {
 	}
 }
 
-// A chat asks about the block the caret was left in, sent from the
-// composer, where the focus then is; a page whose caret was never placed
-// gives none.
 func TestChatTakesTheCaretsBlock(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -442,7 +413,6 @@ func TestChatTakesTheCaretsBlock(t *testing.T) {
 	if !a.page.editor.Focused() {
 		t.Fatal("the page didn't take the focus")
 	}
-	// The title takes the focus, as the composer would.
 	a.focusTitle(false)
 	tt.Frame()
 	if a.page.editor.Focused() {
@@ -453,8 +423,6 @@ func TestChatTakesTheCaretsBlock(t *testing.T) {
 	}
 }
 
-// commentsApp is an app with a page open, Plan, of blocks b1 and b2, and
-// the comments panel beside it.
 func commentsApp(t *testing.T) (*App, store.Page) {
 	t.Helper()
 	a := templatesApp(t)
@@ -475,8 +443,6 @@ func commentsApp(t *testing.T) (*App, store.Page) {
 	return a, p
 }
 
-// Enter posts a new comment and sends a reply, as it sends a chat, and
-// Cmd+Enter too; Shift+Enter breaks the line.
 func TestEnterPostsComments(t *testing.T) {
 	a, p := commentsApp(t)
 	a.dialogs.newComment = &newComment{blockID: "b1"}
@@ -497,7 +463,6 @@ func TestEnterPostsComments(t *testing.T) {
 	}
 	a.page.setThreads(a.st.Threads(p.ID))
 	tt.Frame()
-	// The reply box is under the thread's comment.
 	body, ok := tt.Find("Why May? Not June")
 	if !ok {
 		t.Fatalf("no comment in %q", tt.Texts())
@@ -511,8 +476,6 @@ func TestEnterPostsComments(t *testing.T) {
 	}
 }
 
-// The threads of a block asked for, from its badge or a search, are lit
-// for a moment, every one of them, and then are not.
 func TestCommentsAskedForStayLit(t *testing.T) {
 	a, p := commentsApp(t)
 	for _, c := range []struct{ block, body string }{{"b1", "First question"}, {"b1", "Second question"}, {"b2", "Other question"}} {
@@ -523,8 +486,6 @@ func TestCommentsAskedForStayLit(t *testing.T) {
 	a.page.setThreads(a.st.Threads(p.ID))
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
 	tt.Frame()
-	// A card's border, left of its comment's text, by the card's padding
-	// and the comment's indent past its avatar.
 	border := func(body string) [4]uint8 {
 		t.Helper()
 		r, ok := tt.Find(body)
@@ -561,8 +522,6 @@ func TestCommentsAskedForStayLit(t *testing.T) {
 	}
 }
 
-// A comment that could not be posted, and an agent asked in one that
-// could not answer, say so in the app's words around why.
 func TestCommentErrorsSaySo(t *testing.T) {
 	a, _ := commentsApp(t)
 	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE INSERT ON comments BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
@@ -582,7 +541,6 @@ func TestCommentErrorsSaySo(t *testing.T) {
 		t.Error("the comment not posted was dropped")
 	}
 
-	// A model that cannot be reached.
 	hs := httptest.NewServer(http.NotFoundHandler())
 	hs.Close()
 	var mu sync.Mutex
@@ -594,7 +552,7 @@ func TestCommentErrorsSaySo(t *testing.T) {
 	}
 	a.online, a.toasts = true, nil
 	if err := a.st.PutProvider(store.Provider{ID: "test-gone-" + t.Name(), Preset: "ollama", Name: "Ollama", BaseURL: hs.URL,
-		AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	a.reloadAll()
@@ -617,8 +575,6 @@ func TestCommentErrorsSaySo(t *testing.T) {
 	}
 }
 
-// What was typed in a page's chat and reply boxes and not sent stays with
-// the page as it closes and opens again, and goes once the page is gone.
 func TestDraftsStayWithTheirPage(t *testing.T) {
 	a := templatesApp(t)
 	plan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -645,13 +601,11 @@ func TestDraftsStayWithTheirPage(t *testing.T) {
 	}
 }
 
-// A page an agent made opens from its edit in the chat, and an edit of
-// this page's blocks still goes to them.
 func TestCreatedPageEditOpensIt(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	a.settings.SidebarOpen, a.settings.TextSize = true, 16
-	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -683,9 +637,6 @@ func TestCreatedPageEditOpensIt(t *testing.T) {
 	}
 }
 
-// Undo of a run that made a subpage takes its card out of the open page
-// and the subpage away, and Redo puts back one card, not two: the run's
-// own and the one a subpage brought back gets.
 func TestUndoOfASubpageRunOnTheOpenPage(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -728,8 +679,6 @@ func TestUndoOfASubpageRunOnTheOpenPage(t *testing.T) {
 	}
 }
 
-// A page's callouts are alerts in its Markdown: they keep their colors in
-// page history, agents' replies and comments, in either appearance.
 func TestAlertsTakeTheColorsOfCallouts(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		var o markdown.Options
@@ -751,7 +700,6 @@ func TestAlertsTakeTheColorsOfCallouts(t *testing.T) {
 	}
 }
 
-// alertTones keeps to what doc.AlertTone reads an alert as.
 func TestAlertTonesAreTheCalloutsOfAlerts(t *testing.T) {
 	for i, alert := range []string{"NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"} {
 		if tone, ok := doc.AlertTone("> [!" + alert + "]"); !ok || tone != alertTones[i] {
@@ -760,7 +708,6 @@ func TestAlertTonesAreTheCalloutsOfAlerts(t *testing.T) {
 	}
 }
 
-// Showing a comment keeps its mentions' mark beside the alerts' colors.
 func TestCommentKeepsItsMentionsMark(t *testing.T) {
 	a := workspaceApp(t)
 	var pal *theme.Palette

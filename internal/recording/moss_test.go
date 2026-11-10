@@ -19,8 +19,6 @@ import (
 	"leaflet/locales"
 )
 
-// fakeMoss is MOSI's API, as far as TranscribeMoss goes: a file goes up,
-// a task transcribes it, asked twice, and the file is removed.
 func fakeMoss(t *testing.T, audio []byte, task string) (*httptest.Server, *[]string) {
 	t.Helper()
 	var mu sync.Mutex
@@ -79,8 +77,6 @@ func fakeMoss(t *testing.T, audio []byte, task string) (*httptest.Server, *[]str
 	return srv, &removed
 }
 
-// Audio goes up as it is read, is transcribed with speakers, a line of
-// only MOSS's tags is dropped, and the file goes from MOSI after.
 func TestTranscribeMoss(t *testing.T) {
 	audio := []byte("fake m4a audio")
 	_, removed := fakeMoss(t, audio, `{"status":"SUCCESS","segments":[
@@ -102,15 +98,12 @@ func TestTranscribeMoss(t *testing.T) {
 	if strings.Join(*removed, " ") != "/files/file-1" {
 		t.Errorf("removed %v", *removed)
 	}
-	// Without speakers, the lines have none.
 	segs, err = TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "audio.m4a", false)
 	if err != nil || len(segs) != 2 || segs[0].Speaker != "" {
 		t.Errorf("without speakers: %+v, %v", segs, err)
 	}
 }
 
-// With no lines, the task's text is the transcript; a failed task says
-// what MOSS said, and its file goes still.
 func TestTranscribeMossTextAndFailure(t *testing.T) {
 	fakeMoss(t, nil, `{"status":"SUCCESS","duration":2.75,"text":"Short message","segments":[]}`)
 	segs, err := TranscribeMoss(context.Background(), "mk", strings.NewReader("x"), 1, "a.wav", true)
@@ -128,8 +121,6 @@ func TestTranscribeMossTextAndFailure(t *testing.T) {
 	}
 }
 
-// A key MOSI takes passes, whatever its models are called; one it refuses
-// says so; and a file past MOSS's most goes nowhere.
 func TestMossKeyAndLimits(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("Authorization") {
@@ -163,24 +154,18 @@ func TestMossKeyAndLimits(t *testing.T) {
 	}
 }
 
-// MOSS needs a key on this device, and a connection; with them, an audio
-// file is transcribed from here, signed out, and the settings stay off
-// the server.
 func TestTranscribeFileWithMoss(t *testing.T) {
 	keychain.Use(memKeys{})
 	t.Cleanup(func() { keychain.Use(nil) })
 	stt := store.SttSettings{Provider: Moss, SpeakerLabels: true}
-	if err := Usable(stt, true, true); err == nil || err.Error() != locales.RecErrSetUpMoss() {
+	if err := Usable(stt, true); err == nil || err.Error() != locales.RecErrSetUpMoss() {
 		t.Errorf("no key: %v", err)
 	}
 	if err := SetMossKey(" mk "); err != nil {
 		t.Fatal(err)
 	}
-	if err := Usable(stt, false, true); err == nil || err.Error() != locales.RecErrNeedsConnection() {
+	if err := Usable(stt, false); err == nil || err.Error() != locales.RecErrNeedsConnection() {
 		t.Errorf("offline: %v", err)
-	}
-	if onServer(stt) {
-		t.Error("MOSS transcribes on the server")
 	}
 	fakeMoss(t, []byte("audio"), `{"status":"SUCCESS","segments":[{"start":0,"end":1,"text":"Hello.","speaker":"S01"}]}`)
 

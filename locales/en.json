@@ -1946,16 +1946,6 @@
   "@agentNoProvider": {
     "description": "Why an agent can't run: no agent provider has been added."
   },
-  "agentSignInToUse": "Sign in to use {agent}, or add a provider on this machine.",
-  "@agentSignInToUse": {
-    "description": "Why an agent can't run: its provider runs on the server, and the user is signed out.",
-    "placeholders": {
-      "agent": {
-        "type": "String",
-        "example": "Claude"
-      }
-    }
-  },
   "agentNeedsConnection": "Agents need a connection. You can keep editing; agents return when you are back online.",
   "@agentNeedsConnection": {
     "description": "Why an agent can't run: the device is offline, and no provider works offline."
@@ -1993,6 +1983,16 @@
   "agentKeyUnread": "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key again in Settings › Agent providers.",
   "@agentKeyUnread": {
     "description": "Why an agent can't run: the API key kept on this device for its provider could not be read, as the user turned the system's prompt down.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "DeepSeek"
+      }
+    }
+  },
+  "agentKeyMissing": "Paste the API key of {agent} in Settings › Agent providers: this device has none for it.",
+  "@agentKeyMissing": {
+    "description": "Why an agent can't run: its provider runs on an API key and this device's keychain has none for it, as for a provider whose key the server kept in an earlier version.",
     "placeholders": {
       "agent": {
         "type": "String",
@@ -2232,10 +2232,6 @@
       }
     }
   },
-  "agentEditedPage": "Edited the page",
-  "@agentEditedPage": {
-    "description": "An edit a cloud agent made that came without saying what it was, in the agent's reply and the list of its edits."
-  },
   "agentEditInserted": "Inserted {what}",
   "@agentEditInserted": {
     "description": "An edit an agent made, in its reply and the list of its edits: it inserted blocks; what is agentEditBlocks, or a block's kind as agentEditChart and the others name it, maybe with its title after a ·.",
@@ -2413,10 +2409,6 @@
   "agentPageUnreadable": "The page's content could not be read, so agents leave it as it is.",
   "@agentPageUnreadable": {
     "description": "Why an agent can't run or undo its edits: the page's content on this device can't be read, as one saved by a newer version of the app."
-  },
-  "agentConnectionEnded": "The connection to the agent ended before it finished.",
-  "@agentConnectionEnded": {
-    "description": "Why a cloud agent run failed: the connection to the server ended before it said how the run went."
   },
   "agentModelNoChoices": "The model returned no choices.",
   "@agentModelNoChoices": {
@@ -3399,33 +3391,13 @@
       }
     }
   },
-  "recSttNoKey": "No key",
-  "@recSttNoKey": {
-    "description": "Settings › Speech to text › API key from: the choice of no provider's key."
-  },
-  "recSttKeyFrom": "API key from",
-  "@recSttKeyFrom": {
-    "description": "Settings › Speech to text: the row choosing which agent provider's key a cloud endpoint uses."
-  },
-  "recSttKeyFromDesc": "The server calls the endpoint with this provider's key",
-  "@recSttKeyFromDesc": {
-    "description": "Settings › Speech to text: the description of the API key from row."
-  },
-  "recSttAddProvider": "Add a cloud agent provider, such as OpenAI, to use its key here",
-  "@recSttAddProvider": {
-    "description": "Settings › Speech to text: the description of the API key from row when there is no cloud provider."
-  },
   "recSttSonioxKey": "Soniox API key",
   "@recSttSonioxKey": {
     "description": "Settings › Speech to text: the row of the Soniox key."
   },
-  "recSttSonioxOnServer": "Live transcripts; key kept on the server",
-  "@recSttSonioxOnServer": {
-    "description": "Settings › Speech to text: description of the Soniox key row, signed in."
-  },
   "recSttSonioxOnDevice": "Live transcripts; key kept on this device",
   "@recSttSonioxOnDevice": {
-    "description": "Settings › Speech to text: description of the Soniox key row, signed out."
+    "description": "Settings › Speech to text: description of the Soniox key row, and of Soniox in the providers list."
   },
   "recSttPasteKey": "Paste a key",
   "@recSttPasteKey": {
@@ -3492,11 +3464,7 @@
   },
   "recSttSavedOnDevice": "Saved the key on this device",
   "@recSttSavedOnDevice": {
-    "description": "Toast after saving the Soniox key on this device."
-  },
-  "recSttSavedOnServer": "Saved the key on the server",
-  "@recSttSavedOnServer": {
-    "description": "Toast after saving the key on the server."
+    "description": "Toast after saving a speech provider's key on this device."
   },
   "recLanguageDetect": "Detect",
   "@recLanguageDetect": {
@@ -3570,14 +3538,6 @@
   "@recErrNeedsConnection": {
     "description": "Error when offline."
   },
-  "recErrSignInOrServer": "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text.",
-  "@recErrSignInOrServer": {
-    "description": "Error when signed out without a local engine."
-  },
-  "recErrOfflineServer": "Transcription needs a connection. Set a server on your network in Settings › Speech to text to record offline.",
-  "@recErrOfflineServer": {
-    "description": "Error when offline with a cloud engine."
-  },
   "recErrAlreadyRecording": "Already recording.",
   "@recErrAlreadyRecording": {
     "description": "Error when a recording is asked for while one runs."
@@ -3585,10 +3545,6 @@
   "recErrWindowNotReady": "The window is not ready.",
   "@recErrWindowNotReady": {
     "description": "Error when recording starts before the window is."
-  },
-  "recErrCloudTest": "A cloud endpoint transcribes saved recordings, so record on a page to try it.",
-  "@recErrCloudTest": {
-    "description": "Settings › Speech to text: why a microphone test cannot transcribe with a cloud endpoint."
   },
   "recErrQuit": "Leaflet quit before the transcript was done.",
   "@recErrQuit": {
@@ -3685,6 +3641,10 @@
       }
     }
   },
+  "recErrSetUpSoniox": "Add a Soniox API key in Settings › Speech to text.",
+  "@recErrSetUpSoniox": {
+    "description": "Error when transcribing with Soniox before a key is saved on this device."
+  },
   "recErrSetUpMoss": "Add a MOSS API key in Settings › Speech to text.",
   "@recErrSetUpMoss": {
     "description": "Error when transcribing with MOSS before a key is saved on this device."
@@ -3750,10 +3710,6 @@
   "recErrAudioMissing": "The audio is not on this device.",
   "@recErrAudioMissing": {
     "description": "Error when a recording's audio is missing."
-  },
-  "recErrSignIn": "Sign in with Supabase to transcribe in the cloud.",
-  "@recErrSignIn": {
-    "description": "Error when the cloud needs signing in."
   },
   "recErrEndpoint": "Transcription failed: {status} {details}",
   "@recErrEndpoint": {
@@ -3828,10 +3784,6 @@
   "@recReplaceNotesAction": {
     "description": "Confirms replacing a file’s notes with a transcript."
   },
-  "recErrFileUploading": "This file is still uploading. Try again once it’s up.",
-  "@recErrFileUploading": {
-    "description": "Why a file can’t be transcribed on the server yet."
-  },
   "recErrFileKind": "The on-device model can’t read this kind of audio. Choose Soniox or an endpoint for it.",
   "@recErrFileKind": {
     "description": "Why the on-device engine refuses an audio file."
@@ -3865,10 +3817,6 @@
         "example": "meeting.m4a"
       }
     }
-  },
-  "recErrServerOld": "Your server needs updating before it can transcribe files. Open Leaflet on your Mac to update it, or choose an on-device model.",
-  "@recErrServerOld": {
-    "description": "The server’s functions are older than this app, and don’t know how to transcribe a file."
   },
   "editorPage": "Page",
   "@editorPage": {
@@ -4626,9 +4574,13 @@
   "@settingsNoProvidersDesc": {
     "description": "Settings › Agent providers: when there are none."
   },
-  "settingsProviderCloud": "Cloud · key on the server",
+  "settingsProviderCloud": "Cloud · key on this device",
   "@settingsProviderCloud": {
-    "description": "Settings › Agent providers: where a cloud provider runs."
+    "description": "Settings › Agent providers: under a cloud provider's name, where its key is kept."
+  },
+  "settingsProviderNeedsKey": "Cloud · paste its API key to use it",
+  "@settingsProviderNeedsKey": {
+    "description": "Settings › Agent providers: under a cloud provider's name, when this device's keychain has no key for it, as for one an earlier version kept on the server."
   },
   "settingsProviderPlan": "ChatGPT plan",
   "@settingsProviderPlan": {
@@ -4714,10 +4666,6 @@
       }
     }
   },
-  "settingsProviderDescCloud": "Runs in Leaflet's server with your key, which never comes back to this device.",
-  "@settingsProviderDescCloud": {
-    "description": "The provider dialog: a cloud provider."
-  },
   "settingsProviderDescAccount": "Agents use your ChatGPT Plus or Pro plan. Sign-in stays on this device.",
   "@settingsProviderDescAccount": {
     "description": "The provider dialog: signing in with ChatGPT."
@@ -4759,10 +4707,6 @@
   "settingsPasteKey": "Paste a key",
   "@settingsPasteKey": {
     "description": "The provider dialog: the key field's placeholder."
-  },
-  "settingsKeySaved": "Saved on the server · paste a new key to replace it",
-  "@settingsKeySaved": {
-    "description": "The provider dialog: the key field's placeholder for a saved cloud provider."
   },
   "settingsOptional": "Optional",
   "@settingsOptional": {
@@ -4899,10 +4843,6 @@
         "example": "OpenAI"
       }
     }
-  },
-  "settingsRemoveProviderCloud": "Agents can no longer use it, and its API key is deleted from the server. You can't undo this.",
-  "@settingsRemoveProviderCloud": {
-    "description": "Settings › Agent providers: the alert asking before a provider kept on the server is removed: its message."
   },
   "settingsRemoveProviderLocal": "Agents can no longer use it, and its key is deleted from this device.",
   "@settingsRemoveProviderLocal": {

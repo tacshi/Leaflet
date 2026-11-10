@@ -9,30 +9,14 @@ import (
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
-// ToMarkdown writes rich text in the small inline markdown dialect agents
-// read and write: **bold** or __bold__, *italic* or _italic_, `code`,
-// ~~strike~~, <span style="color:#ef4444ff;background:#eab30840">text color
-// and highlight</span>, and [text](url); a page mention is
-// [Title](leaflet://page/<id>), and a person or an agent
-// [@Name](mention:user:<id>) or mention:agent:<id>.
-// Text that would read as markup is escaped with backslashes, so it reads
-// back as written. A format over several runs is
-// one span, the others nested in it, so runs side by side read back as
-// they were.
 func (d Delta) ToMarkdown() string { return d.markdown(escapeText, escapeText, LinkDestination) }
 
-// markdown writes d as ToMarkdown does, its text escaped by escape, a
-// link's by linked, and its links' urls written by dest.
 func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	var toks []mdToken
 	var open []mdMark
 	runs := trimSpans(d.Compact())
 	for i, r := range runs {
 		want := marksOf(r.Attrs)
-		// The marks open that this run still has stay open, as far as
-		// the first it hasn't: closing one to open it again inside
-		// another would put its marker after a space, as in "*the *[",
-		// where it no longer reads as one.
 		k := 0
 		for k < len(open) && slices.Contains(want, open[k]) {
 			k++
@@ -41,8 +25,6 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 			toks = append(toks, mdToken{mark: open[len(open)-1], close: true})
 			open = open[:len(open)-1]
 		}
-		// Of the marks to open, the one that spans the most runs goes
-		// outermost, so it closes last; in marksOf's order otherwise.
 		var opening []mdMark
 		for _, m := range want {
 			if !slices.Contains(open, m) {
@@ -63,19 +45,12 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 		}
 		switch m := r.Attrs.Mention; {
 		case m != nil && m.ID != "" && m.Kind != "page":
-			// A page mention is a link to the page, which reads back as
-			// one; a person or an agent is a link to mention:<kind>:<id>,
-			// as the server's agents write it, so it reads back as the
-			// mention and not as text.
 			name := m.Name
 			if name == "" {
 				name = strings.TrimPrefix(r.Text, "@")
 			}
 			toks = append(toks, mdToken{text: "[@" + linked(name) + "](" + dest(MentionLink(m.Kind, m.ID)) + ")"})
 		case r.Attrs.Code:
-			// Code spans side by side differ only in what Markdown can't
-			// say: they are one span, as backticks touching would not
-			// read back.
 			if n := len(toks); n > 0 && toks[n-1].code {
 				toks[n-1].text += r.Text
 			} else {
@@ -93,7 +68,6 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	toks = spacesOutside(toks)
 	var b strings.Builder
 	for i, t := range toks {
-		// A ! before a link would make it a picture: it is escaped.
 		if t.open && t.mark.kind == '[' || plainToken(t) && strings.HasPrefix(t.text, "[") {
 			if out := b.String(); strings.HasSuffix(out, "!") {
 				b.Reset()
@@ -114,7 +88,6 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 		case t.mark.kind == 'c':
 			b.WriteString(colorClose)
 		case t.mark.kind == '*' && boldTouchesItalic(toks, i):
-			// Bold beside an italic's * is __, as *** reads either way.
 			b.WriteString("__")
 		case t.mark.kind == '*':
 			b.WriteString("**")
@@ -127,14 +100,11 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	return b.String()
 }
 
-// mdMark is a format Markdown writes around text: a link to href, bold
-// ('*'), italic ('i'), strike ('~') or a color ('c'), href its style.
 type mdMark struct {
 	kind byte
 	href string
 }
 
-// mdToken is a mark opening or closing, or text: written out, or code.
 type mdToken struct {
 	mark        mdMark
 	open, close bool
@@ -142,11 +112,8 @@ type mdToken struct {
 	code        bool
 }
 
-// plainToken reports whether a token is text written out as it is.
 func plainToken(t mdToken) bool { return !t.open && !t.close && !t.code }
 
-// marksOf are the marks of a run, outermost first when they open
-// together: a link holds the others, and a color the formats.
 func marksOf(a Attrs) []mdMark {
 	var out []mdMark
 	if a.Href != "" {
@@ -167,14 +134,6 @@ func marksOf(a Attrs) []mdMark {
 	return out
 }
 
-// spacesOutside moves spaces off the inner side of bold, italic and strike
-// markers, where a marker no longer reads as one: those before a closing
-// marker go after it, those after an opening one before it. trimSpans
-// keeps a format's own ends clear, but a format closed at a link's end
-// and opened again past it, as in "[read *this *](u)*and that*", gets new
-// ends. The spaces lose the format there, which they can't show; they
-// never cross a link's brackets or a color's tags, so a link keeps its
-// text and a color its spaces.
 func spacesOutside(toks []mdToken) []mdToken {
 	plain := plainToken
 	emphasis := func(t mdToken) bool { return (t.open || t.close) && t.mark.kind != '[' && t.mark.kind != 'c' }
@@ -185,8 +144,6 @@ func spacesOutside(toks []mdToken) []mdToken {
 			i++
 			continue
 		}
-		// The markers here, and the spaces among them, each at the
-		// number of markers before it.
 		type space struct {
 			text string
 			at   int
@@ -233,8 +190,6 @@ func spacesOutside(toks []mdToken) []mdToken {
 				seq = append(seq, marks[k])
 			}
 		}
-		// With the spaces out, a format can open and close on nothing,
-		// or close and open again on the spot: it needs neither.
 		for k := 0; k+1 < len(seq); {
 			a, b := seq[k], seq[k+1]
 			if (a.open || a.close) && (b.open || b.close) && a.mark == b.mark && a.open != b.open {
@@ -250,14 +205,10 @@ func spacesOutside(toks []mdToken) []mdToken {
 	return out
 }
 
-// boldTouchesItalic reports whether the bold mark toks[i] opens or closes
-// has an italic mark next to either of its ends.
 func boldTouchesItalic(toks []mdToken, i int) bool {
 	at := func(j int) bool {
 		return j >= 0 && j < len(toks) && (toks[j].open || toks[j].close) && toks[j].mark.kind == 'i'
 	}
-	// The other end: bold doesn't nest in bold, so it is the next bold
-	// mark after an open, or before a close.
 	step := 1
 	if toks[i].close {
 		step = -1
@@ -269,10 +220,6 @@ func boldTouchesItalic(toks []mdToken, i int) bool {
 	return at(i-1) || at(i+1) || at(j-1) || at(j+1)
 }
 
-// trimSpans takes bold, italic and strike off the spaces at either end of
-// the text they span, outside code, and off line breaks in code too:
-// markers must touch text to read as markers, and a line can't start with
-// one that closes, where it can read as a list item's.
 func trimSpans(d Delta) Delta {
 	const bold, italic, strike = 1, 2, 4
 	marksOf := func(a Attrs) (m uint8) {
@@ -287,13 +234,9 @@ func trimSpans(d Delta) Delta {
 		}
 		return m
 	}
-	// Most text has none of the three, and nothing to trim.
 	if !slices.ContainsFunc(d, func(r Run) bool { return marksOf(r.Attrs) != 0 }) {
 		return d.Compact()
 	}
-	// A character as trimming sees it: its run and where in the run's text
-	// it starts, whether a mark comes off it at a span's end, and the
-	// marks it keeps; its other formats are its run's.
 	type char struct {
 		run, at int32
 		space   bool
@@ -351,18 +294,13 @@ func trimSpans(d Delta) Delta {
 	return out.Compact()
 }
 
-// The tags a color is written between (ToMarkdown).
 const (
 	colorOpen  = `<span style="`
 	colorClose = `</span>`
 )
 
-// maxColorStyle is the longest style a color's tag is read with: a text of
-// tags that end nowhere is not looked through to its end from each.
 const maxColorStyle = 64
 
-// colorStyle is how a run's color and highlight are written in a tag, ""
-// without them.
 func colorStyle(a Attrs) string {
 	var parts []string
 	if ValidColor(a.Color) {
@@ -374,9 +312,6 @@ func colorStyle(a Attrs) string {
 	return strings.Join(parts, ";")
 }
 
-// colorTagAt reads a color's opening tag at the start of s: the formats it
-// sets on attrs, and how many runes it takes; 0 when there is none, as a
-// style of anything but hex colors, which reads as the text it is.
 func colorTagAt(s []rune, attrs Attrs) (Attrs, int) {
 	if !hasRunes(s, colorOpen) {
 		return attrs, 0
@@ -413,37 +348,20 @@ func colorTagAt(s []rune, attrs Attrs) (Attrs, int) {
 	return attrs, start + end + 2
 }
 
-// hasRunes reports whether s starts with prefix.
 func hasRunes(s []rune, prefix string) bool {
 	p := []rune(prefix)
 	return len(s) >= len(p) && slices.Equal(s[:len(p)], p)
 }
 
-// escapeText escapes the characters that would read as markup: all the
-// markers but a _ inside a word, which can't start or end italics, and the
-// < of a color's tags.
 func escapeText(s string) string { return escapeMarkup(s, false, false) }
 
-// escapeCommonMark is escapeText for a CommonMark reader, which reads
-// more as markup than Leaflet does: an & that starts an entity or a
-// numeric character reference, as &amp; or &#65;, and a < that could
-// start an autolink or HTML, before a letter, a /, a ! or a ?, or before
-// an email address, as <1@x.io>. GitHub's makes a link of a web address
-// written out, and takes a backslash in one for part of it: a ~ and a _
-// in an address's path stay as they are where Leaflet reads them as text
-// too, as in https://x.edu/~user/ and https://x.dev/Foo_(bar).
 func escapeCommonMark(s string) string { return escapeMarkup(s, true, true) }
 
-// escapeLinkText is escapeCommonMark for a link's text, where an address
-// written out is no link of its own, and a ~ of its path could strike
-// text through.
 func escapeLinkText(s string) string { return escapeMarkup(s, true, false) }
 
-// escapeMarkup is escapeText, or escapeCommonMark where commonMark is
-// set, the paths of addresses left as they are where addresses is.
 func escapeMarkup(s string, commonMark, addresses bool) string {
 	var runes []rune
-	var at []int // where each rune is in s
+	var at []int
 	for i, c := range s {
 		runes, at = append(runes, c), append(at, i)
 	}
@@ -455,15 +373,12 @@ func escapeMarkup(s string, commonMark, addresses bool) string {
 	for i, c := range runes {
 		switch c {
 		case '~':
-			// One alone is text to Leaflet; two are a strike's marker.
 			if path == nil || !path[i] || runes[i-1] == '~' || runes[i+1] == '~' {
 				b.WriteByte('\\')
 			}
 		case '\\', '*', '`', '[', ']':
 			b.WriteByte('\\')
 		case '_':
-			// After a word, one alone opens no italics, and closes none:
-			// those that could open them are escaped.
 			if path != nil && path[i] && isWord(runes[i-1]) && runes[i+1] != '_' {
 				break
 			}
@@ -485,14 +400,6 @@ func escapeMarkup(s string, commonMark, addresses bool) string {
 	return b.String()
 }
 
-// addressPaths is, for each character of a text, whether it is in the
-// path of a web address written out, which GitHub's Markdown makes a
-// link: one that starts with http://, https:// or www., in either case,
-// at the text's start or after a space, a (, a *, a _ or a ~, and goes on to a space or
-// a <. Its path is what follows its host, from the first /, ? or #, but
-// for its last character: a marker there may close a format, and GitHub
-// leaves a ~ or a _ that ends an address out of its link. nil when the
-// text has none.
 func addressPaths(s []rune) []bool {
 	var path []bool
 	for i := 0; i < len(s); i++ {
@@ -541,22 +448,15 @@ func addressPaths(s []rune) []bool {
 	return path
 }
 
-// startsReference reports whether s starts with an entity or a numeric
-// character reference CommonMark reads, as &amp; or &#65;.
 func startsReference(s string) bool {
 	n, _ := parser.Entity(s)
 	return n > 0
 }
 
-// htmlStart reports whether c after a < could make it the start of HTML
-// or an autolink in CommonMark: a tag's name, its closing /, a comment's
-// or a declaration's !, or a processing instruction's ?.
 func htmlStart(c rune) bool {
 	return c < 0x80 && (unicode.IsLetter(c) || c == '/' || c == '!' || c == '?')
 }
 
-// emailAutolink reports whether s, after a <, starts as an email address
-// CommonMark makes an autolink of: the characters of its name, then an @.
 func emailAutolink(s []rune) bool {
 	for i, c := range s {
 		switch {
@@ -569,9 +469,6 @@ func emailAutolink(s []rune) bool {
 	return false
 }
 
-// codeSpan writes code between more backticks than any run of them in it,
-// with a space inside each end where it starts or ends with a backtick or
-// a space, as CommonMark reads code spans.
 func codeSpan(s string) string {
 	fence, run := 1, 0
 	for _, c := range s {
@@ -590,10 +487,6 @@ func codeSpan(s string) string {
 	return ticks + s + ticks
 }
 
-// ReadableMarkdown is ToMarkdown for people to read, in an export or a
-// copy for another app: a person or an agent mentioned is the name the
-// page shows, as mention links mean something only to Leaflet's agents,
-// and colors stay out, as Markdown has none.
 func (d Delta) ReadableMarkdown() string {
 	out := make(Delta, len(d))
 	for i, r := range d {
@@ -605,9 +498,6 @@ func (d Delta) ReadableMarkdown() string {
 		}
 		out[i] = r
 	}
-	// Text can read back other than it was where Markdown can't say it, as
-	// a format over a space between runs of another: what it reads back as
-	// is written instead, so the same Markdown comes out each time.
 	md := out.Uncolored().commonMark()
 	for range 3 {
 		again := FromMarkdown(md).commonMark()
@@ -619,12 +509,10 @@ func (d Delta) ReadableMarkdown() string {
 	return md
 }
 
-// commonMark is ToMarkdown escaped for a CommonMark reader.
 func (d Delta) commonMark() string {
 	return d.markdown(escapeCommonMark, escapeLinkText, commonMarkDestination)
 }
 
-// Uncolored is d without its colors and highlights.
 func (d Delta) Uncolored() Delta {
 	out := slices.Clone(d)
 	for i := range out {
@@ -633,8 +521,6 @@ func (d Delta) Uncolored() Delta {
 	return out
 }
 
-// MentionLink is how inline markdown writes a mention of a person or an
-// agent: [@Name](mention:user:<id>), or mention:agent:<id> for an agent.
 func MentionLink(kind, id string) string {
 	if kind != "agent" {
 		kind = "user"
@@ -642,7 +528,6 @@ func MentionLink(kind, id string) string {
 	return "mention:" + kind + ":" + id
 }
 
-// mentionOf reads a mention link: the kind of what it mentions and its ID.
 func mentionOf(href string) (kind, id string, ok bool) {
 	rest, ok := strings.CutPrefix(href, "mention:")
 	if !ok {
@@ -652,20 +537,10 @@ func mentionOf(href string) (kind, id string, ok bool) {
 	return kind, id, (kind == "user" || kind == "agent") && id != ""
 }
 
-// LinkDestination writes a link's url, in angle brackets when it holds
-// what would end it or read as markup: parentheses, spaces, backslashes.
-// A backtick is written as a url can hold one: what looks for code spans
-// around a link, in a table's row or a toggle's summary, reads Markdown
-// before it reads links.
 func LinkDestination(href string) string { return linkDestination(href, false) }
 
-// commonMarkDestination is LinkDestination for a CommonMark reader, which
-// reads an entity or a numeric character reference in a url as the
-// character it stands for: the & that starts one is escaped.
 func commonMarkDestination(href string) string { return linkDestination(href, true) }
 
-// linkDestination is LinkDestination, or commonMarkDestination where
-// commonMark is set.
 func linkDestination(href string, commonMark bool) string {
 	href = strings.ReplaceAll(href, "`", "%60")
 	angled := strings.ContainsAny(href, "()<>\\ \t\n")
@@ -688,16 +563,6 @@ func linkDestination(href string, commonMark bool) string {
 	return href
 }
 
-// EscapeBlockStart escapes what at the start of a block's text would
-// read as another kind of block: a heading's #, a list item's marker, a
-// quote's >, a table's |, a math block's $$, a rule, a line only of ='s
-// or -'s, which makes the line before it a heading, the line under a
-// table's header as GitHub reads one without its first |, as "--- | ---"
-// or ":--", which makes the line before it a table, a tag, a comment or
-// another start of HTML, as a toggle's <details>, or the ! that would
-// make a link a picture. They are looked for past spaces of any kind, as
-// a no-break or an ideographic space, which ParseLines passes over
-// before a $$ or a </details>.
 func EscapeBlockStart(md string) string {
 	s := strings.TrimLeftFunc(md, unicode.IsSpace)
 	lead := md[:len(md)-len(s)]
@@ -720,23 +585,15 @@ func EscapeBlockStart(md string) string {
 	return md
 }
 
-// underline reports whether a line is only ='s or only -'s, and spaces
-// after them, as CommonMark underlines a heading with.
 func underline(s string) bool {
 	s = strings.TrimRight(s, " \t")
 	return s != "" && (strings.Trim(s, "=") == "" || strings.Trim(s, "-") == "")
 }
 
-// tableRule reports whether a line is the one under a table's header in
-// GitHub's Markdown, which needs no | at its start: only -'s, :'s, |'s
-// and spaces, with a - and a | or a : among them.
 func tableRule(s string) bool {
 	return strings.Trim(s, "-:| \t") == "" && strings.Contains(s, "-") && strings.ContainsAny(s, "|:")
 }
 
-// headingMarkdown escapes the # that starts a run of them ending a
-// heading's Markdown, or making all of it, after a space: CommonMark
-// takes that run for the heading's closing #s, and leaves it out.
 func headingMarkdown(md string) string {
 	s := strings.TrimRight(md, " \t")
 	rest := strings.TrimRight(s, "#")
@@ -746,36 +603,20 @@ func headingMarkdown(md string) string {
 	return rest + "\\" + md[len(rest):]
 }
 
-// FromMarkdown reads the inline markdown dialect.
 func FromMarkdown(markdown string) Delta {
 	var out Delta
 	parseInline([]rune(markdown), Attrs{}, &out, 0)
 	return out.Compact()
 }
 
-// maxInlineDepth is how deep formats and links nest: past it, text is read
-// as it is written. Each level reads its text again.
 const maxInlineDepth = 32
 
-// linkScan reads the links of a text, s, at its [s. Where the ] that ends
-// a link's text is from each place, and the ) that ends its url, are
-// worked out once for the whole text, from its end, as it is first asked
-// for a link: scanned for from each [ instead, a text of many [s closed by
-// none would be read as many times.
 type linkScan struct {
-	s []rune
-	// closes is, for each place, where the first ] at its depth is from
-	// there, a [ and its ] in between, an escaped one or one in a code span
-	// not counting, or -1; urlEnds is, for each place in a url, where the
-	// first ) at its depth is, a ( and its ) in between, an escaped one not
-	// counting, or -1 past a space.
+	s               []rune
 	closes, urlEnds []int
-	// found is, of each marker, where it is first found from each place
-	// passed (first).
-	found map[string]map[int]int
+	found           map[string]map[int]int
 }
 
-// scan works out closes and urlEnds, each place from the places after it.
 func (l *linkScan) scan() {
 	s := l.s
 	l.closes, l.urlEnds = make([]int, len(s)), make([]int, len(s))
@@ -785,11 +626,6 @@ func (l *linkScan) scan() {
 		}
 		return -1
 	}
-	// A code span from a backtick goes to the first run after its own of
-	// as many backticks as there are from it to its run's end, as
-	// codeSpanAt finds it: runs is where the nearest run of each length
-	// after the place the pass is at starts, and runEnd where the
-	// backticks from that place end.
 	runs := map[int]int{}
 	runEnd := len(s)
 	for q := len(s) - 1; q >= 0; q-- {
@@ -800,7 +636,6 @@ func (l *linkScan) scan() {
 			if q+1 == len(s) || s[q+1] != '`' {
 				runEnd = q + 1
 			}
-			// A ] in code is the code's.
 			next := q + 1
 			if start, ok := runs[runEnd-q]; ok {
 				next = start + runEnd - q
@@ -837,9 +672,6 @@ func (l *linkScan) scan() {
 	}
 }
 
-// link reads [text](url) at s[i]: the text, the url and how many runes
-// they take. As in CommonMark, the url may be in angle brackets or hold
-// balanced parentheses, and backslashes escape in both.
 func (l *linkScan) link(i int) (text []rune, href string, n int, ok bool) {
 	s := l.s
 	if l.closes == nil {
@@ -887,7 +719,6 @@ func (l *linkScan) link(i int) (text []rune, href string, n int, ok bool) {
 	return text, b.String(), n, true
 }
 
-// isPunct reports whether a backslash escapes c: ASCII punctuation.
 func isPunct(c rune) bool {
 	return c < 0x80 && (unicode.IsPunct(c) || unicode.IsSymbol(c))
 }
@@ -926,10 +757,6 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 		if c == '[' {
 			if text, href, n, ok := links.link(i); ok {
 				flush()
-				// A link to a page is a mention of it, in the formats
-				// around the link and those all its text has, as ToMarkdown
-				// writes a mention's own; one to a block of a page stays a
-				// link, with its own text.
 				if id, ok := PageLinkID(href); ok && LinkBlock(href) == "" {
 					var inner Delta
 					parseInline(text, attrs, &inner, depth+1)
@@ -940,8 +767,6 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 					i += n
 					continue
 				}
-				// A link to mention:user:<id> or mention:agent:<id> is a
-				// mention of that person or agent, by the name it shows.
 				if kind, id, ok := mentionOf(href); ok {
 					var inner Delta
 					parseInline(text, Attrs{}, &inner, depth+1)
@@ -969,7 +794,6 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 				}
 			}
 		}
-		// ***both*** is bold and italic, as agents write it.
 		if i+2 < len(s) && (c == '*' || c == '_') && s[i+1] == c && s[i+2] == c {
 			marker := string([]rune{c, c, c})
 			if end := indexString(links, marker, i+3); end > i+3 {
@@ -1015,9 +839,6 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 	flush()
 }
 
-// sharedAttrs are the formats every run of d has, or attrs when it has
-// none. A run only of spaces counts only when all are: ToMarkdown takes
-// bold, italic and strike off the spaces at a format's ends.
 func sharedAttrs(d Delta, attrs Attrs) Attrs {
 	if text := slices.DeleteFunc(slices.Clone(d), func(r Run) bool { return strings.TrimSpace(r.Text) == "" }); len(text) > 0 {
 		d = text
@@ -1040,9 +861,6 @@ func sharedAttrs(d Delta, attrs Attrs) Attrs {
 	return a
 }
 
-// codeSpanAt reads a code span at the start of s, between runs of as many
-// backticks, and how many runes it takes; 0 when there is none. A space
-// inside each end comes off, as CommonMark has it.
 func codeSpanAt(s []rune) (string, int) {
 	open := 0
 	for open < len(s) && s[open] == '`' {
@@ -1072,9 +890,6 @@ func codeSpanAt(s []rune) (string, int) {
 	return "", 0
 }
 
-// skipSpan returns where a code span or a link at s[j] ends, of the text
-// links reads, or j when none starts there: they hold their text, markers
-// and all, as the markers around them look for their ends.
 func skipSpan(links *linkScan, j int) int {
 	s := links.s
 	switch s[j] {
@@ -1090,9 +905,6 @@ func skipSpan(links *linkScan, j int) int {
 	return j
 }
 
-// first is where scanning from p for a marker, key, first finds one, a
-// place at a time as next has it, or -1: each place passed is told what
-// was found, so no place is scanned from twice.
 func (l *linkScan) first(key string, p, end int, next func(int) int, takes func(int) bool) int {
 	if l.found == nil {
 		l.found = map[string]map[int]int{}
@@ -1122,9 +934,6 @@ func (l *linkScan) first(key string, p, end int, next func(int) int, takes func(
 	return at
 }
 
-// findSingle is where a single * or _ closes from from: one not doubled,
-// not before a word for _, nor after a space but right at from, outside
-// code spans and links.
 func findSingle(links *linkScan, marker rune, from int) int {
 	s := links.s
 	next := func(j int) int {
@@ -1151,7 +960,6 @@ func findSingle(links *linkScan, marker rune, from int) int {
 	if from >= len(s) {
 		return -1
 	}
-	// Right at from, a space before it does not count.
 	if closes(from) {
 		return from
 	}
@@ -1172,6 +980,5 @@ func indexString(links *linkScan, sub string, from int) int {
 		}
 		return j + 1
 	}
-	// A marker's characters are never a backslash, nor what opens a span.
 	return links.first(sub, from, len(s)-len(m)+1, next, func(j int) bool { return string(s[j:j+len(m)]) == sub })
 }

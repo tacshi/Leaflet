@@ -1,9 +1,4 @@
 #!/bin/bash
-# Fails if the Go core for iOS (./mobile) depends on MyGo's windowing
-# packages, which load AppKit and lock the main thread, or on purego.
-# MyGo's i18n and its locale catalogs are allowed, since locales/ is
-# built on them, and so is its Markdown parser, which internal/doc uses
-# and which imports only the standard library.
 
 set -euo pipefail
 

@@ -3,8 +3,6 @@ import Testing
 
 @testable import Leaflet
 
-/// SVGPercentsTests check shapes' percentages resolve against the
-/// viewport, as a browser resolves them.
 struct SVGPercentsTests {
     private func resolved(_ svg: String) -> String {
         String(decoding: SVGPercents.resolved(Data(svg.utf8)), as: UTF8.self)

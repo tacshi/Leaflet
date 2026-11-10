@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// A label or a series' name holding a comma, a quote or a leading space
-// is quoted, and reads back as it was.
 func TestChartCSVRoundTrips(t *testing.T) {
 	labels := []any{"Jan, 2024", `5" screen`, " padded", "plain"}
 	series := []any{
@@ -22,7 +20,6 @@ func TestChartCSVRoundTrips(t *testing.T) {
 		t.Fatalf("csv\n%s\nwant\n%s", csv, want)
 	}
 	gotLabels, gotSeries, err := ParseChartCSV(csv)
-	// A label's leading space comes off, as every field's does.
 	labels[2] = "padded"
 	if err != nil || !reflect.DeepEqual(gotLabels, labels) || !reflect.DeepEqual(gotSeries, []any{
 		map[string]any{"name": "Sales, net", "values": []any{1.0, 2.5, 3.0, 4.0}},
@@ -32,8 +29,6 @@ func TestChartCSVRoundTrips(t *testing.T) {
 	}
 }
 
-// Text typed before labels were quoted reads as it did: unquoted fields,
-// a quote inside one, blank lines and missing values.
 func TestParseChartCSVReadsTypedText(t *testing.T) {
 	labels, series, err := ParseChartCSV("\n  \nMonth, Sales , Costs\nJan, 1\n\n6\" pipe,2, 3 \n")
 	if err != nil || !reflect.DeepEqual(labels, []any{"Jan", `6" pipe`}) || !reflect.DeepEqual(series, []any{
@@ -46,7 +41,6 @@ func TestParseChartCSVReadsTypedText(t *testing.T) {
 	if number, ok := errors.AsType[*ChartNumberError](err); !ok || number.Line != 4 || number.Cell != "lots" {
 		t.Errorf("error %v", err)
 	}
-	// What reads as a float but no chart can draw is no number either.
 	for _, cell := range []string{"NaN", "Infinity", "-inf", "+Inf"} {
 		_, _, err = ParseChartCSV("Month, Sales\nJan, " + cell)
 		if number, ok := errors.AsType[*ChartNumberError](err); !ok || number.Line != 2 || number.Cell != cell {

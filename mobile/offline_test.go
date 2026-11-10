@@ -2,8 +2,6 @@ package mobile
 
 import "testing"
 
-// Saving settings keeps keeping all pages on this device, as it turns off
-// and on, with the other settings saved beside it.
 func TestSaveSettingsKeepsAllPagesOffline(t *testing.T) {
 	c, _ := open(t)
 	for _, on := range []bool{false, true} {

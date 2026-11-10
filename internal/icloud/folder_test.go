@@ -39,7 +39,6 @@ func TestWriteAndRead(t *testing.T) {
 	if err := f.ReadJSON(path, &p); err != nil || p.Version != 3 {
 		t.Fatalf("read %+v, %v", p, err)
 	}
-	// Written whole: nothing is left beside it, nor in Temp.
 	entries, _ := os.ReadDir(filepath.Dir(f.abs(path)))
 	if len(entries) != 1 {
 		t.Errorf("left %d files", len(entries))
@@ -83,7 +82,6 @@ func TestBatchesListsPlaceholdersAndSpotsCopies(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(seqs, []int64{1, 2}) || copies {
 		t.Fatalf("seqs %v copies %v err %v", seqs, copies, err)
 	}
-	// A batch iCloud has not downloaded is not ready, and is asked for.
 	asked := ""
 	was := StartDownload
 	StartDownload = func(p string) error { asked = p; return nil }
@@ -95,7 +93,6 @@ func TestBatchesListsPlaceholdersAndSpotsCopies(t *testing.T) {
 	if !f.Exists(rel) {
 		t.Error("a placeholder's file does not exist")
 	}
-	// Download asks for it too, and not for a file downloaded or missing.
 	asked = ""
 	f.Download(rel)
 	if asked != f.abs(rel) {
@@ -161,8 +158,6 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// A file whose name is as long as the disk takes goes in, though the
-// name it is written under first is longer.
 func TestCopyInTakesALongName(t *testing.T) {
 	f := folder(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -181,8 +176,6 @@ func TestCopyInTakesALongName(t *testing.T) {
 	}
 }
 
-// A copy whose first try fails, as where Temp is on another disk, is
-// written whole by the second; one cut short before is written again.
 func TestCopyInTriesAgainWithTheWholeFile(t *testing.T) {
 	f := folder(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -215,9 +208,6 @@ func TestCopyInTriesAgainWithTheWholeFile(t *testing.T) {
 	}
 }
 
-// A placeholder of a file that starts with a dot is left out as the file
-// is, and a file listed both as itself and as its placeholder, as while
-// iCloud brings it, is listed once: neither reads as a copy iCloud made.
 func TestBatchesPassOverDotPlaceholders(t *testing.T) {
 	f := folder(t)
 	dir := filepath.Join(f.Root, "devices", dev, "log")
@@ -236,8 +226,6 @@ func TestBatchesPassOverDotPlaceholders(t *testing.T) {
 	}
 }
 
-// A file made only where none is fails, leaving the one there, downloaded
-// or not.
 func TestCreateJSONLeavesAFileThere(t *testing.T) {
 	f := folder(t)
 	if err := f.CreateJSON(SpacePath, Space{Format: Format, SpaceID: page}); err != nil {
@@ -260,8 +248,6 @@ func TestCreateJSONLeavesAFileThere(t *testing.T) {
 	}
 }
 
-// Every system with iCloud Drive can hold a file's name in the folder; a
-// copy an earlier Leaflet kept by the name it had is still found.
 func TestFileBlobsHaveNamesWindowsHolds(t *testing.T) {
 	for in, want := range map[string]string{"Q3: report.pdf": "Q3_ report.pdf", "aux.txt": "_aux.txt", "LPT¹": "_LPT¹",
 		"notes.pdf ": "notes.pdf", `a\b`: "a_b", "fine.pdf": "fine.pdf", "COM10": "COM10"} {
@@ -275,7 +261,7 @@ func TestFileBlobsHaveNamesWindowsHolds(t *testing.T) {
 		t.Fatalf("path %q, %v", rel, err)
 	}
 	if runtime.GOOS == "windows" {
-		return // no copy has that name there: a ":" names a part of a file
+		return
 	}
 	old := f.abs("blobs/files/" + page + "/Q3: report.pdf")
 	if err := os.MkdirAll(filepath.Dir(old), 0o750); err != nil {
@@ -289,7 +275,6 @@ func TestFileBlobsHaveNamesWindowsHolds(t *testing.T) {
 	}
 }
 
-// A file's copy goes with the copies iCloud made of it beside it.
 func TestRemoveBlobTakesItsCopies(t *testing.T) {
 	f := folder(t)
 	src := filepath.Join(t.TempDir(), "notes.txt")

@@ -1,62 +1,32 @@
 import UIKit
 
-/// BlockText is the page's text as its blocks: the text view's storage, a
-/// paragraph a block, each carrying its BlockInfo, and the block of the
-/// last paragraph, which no character holds once it is empty. It finds
-/// the paragraphs and their blocks, keeping an index of them that it
-/// finds again only where the text changes, and keeps each paragraph one
-/// block as the text changes.
 @MainActor
 final class BlockText: NSObject {
     let storage: NSTextStorage
-    /// trailing is the block of the last paragraph, which no character
-    /// holds when it is empty. It is kept while the paragraph has text too
-    /// (keepTrailing), and counts only once it is empty.
     var trailing: BlockInfo? {
         didSet {
             guard trailing !== oldValue else { return }
-            // Kept beside a last paragraph that holds its block, it is no
-            // paragraph's, and the index stands: the first key typed in a
-            // page sets it, and would have the whole page found again.
             if !lastHoldsItsBlock { index = nil }
             for id in [oldValue?.id, trailing?.id].compactMap(\.self) { touched.insert(id) }
         }
     }
-    /// emptied is the block of the page's last paragraph, as an edit
-    /// empties it, for the trailing block to keep.
     var emptied: BlockInfo?
 
-    /// lastHoldsItsBlock reports whether the page's last paragraph has text
-    /// that holds its block, so that trailing doesn't count.
     private var lastHoldsItsBlock: Bool {
         let ns = storage.string as NSString
         guard ns.length > 0, ns.character(at: ns.length - 1) != 0x0A else { return false }
         let last = ns.paragraphRange(for: NSRange(location: ns.length - 1, length: 0))
         return blockAt(last.location) != nil
     }
-    /// index is the paragraphs' blocks and ranges, as blocks() last found
-    /// them, and stale what changed in the text since: where, as the text
-    /// now is, and how far the text after it moved. blocks() finds the
-    /// paragraphs again there alone, rather than through the whole page as
-    /// each key is typed.
     private var index: [(info: BlockInfo, range: NSRange)]?
     private var stale: (range: NSRange, moved: Int)?
-    /// foldChanges counts the changes blocks() found of what folds go by
-    /// (EditorLayout.updateFolds): paragraphs that came or went, or a
-    /// block's ID, type, depth, level or fold that changed. collapsed is
-    /// how many blocks are folded, as it last found them.
     private(set) var foldChanges = 0
     private(set) var collapsed = 0
-    /// touched are the blocks whose paragraphs changed, their text or their
-    /// attributes, since takeTouched last gave them.
     private var touched = Set<String>()
 
     init(_ storage: NSTextStorage) {
         self.storage = storage
         super.init()
-        // Every change of the text, its characters or its attributes, the
-        // blocks' among them, is processed as it ends, whoever made it:
-        // the keyboard, an undo, the editor.
         NotificationCenter.default.addObserver(
             self, selector: #selector(processed),
             name: NSTextStorage.didProcessEditingNotification, object: storage)
@@ -72,8 +42,6 @@ final class BlockText: NSObject {
         guard index != nil else { return }
         let moved = storage.changeInLength
         if let was = stale {
-            // Both changes as one: the text from where either began to where
-            // either ended, the first's end moved by the second.
             let start = min(was.range.location, edited.location)
             let end = max(NSMaxRange(was.range), NSMaxRange(edited) - moved) + moved
             stale = (NSRange(location: start, length: end - start), was.moved + moved)
@@ -82,8 +50,6 @@ final class BlockText: NSObject {
         }
     }
 
-    /// touch notes the blocks of the paragraphs range is in, as the text
-    /// now is, as touched.
     private func touch(_ range: NSRange) {
         let ns = storage.string as NSString
         let end = min(NSMaxRange(range), ns.length)
@@ -94,12 +60,9 @@ final class BlockText: NSObject {
             at = NSMaxRange(para)
             if at >= end { break }
         }
-        // The empty paragraph at the end is the trailing block's.
         if end >= ns.length, let trailing { touched.insert(trailing.id) }
     }
 
-    /// takeTouched returns the blocks whose paragraphs changed since it
-    /// last did.
     func takeTouched() -> Set<String> {
         defer { touched = [] }
         return touched
@@ -107,12 +70,9 @@ final class BlockText: NSObject {
 
     var length: Int { storage.length }
 
-    /// blocks are the paragraphs' blocks and ranges, without their
-    /// separators, as DocumentMapper.blocks has them.
     func blocks() -> [(info: BlockInfo, range: NSRange)] {
         if let index, stale == nil { return index }
         if var found = index, let stale, storage.length > 0 {
-            // The index alone holds the list, for it to change in place.
             index = nil
             let (was, now) = refind(&found, stale)
             if was.count != now.count
@@ -132,20 +92,13 @@ final class BlockText: NSObject {
         return index ?? []
     }
 
-    /// refind finds the paragraphs again where the text changed (stale),
-    /// in index as blocks() found them before the change, and returns the
-    /// ones index had there and the ones there now.
     private func refind(
         _ index: inout [(info: BlockInfo, range: NSRange)], _ stale: (range: NSRange, moved: Int)
     ) -> (was: [(info: BlockInfo, range: NSRange)], now: [(info: BlockInfo, range: NSRange)]) {
         let ns = storage.string as NSString
-        // Where the change was, in the text as index has it.
         let from = stale.range.location
         let to = NSMaxRange(stale.range) - stale.moved
-        // A paragraph goes to the end of its separator.
         func end(_ i: Int) -> Int { NSMaxRange(index[i].range) + (i < index.count - 1 ? 1 : 0) }
-        // The paragraphs the change touched: from the first that ends at
-        // or after its start, to the last that starts at or before its end.
         var lo = 0
         var hi = index.count - 1
         while lo < hi {
@@ -178,7 +131,6 @@ final class BlockText: NSObject {
             at = NSMaxRange(range)
         }
         if toEnd, ns.character(at: ns.length - 1) == 0x0A {
-            // Text ending in a separator has an empty paragraph after it.
             now.append((trailing ?? BlockInfo.paragraph(), NSRange(location: ns.length, length: 0)))
         }
         let was = Array(index[first...last])
@@ -189,15 +141,12 @@ final class BlockText: NSObject {
         return (was, now)
     }
 
-    /// foldAlike says two blocks are alike as folds go by them.
     private static func foldAlike(_ a: BlockInfo, _ b: BlockInfo) -> Bool {
         a === b
             || a.id == b.id && a.type == b.type && a.depth == b.depth && a.level == b.level
                 && a.isCollapsed == b.isCollapsed
     }
 
-    /// paragraphs are the paragraphs with their text, as
-    /// DocumentMapper.paragraphs has them.
     func paragraphs() -> [DocumentMapper.Paragraph] {
         blocks().map {
             DocumentMapper.Paragraph(
@@ -205,8 +154,6 @@ final class BlockText: NSObject {
         }
     }
 
-    /// paragraph returns the paragraph at location: its text's range,
-    /// without the separator, and its block.
     func paragraph(at location: Int) -> (range: NSRange, info: BlockInfo) {
         let ns = storage.string as NSString
         let loc = min(max(location, 0), ns.length)
@@ -222,8 +169,6 @@ final class BlockText: NSObject {
         return (content, info ?? trailing ?? BlockInfo.paragraph())
     }
 
-    /// paragraphs(touching:) are the paragraphs range touches: one it ends
-    /// at the start of, it does not.
     func paragraphs(touching sel: NSRange) -> [(range: NSRange, info: BlockInfo)] {
         var out: [(NSRange, BlockInfo)] = []
         var at = sel.location
@@ -240,7 +185,6 @@ final class BlockText: NSObject {
         return storage.attribute(.leafletBlock, at: location, effectiveRange: nil) as? BlockInfo
     }
 
-    /// firstBlock is the first block a character in range holds.
     func firstBlock(in range: NSRange) -> BlockInfo? {
         var found: BlockInfo?
         storage.enumerateAttribute(.leafletBlock, in: range) { v, _, stop in
@@ -252,8 +196,6 @@ final class BlockText: NSObject {
         return found
     }
 
-    /// location is where the paragraph of block info is, or nil once no
-    /// paragraph is that block.
     func location(of info: BlockInfo) -> Int? {
         let ns = storage.string as NSString
         if trailing === info, ns.length == 0 || ns.character(at: ns.length - 1) == 0x0A {
@@ -270,8 +212,6 @@ final class BlockText: NSObject {
         return found
     }
 
-    /// mentionRun is the whole of the mention the character at location
-    /// is part of, or nil.
     func mentionRun(at location: Int) -> NSRange? {
         guard location < storage.length else { return nil }
         var run = NSRange()
@@ -283,8 +223,6 @@ final class BlockText: NSObject {
         return run
     }
 
-    /// widenToMentions widens range to the whole of each mention it cuts,
-    /// as doc.Delta.Widen does: a mention is taken out or formatted whole.
     func widenToMentions(_ range: NSRange) -> NSRange {
         guard range.length > 0 else { return range }
         var out = range
@@ -293,10 +231,6 @@ final class BlockText: NSObject {
         return out
     }
 
-    // MARK: Places that stay
-
-    /// Position is a place in the text as its block and the offset in it,
-    /// which stays the same place as the text around the block changes.
     typealias Position = (id: String, offset: Int)
 
     func position(at location: Int) -> Position {
@@ -304,8 +238,6 @@ final class BlockText: NSObject {
         return (info.id, location - range.location)
     }
 
-    /// place is where position is in the text now, or nil once its block
-    /// is gone.
     func place(_ position: Position) -> Int? {
         for p in blocks() where p.info.id == position.id {
             return p.range.location + min(position.offset, p.range.length)
@@ -313,12 +245,6 @@ final class BlockText: NSObject {
         return nil
     }
 
-    /// nearest is where the caret goes once a change from outside took
-    /// away its block, id, which was in the paragraphs before it, old: the
-    /// end of the nearest block before it that stayed, or else the start
-    /// of the nearest after it, or else the start of the page. Left to
-    /// the text view, the caret would go where the change ended, which may
-    /// be far from where the user was.
     func nearest(_ id: String, in old: [(info: BlockInfo, range: NSRange)]) -> Int? {
         guard let i = old.firstIndex(where: { $0.info.id == id }) else { return nil }
         var now: [String: NSRange] = [:]
@@ -334,25 +260,16 @@ final class BlockText: NSObject {
         return 0
     }
 
-    /// subtree is the last of the paragraphs from first that its block
-    /// holds, nested in it: the block moves with them.
     static func subtree(_ all: [DocumentMapper.Paragraph], _ first: Int) -> Int {
         var last = first
         while last + 1 < all.count, all[last + 1].info.depth > all[first].info.depth { last += 1 }
         return last
     }
 
-    /// index is the paragraph of all that location is in.
     static func index(_ all: [DocumentMapper.Paragraph], at location: Int) -> Int {
         all.lastIndex { $0.range.location <= location } ?? 0
     }
 
-    // MARK: One block a paragraph
-
-    /// normalize keeps each paragraph in and near range one block: the
-    /// block of its first character, and one apart from the paragraphs
-    /// before it, as lines pasted in all take the block they went in. It
-    /// returns the paragraphs it went through.
     @discardableResult
     func normalize(around range: NSRange) -> NSRange {
         let ns = storage.string as NSString
@@ -367,17 +284,12 @@ final class BlockText: NSObject {
         var seen = Set<String>()
         while at < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: at, length: 0))
-            // Text typed into an empty block may have no block yet: the
-            // rest of the paragraph, its separator, or the trailing block
-            // holds the paragraph's.
             var info =
                 blockAt(para.location) ?? firstBlock(in: para) ?? trailing
                 ?? BlockInfo.paragraph()
             if seen.contains(info.id) { info = info.newLine() }
             var content = para
             if ns.character(at: NSMaxRange(para) - 1) == 0x0A { content.length -= 1 }
-            // A block without text whose attachment went is an empty
-            // paragraph.
             if !info.isText,
                 content.length == 0
                     || storage.attribute(.attachment, at: para.location, effectiveRange: nil) == nil
@@ -404,12 +316,6 @@ final class BlockText: NSObject {
         return NSRange(location: from, length: min(at, ns.length) - from)
     }
 
-    /// keepTrailing keeps the page's last paragraph a block of its own,
-    /// and reports whether its block changed. Once empty, no character
-    /// holds it, and the trailing block does: the last paragraph's block,
-    /// kept while it has text too, for an edit the editor isn't told of,
-    /// as the text view's own undo, to leave it that block; or, as an edit
-    /// empties it, the block it was then.
     func keepTrailing() -> Bool {
         let ns = storage.string as NSString
         let before = trailing
@@ -423,26 +329,12 @@ final class BlockText: NSObject {
                 trailing =
                     ns.length > 0 ? blockAt(ns.length - 1)?.newLine() : BlockInfo.paragraph()
             }
-            // An empty block without text, its attachment gone, as the
-            // page's last image deleted, is an empty paragraph, as
-            // normalize has it: it would be saved as the block it was.
             if let t = trailing, !t.isText { trailing = t.with(type: "paragraph", data: [:]) }
         }
         emptied = nil
         return trailing !== before
     }
 
-    /// fitDepths keeps each block from the paragraph range starts in as
-    /// deep as the page's content has it, as DocumentMapper.content reads
-    /// the text: a block goes in the block before it that holds blocks,
-    /// one deeper, or at the top, so no deeper than the block before it,
-    /// and one deeper only when that one holds blocks. A block shown
-    /// deeper, as one whose list item became text, would be saved where it
-    /// shows not. The blocks before range are as deep as they go already,
-    /// as each change has kept them: past range, it goes on only while the
-    /// blocks change, as one that stays as deep as it was leaves those
-    /// after it as they were too. It returns the paragraphs it changed,
-    /// and whether the trailing block changed.
     func fitDepths(from range: NSRange) -> (changed: [NSRange], trailing: Bool) {
         let ns = storage.string as NSString
         let before = trailing
@@ -450,8 +342,6 @@ final class BlockText: NSObject {
         var at =
             ns.paragraphRange(for: NSRange(location: min(range.location, ns.length), length: 0))
             .location
-        // room is how deep the next block can go: as deep as the block
-        // before it, or one deeper in a block that holds blocks.
         var room = 0
         if at > 0,
             let prev = blockAt(
@@ -473,8 +363,6 @@ final class BlockText: NSObject {
             room = fitted.depth + (fitted.isList ? 1 : 0)
             at = NSMaxRange(para)
         }
-        // The empty paragraph after the last separator, or of an empty
-        // page, is the trailing block's.
         if ns.length == 0 || ns.character(at: ns.length - 1) == 0x0A, let t = trailing,
             t.depth > room
         {
@@ -483,10 +371,6 @@ final class BlockText: NSObject {
         return (changed, trailing !== before)
     }
 
-    /// uniqueIDs gives a block whose ID a block before it has a new one, in
-    /// the text, and reports whether the trailing block was one:
-    /// DocumentMapper.content would give it another each time the page is
-    /// sent, a new block to the core each time.
     func uniqueIDs() -> Bool {
         var seen = Set<String>()
         var trailingChanged = false
@@ -497,7 +381,6 @@ final class BlockText: NSObject {
             }
             let info = p.info.with(id: BlockInfo.newID())
             seen.insert(info.id)
-            // The separator after the paragraph is its block's too.
             var whole = p.range
             if NSMaxRange(whole) < storage.length { whole.length += 1 }
             if whole.length > 0 {

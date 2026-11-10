@@ -61,9 +61,6 @@ x64 | amd64) GOARCH=amd64 ;;
 esac
 
 NAME="Leaflet Debug"
-# MyGo names the data folder after the app and keeps secrets under its
-# identifier, both from mygo.json, which this build alone sees changed.
-# Without updates, the app has no updater.
 patch_config "name=$NAME" "identifier=$(config_value identifier).debug" -updates
 
 if [[ "$TARGET" == mac ]]; then
@@ -71,9 +68,6 @@ if [[ "$TARGET" == mac ]]; then
 	OUT="build/mac-debug"
 	BUILT="$OUT/darwin-$GOARCH/$NAME.app"
 	APP="$OUT/$NAME.app"
-	# A debug build goes on without the Mac's speech helper where Xcode
-	# can't build it: the app then has no on-device engine, and says so
-	# when one is chosen. Release builds need it (build-release.sh).
 	if why="$(speech_toolchain)"; then
 		"$ROOT_DIR/scripts/build-speech.sh" "$ARCH"
 	else
@@ -85,7 +79,6 @@ if [[ "$TARGET" == mac ]]; then
 	[[ -d "$BUILT" ]] || die "expected $BUILT after the build"
 	rm -rf "$APP"
 	mv "$BUILT" "$APP"
-	# MyGo builds into a folder per platform, empty once the app moves out.
 	rmdir "$(dirname "$BUILT")" 2>/dev/null || true
 	info "built $ROOT_DIR/$APP"
 	if $OPEN; then open "$APP"; fi

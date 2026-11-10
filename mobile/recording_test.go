@@ -21,9 +21,6 @@ import (
 	"leaflet/locales"
 )
 
-// fakeMic is the app's microphone, one for all recordings: on at once,
-// it hands on a second of silence to the recording stopping, once hold
-// lets it, and keeps the calls it was given.
 type fakeMic struct {
 	mu     sync.Mutex
 	sinks  map[int]*AudioSink
@@ -128,7 +125,6 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 		}
 		_ = json.Unmarshal([]byte(raw), &rec)
 	}
-	// Offline and with no endpoint, it keeps only its audio.
 	if rec.SttProvider != "" {
 		t.Fatalf("recording %+v", rec)
 	}
@@ -141,8 +137,6 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	}
 }
 
-// quietMic is a microphone that never answers, as one whose permission
-// the user has yet to give, or that refuses, saying refused.
 type quietMic struct{ refused string }
 
 func (m quietMic) Start(_, _ int, sink *AudioSink) error {
@@ -156,11 +150,6 @@ func (quietMic) Resume(int) {}
 func (quietMic) Stop(int)   {}
 func (quietMic) Close(int)  {}
 
-// RecordNewPage records into a page of its own, in the folder asked for,
-// with no editor to put its block in: the page is made with the block in
-// it as the microphone comes on. One that never comes on, refused or
-// stopped while it starts, leaves nothing behind: no page, no recording,
-// no audio, nothing waiting to go up.
 func TestRecordNewPage(t *testing.T) {
 	c, _ := open(t)
 	raw, err := c.CreateFolder("Voice notes")
@@ -185,7 +174,6 @@ func TestRecordNewPage(t *testing.T) {
 	}
 	pages, _ := c.core.Store.Pages()
 	queued := c.core.Store.PendingCount()
-	// nothingLeft says a voice note that never began left nothing.
 	nothingLeft := func(id string) {
 		t.Helper()
 		if _, err := c.core.Store.Page(id); err == nil {
@@ -210,7 +198,6 @@ func TestRecordNewPage(t *testing.T) {
 	}
 	nothingLeft("")
 
-	// Refused, as the microphone's permission turned down.
 	c.UseMicrophone(quietMic{refused: "denied"})
 	id, err := c.RecordNewPage(folder.ID)
 	if err != nil {
@@ -219,7 +206,6 @@ func TestRecordNewPage(t *testing.T) {
 	until("failed", func(st recordingState) bool { return !st.Starting && !st.Active })
 	nothingLeft(id)
 
-	// Stopped while it starts, as the Action Button pressed again.
 	c.UseMicrophone(quietMic{})
 	if id, err = c.RecordNewPage(folder.ID); err != nil {
 		t.Fatal(err)
@@ -242,7 +228,6 @@ func TestRecordNewPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Named after when it began, which a minute may have turned over.
 	named := p.Title == locales.RecBlockTitle(before) || p.Title == locales.RecBlockTitle(time.Now())
 	if p.FolderID != folder.ID || !named {
 		t.Fatalf("page %+v", p)
@@ -278,9 +263,6 @@ func TestRecordNewPage(t *testing.T) {
 	}
 }
 
-// A recording started before the last one's microphone has stopped gets
-// a session of its own: the last one's Stop and Close, late, are for it
-// alone, and its last audio goes to its own file.
 func TestRecordingsShareTheMicrophoneApart(t *testing.T) {
 	c, _ := open(t)
 	raw, _ := c.CreatePage(`{"title":"Standup"}`)
@@ -338,7 +320,6 @@ func TestRecordingsShareTheMicrophoneApart(t *testing.T) {
 	if len(starts) != 2 || starts[0] == starts[1] {
 		t.Fatalf("calls %v", calls)
 	}
-	// Each recording's own, and nothing else.
 	for _, n := range starts {
 		for _, what := range []string{"stop", "close"} {
 			if want := fmt.Sprintf("%s %d", what, n); !slices.Contains(calls, want) {
@@ -358,15 +339,12 @@ func TestRecordingsShareTheMicrophoneApart(t *testing.T) {
 			raw, _ := c.Recording(id)
 			_ = json.Unmarshal([]byte(raw), &rec)
 		}
-		// Each has the second its own Stop handed on.
 		if rec.DurationMs != 1000 {
 			t.Errorf("recording %s lasts %d ms", id, rec.DurationMs)
 		}
 	}
 }
 
-// fakeTranscriber is the device's engine: a stream's words say how many
-// bytes it was sent, and every file says "from the file".
 type fakeTranscriber struct {
 	mu    sync.Mutex
 	heard map[string]int
@@ -410,7 +388,6 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 	}
 	var speech speechSettings
 	_ = json.Unmarshal([]byte(raw), &speech)
-	// An endpoint with no address turns to the device's engine.
 	if speech.Stt.Provider != recording.OnDevice || !speech.OnDevice {
 		t.Fatalf("speech settings %+v", speech)
 	}
@@ -455,7 +432,6 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 			}
 		}
 	}
-	// The stream heard the second the microphone held as it stopped.
 	if rec := ready("heard 32000"); rec.SttProvider != recording.OnDevice {
 		t.Fatalf("recording %+v", rec)
 	}
@@ -465,25 +441,69 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 	ready("from the file")
 }
 
-// The speech settings the app saves are the whole of them: a provider or
-// language hints it leaves out are cleared, not kept from before.
 func TestSaveSpeechSettingsClearsWhatItLeavesOut(t *testing.T) {
 	c, _ := open(t)
-	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://api.example.com/v1","model":"whisper-1","provider_id":"p1","language_hints":["en","ja"]}`); err != nil {
+	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://api.example.com/v1","model":"whisper-1","language_hints":["en","ja"]}`); err != nil {
 		t.Fatal(err)
 	}
-	// "No key", and no hints.
 	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://api.example.com/v1","model":"whisper-1"}`); err != nil {
 		t.Fatal(err)
 	}
 	var stt store.SttSettings
 	c.q.do(func() { stt = c.core.Store.Settings().Stt })
-	if stt.ProviderID != "" || len(stt.LanguageHints) != 0 || stt.Model != "whisper-1" {
+	if len(stt.LanguageHints) != 0 || stt.Model != "whisper-1" {
 		t.Fatalf("saved %+v", stt)
 	}
 }
 
-// TestEndpoint sends the endpoint a second of silence.
+func TestSpeechKeysAreThisDevices(t *testing.T) {
+	c, _ := open(t)
+	settings := func() (s speechSettings, fields map[string]any) {
+		t.Helper()
+		raw, err := c.SpeechSettings()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &s); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal([]byte(raw), &fields)
+		return s, fields
+	}
+	set := func(s speechSettings, id string) bool {
+		return slices.ContainsFunc(s.Providers, func(p recording.SpeechProvider) bool { return p.ID == id })
+	}
+	const url = "https://api.example.com/v1"
+	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"` + url + `","model":"whisper-1"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetEndpointKey(url, "ek"); err != nil {
+		t.Fatal(err)
+	}
+	s, fields := settings()
+	if s.EndpointKey != "ek" || !set(s, recording.Endpoint) || set(s, "soniox") {
+		t.Errorf("speech settings %+v", s)
+	}
+	for _, gone := range []string{"signed_in", "local_endpoint"} {
+		if _, ok := fields[gone]; ok {
+			t.Errorf("the settings still say %s", gone)
+		}
+	}
+	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://elsewhere.example.com/v1","model":"whisper-1"}`); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := settings(); s.EndpointKey != "" {
+		t.Errorf("another origin has the key %q", s.EndpointKey)
+	}
+	place, err := c.SaveSonioxKey(" sk ")
+	if err != nil || place != locales.RecSttSavedOnDevice() || recording.LocalSonioxKey() != "sk" {
+		t.Errorf("saved %q, %v, kept %q", place, err, recording.LocalSonioxKey())
+	}
+	if s, _ := settings(); !s.SonioxSaved || !set(s, "soniox") {
+		t.Errorf("Soniox with its key here: %+v", s)
+	}
+}
+
 func TestTestEndpointSendsASecond(t *testing.T) {
 	c, _ := open(t)
 	sent := make(chan int, 1)
@@ -506,7 +526,6 @@ func TestTestEndpointSendsASecond(t *testing.T) {
 	}
 }
 
-// recordingEvents keeps what the core tells the app of the recording.
 type recordingEvents struct {
 	fakeEvents
 	states, levels chan string
@@ -515,8 +534,6 @@ type recordingEvents struct {
 func (e *recordingEvents) RecordingChanged(s string) { e.states <- s }
 func (e *recordingEvents) RecordingLevels(l string)  { e.levels <- l }
 
-// The recording's state goes to the app as it changes, its levels alone:
-// told again with nothing new, it goes nowhere.
 func TestRecordingToldAsItChanges(t *testing.T) {
 	c, ev := open(t)
 	re := &recordingEvents{fakeEvents: *ev, states: make(chan string, 8), levels: make(chan string, 8)}
@@ -548,8 +565,6 @@ func TestRecordingToldAsItChanges(t *testing.T) {
 	}
 }
 
-// stuckTranscriber is the device's engine stuck, as a speech model that
-// stops answering: Finish and File return only once released.
 type stuckTranscriber struct {
 	release chan struct{}
 	closed  chan string
@@ -569,10 +584,6 @@ func (s *stuckTranscriber) File(path, language string) (string, error) {
 	return `{"done":true,"segments":[]}`, nil
 }
 
-// The device's engine stuck is given up on once the audio's length and
-// onDeviceSlack have gone by, as the Mac's speech helper is: the
-// transcription fails saying so, rather than run until the app quits,
-// and a stream is ended.
 func TestStuckEngineIsGivenUpOn(t *testing.T) {
 	slack := onDeviceSlack
 	onDeviceSlack = 50 * time.Millisecond
@@ -604,9 +615,6 @@ func TestStuckEngineIsGivenUpOn(t *testing.T) {
 	}
 }
 
-// An audio file's transcript comes into its open page's block as a step of
-// its own, which the app is told is that block's, and the state says it
-// runs until then.
 func TestFileTranscribedIntoItsNotes(t *testing.T) {
 	c, ev := open(t)
 	c.UseMicrophone(&fakeMic{closed: make(chan struct{}, 1)})
@@ -648,7 +656,6 @@ func TestFileTranscribedIntoItsNotes(t *testing.T) {
 	}
 }
 
-// A transcript saves as a file named for its recording.
 func TestRecordingTranscriptFile(t *testing.T) {
 	c, _ := open(t)
 	if err := c.core.Store.PutRecording(store.Recording{ID: "r1", PageID: "p", Status: "ready",
@@ -670,8 +677,6 @@ func TestRecordingTranscriptFile(t *testing.T) {
 }
 
 func TestSpeechSettingsListsAreNeverNull(t *testing.T) {
-	// A fresh core with no engine on the device has no provider set up:
-	// the app reads its providers as a list all the same.
 	c, _ := open(t)
 	raw, err := c.SpeechSettings()
 	if err != nil {

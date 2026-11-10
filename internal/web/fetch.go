@@ -1,6 +1,3 @@
-// Package web reads from the web for both apps: a link's page, a picture
-// or a video's info, from public addresses only, and what a page says
-// about itself, for its link cards.
 package web
 
 import (
@@ -21,21 +18,12 @@ import (
 	"leaflet/internal/remote"
 )
 
-// ErrNotPublic is Fetch's for an address on this machine or its network.
 var ErrNotPublic = errors.New("not a public address")
 
-// Fetch reads a link's page, a picture or a video's info from the web.
-// The links come from pages other people share and from the web, so only
-// http(s) to a public address goes: never a file on this device, nor a
-// service on it or its network, as a router's page. The address is
-// checked as it is dialed, after the name resolves, so a name that
-// resolves elsewhere the second time cannot get round it.
 func Fetch(link string) ([]byte, error) {
 	return FetchContext(context.Background(), link)
 }
 
-// FetchContext is Fetch, which ends as ctx does, as when the app gives up
-// on a picture whose page closed, or after fetchWait at the latest.
 func FetchContext(ctx context.Context, link string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchWait)
 	defer cancel()
@@ -47,16 +35,10 @@ func FetchContext(ctx context.Context, link string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(res.Body, maxFetchBytes))
 }
 
-// maxFetchBytes is the most Fetch reads: a large picture whole.
 const maxFetchBytes = 20 << 20
 
-// fetchWait is how long Fetch, and a page's reading, wait for what they
-// read, whole. Tests shorten it.
 var fetchWait = 30 * time.Second
 
-// get asks for link as Fetch does, with accept, if any, as its Accept
-// header. An answer that is an error is its error; another's body is the
-// caller's to read and close.
 func get(ctx context.Context, link, accept string) (*http.Response, error) {
 	u, err := url.Parse(link)
 	if err != nil {
@@ -84,20 +66,12 @@ func get(ctx context.Context, link, accept string) (*http.Response, error) {
 	return res, nil
 }
 
-// do sends get's requests, to public addresses only. Tests answer from
-// servers of their own, which it refuses.
 var do = publicClient.Do
 
-// fetchAgent is the User-Agent Fetch names, as a browser's: some sites
-// refuse Go's own, as segmentfault.com's picture links answer it 410 Gone
-// where a browser is sent on to the picture.
 const fetchAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Leaflet"
 
-// publicClient is Fetch's: through the system's proxy, as the app's other
-// clients go, and to public addresses only.
 var publicClient = &http.Client{Transport: publicTransport{}}
 
-// direct goes to a site itself, its address checked as it is dialed.
 var direct = &http.Transport{
 	DialContext:           publicDialer.DialContext,
 	ForceAttemptHTTP2:     true,
@@ -108,12 +82,8 @@ var direct = &http.Transport{
 	ExpectContinueTimeout: time.Second,
 }
 
-// answerWait is how long a site that took a request has to start its
-// answer: one that never does holds nothing up for longer.
 const answerWait = 20 * time.Second
 
-// systemProxy is the proxy the app's other clients would use for r, or
-// nil to go direct.
 var systemProxy = func(r *http.Request) (*url.URL, error) {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok && t.Proxy != nil {
 		return t.Proxy(r)
@@ -121,11 +91,8 @@ var systemProxy = func(r *http.Request) (*url.URL, error) {
 	return nil, nil
 }
 
-// lookupIP finds the addresses of a host's name.
 var lookupIP = net.DefaultResolver.LookupNetIP
 
-// publicTransport takes each request, redirects too, direct or through
-// the system's proxy.
 type publicTransport struct{}
 
 func (publicTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -139,12 +106,6 @@ func (publicTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return viaProxy(r, proxy)
 }
 
-// viaProxy takes a request through a proxy. A proxy would look the site's
-// name up itself, and a name can resolve elsewhere the second time, to
-// this machine, whose proxy it may be, or its network: the address is
-// found and checked here, and the proxy asked for it, the name going only
-// in the Host header and to TLS. Each request has a connection of its
-// own, which goes with its response.
 func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 	host := r.URL.Hostname()
 	ips, err := lookupIP(r.Context(), "ip", host)
@@ -165,8 +126,6 @@ func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 		ExpectContinueTimeout: time.Second}
 	switch proxy.Scheme {
 	case "http", "https":
-		// A tunnel to the address, as CONNECT asks for, the site's TLS
-		// in it by the site's name.
 		t.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return tunnel(ctx, proxy, addr) }
 		t.DialTLSContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			conn, err := tunnel(ctx, proxy, addr)
@@ -197,14 +156,10 @@ func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The address is the proxy's to know: to the caller the answer is the
-	// link's, as what comes of it, its relative links and redirects, is.
 	res.Request = asked
 	return res, nil
 }
 
-// tunnel opens a connection to addr through an HTTP proxy, which CONNECT
-// asks to go there.
 func tunnel(ctx context.Context, proxy *url.URL, addr string) (net.Conn, error) {
 	conn, err := plainDialer.DialContext(ctx, "tcp", hostPort(proxy))
 	if err != nil {
@@ -244,8 +199,6 @@ func tunnel(ctx context.Context, proxy *url.URL, addr string) (net.Conn, error) 
 	return conn, nil
 }
 
-// hostPort is where a URL connects, its port given by its scheme when it
-// has none, as the transport dials it.
 func hostPort(u *url.URL) string {
 	port := u.Port()
 	if port == "" {
@@ -259,7 +212,6 @@ var (
 	publicDialer = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Control: publicControl}
 )
 
-// publicControl refuses an address, as resolved, that is not public.
 func publicControl(_, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
@@ -272,13 +224,6 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-// sharedSpace is 100.64.0.0/10, carriers' and Tailscale's, thisNetwork
-// 0.0.0.0/8, protocolSpace 192.0.0.0/24, kept for protocols' own
-// addresses, and futureSpace 240.0.0.0/4, kept for later, as is
-// 255.255.255.255, a network's broadcast. IPv6 addresses of nat64,
-// sixToFour, v4Compat and v4Translated stand for IPv4 ones, in their last
-// 4 bytes, or 6to4's 2 bytes in; nat64Local's and siteLocal's are a
-// network's own.
 var (
 	sharedSpace   = netip.MustParsePrefix("100.64.0.0/10")
 	thisNetwork   = netip.MustParsePrefix("0.0.0.0/8")
@@ -292,9 +237,6 @@ var (
 	siteLocal     = netip.MustParsePrefix("fec0::/10")
 )
 
-// publicAddr reports whether ip is on the internet: not this machine, nor
-// its network, nor one of the ranges kept for neither, nor an IPv6
-// address standing for an IPv4 one that is not.
 func publicAddr(ip netip.Addr) bool {
 	ip = ip.Unmap()
 	b := ip.As16()
@@ -307,9 +249,6 @@ func publicAddr(ip netip.Addr) bool {
 	case nat64Local.Contains(ip), siteLocal.Contains(ip):
 		return false
 	}
-	// 198.18.0.0/15, kept for benchmarks, is public here: fake-IP proxies,
-	// as Clash, answer every name with one of its addresses, and refusing
-	// it would stop link cards and reading the web behind them.
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip) && !thisNetwork.Contains(ip) &&
 		!protocolSpace.Contains(ip) && !futureSpace.Contains(ip)
 }

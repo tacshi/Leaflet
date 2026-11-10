@@ -16,15 +16,11 @@ import (
 	"leaflet/locales"
 )
 
-// todoRow is a row of the To-dos tab: a section's header, or a to-do.
 type todoRow struct {
 	header string
 	todo   store.PageTodo
 }
 
-// todoRows sorts open to-dos into sections: overdue, today's, the coming
-// ones, each by date, and those with no date but an owner. A section
-// alone has no header, which would only say what the to-dos' dates do.
 func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 	groups := doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
 	var out []todoRow
@@ -39,10 +35,8 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 	return out
 }
 
-// todoHeaders are the To-dos tab's sections, as todoSection names them.
 var todoHeaders = [...]string{doc.TodoOverdue: "Overdue", doc.TodoToday: "Today", doc.TodoUpcoming: "Upcoming", doc.TodoNoDate: "No date"}
 
-// todoSection is the name a person reads of a section of the To-dos tab.
 func todoSection(header string) string {
 	switch header {
 	case "Overdue":
@@ -57,11 +51,8 @@ func todoSection(header string) string {
 	return header
 }
 
-// todoList returns the open to-dos, read again after pages changed.
 func (a *App) todoList() []store.PageTodo {
 	if a.todosStale || a.todos == nil {
-		// A read that failed leaves the list as it was, until the pages
-		// change again.
 		reread(&a.todos, a.st.Todos)
 		if a.todos == nil {
 			a.todos = []store.PageTodo{}
@@ -71,9 +62,6 @@ func (a *App) todoList() []store.PageTodo {
 	return a.todos
 }
 
-// todosList is the sidebar's To-dos tab: the open to-dos of every page
-// that have a due date or an owner. A check finishes one, a click goes to
-// it.
 func (a *App) todosList(c *ui.Context) {
 	pal := theme.Of(c)
 	rows := todoRows(a.todoList(), time.Now())
@@ -84,8 +72,6 @@ func (a *App) todosList(c *ui.Context) {
 		})
 		return
 	}
-	// A header held at the top needs a fill to cover the rows under it, and
-	// a see-through sidebar has none to match: there it scrolls with them.
 	opaque := opaqueSidebar(c, pal)
 	a.todoState.Header = nil
 	if opaque {
@@ -117,8 +103,6 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 		row.Background(pal.Hover)
 	}
 	row.Children(func() {
-		// A page shared to view lists its to-dos, which only its editors
-		// check off.
 		done := false
 		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(1, 0, 0).Disabled(!a.canEdit(t.PageID)).Changed() {
 			a.finishTodo(t)
@@ -148,7 +132,6 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 	}
 }
 
-// finishTodo checks a to-do off, in its page, and offers to undo it.
 func (a *App) finishTodo(t store.PageTodo) {
 	if !a.canEdit(t.PageID) {
 		return
@@ -181,14 +164,10 @@ func (a *App) finishTodo(t store.PageTodo) {
 	})
 }
 
-// remindsOf reports whether the user is reminded of a to-do
-// (core.RemindsOf).
 func (a *App) remindsOf(t store.PageTodo) bool {
 	return core.RemindsOf(t, a.session.UserID, a.ownsPage(t.PageID))
 }
 
-// reminders are the to-dos to remind the user of now, each once for each
-// of its due dates and times.
 func (a *App) reminders(now time.Time) []store.PageTodo {
 	var todos []store.PageTodo
 	for _, t := range a.todoList() {
@@ -202,7 +181,6 @@ func (a *App) reminders(now time.Time) []store.PageTodo {
 	})
 }
 
-// remind shows a desktop notification for each to-do to remind of now.
 func (a *App) remind() {
 	if !mygo.NotificationsSupported() {
 		return
@@ -217,10 +195,6 @@ func (a *App) remind() {
 	}
 }
 
-// notificationClicked opens the to-do of a reminder clicked, showing the
-// window, which may have been closed to the menu bar. Run has it hear the
-// clicks before the app runs, for one that launched the app, whose to-do
-// opens once the window has been made.
 func (a *App) notificationClicked(id string) {
 	target, ok := strings.CutPrefix(id, "todo:")
 	if !ok {
@@ -233,7 +207,6 @@ func (a *App) notificationClicked(id string) {
 	}
 	a.winMu.Lock()
 	if a.win == nil {
-		// Not started yet: start runs it with the window made.
 		a.early = append(a.early, open)
 		a.winMu.Unlock()
 		return
@@ -242,7 +215,6 @@ func (a *App) notificationClicked(id string) {
 	a.update(open)
 }
 
-// startReminders checks for to-dos to remind of each minute.
 func (a *App) startReminders() {
 	var tick func()
 	tick = func() {

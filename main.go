@@ -1,4 +1,3 @@
-// Leaflet is an app where people and AI co-write living documents.
 package main
 
 import (
@@ -14,15 +13,9 @@ import (
 )
 
 func main() {
-	// The app's clients share http.DefaultTransport: it goes through the
-	// proxy set in the system's settings, as the browser does, which an
-	// app opened from the Finder or the Start menu has no variable of.
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		t.Proxy = netproxy.Proxy
 	}
-	// The command line, `leaflet mcp` among its commands: through the link
-	// Settings installs, or with a command. Windows' terminals run
-	// cmd/leaflet instead, as this is no console program there.
 	name := cli.CommandName(mygo.App.Name())
 	if cli.Invoked(os.Args, name) {
 		os.Exit(cli.Main(os.Args[1:], cli.Options{

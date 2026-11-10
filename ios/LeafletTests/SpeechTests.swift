@@ -3,14 +3,7 @@ import Testing
 
 @testable import LeafletSpeech
 
-/// SpeechTests cover the device's own transcription as the core reads
-/// it: what it answers, which the Mac's speech helper answers alike, and
-/// a language the device can't transcribe, which the core names from its
-/// code in the user's language.
 struct SpeechTests {
-    /// A transcript, and why one could not be made, read as the core reads
-    /// them (recording.OnDeviceAnswer): a failure the core can say has its
-    /// code, and its language's.
     @Test func answersAreTheCoresToRead() throws {
         let text = { (answer: Data) in String(decoding: answer, as: UTF8.self) }
         #expect(
@@ -31,8 +24,6 @@ struct SpeechTests {
         #expect(failure["code"] == nil && failure["error"]?.isEmpty == false)
     }
 
-    /// A language the device can't transcribe fails with its code, for the
-    /// core to name it, as on the Mac; one it can is its locale.
     @Test func aLanguageTheDeviceCantTranscribeHasItsCode() async throws {
         do {
             _ = try await Transcription.locale(for: "xx")

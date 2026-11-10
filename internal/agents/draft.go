@@ -11,47 +11,23 @@ import (
 	"leaflet/locales"
 )
 
-// draft is a call that writes blocks going into the page while its
-// arguments stream, write_markdown's or insert_blocks': each block as it
-// comes, the last one as far as it has come. The run keeps the call's
-// ops as if it had run whole, revised as more comes: an insert of the
-// blocks, after a replace of the empty block the first took the place of.
 type draft struct {
-	// verb says what the call did, in its edits.
-	verb func(what string) string
-	pos  doc.Position
-	// into is the empty block the first block takes the place of, and
-	// prev that block as it was.
-	into string
-	prev *doc.Node
-	// nodes are the blocks as last put in, as the call's arguments made
-	// them, which the page has as they are, and ids their IDs: kept here,
-	// so a tick of the stream finds none of them in the page again.
-	nodes []*doc.Node
-	ids   []string
-	// replaceAt and insertAt are the call's ops among the run's, -1
-	// before it has them.
+	verb                func(what string) string
+	pos                 doc.Position
+	into                string
+	prev                *doc.Node
+	nodes               []*doc.Node
+	ids                 []string
 	replaceAt, insertAt int
-	// frozen is a draft a block of which could not go in, or of more
-	// blocks than may go in (fits): the rest wait for the whole call,
-	// which then fails.
-	frozen bool
+	frozen              bool
 }
 
-// drafts are the tools whose calls go in the page as they stream.
 var drafts = map[string]bool{"write_markdown": true, "insert_blocks": true}
 
-// Draft puts a call's blocks in the page as its arguments stream, raw
-// being them so far. A block of insert_blocks that is not text waits
-// until it has all come.
 func (x *Executor) Draft(name, raw string) {
-	// The workspace agent writes no page's blocks: a call of these runs
-	// whole, through its own tools, which refuse it (Executor.workspace).
 	if !drafts[name] || x.Ctx.ReadOnly || x.Ctx.Workspace != nil || x.draft != nil && x.draft.frozen {
 		return
 	}
-	// A drafted call runs no dispatch, which keeps the page's URLs as the
-	// run began, before the draft puts its own in.
 	x.begin()
 	closed, ok := closeJSON(raw)
 	if !ok {
@@ -66,7 +42,6 @@ func (x *Executor) Draft(name, raw string) {
 		body = "markdown"
 	}
 	if x.draft == nil {
-		// The position has all come once what goes there begins.
 		p, b := strings.Index(raw, `"position"`), strings.Index(raw, `"`+body+`"`)
 		if p < 0 || b < p {
 			return
@@ -94,8 +69,6 @@ func (x *Executor) Draft(name, raw string) {
 	var nodes []*doc.Node
 	for i, s := range list {
 		m, _ := s.(map[string]any)
-		// The last block is still coming: a text one shows as far as it
-		// has come, another once it has all come.
 		if t, _ := m["type"].(string); i == len(list)-1 && !doc.TextTypes[t] {
 			break
 		}
@@ -114,10 +87,6 @@ func (x *Executor) Draft(name, raw string) {
 	_ = x.syncDraft(nodes, len(list)-1)
 }
 
-// fits reports whether a draft's blocks are within the most a call writes
-// and a run does. One past them freezes the draft: the page gets no more
-// of it, and the whole call, refused once it has come, takes out what it
-// put in.
 func (x *Executor) fits(nodes []*doc.Node) bool {
 	if doc.CallNodes(nodes) != nil || x.room(nodes) != nil {
 		x.draft.frozen = true
@@ -126,13 +95,8 @@ func (x *Executor) fits(nodes []*doc.Node) bool {
 	return true
 }
 
-// newDraft is a draft of blocks going where raw says: insert_blocks'
-// positions, or with replace, as write_markdown takes it, an empty block
-// to write in place of too.
 func (x *Executor) newDraft(raw any, replace bool) (*draft, error) {
 	d := &draft{replaceAt: -1, insertAt: -1}
-	// An empty block to write in place of says where, whatever else the
-	// position has.
 	if m := given(raw); replace && m["replace"] != nil {
 		id, _ := m["replace"].(string)
 		n := x.block(id)
@@ -153,9 +117,6 @@ func (x *Executor) newDraft(raw any, replace bool) (*draft, error) {
 	return d, nil
 }
 
-// FinishDraft ends the draft with the call's whole arguments, as running
-// the call would: its result, and false when there is no draft. A call
-// that fails takes what it put in the page out again.
 func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 	if x.draft == nil {
 		return nil, false
@@ -197,8 +158,6 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 	return map[string]any{"inserted_ids": ids}, true
 }
 
-// DropDraft takes a draft's blocks out of the page again, as for a call
-// that was cut off.
 func (x *Executor) DropDraft() {
 	d := x.draft
 	x.draft = nil
@@ -223,8 +182,6 @@ func (x *Executor) DropDraft() {
 	}
 }
 
-// dropOp takes away a draft's op, the run's last, delta being what that
-// changes in the page.
 func (x *Executor) dropOp(at int, delta []doc.Op) {
 	x.Ops, x.Edits = x.Ops[:at], x.Edits[:at]
 	if x.OnRevise != nil {
@@ -232,8 +189,6 @@ func (x *Executor) dropOp(at int, delta []doc.Op) {
 	}
 }
 
-// sameBlock reports whether a and b are one block but for their IDs,
-// which each reading of a call's arguments makes anew.
 func sameBlock(a, b *doc.Node) bool {
 	if a.Type != b.Type || len(a.Children) != len(b.Children) || !reflect.DeepEqual(a.Data, b.Data) {
 		return false
@@ -246,14 +201,8 @@ func sameBlock(a, b *doc.Node) bool {
 	return true
 }
 
-// syncDraft puts nodes in the page, those before whole having all come:
-// a block that changed is rewritten, the new ones go in together after
-// the one before them, and one no longer there once all has come is
-// taken out. Each change walks the page, so a tick of the stream makes
-// as few as it can.
 func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 	d := x.draft
-	// The changes in the page, of the replaced block and of the rest.
 	var first, rest []doc.Op
 	apply := func(i int, op doc.Op) error {
 		if err := x.Ctx.Content.Apply(op); err != nil {
@@ -267,7 +216,6 @@ func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 		return nil
 	}
 	var err error
-	// fresh are the blocks after those the page has, which go in at once.
 	var fresh []*doc.Node
 	for i, n := range nodes {
 		if i < len(d.nodes) && sameBlock(d.nodes[i], n) {
@@ -341,16 +289,12 @@ func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 		}
 		x.putOp(&d.insertAt, doc.InsertOp(pos, blocks...), summaryFor(d.verb, blocks), append([]string(nil), ids...), rest)
 	case d.insertAt >= 0:
-		// The blocks after the first were all taken out.
 		x.dropOp(d.insertAt, rest)
 		d.insertAt = -1
 	}
 	return err
 }
 
-// putOp makes a draft's op the run's, at *at: a new one when it has none
-// yet, which the page gets whole, else a revision of it, of which the
-// page gets delta.
 func (x *Executor) putOp(at *int, op doc.Op, summary string, ids []string, delta []doc.Op) {
 	edit := Edit{Summary: summary, BlockIDs: ids}
 	if *at < 0 {
@@ -367,7 +311,6 @@ func (x *Executor) putOp(at *int, op doc.Op, summary string, ids []string, delta
 	}
 }
 
-// toolMessage is an error as a tool's result says it.
 func toolMessage(err error) string {
 	var te *doc.ToolError
 	if errors.As(err, &te) {

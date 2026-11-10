@@ -18,8 +18,6 @@ import (
 	"leaflet/locales"
 )
 
-// hasSubpageLink reports whether page parent links to subpage id, as the
-// open page shows it or as stored.
 func (a *App) hasSubpageLink(parent, id string) bool {
 	c := a.st.Content(parent)
 	if ed := a.openEditor(parent); ed != nil {
@@ -32,9 +30,6 @@ func (a *App) hasSubpageLink(parent, id string) bool {
 	return ok
 }
 
-// The sidebar's tree is MyGo's Outline: choosing a page opens it and is
-// its row chosen, choosing a folder opens it to its pages, and a page
-// opened shows the pages above it opened.
 func TestSidebarTree(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -67,7 +62,6 @@ func TestSidebarTree(t *testing.T) {
 	if a.route.Kind != "page" || a.route.ID != notes.ID {
 		t.Errorf("route %+v", a.route)
 	}
-	// Opening a subpage elsewhere opens the pages above it in the tree.
 	a.openPage(faq.ID)
 	tt.Frame()
 	tt.Frame()
@@ -79,9 +73,6 @@ func TestSidebarTree(t *testing.T) {
 	}
 }
 
-// A page dragged in the tree goes between pages by their top and bottom
-// edges, and inside one by its middle, which then links to it, until it
-// moves out; a click on it still opens it.
 func TestSidebarDragPages(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -118,17 +109,14 @@ func TestSidebarDragPages(t *testing.T) {
 		a.reloadAll()
 		tt.Frame()
 	}
-	// Gamma before Alpha: onto Alpha's top edge.
 	drag("Gamma", "Alpha", -10)
 	if got := fmt.Sprint(order()); got != "[Gamma Alpha Beta]" {
 		t.Fatalf("order %s", got)
 	}
-	// Gamma after Beta: onto Beta's bottom edge.
 	drag("Gamma", "Beta", 10)
 	if got := fmt.Sprint(order()); got != "[Alpha Beta Gamma]" {
 		t.Fatalf("order %s", got)
 	}
-	// Alpha inside Beta: onto its middle.
 	drag("Alpha", "Beta", 0)
 	if p := a.pageByID(ids[0]); p == nil || p.ParentID != ids[1] {
 		t.Fatalf("Alpha is under %q", p.ParentID)
@@ -139,13 +127,11 @@ func TestSidebarDragPages(t *testing.T) {
 	if !a.hasSubpageLink(ids[1], ids[0]) {
 		t.Error("Beta does not link to Alpha inside it")
 	}
-	// Beta cannot go inside Alpha, its own subpage.
 	tt.Frame()
 	drag("Beta", "Alpha", 0)
 	if p := a.pageByID(ids[1]); p == nil || p.ParentID != "" {
 		t.Fatalf("Beta moved under %q", p.ParentID)
 	}
-	// Alpha back to the top level, by Move to…: Beta's link goes.
 	if err := a.pageCore().MovePage(ids[0], "", func() error { return a.st.MovePage(ids[0], "", "", "") }); err != nil {
 		t.Fatal(err)
 	}
@@ -160,9 +146,6 @@ func TestSidebarDragPages(t *testing.T) {
 	}
 }
 
-// A page whose parent is gone, as deleted on another device while this
-// one made the page in it, shows at the top level, and a page dropped
-// beside it goes there, not under the page gone.
 func TestSidebarDragBesideAPageWhoseParentIsGone(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -203,7 +186,6 @@ func TestSidebarDragBesideAPageWhoseParentIsGone(t *testing.T) {
 		a.reloadAll()
 		tt.Frame()
 	}
-	// Before Orphan, by its top edge; then after it, by its bottom.
 	drag("Orphan", -10)
 	if p := a.pageByID(alpha.ID); p == nil || p.ParentID != "" || fmt.Sprint(top()) != "[Alpha Orphan]" || len(a.toasts) != 0 {
 		t.Fatalf("before: top level %v, toasts %+v", top(), a.toasts)
@@ -217,8 +199,6 @@ func TestSidebarDragBesideAPageWhoseParentIsGone(t *testing.T) {
 	}
 }
 
-// A subpage comes out of its page by the bottom edge of the last
-// subpage with the pointer left of it, or by the room below the tree.
 func TestSidebarDragOut(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -246,9 +226,6 @@ func TestSidebarDragOut(t *testing.T) {
 		a.reloadAll()
 		tt.Frame()
 	}
-	// Onto the bottom edge of Sync, the last subpage, left of its icon:
-	// after Welcome.
-	// Find gives the whole row; its indent is at its start.
 	s, _ := tt.Find("Sync")
 	drag("Reversi", s.X+12, s.Y+s.H/2+10)
 	if p := a.pageByID(reversi.ID); p == nil || p.ParentID != "" {
@@ -261,7 +238,6 @@ func TestSidebarDragOut(t *testing.T) {
 	if fmt.Sprint(top) != "[Welcome Reversi]" {
 		t.Fatalf("top level %v", top)
 	}
-	// Into the room below the tree: the end of the top level.
 	drag("Sync", 130, 450)
 	if p := a.pageByID(sync.ID); p == nil || p.ParentID != "" {
 		t.Fatalf("Sync is under %q", p.ParentID)
@@ -271,9 +247,6 @@ func TestSidebarDragOut(t *testing.T) {
 	}
 }
 
-// Move offers the places a drag in the sidebar could put the page: a
-// page shared with the user stays in its own space, out of folders and
-// the user's top level, and the user's pages don't go into it.
 func TestMoveOffersWhatADragCould(t *testing.T) {
 	a := templatesApp(t)
 	mine, _ := a.st.CreatePage(store.NewPageOptions{Title: "Mine"})
@@ -319,8 +292,6 @@ func TestMoveOffersWhatADragCould(t *testing.T) {
 	}
 }
 
-// A page's path is MyGo's breadcrumbs: its folder, the pages above it and
-// it; a click on a page above opens it.
 func TestBreadcrumbs(t *testing.T) {
 	a := templatesApp(t)
 	f, _ := a.st.CreateFolder("Product")
@@ -347,7 +318,6 @@ func TestBreadcrumbs(t *testing.T) {
 	}
 }
 
-// Settings' sections are MyGo's sidebar: a click shows a section.
 func TestSettingsSections(t *testing.T) {
 	a := templatesApp(t)
 	a.settingsSection = "account"
@@ -361,8 +331,6 @@ func TestSettingsSections(t *testing.T) {
 	}
 }
 
-// Settings is a dialog over the window: opening it leaves the route and
-// the router's history, Escape closes the dialog on top first.
 func TestSettingsModal(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen, a.sidebarW = true, 240
@@ -406,8 +374,6 @@ func TestSettingsModal(t *testing.T) {
 	}
 }
 
-// Navigation is MyGo's router: pages opened go into its history, Back and
-// Forward go through it.
 func TestRouterHistory(t *testing.T) {
 	a := templatesApp(t)
 	one, _ := a.st.CreatePage(store.NewPageOptions{Title: "One"})
@@ -436,8 +402,6 @@ func TestRouterHistory(t *testing.T) {
 	}
 }
 
-// The sidebar's header makes folders, beside New page, and its tabs show
-// the pages, the tags and the to-dos, the tab chosen kept in Settings.
 func TestSidebarTabs(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -466,7 +430,6 @@ func TestSidebarTabs(t *testing.T) {
 	if !tt.HasText("work") || !tt.HasText("daily") || tt.HasText("Untagged") || tt.HasText("Plan") {
 		t.Fatalf("Tags tab shows %v", tt.Texts())
 	}
-	// A tag's menu is drawn in the window, in the app's look.
 	rightClickOn(t, tt, "daily")
 	tt.Frame()
 	if !tt.HasText("Rename…") || !tt.HasText("Delete tag") {
@@ -496,18 +459,15 @@ func TestSidebarTabs(t *testing.T) {
 	}
 }
 
-// A tag renamed in the Tags tab is renamed on its pages, and one deleted
-// comes back with Undo.
 func TestRenameAndDeleteTag(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work", "q4"}})
-	// A template's tags change with the pages', and Undo puts them back.
 	tpl, _ := a.st.CreatePage(store.NewPageOptions{Title: "Review", Template: true, Tags: []string{"q4", "keep"}})
 	a.reloadAll()
 	a.dialogs.openRenameTag("work")
 	tt := ui.NewTester(func(c *ui.Context) { a.tagDialog(c) }, 600, 400)
 	tt.Frame()
-	tt.Frame() // the name is selected as the field takes the focus
+	tt.Frame()
 	tt.Type("job")
 	tt.Key(0, ui.KeyEnter)
 	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job", "q4"}) || a.dialogs.tagOpen {
@@ -530,8 +490,6 @@ func TestRenameAndDeleteTag(t *testing.T) {
 	}
 }
 
-// A file deleted from the sidebar goes only once the alert asking about
-// it is answered.
 func TestDeleteFileAsksFirst(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -582,11 +540,8 @@ func TestDeleteFileAsksFirst(t *testing.T) {
 	}
 }
 
-// A folder that could not be made says so, as a rename that fails does,
-// rather than the dialog closing as if it was.
 func TestFolderNotMadeSaysSo(t *testing.T) {
 	a := templatesApp(t)
-	// A store that is closed takes nothing.
 	if err := a.st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -603,8 +558,6 @@ func TestFolderNotMadeSaysSo(t *testing.T) {
 	}
 }
 
-// Open in a file's menu opens one not yet on this device as a click on
-// it does: it is downloaded first, which the app says.
 func TestOpenFileNotHereDownloadsIt(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -633,9 +586,6 @@ func TestOpenFileNotHereDownloadsIt(t *testing.T) {
 	}
 }
 
-// Not signed in, the account row signs in, and the footer has no other
-// way to. Beside Settings an icon checks for updates, a spinner shows while
-// the check is under way, and the update shows once it is installed.
 func TestSidebarFooter(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
@@ -676,8 +626,6 @@ func TestSidebarFooter(t *testing.T) {
 	}
 }
 
-// sharedTree puts a page of someone else's space, and a subpage of it,
-// that the user may edit, beside a page of the user's own.
 func sharedTree(t *testing.T, a *App) (theirs, kid string) {
 	t.Helper()
 	const space, at = "00000000-0000-0000-0000-0000000000cc", "2026-01-01T00:00:00Z"
@@ -701,8 +649,6 @@ func sharedTree(t *testing.T, a *App) (theirs, kid string) {
 	return theirs, kid
 }
 
-// A page shared with the user is listed once, under Shared with me, not
-// among the user's own too.
 func TestSharedPageListedOnce(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -725,9 +671,6 @@ func TestSharedPageListedOnce(t *testing.T) {
 	}
 }
 
-// A shared subpage dragged beside the shared page it is under, a level
-// out or not, would go to the top level of its owner's space, where Move
-// doesn't put it either: it doesn't go there.
 func TestSharedSubpageStaysInside(t *testing.T) {
 	a := templatesApp(t)
 	theirs, kid := sharedTree(t, a)
@@ -741,15 +684,12 @@ func TestSharedSubpageStaysInside(t *testing.T) {
 	if _, _, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+kid, -20, 25, 26); ok {
 		t.Error("the subpage goes a level out, after the shared page")
 	}
-	// Open, the shared page takes it first among its subpages.
 	a.treeOpen("page", theirs)
 	if at, target, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+theirs, 10, 25, 26); !ok || at != dropAfter || target != "page:"+theirs {
 		t.Errorf("after the open shared page: %d %s %v", at, target, ok)
 	}
 }
 
-// Pages of a folder deleted on another device are at the top level, not
-// lost with it.
 func TestPagesOfAGoneFolder(t *testing.T) {
 	a := templatesApp(t)
 	f, err := a.st.CreateFolder("Gone")
@@ -769,8 +709,6 @@ func TestPagesOfAGoneFolder(t *testing.T) {
 	}
 }
 
-// A page's row in the sidebar adds a subpage with its + button, which its
-// menu doesn't repeat; the page's header menu has it.
 func TestPageRowMenuLeavesOutAddSubpage(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -789,8 +727,6 @@ func TestPageRowMenuLeavesOutAddSubpage(t *testing.T) {
 	}
 }
 
-// A page deleted takes its link out of the page it is in, and Undo puts
-// it back where it was.
 func TestDeletedSubpageTakesItsLink(t *testing.T) {
 	a := templatesApp(t)
 	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
@@ -811,9 +747,6 @@ func TestDeletedSubpageTakesItsLink(t *testing.T) {
 	}
 }
 
-// A subpage deleted from under its open page, whose only block was its
-// link, leaves the page a block to type in, and undoing in the page does
-// not bring the link back: only the toast's Undo does.
 func TestDeletedOnlySubpageLeavesABlock(t *testing.T) {
 	a := templatesApp(t)
 	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
@@ -827,7 +760,6 @@ func TestDeletedOnlySubpageLeavesABlock(t *testing.T) {
 		t.Fatal("Trip did not open")
 	}
 	ed := a.page.editor
-	// An edit of the user's before, for undoing to go back past.
 	ed.Edit(func(*doc.Content) {})
 
 	a.deletePage(child.ID)
@@ -837,7 +769,6 @@ func TestDeletedOnlySubpageLeavesABlock(t *testing.T) {
 	if c := a.st.Content(parent.ID); c == nil || len(c.Children) == 0 {
 		t.Fatalf("stored with no block: %v", c)
 	}
-	// A click below the page puts the caret at its end.
 	a.caretAtEnd()
 	ed.Undo()
 	if a.hasSubpageLink(parent.ID, child.ID) {
@@ -849,7 +780,6 @@ func TestDeletedOnlySubpageLeavesABlock(t *testing.T) {
 	}
 }
 
-// A click below a page with no blocks gives it one to type in.
 func TestCaretAtEndOfAPageWithNoBlocks(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -865,8 +795,6 @@ func TestCaretAtEndOfAPageWithNoBlocks(t *testing.T) {
 	}
 }
 
-// The arrows go by a folder in the tree without opening it, the row
-// chosen staying where they put it; Enter opens it, as a click does.
 func TestTreeArrowsGoByFolders(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
@@ -903,9 +831,6 @@ func TestTreeArrowsGoByFolders(t *testing.T) {
 	}
 }
 
-// A page moved into the open page links to it there as a change from
-// outside the editor, not an undo step: undoing in the page leaves the
-// link to the page still inside it.
 func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 	a := templatesApp(t)
 	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Plans")})})
@@ -916,7 +841,6 @@ func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 		t.Fatal("Trip did not open")
 	}
 	ed := a.page.editor
-	// An edit of the user's before, for undoing to go back past.
 	ed.Edit(func(c *doc.Content) { c.Children[0].SetDelta(doc.FromMarkdown("Plans for May")) })
 	if err := a.pageCore().MovePage(packing.ID, trip.ID, func() error { return a.st.MovePage(packing.ID, trip.ID, "", "") }); err != nil {
 		t.Fatal(err)
@@ -937,9 +861,6 @@ func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 	}
 }
 
-// What a page may go inside: the top level or a folder for a page of the
-// user's own; a page they may edit, in the same space, but not the page
-// itself nor one under it.
 func TestCanMoveInside(t *testing.T) {
 	a := templatesApp(t)
 	f, _ := a.st.CreateFolder("Work")
@@ -979,9 +900,6 @@ func TestCanMoveInside(t *testing.T) {
 	}
 }
 
-// A folder made shows in the sidebar, which the menu's New Folder (⌘⇧N)
-// makes from the sidebar hidden or at the Tags tab; so does a click on
-// the folder in a page's path.
 func TestFolderShowsInTheSidebar(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen, a.settings.SidebarTab = false, tabTags
@@ -1016,8 +934,6 @@ func TestFolderShowsInTheSidebar(t *testing.T) {
 	}
 }
 
-// Settings… is in the app menu at ⌘,, as on the Mac, opening Settings and
-// closing it again; each of the menu's shortcuts is its own.
 func TestSettingsInTheAppMenu(t *testing.T) {
 	a := templatesApp(t)
 	items := a.menu(&mygo.MenuItem{Label: "Check for Updates…"})
@@ -1054,16 +970,12 @@ func TestSettingsInTheAppMenu(t *testing.T) {
 	walk(items)
 }
 
-// clickOn clicks the middle of what shows s as a pointer does, on whatever
-// is on top there: a tree row's content and a split's wider grip are over
-// the element named s, so Tester.Click takes them for something else.
 func clickOn(t *testing.T, tt *ui.Tester, s string) {
 	t.Helper()
 	x, y := middleOf(t, tt, s)
 	tt.ClickAt(x, y)
 }
 
-// rightClickOn is clickOn with the right button.
 func rightClickOn(t *testing.T, tt *ui.Tester, s string) {
 	t.Helper()
 	x, y := middleOf(t, tt, s)
@@ -1079,8 +991,6 @@ func middleOf(t *testing.T, tt *ui.Tester, s string) (x, y float32) {
 	return r.X + r.W/2, r.Y + r.H/2
 }
 
-// Lists that fail to read again stay as they were: the sidebar keeps its
-// pages and folders, not emptied by a read that failed.
 func TestListsStayWhenAReadFails(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{

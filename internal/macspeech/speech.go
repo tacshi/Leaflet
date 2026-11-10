@@ -1,6 +1,3 @@
-// Package macspeech transcribes recordings with the Mac's own speech
-// recognition, through leaflet-speech (speech/), the helper the Mac
-// app ships in its resources: the recorder's on-device engine there.
 package macspeech
 
 import (
@@ -24,15 +21,10 @@ import (
 	"leaflet/locales"
 )
 
-// Name is the helper's file name in the app's resources.
 const Name = "leaflet-speech"
 
-// Helper is leaflet-speech, as the recorder's Engine.
 type Helper struct{ path string }
 
-// Find returns the helper in dir, the app's resources, when it is there
-// and the Mac can transcribe; nil otherwise, as on other platforms and
-// before macOS 26. It runs the helper, so call it off the main thread.
 func Find(dir string) *Helper {
 	if runtime.GOOS != "darwin" {
 		return nil
@@ -40,18 +32,16 @@ func Find(dir string) *Helper {
 	path := filepath.Join(dir, Name)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, path, "available").Run(); err != nil { // #nosec G204 -- the app's own helper.
+	if err := exec.CommandContext(ctx, path, "available").Run(); err != nil { // #nosec G204
 		return nil
 	}
 	return &Helper{path: path}
 }
 
-// File transcribes the audio file at path, a recording's or another's,
-// in fileWait at the most.
 func (h *Helper) File(path, language string) ([]store.Segment, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fileWait(path))
 	defer cancel()
-	cmd := exec.CommandContext(ctx, h.path, "file", language, path) // #nosec G204 -- the app's own helper, on the recording's own file.
+	cmd := exec.CommandContext(ctx, h.path, "file", language, path) // #nosec G204
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -66,11 +56,6 @@ func (h *Helper) File(path, language string) ([]store.Segment, error) {
 	return recording.Tidy(segs), ferr
 }
 
-// fileWait is how long the helper gets to transcribe the file at path:
-// twice as long as a WAV's audio lasts, read from its size at its format's
-// byte rate as the stream's Finish does, and five minutes more; three
-// hours for another file, or a WAV whose format can't be read, whose
-// length isn't known.
 func fileWait(path string) time.Duration {
 	const other = 3 * time.Hour
 	if !strings.EqualFold(filepath.Ext(path), ".wav") {
@@ -83,12 +68,8 @@ func fileWait(path string) time.Duration {
 	return time.Duration(2*data/rate)*time.Second + 5*time.Minute
 }
 
-// wavFormat reads the WAV file at path for the bytes of audio in it, all
-// past its fmt chunk, and the byte rate they play at: 0 when it has none
-// to read. The data chunk's own count is left alone, as a recording cut
-// short leaves it 0 and one past 4 GB leaves it short.
 func wavFormat(path string) (data, rate int64) {
-	f, err := os.Open(path) // #nosec G304 -- the audio file to transcribe.
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return 0, 0
 	}
@@ -101,7 +82,6 @@ func wavFormat(path string) (data, rate int64) {
 	if _, err := io.ReadFull(f, head[:]); err != nil || string(head[0:4]) != "RIFF" || string(head[8:12]) != "WAVE" {
 		return 0, 0
 	}
-	// The chunks before fmt are few and small, where there are any.
 	at := int64(12)
 	for range 16 {
 		var chunk [8]byte
@@ -125,8 +105,6 @@ func wavFormat(path string) (data, rate int64) {
 	return 0, 0
 }
 
-// read reads the helper's answers until its transcript, passing the words
-// so far to text, if not nil.
 func read(r io.Reader, language string, text func(string)) ([]store.Segment, error) {
 	dec := json.NewDecoder(r)
 	for {
@@ -148,9 +126,8 @@ func read(r io.Reader, language string, text func(string)) ([]store.Segment, err
 	}
 }
 
-// Stream starts transcribing a recording as it is recorded.
 func (h *Helper) Stream(language string, text func(string)) (recording.Stream, error) {
-	cmd := exec.Command(h.path, "stream", language) // #nosec G204 -- the app's own helper.
+	cmd := exec.Command(h.path, "stream", language) // #nosec G204
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -180,16 +157,10 @@ func (h *Helper) Stream(language string, text func(string)) (recording.Stream, e
 	return s, nil
 }
 
-// stream is one recording's transcription by the helper. What Send gives
-// it waits in queue for the helper to take, so the microphone never waits
-// on it.
 type stream struct {
-	cmd  *exec.Cmd
-	mu   sync.Mutex
-	wake *sync.Cond
-	// queue is the audio not yet written; ended, that Finish was called;
-	// stopped, that the helper takes no more, as it ended or its input
-	// failed; sent, how many bytes of audio Send was given.
+	cmd     *exec.Cmd
+	mu      sync.Mutex
+	wake    *sync.Cond
 	queue   [][]byte
 	ended   bool
 	stopped bool
@@ -209,8 +180,6 @@ func (s *stream) Send(pcm []byte) {
 	s.mu.Unlock()
 }
 
-// write writes the queued audio to the helper, ending its input once
-// Finish was called and the queue is empty.
 func (s *stream) write(in io.WriteCloser) {
 	defer func() { _ = in.Close() }()
 	for {
@@ -236,14 +205,8 @@ func (s *stream) write(in io.WriteCloser) {
 	}
 }
 
-// finishSlack is how much longer than the audio sent Finish waits for the
-// helper, which on its first use in a language downloads the model before
-// it hears any audio; tests shorten it.
 var finishSlack = 4 * time.Minute
 
-// Finish waits for the words of the audio sent: as long as the helper
-// takes to catch up, which is about as long as the recording at worst. A
-// helper that takes longer still, stuck, is ended.
 func (s *stream) Finish() ([]store.Segment, error) {
 	s.mu.Lock()
 	s.ended = true
@@ -274,7 +237,6 @@ func (s *stream) Close() {
 	}
 }
 
-// Lost says why the helper ended before Finish, if it did.
 func (s *stream) Lost() error {
 	select {
 	case <-s.done:

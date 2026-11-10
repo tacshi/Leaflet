@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// StartWith is a blank page's ways to start it, under its empty line, as
-/// the desktop's: an agent's draft, a subpage, files, or a template, which
-/// can be changed or deleted from its menu.
 struct StartWith: View {
     let page: PageRow
     let draft: () -> Void
@@ -19,7 +16,6 @@ struct StartWith: View {
             row("sparkles", L.pageDraftWithAgent, L.pageDraftWithAgentHint, action: draft)
             row("doc.badge.plus", L.pageAddSubpage, L.pageAddSubpageHint, action: addSubpage)
             row("square.and.arrow.up", L.pageUpload, L.pageUploadHint, action: upload)
-            // A template starts from the others, not from itself.
             if !page.template, !app.templates.isEmpty {
                 title(L.templateSectionTitle).padding(.top, 10)
                 ForEach(app.templates) { t in

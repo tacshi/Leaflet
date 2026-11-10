@@ -11,8 +11,6 @@ import (
 	"leaflet/locales"
 )
 
-// A panic on a goroutine Go started is logged, with where it happened,
-// and the test goes on.
 func TestGoRecovers(t *testing.T) {
 	logged := make(chan string, 1)
 	log.SetOutput(writerFunc(func(p []byte) (int, error) {
@@ -35,8 +33,6 @@ type writerFunc func(p []byte) (int, error)
 
 func (w writerFunc) Write(p []byte) (int, error) { return w(p) }
 
-// A panic RecoverAs catches is the goroutine's error, worded as the app's
-// own errors are.
 func TestRecoverAsSaysWhatWentWrong(t *testing.T) {
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })

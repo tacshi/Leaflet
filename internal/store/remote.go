@@ -10,16 +10,6 @@ import (
 	"time"
 )
 
-// Conversions from local rows to Supabase rows. Column names follow
-// supabase/migrations.
-//
-// A row goes with changed_at, when it last changed here: the server keeps
-// it, as its own updated_at is when the row reached it, which for a row
-// sent late, as one a device that synced through iCloud Drive sends as it
-// signs in, is long after the change (sync's newerThere). A row read from
-// the server keeps the server's updated_at, by which the pulls tell the
-// rows they have (HasRowAt).
-
 func iso(t time.Time) any {
 	if t.IsZero() {
 		return nil
@@ -27,10 +17,6 @@ func iso(t time.Time) any {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// PageToRemote is a page as the pages table has it, its title within the
-// bound the server holds titles to (ClampTitle): one longer, as a page from
-// another device's older Leaflet may have, would be refused every time it
-// went up.
 func PageToRemote(p Page) map[string]any {
 	return map[string]any{
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
@@ -40,7 +26,6 @@ func PageToRemote(p Page) map[string]any {
 	}
 }
 
-// FolderToRemote is a folder as the folders table has it.
 func FolderToRemote(f Folder) map[string]any {
 	return map[string]any{
 		"id": f.ID, "space_id": f.SpaceID, "parent_folder_id": ns(f.ParentFolderID), "name": f.Name,
@@ -49,10 +34,7 @@ func FolderToRemote(f Folder) map[string]any {
 	}
 }
 
-// CommentToRemote is a comment as the comments table has it.
 func CommentToRemote(c Comment) map[string]any {
-	// An agent's name, or a guest's, rides in agent_name: the row's
-	// author is the person who posted it.
 	var agent any
 	if c.AuthorKind == "agent" || c.AuthorKind == "guest" {
 		agent = c.AuthorName
@@ -65,7 +47,6 @@ func CommentToRemote(c Comment) map[string]any {
 	}
 }
 
-// RecordingToRemote is a recording as the recordings table has it.
 func RecordingToRemote(r Recording) map[string]any {
 	transcript := r.Transcript
 	if transcript == nil {
@@ -79,7 +60,6 @@ func RecordingToRemote(r Recording) map[string]any {
 	}
 }
 
-// FileToRemote is a file as the files table has it.
 func FileToRemote(f File) map[string]any {
 	return map[string]any{
 		"id": f.ID, "space_id": f.SpaceID, "folder_id": ns(f.FolderID), "page_id": ns(f.PageID), "name": f.Name,
@@ -88,8 +68,6 @@ func FileToRemote(f File) map[string]any {
 	}
 }
 
-// HistoryToRemote is a snapshot as the page_history table has it, without
-// its job: a local run's job has no server row for ai_job_id to name.
 func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
 	var content any = rawJSON(CleanJSON(h.Content))
 	var by any = userID
@@ -101,19 +79,10 @@ func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
 	}
 }
 
-// Postgres keeps neither a NUL nor text that is not UTF-8, in text or
-// jsonb, nor a surrogate without its other half in jsonb, and refuses the
-// whole row for one: a page holding any would be refused every time it went
-// up. A device may hold them, as an agent writes what a model gave it.
-// Each goes up as U+FFFD (CleanRow, CleanJSON), and comes back so.
-
-// CleanText is text as Postgres keeps it.
 func CleanText(text string) string {
 	return strings.ReplaceAll(strings.ToValidUTF8(text, "\uFFFD"), "\x00", "\uFFFD")
 }
 
-// CleanRow makes a row as it goes up, decoded from JSON, one Postgres
-// keeps: each string in it, nested ones too (CleanText).
 func CleanRow(row map[string]any) {
 	for k, v := range row {
 		row[k] = cleanValue(v)
@@ -134,10 +103,6 @@ func cleanValue(v any) any {
 	return v
 }
 
-// CleanJSON is encoded JSON as Postgres keeps it, as CleanText does text:
-// escapes that name a NUL, or a surrogate without its other half, are
-// replaced where they stand. Backslashes come in pairs of what they escape,
-// so one spelled out in text, as "\\u0000" in a code block, stays text.
 func CleanJSON(encoded string) string {
 	encoded = strings.ToValidUTF8(encoded, "\uFFFD")
 	if !strings.Contains(encoded, `\u`) {
@@ -162,8 +127,6 @@ func CleanJSON(encoded string) string {
 	return b.String()
 }
 
-// escapeLen is how long the escape s starts with is, and whether Postgres
-// keeps it.
 func escapeLen(s string) (int, bool) {
 	unit, ok := escapedUnit(s)
 	switch {
@@ -180,7 +143,6 @@ func escapeLen(s string) (int, bool) {
 	return 6, true
 }
 
-// escapedUnit reads the \uXXXX s starts with.
 func escapedUnit(s string) (uint16, bool) {
 	if len(s) < 6 || s[0] != '\\' || s[1] != 'u' {
 		return 0, false
@@ -189,12 +151,10 @@ func escapedUnit(s string) (uint16, bool) {
 	return uint16(n), err == nil
 }
 
-// rawJSON keeps stored JSON as it is inside a payload.
 type rawJSON string
 
 func (r rawJSON) MarshalJSON() ([]byte, error) { return []byte(r), nil }
 
-// Time parses a timestamp from Postgres, or returns now.
 func Time(v any) time.Time {
 	s, _ := v.(string)
 	if s == "" {
@@ -208,7 +168,6 @@ func Time(v any) time.Time {
 	return time.Now()
 }
 
-// TimeOrZero parses a nullable timestamp.
 func TimeOrZero(v any) time.Time {
 	if v == nil {
 		return time.Time{}
@@ -216,19 +175,16 @@ func TimeOrZero(v any) time.Time {
 	return Time(v)
 }
 
-// Int reads a number column of a remote row.
 func Int(r map[string]any, key string) int64 {
 	n, _ := r[key].(float64)
 	return int64(n)
 }
 
-// S reads a string column of a remote row.
 func S(r map[string]any, key string) string {
 	s, _ := r[key].(string)
 	return s
 }
 
-// PageFromRemote reads a pages row, keeping the device-only keepOffline.
 func PageFromRemote(r map[string]any, keepOffline bool) Page {
 	sk := S(r, "sort_key")
 	if sk == "" {
@@ -243,7 +199,6 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 	}
 }
 
-// tagsFromRemote reads a row's tags, none for a row without them.
 func tagsFromRemote(v any) []string {
 	var tags []string
 	switch v := v.(type) {
@@ -259,7 +214,6 @@ func tagsFromRemote(v any) []string {
 	return NormalizeTags(tags)
 }
 
-// FolderFromRemote reads a folders row.
 func FolderFromRemote(r map[string]any) Folder {
 	sk := S(r, "sort_key")
 	if sk == "" {
@@ -270,7 +224,6 @@ func FolderFromRemote(r map[string]any) Folder {
 		DefaultTemplateID: S(r, "default_template_id")}
 }
 
-// CommentFromRemote reads a comments row.
 func CommentFromRemote(r map[string]any, authorName string) Comment {
 	kind := S(r, "author_kind")
 	if kind == "" {
@@ -285,8 +238,6 @@ func CommentFromRemote(r map[string]any, authorName string) Comment {
 		Resolved: resolved, CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
 }
 
-// FileFromRemote reads a files row. Its name is one the file can be kept
-// by here, whatever the server has.
 func FileFromRemote(r map[string]any) File {
 	size, _ := r["size_bytes"].(float64)
 	return File{ID: S(r, "id"), SpaceID: S(r, "space_id"), FolderID: S(r, "folder_id"), PageID: S(r, "page_id"), Name: fileName(S(r, "name")),
@@ -294,68 +245,21 @@ func FileFromRemote(r map[string]any) File {
 		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
 }
 
-// ProviderFromRemote reads a model_providers row.
-func ProviderFromRemote(r map[string]any) Provider {
-	p := Provider{ID: S(r, "id"), Preset: S(r, "preset"), Name: S(r, "name"), BaseURL: S(r, "base_url"),
-		AuthKind: S(r, "auth_kind"), DefaultModel: S(r, "default_model"), CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"])}
-	if p.Name == "" {
-		p.Name = p.Preset
-	}
-	if p.AuthKind == "" {
-		p.AuthKind = "api_key"
-	}
-	if b, ok := r["supports_tools"].(bool); ok {
-		p.SupportsTools = &b
-	}
-	if ms, ok := r["models"].([]any); ok {
-		for _, m := range ms {
-			if s, ok := m.(string); ok {
-				p.Models = append(p.Models, s)
-			}
-		}
-	}
-	return p
-}
+var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true}
 
-// pulled are the tables a pull from the server stores rows of, by id,
-// with the time each last changed there.
-var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true, "model_providers": true}
-
-// HasRowAt reports whether this device has a row pulled from the server as
-// it was at a time, to the millisecond kept here. One that cannot be read
-// is not had: the row is stored again, as any other is (putRemote).
 func (s *Store) HasRowAt(table, id string, at time.Time) bool {
 	if !pulled[table] {
 		return false
 	}
 	var n int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ? AND updated_at = ?`, id, at.UnixMilli()).Scan(&n) // #nosec G202 -- table is one of pulled.
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ? AND updated_at = ?`, id, at.UnixMilli()).Scan(&n) // #nosec G202
 	return n > 0
 }
 
-// pulledTables are the tables whose rows keep, as pulled_at, the server's
-// time of the row this device last took from the server, until the row
-// changes here (unpulled): sync tells by it the rows of the server's it
-// still has as they came, which it does not send again as its pages join
-// the account (sync's newerThere).
 var pulledTables = []string{"pages", "folders", "comments", "recordings", "files"}
 
-// PeerKey marks, in a row stored with a PutRemote function, one that came
-// from another device through iCloud Drive, not from the server: it is no
-// copy of the server's, so it keeps no pulled_at, and counts as changed
-// here.
 const PeerKey = "_peer"
 
-// putRemote stores a row that came from the server, or another device
-// (PeerKey), with write, unless it has a change waiting here: that change
-// wins and goes up on the next push. The check and the write are one
-// transaction, so a change made in between, here or by leaflet mcp, is
-// never stored over, and nor is one the check could not tell of. A row
-// from the server keeps its time there as pulled_at, in the same
-// transaction. over, when not nil, is this device's change to the row,
-// which the row is taken over: it leaves the queue in the transaction,
-// unless a change made since replaced it, which keeps the row out. It
-// reports whether it stored the row.
 func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry, write func(tx *sql.Tx) error) (bool, error) {
 	stored := false
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -374,7 +278,7 @@ func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry
 		if _, peer := r[PeerKey]; !peer {
 			at = Time(r["updated_at"]).UnixMilli()
 		}
-		_, err = tx.Exec(`UPDATE `+entity+` SET pulled_at = ? WHERE id = ?`, at, id) // #nosec G202 -- entity is one of pulledTables.
+		_, err = tx.Exec(`UPDATE `+entity+` SET pulled_at = ? WHERE id = ?`, at, id) // #nosec G202
 		return err
 	})
 	if err == nil && over != nil {
@@ -383,8 +287,6 @@ func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry
 	return stored && err == nil, err
 }
 
-// dequeueIn takes an entry off the queue in a transaction, as Dequeue
-// does, unless it was replaced since it was read; nil is none.
 func dequeueIn(tx *sql.Tx, e *OutboxEntry) error {
 	if e == nil {
 		return nil
@@ -393,14 +295,6 @@ func dequeueIn(tx *sql.Tx, e *OutboxEntry) error {
 	return err
 }
 
-// TakeRemote stores a row from the server over this device's change to
-// it, entry e, as the PutRemote function of e's table does, with e off
-// the queue in the same transaction: stored apart, a failure in between
-// would leave the change neither queued nor replaced. A change made here
-// since, which replaced e, stays queued, and the row stays out, as the
-// pulls leave it. A comment's author is the row's author_name. Of a table
-// whose rows come from elsewhere through no PutRemote function, e only
-// leaves the queue.
 func (s *Store) TakeRemote(e OutboxEntry, r map[string]any) error {
 	switch e.Entity {
 	case "pages":
@@ -417,34 +311,25 @@ func (s *Store) TakeRemote(e OutboxEntry, r map[string]any) error {
 	return s.Dequeue(e)
 }
 
-// unpulled has a row changed here no longer count as the server's copy
-// (pulledTables), in the transaction of the change: its change goes up
-// as the row's, whenever it goes. A table that keeps no such time is left.
 func unpulled(q querier, entity, id string) error {
 	if !slices.Contains(pulledTables, entity) {
 		return nil
 	}
-	_, err := q.Exec(`UPDATE `+entity+` SET pulled_at = NULL WHERE id = ? AND pulled_at IS NOT NULL`, id) // #nosec G202 -- entity is one of pulledTables.
+	_, err := q.Exec(`UPDATE `+entity+` SET pulled_at = NULL WHERE id = ? AND pulled_at IS NOT NULL`, id) // #nosec G202
 	return err
 }
 
-// RowPulledAt reports the server's time of a row this device took from the
-// server, as it took it, and false once the row changed here since, came
-// from another device, or was never the server's: a database from before
-// kept no such time.
 func (s *Store) RowPulledAt(table, id string) (time.Time, bool) {
 	if !slices.Contains(pulledTables, table) {
 		return time.Time{}, false
 	}
 	var at sql.NullInt64
-	if err := s.db.QueryRow(`SELECT pulled_at FROM `+table+` WHERE id = ?`, id).Scan(&at); err != nil || !at.Valid { // #nosec G202 -- table is one of pulledTables.
+	if err := s.db.QueryRow(`SELECT pulled_at FROM `+table+` WHERE id = ?`, id).Scan(&at); err != nil || !at.Valid { // #nosec G202
 		return time.Time{}, false
 	}
 	return time.UnixMilli(at.Int64), true
 }
 
-// PutRemotePage stores a page that came from the server, unless it has a
-// change waiting here (putRemote), keeping whether it is kept offline.
 func (s *Store) PutRemotePage(r map[string]any) error { return s.putRemotePage(r, nil) }
 
 func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
@@ -459,8 +344,6 @@ func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
 	return err
 }
 
-// PutRemoteFolder stores a folder from the server, unless it has a change
-// waiting here (putRemote).
 func (s *Store) PutRemoteFolder(r map[string]any) error { return s.putRemoteFolder(r, nil) }
 
 func (s *Store) putRemoteFolder(r map[string]any, over *OutboxEntry) error {
@@ -469,8 +352,6 @@ func (s *Store) putRemoteFolder(r map[string]any, over *OutboxEntry) error {
 	return err
 }
 
-// PutRemoteComment stores a comment from the server, unless it has a
-// change waiting here (putRemote).
 func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {
 	return s.putRemoteComment(r, authorName, nil)
 }
@@ -481,9 +362,6 @@ func (s *Store) putRemoteComment(r map[string]any, authorName string, over *Outb
 	return err
 }
 
-// PutRemoteFile stores a file from the server, unless it has a change
-// waiting here (putRemote), keeping its copy here until the file is
-// deleted.
 func (s *Store) PutRemoteFile(r map[string]any) error { return s.putRemoteFile(r, nil) }
 
 func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
@@ -492,10 +370,6 @@ func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 		if err := putFile(tx, s.Dir, f); err != nil || !f.DeletedAt.IsZero() {
 			return err
 		}
-		// A file that lives keeps its stored copy: its deletion here gave
-		// way to the server's row, as one the user may no longer delete
-		// (sync's pushRow), and the removal queued with it would take
-		// the copy the row still names.
 		_, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage_delete' AND entity_id = ?`, "files/"+f.ID)
 		return err
 	})
@@ -505,7 +379,6 @@ func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 	return err
 }
 
-// RecordingFromRemote reads a recordings row.
 func RecordingFromRemote(r map[string]any) Recording {
 	rec := Recording{ID: S(r, "id"), PageID: S(r, "page_id"), BlockID: S(r, "block_id"), AudioPath: S(r, "audio_path"),
 		SttProvider: S(r, "stt_provider"), SttModel: S(r, "stt_model"), Status: S(r, "status"), Language: S(r, "language"),
@@ -522,8 +395,6 @@ func RecordingFromRemote(r map[string]any) Recording {
 	return rec
 }
 
-// PutRemoteRecording stores a recording from the server, unless it has a
-// change waiting here (putRemote), keeping its audio on this device.
 func (s *Store) PutRemoteRecording(r map[string]any) error { return s.putRemoteRecording(r, nil) }
 
 func (s *Store) putRemoteRecording(r map[string]any, over *OutboxEntry) error {
@@ -538,9 +409,4 @@ func (s *Store) putRemoteRecording(r map[string]any, over *OutboxEntry) error {
 		return putRecording(tx, s.Dir, rec)
 	})
 	return err
-}
-
-// PutRemoteProvider stores a cloud model connection from the server.
-func (s *Store) PutRemoteProvider(r map[string]any) error {
-	return s.PutProvider(ProviderFromRemote(r))
 }

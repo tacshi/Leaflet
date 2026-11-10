@@ -1,6 +1,3 @@
-// Settings every build of the iOS app shares. The version is the App
-// Store's, separate from the desktop's in mygo.json.
-
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
 
@@ -11,6 +8,4 @@ INFOPLIST_KEY_CFBundleDisplayName = Leaflet
 CODE_SIGN_STYLE = Automatic
 DEVELOPMENT_TEAM =
 
-// Local.xcconfig, which git ignores, can set DEVELOPMENT_TEAM and anything
-// else for this Mac only.
 #include? "Local.xcconfig"

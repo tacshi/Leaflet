@@ -14,8 +14,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// An endpoint gets the audio as it is read, in a form whose length is
-// known before, with the model and the language.
 func TestTranscribeEndpointStreamsTheAudio(t *testing.T) {
 	audio := WavFromPCM(bytes.Repeat([]byte{1, 2}, SampleRate))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +34,6 @@ func TestTranscribeEndpointStreamsTheAudio(t *testing.T) {
 		_, _ = io.WriteString(w, `{"text":" hello ","duration":1}`)
 	}))
 	defer srv.Close()
-	// A reader of its own, not bytes, whose length the request can't see.
 	wav := struct{ io.Reader }{bytes.NewReader(audio)}
 	segs, err := TranscribeEndpoint(context.Background(), srv.URL, "whisper", wav, int64(len(audio)), "", "ja")
 	if err != nil {
@@ -47,8 +44,6 @@ func TestTranscribeEndpointStreamsTheAudio(t *testing.T) {
 	}
 }
 
-// Closing a stream returns at once, though its server never answers the
-// close, as over a slow network, and the stream's goroutines end with it.
 func TestSonioxCloseDoesNotWait(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -82,8 +77,6 @@ func TestSonioxCloseDoesNotWait(t *testing.T) {
 	if err := s.Lost(); err != nil {
 		t.Errorf("a stream closed here was lost: %v", err)
 	}
-	// Finish after Close, as a recording that failed as it stopped may
-	// call both, returns at once too.
 	start = time.Now()
 	_, _ = s.Finish()
 	if took := time.Since(start); took > time.Second {
@@ -91,8 +84,6 @@ func TestSonioxCloseDoesNotWait(t *testing.T) {
 	}
 }
 
-// A compressed file's size says little of how long it lasts: its wait
-// goes by the least bit rate of speech, up to a most.
 func TestFileWait(t *testing.T) {
 	hour := int64(3600 * 4000)
 	if got := fileWait(hour); got != 5*time.Minute+2*time.Hour {
@@ -103,9 +94,6 @@ func TestFileWait(t *testing.T) {
 	}
 }
 
-// Saved audio goes to Soniox from this device, with its key: it goes up
-// as it is read, is transcribed by an async model with the hints given,
-// and both the file and the transcription are removed once it is done.
 func TestTranscribeSonioxFromHere(t *testing.T) {
 	audio := []byte("fake m4a audio")
 	var removed []string
@@ -173,7 +161,6 @@ func TestTranscribeSonioxFromHere(t *testing.T) {
 	}
 }
 
-// A transcription Soniox fails says so, and still leaves nothing there.
 func TestTranscribeSonioxFails(t *testing.T) {
 	var removed []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

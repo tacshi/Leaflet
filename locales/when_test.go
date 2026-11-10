@@ -7,8 +7,6 @@ import (
 	"github.com/egoist/mygo/i18n"
 )
 
-// Today and yesterday are days of the calendar, not 24 and 48 hours; a
-// time under an hour ago says how long ago, and a zero time nothing.
 func TestWhenByTheCalendar(t *testing.T) {
 	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.Local)
 	msgs := In("en")
@@ -39,7 +37,6 @@ func TestWhenByTheCalendar(t *testing.T) {
 	}
 }
 
-// Minutes ago are in each language the app ships, as the words around them.
 func TestMinutesAgoInEachLanguage(t *testing.T) {
 	now := time.Now()
 	for _, lang := range Catalog.Languages() {
@@ -50,7 +47,6 @@ func TestMinutesAgoInEachLanguage(t *testing.T) {
 	}
 }
 
-// A day says its year only when it is another year's, here.
 func TestDayNamesAnotherYear(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	msgs := In("en")

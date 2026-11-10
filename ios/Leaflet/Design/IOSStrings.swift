@@ -1,8 +1,5 @@
 import Foundation
 
-/// LI says the messages only the iOS app has, from
-/// Resources/Localizable.xcstrings; those it shares with the desktop come
-/// from L.
 enum LI {
     static var openInNewWindow: String {
         String(

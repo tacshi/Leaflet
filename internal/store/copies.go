@@ -11,20 +11,15 @@ import (
 	"leaflet/internal/doc"
 )
 
-// CopyOptions say where a copy of a page goes, as NewPageOptions do.
 type CopyOptions struct {
 	ParentID string
 	FolderID string
 	SpaceID  string
 	AfterID  string
 	Title    string
-	// Template makes the copy and its subpages templates; else they are
-	// pages.
 	Template bool
 }
 
-// CopyPage copies a page and its subpages, which keep their titles and
-// order, and returns the copy. Links among them go to the copies.
 func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
 	plan, err := s.copyPlan(id, doc.NewRowID())
 	if err != nil {
@@ -41,9 +36,6 @@ func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
 	return p, err
 }
 
-// CopyInto copies page id's subpages under page into, and returns a copy
-// of id's content for into to hold, as when a page starts from a
-// template. Links among them go to the copies.
 func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 	plan, err := s.copyPlan(id, into)
 	if err != nil {
@@ -54,7 +46,6 @@ func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 		if err != nil {
 			return false, err
 		}
-		// The page takes the template's tags too, after its own.
 		if tags := NormalizeTags(append(append([]string{}, target.Tags...), plan.tree[0].Tags...)); len(tags) != len(target.Tags) {
 			target.Tags, target.UpdatedAt = tags, time.Now()
 			if err := savePage(tx, target, "tagged"); err != nil {
@@ -69,11 +60,6 @@ func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 	return plan.contents[0], nil
 }
 
-// storeCopies stores what copyPlan planned in one transaction, with the
-// root the caller makes or changes in it first, which reports whether the
-// copies are templates: a copy cut short would be left half made, and
-// queued to go up so. What it copied here of the files and audio goes
-// again when it fails.
 func (s *Store) storeCopies(plan pageCopies, root func(tx *sql.Tx) (bool, error)) error {
 	recs, files, made, err := s.copyLocal(plan)
 	if err == nil {
@@ -108,9 +94,6 @@ func (s *Store) storeCopies(plan pageCopies, root func(tx *sql.Tx) (bool, error)
 	return nil
 }
 
-// pageCopies is what copyPlan plans: the pages, parents before their
-// subpages, the IDs of their copies, the copies' contents, and the
-// recordings and files the copies get of their own.
 type pageCopies struct {
 	tree     []Page
 	ids      map[string]string
@@ -119,18 +102,13 @@ type pageCopies struct {
 	files    []fileCopy
 }
 
-// copyPlan reads page id and the pages under it, parents before their
-// subpages, and gives each the ID of its copy (copyID for id) and its
-// content with links among them going to the copies, and blocks of the
-// page's own recordings and files to recordings and files of their own,
-// which storeCopies stores once the copies are in.
 func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 	root, err := s.Page(id)
 	if err != nil {
 		return pageCopies{}, err
 	}
 	tree := []Page{root}
-	seen := map[string]bool{id: true} // a loop of parents is copied once
+	seen := map[string]bool{id: true}
 	for i := 0; i < len(tree); i++ {
 		kids, err := s.queryPages(`parent_id = ? AND deleted_at IS NULL ORDER BY sort_key, id`, tree[i].ID)
 		if err != nil {
@@ -155,7 +133,6 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 		} else if err != nil {
 			return pageCopies{}, err
 		}
-		// Content that cannot be read is not copied as an empty page.
 		c, err := doc.Decode(row.Content)
 		if err != nil {
 			return pageCopies{}, fmt.Errorf("%s: %w", p.DisplayTitle(), err)
@@ -164,14 +141,9 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 	}
 	copies := doc.CopyPages(contents, plan.ids)
 	for i, p := range tree {
-		files := map[string]int{} // the page's files, by where plan.files has their copies
+		files := map[string]int{}
 		plan.contents[i] = copies[p.ID]
 		plan.contents[i].Walk(func(n, _ *doc.Node) {
-			// Only the page's own recordings and files are copied: a block
-			// may name any, as one an editor of the page wrote could, and
-			// another page's would go to the copy's audience. A block of
-			// another's keeps naming it, as the page's does, and shows it no
-			// more than the page does.
 			if n.Type == "recording" {
 				r, err := s.Recording(n.Str("recording_id"))
 				if err != nil || r.PageID != p.ID {
@@ -205,8 +177,6 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 	return plan, nil
 }
 
-// createCopies makes the copies of subpages that copyPlan planned, each
-// last under its parent's copy, so they keep their order.
 func createCopies(tx *sql.Tx, sess Session, pages []Page, ids map[string]string, contents []*doc.Content, template bool) error {
 	for i, p := range pages {
 		if _, err := createPage(tx, sess, NewPageOptions{ID: ids[p.ID], ParentID: ids[p.ParentID], Title: p.Title,
@@ -217,37 +187,23 @@ func createCopies(tx *sql.Tx, sess Session, pages []Page, ids map[string]string,
 	return nil
 }
 
-// recordingCopy is a recording of a copied page, and the ID of the one it
-// copies.
 type recordingCopy struct {
 	Recording
 	from string
 }
 
-// fileCopy is a file of a copied page, with the ID of its copy and the
-// page the copy is on.
 type fileCopy struct {
 	File
 	to, pageID string
 }
 
-// ErrCopyNotHere is a copy refused because a file's contents or a
-// recording's audio it copies is not on this device (CopyNeeds).
 var ErrCopyNotHere = errors.New("store: a file or a recording the copy copies is not on this device")
 
-// CopyNeed is a file's contents or a recording's audio that copying a
-// page needs on this device first: where it is stored, by its bucket and
-// path, which is "" for audio still uploading from where it was made.
 type CopyNeed struct {
 	Bucket, Path        string
 	FileID, RecordingID string
 }
 
-// CopyNeeds lists what copying page id, with its subpages, needs brought
-// to this device first (DownloadedFile, DownloadedAudio): a copy goes up
-// with its own contents and audio, from this device, as it is made, and
-// never comes later from the original's, which another device may delete
-// meanwhile.
 func (s *Store) CopyNeeds(id string) ([]CopyNeed, error) {
 	plan, err := s.copyPlan(id, doc.NewRowID())
 	if err != nil {
@@ -267,13 +223,6 @@ func (s *Store) CopyNeeds(id string) ([]CopyNeed, error) {
 	return out, nil
 }
 
-// copyLocal copies, for the recordings and files of copied pages, their
-// audio and contents on this device, before storeCopies stores them: only
-// those who can view the page of the recording a stored audio is named
-// for, or the page a file is on, can read it, so each copy goes up with
-// its own. One not on this device refuses the copy (ErrCopyNotHere). It
-// returns the recordings and files to store, and the paths it made, which
-// go if they are not stored.
 func (s *Store) copyLocal(plan pageCopies) ([]Recording, []File, []string, error) {
 	var made []string
 	var recs []Recording
@@ -311,8 +260,6 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []File, []string, error
 	return recs, files, made, nil
 }
 
-// putRecordingCopies stores and queues the recordings of copied pages,
-// each with the upload of its audio, in storeCopies' transaction.
 func putRecordingCopies(tx *sql.Tx, dir, space string, recs []Recording) error {
 	if len(recs) > 0 && space != "" && !hasSpace(tx, space) {
 		return ErrNoSpace
@@ -331,8 +278,6 @@ func putRecordingCopies(tx *sql.Tx, dir, space string, recs []Recording) error {
 	return nil
 }
 
-// putFileCopies stores and queues the files of copied pages, as AddFile
-// adds one, in storeCopies' transaction.
 func putFileCopies(tx *sql.Tx, dir string, files []File) error {
 	for _, f := range files {
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {

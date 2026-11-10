@@ -19,8 +19,6 @@ import (
 	"leaflet/locales"
 )
 
-// A video's notes show under it, folded when long; the menu writes them,
-// as one step to undo, and copies a link to a line's moment.
 func TestVideoNotes(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -90,15 +88,12 @@ func TestVideoNotes(t *testing.T) {
 	if got := ed.Content.Find("v1").Str("notes"); !strings.HasPrefix(got, "A talk on caching") {
 		t.Fatalf("after undo %q", got)
 	}
-	// Notes left empty go.
 	a.setVideoNotes("v1", "")
 	if _, ok := ed.Content.Find("v1").Data["notes"]; ok {
 		t.Error("empty notes stay")
 	}
 }
 
-// A link to a moment of a recording on another page opens that page at the
-// recording and plays it from that time.
 func TestOpenMomentLink(t *testing.T) {
 	a := templatesApp(t)
 	a.post = func(func()) {}
@@ -121,7 +116,6 @@ func TestOpenMomentLink(t *testing.T) {
 	if pl := a.players[rec.ID]; pl == nil || pl.from != 43*time.Second {
 		t.Errorf("player %+v", pl)
 	}
-	// A link to the block alone plays nothing.
 	delete(a.players, rec.ID)
 	a.openLink(p.ID, "p0", -1)
 	if a.players[rec.ID] != nil {
@@ -129,8 +123,6 @@ func TestOpenMomentLink(t *testing.T) {
 	}
 }
 
-// A file's notes show under its card, as a video's do: a menu writes them,
-// as one step to undo, and they reach a file's own dialog.
 func TestFileNotes(t *testing.T) {
 	a := templatesApp(t)
 	a.post = func(func()) {}
@@ -172,15 +164,12 @@ func TestFileNotes(t *testing.T) {
 	if got := ed.Content.Find("f1").Str("notes"); got != "0:05 Hello\n1:30 Bye" {
 		t.Fatalf("after undo %q", got)
 	}
-	// With no window to play in, a time asks for nothing, and breaks nothing.
 	a.openLink(p.ID, "f1", 90)
 	if a.videos["f1"] != nil {
 		t.Error("a player without a window")
 	}
 }
 
-// A file the app can read shows in the window as what it is, until Close;
-// one it can't leaves the page as it was.
 func TestPreviewFile(t *testing.T) {
 	a := templatesApp(t)
 	dir := t.TempDir()
@@ -235,7 +224,6 @@ func TestPreviewFile(t *testing.T) {
 	a.closePreview()
 }
 
-// wordsEngine is a speech engine that hears the same words in every file.
 type wordsEngine struct{}
 
 func (wordsEngine) Stream(string, func(string)) (recording.Stream, error) {
@@ -245,8 +233,6 @@ func (wordsEngine) File(string, string) ([]store.Segment, error) {
 	return []store.Segment{{StartMs: 5000, Text: "We ship on Friday."}}, nil
 }
 
-// An audio file's menu transcribes it into its notes, as one step to undo;
-// transcribing it again asks first.
 func TestTranscribeFileIntoNotes(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -305,8 +291,6 @@ func TestTranscribeFileIntoNotes(t *testing.T) {
 	}
 }
 
-// A file's menu hides the speakers of its notes, as one step to undo, and
-// offers it only for notes that name them.
 func TestHideSpeakers(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -368,9 +352,6 @@ func TestHideSpeakers(t *testing.T) {
 	}
 }
 
-// A speaker's name is the user's to give, for all their lines, and a line
-// goes to another speaker or a new one from its own menu, each one step to
-// undo.
 func TestSpeakersFromALine(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -441,8 +422,6 @@ func TestSpeakersFromALine(t *testing.T) {
 	}
 }
 
-// A file's transcript copies and goes in the page from its menu, and the
-// menu leaves those out for notes on what isn't audio or video.
 func TestFileTranscriptMenu(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
@@ -504,8 +483,6 @@ func TestFileTranscriptMenu(t *testing.T) {
 	}
 }
 
-// The player under the page goes by the top of a block, where its own
-// player is: a long transcript may still show with that scrolled away.
 func TestHeadGone(t *testing.T) {
 	const viewTop, viewBottom = 50, 750
 	for _, c := range []struct {
@@ -526,8 +503,6 @@ func TestHeadGone(t *testing.T) {
 	}
 }
 
-// A recording that starts is what the player under the page plays, by its
-// block; a video isn't, and playing nothing leaves none.
 func TestNowPlaying(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Meeting", Content: doc.FromBlocks([]*doc.Node{
@@ -549,7 +524,6 @@ func TestNowPlaying(t *testing.T) {
 	if a.now != (nowPlaying{block: "f1"}) {
 		t.Errorf("audio: %+v", a.now)
 	}
-	// Going on from a pause, it stays where its player said it is.
 	a.fileNow = fileStatus{at: 42, length: 90}
 	a.setNowPlaying("f1", "")
 	if a.fileNow.at != 42 {
@@ -566,7 +540,6 @@ func TestNowPlaying(t *testing.T) {
 	}
 }
 
-// A skip stays within the audio, and waits for its length.
 func TestSkipped(t *testing.T) {
 	const s = time.Second
 	for _, c := range []struct{ pos, by, dur, want time.Duration }{
@@ -582,8 +555,6 @@ func TestSkipped(t *testing.T) {
 	}
 }
 
-// A speed is kept for next time and reaches what plays, and one that isn't
-// offered reads as normal.
 func TestPlaySpeed(t *testing.T) {
 	a := templatesApp(t)
 	if a.speed() != 1 {
@@ -599,7 +570,6 @@ func TestPlaySpeed(t *testing.T) {
 	if a.speed() != 1.5 {
 		t.Errorf("read back %v", a.speed())
 	}
-	// Its button shows the speed, and its menu changes it.
 	tt := ui.NewTester(func(c *ui.Context) { a.playerBar(c, 0, time.Minute, func(time.Duration) {}) }, 700, 300)
 	tt.Frame()
 	if err := tt.Click("1.5×"); err != nil {
@@ -625,9 +595,6 @@ func TestPlaySpeed(t *testing.T) {
 	}
 }
 
-// An audio file is one card, as a recording: its name and controls over its
-// transcript, with a speaker over their line; a video's notes stay in their
-// panel, with the speaker in the line.
 func TestAudioCard(t *testing.T) {
 	a := templatesApp(t)
 	src := filepath.Join(t.TempDir(), "call.m4a")
@@ -676,8 +643,6 @@ func TestAudioCard(t *testing.T) {
 	}
 }
 
-// A long transcript's window moves on with the audio, and stays closed;
-// opened, it shows every line.
 func TestRollingLines(t *testing.T) {
 	a := templatesApp(t)
 	var notes []string
@@ -719,8 +684,6 @@ func TestRollingLines(t *testing.T) {
 	}
 }
 
-// The window keeps a line above the one being said, and stops short of
-// the end, where the last lines still show.
 func TestRollTop(t *testing.T) {
 	for _, c := range []struct{ current, count, want int }{
 		{-1, 20, 0}, {0, 20, 0}, {1, 20, 0}, {5, 20, 4}, {19, 20, 17}, {4, 20, 3},
@@ -731,8 +694,6 @@ func TestRollTop(t *testing.T) {
 	}
 }
 
-// The system's media controls show what plays, say so when it moves, and
-// drive it; once it stops, they let the app go.
 func TestSystemAudio(t *testing.T) {
 	a := templatesApp(t)
 	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 60000, Status: "ready"}

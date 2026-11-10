@@ -2,19 +2,11 @@ package agents
 
 import "strings"
 
-// closeJSON completes JSON cut off part way, as a tool call's arguments
-// are while they stream: the text of an open string is kept, what there
-// is of an unfinished key, number or literal is dropped, and the objects
-// and arrays still open are closed. It reports false when nothing of the
-// value has come yet.
 func closeJSON(s string) (string, bool) {
 	var stack []byte
-	// safe is a prefix that ends where a value or container did, with
-	// the containers open there.
 	safe, safeStack := -1, []byte(nil)
 	mark := func(n int) { safe, safeStack = n, append(safeStack[:0], stack...) }
 	inStr, esc, key := false, false, false
-	// expectKey is an object waiting for its next key.
 	expectKey := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -50,7 +42,6 @@ func closeJSON(s string) (string, bool) {
 			expectKey = false
 			mark(i + 1)
 		case ',':
-			// What came before the comma is whole.
 			if safe < i {
 				mark(i)
 			}
@@ -63,7 +54,6 @@ func closeJSON(s string) (string, bool) {
 	closers := safeStack
 	switch {
 	case inStr && !key:
-		// A string value as far as it came, an escape cut in two left out.
 		t := s
 		if esc {
 			t = t[:len(t)-1]
@@ -84,8 +74,6 @@ func closeJSON(s string) (string, bool) {
 	return b.String(), true
 }
 
-// escapes reports whether the backslash at i begins an escape: one after
-// an even run of them, which are escapes of a backslash each.
 func escapes(s string, i int) bool {
 	n := 0
 	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {

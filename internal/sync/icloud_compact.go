@@ -6,13 +6,6 @@ import (
 	"leaflet/internal/icloud"
 )
 
-// compact folds this device's log into one snapshot batch once it holds
-// more than compactAfter batches, and removes the batches before it. A
-// device that had not read them reads the snapshot instead, which holds
-// the latest of every row and page in them, with their versions: what it
-// already had stays, being no older. A row keeps each entry of it a later
-// one does not hold all of, as one that changed a column alone does not
-// hold the columns an earlier one changed.
 func (s *Service) compact(me string) error {
 	seqs, _, err := s.folder().Batches(me)
 	if err != nil || len(seqs) <= compactAfter {
@@ -20,8 +13,6 @@ func (s *Service) compact(me string) error {
 	}
 	last := s.intValue("icloud.seq")
 	snapshot := icloud.Batch{Format: icloud.Format, Device: me, Seq: last + 1, WrittenAt: cloudNow().UTC(), Snapshot: true}
-	// Each row and page has a place in the snapshot, in the order it first
-	// came.
 	var places [][]icloud.Entry
 	rows := map[[2]string]int{}
 	pages := map[string]int{}
@@ -35,15 +26,11 @@ func (s *Service) compact(me string) error {
 		}
 		var b icloud.Batch
 		if err := s.folder().ReadJSON(rel, &b); err != nil {
-			// One that stays cut short, as by a crash, is passed over as
-			// the other devices pass over it (passDamaged): what it held
-			// is lost to them either way, and kept, it would stop the
-			// log from being compacted ever again.
 			if errors.Is(err, icloud.ErrDamaged) && s.passDamaged(me, seq, true, err) {
 				continue
 			}
 			if errors.Is(err, icloud.ErrNotReady) {
-				return nil // try once iCloud has it again
+				return nil
 			}
 			return err
 		}

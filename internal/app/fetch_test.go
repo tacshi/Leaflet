@@ -44,8 +44,6 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 	}
 }
 
-// A picture that cannot be read says it failed, rather than loading
-// forever, and is tried again later.
 func TestImageCacheFailure(t *testing.T) {
 	root := t.TempDir()
 	ic := newImageCache(root)
@@ -61,7 +59,6 @@ func TestImageCacheFailure(t *testing.T) {
 	if ic.get(url, func() { t.Error("tried again at once") }) != nil {
 		t.Fatal("a missing picture is shown")
 	}
-	// After a while it is tried again.
 	ic.mu.Lock()
 	ic.failed[url] = time.Now().Add(-imageRetry)
 	ic.mu.Unlock()
@@ -73,8 +70,6 @@ func TestImageCacheFailure(t *testing.T) {
 	<-again
 }
 
-// An animated GIF gets a player, looping, for each block that shows it,
-// made off the main thread; a GIF of one frame stays a picture.
 func TestAnimatedGIFPlays(t *testing.T) {
 	root := t.TempDir()
 	ic := newImageCache(root)
@@ -133,9 +128,6 @@ func TestAnimatedGIFPlays(t *testing.T) {
 	if q := ic.player(moving, "b2", nil); q == nil || q == p {
 		t.Errorf("second block's player %p, first's %p", q, p)
 	}
-	// A player its block keeps asking for stays; one no block asked for
-	// within playerIdle is closed and forgotten, and made again if its
-	// block shows once more.
 	ic.releasePlayers(time.Now().Add(playerIdle / 2))
 	if ic.player(moving, "b1", nil) != p {
 		t.Fatal("a player asked for recently was released")
@@ -154,17 +146,13 @@ func TestAnimatedGIFPlays(t *testing.T) {
 	}
 }
 
-// A picture whose header says it is far larger than it is, as a small
-// file can, is refused before it is decoded, as decoding it would take
-// more memory than the device has: a bitmap by its size, an animated GIF
-// by all its frames'.
 func TestHugePictureRefused(t *testing.T) {
 	png := func(w, h uint32) []byte {
 		ihdr := make([]byte, 17)
 		copy(ihdr, "IHDR")
 		binary.BigEndian.PutUint32(ihdr[4:], w)
 		binary.BigEndian.PutUint32(ihdr[8:], h)
-		ihdr[12], ihdr[13] = 8, 6 // 8 bits a channel, RGBA
+		ihdr[12], ihdr[13] = 8, 6
 		b := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0d")
 		b = append(b, ihdr...)
 		return binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(ihdr))
@@ -208,8 +196,6 @@ func TestHugePictureRefused(t *testing.T) {
 	}
 }
 
-// Clearing the cache closes its GIFs' players, and those it was still
-// making then as they are made.
 func TestClosedImageCacheClosesPlayers(t *testing.T) {
 	root := t.TempDir()
 	g := &gif.GIF{Config: image.Config{Width: 4, Height: 2}}
@@ -244,9 +230,6 @@ func TestClosedImageCacheClosesPlayers(t *testing.T) {
 	}
 }
 
-// Pictures no frame asked for a while go, and the least recently asked
-// for while they hold more than the budget, but not those on screen; one
-// gone loads again as it is asked for.
 func TestPicturesLetGo(t *testing.T) {
 	root := t.TempDir()
 	ic := newImageCache(root)
@@ -290,7 +273,6 @@ func TestPicturesLetGo(t *testing.T) {
 		t.Fatalf("%d pictures kept long after they were shown", held())
 	}
 
-	// Over the budget, the one asked for longer ago goes first.
 	was := pictureBudget
 	t.Cleanup(func() { pictureBudget = was })
 	pictureBudget = 10 * 10 * 4

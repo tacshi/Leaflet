@@ -80,7 +80,6 @@ func TestTableInCellOrder(t *testing.T) {
 	if got := TableRows(n); !reflect.DeepEqual(got, [][]string{{"A", "B"}, {"1", "2"}}) {
 		t.Errorf("rows %v", got)
 	}
-	// Column-major: the second cell is row 1 of column 0.
 	if c := n.Children[1]; c.Int("colPosition", -1) != 0 || c.Int("rowPosition", -1) != 1 {
 		t.Errorf("second cell %v", c.Data)
 	}
@@ -111,8 +110,6 @@ func TestChildrenOnlyOnLists(t *testing.T) {
 	}
 }
 
-// A blank page is one empty paragraph, or nothing: a paragraph with text
-// in it, or one with blocks under it, or another kind of block, is not.
 func TestIsEmpty(t *testing.T) {
 	nested := para("a", "")
 	nested.Children = []*Node{para("b", "")}
@@ -167,7 +164,6 @@ func TestOpsInvert(t *testing.T) {
 	if got := texts(c); !reflect.DeepEqual(got, []string{"three", "TWO"}) {
 		t.Fatalf("after ops %v", got)
 	}
-	// Through JSON, as ops are stored and streamed.
 	raw, _ := json.Marshal(ops)
 	var decoded []Op
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -206,10 +202,6 @@ func TestMergeSameBlockNewerWins(t *testing.T) {
 	}
 }
 
-// A block only one side changed since base takes that side's version,
-// whatever the times say: an edit in the same millisecond as base (an
-// agent writing right after a save) or from a device whose clock is behind
-// is not lost.
 func TestMergeOneSidedEditWinsWhateverTheTimes(t *testing.T) {
 	base := page(map[string]int64{"a": 5, "b": 5}, para("a", "one"), para("b", "two"))
 	for _, remoteAt := range []int64{5, 2} {
@@ -219,13 +211,11 @@ func TestMergeOneSidedEditWinsWhateverTheTimes(t *testing.T) {
 		if !reflect.DeepEqual(texts(got), []string{"ONE", "TWO"}) || len(conflicts) != 0 {
 			t.Errorf("remote at %d: texts %v conflicts %v", remoteAt, texts(got), conflicts)
 		}
-		// The same with the sides the other way round.
 		got, conflicts = Merge(base, remote, local)
 		if !reflect.DeepEqual(texts(got), []string{"ONE", "TWO"}) || len(conflicts) != 0 {
 			t.Errorf("local at %d: texts %v conflicts %v", remoteAt, texts(got), conflicts)
 		}
 	}
-	// A move one side made, the other side's time newer.
 	local := page(map[string]int64{"a": 9, "b": 5}, para("a", "ONE"), para("b", "two"))
 	remote := page(map[string]int64{"a": 5, "b": 3}, para("b", "two"), para("a", "one"))
 	got, _ := Merge(base, local, remote)
@@ -244,9 +234,6 @@ func TestMergeInsertsInPlace(t *testing.T) {
 	}
 }
 
-// A block one side deleted stays deleted if the other side left it as it
-// was in base. If the other side edited it, it comes back, whichever came
-// later, as a conflict whose deleted side is nil.
 func TestMergeDeletesAndEdits(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
 	local := page(map[string]int64{"b": 8}, para("b", "two!"))
@@ -284,10 +271,6 @@ func TestMergeDeletesAndEdits(t *testing.T) {
 	}
 }
 
-// A block that comes back over a delete stays when the merge reaches the
-// side that deleted it, with changes of its own, whose base lacks the
-// block: it is newer than the delete, whenever it was edited. So does an
-// item added under it, which has no other place.
 func TestMergeKeepsWhatCameBackOverADelete(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
 	edited := base.Copy()
@@ -312,7 +295,6 @@ func TestMergeKeepsWhatCameBackOverADelete(t *testing.T) {
 		t.Errorf("the side that deleted it has %v, conflicts %+v", texts(got), conflicts)
 	}
 
-	// What came back holds an item only the other side has.
 	list := func(kids ...*Node) *Node {
 		n := textNode("bulleted_list", Delta{{Text: "list"}})
 		n.ID, n.Children = "l", kids
@@ -335,9 +317,6 @@ func TestMergeKeepsWhatCameBackOverADelete(t *testing.T) {
 	}
 }
 
-// A list one side deleted comes back whole when the other side edited an
-// item in it, and stays deleted when the other side only added a block
-// beside it.
 func TestMergeDeletedParentWithEditedChild(t *testing.T) {
 	item := func(id, text string, kids ...*Node) *Node {
 		n := para(id, text)
@@ -360,7 +339,6 @@ func TestMergeDeletedParentWithEditedChild(t *testing.T) {
 	if !reflect.DeepEqual(texts(got), []string{"new", "end"}) || len(conflicts) != 0 {
 		t.Errorf("texts %v conflicts %+v", texts(got), conflicts)
 	}
-	// A block added above it does not move it; moving it below "end" does.
 	above := page(map[string]int64{"n": 6, "l": 1, "x": 1, "y": 1, "p": 1}, para("n", "new"), item("l", "list", item("x", "x"), item("y", "y")), para("p", "end"))
 	got, conflicts = Merge(base, local, above)
 	if !reflect.DeepEqual(texts(got), []string{"new", "end"}) || len(conflicts) != 0 {
@@ -407,8 +385,6 @@ func TestDeltaEdits(t *testing.T) {
 	}
 }
 
-// A mention is one unit: text typed inside it goes after it, and taking
-// out or formatting part of it takes all of it.
 func TestMentionIsOneUnit(t *testing.T) {
 	alice := Attrs{Mention: &Mention{Kind: "user", ID: "a", Name: "Alice"}}
 	d := Delta{{Text: "hi "}, {Text: "@Alice", Attrs: alice}}
@@ -471,15 +447,11 @@ func TestColorsRoundTrip(t *testing.T) {
 	if bad[0].Attrs.Color != "" {
 		t.Errorf("kept a color that is not one: %q", bad[0].Attrs.Color)
 	}
-	// Agents read colors in tags; Markdown for people has none, as in
-	// MyGo's rich text.
 	if md := d.ReadableMarkdown(); md != "red marked" {
 		t.Errorf("markdown %q", md)
 	}
 }
 
-// One side wraps blocks in a new toggle while the other edits elsewhere:
-// the blocks move into the toggle, once each, in order.
 func TestMergeMoveIntoANewBlock(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "x": 1, "y": 1}, para("a", "one"), para("x", "two"), para("y", "three"))
 	box := para("box", "box")
@@ -499,9 +471,6 @@ func TestMergeMoveIntoANewBlock(t *testing.T) {
 
 func first(c *Content, _ []Conflict) *Content { return c }
 
-// One side moves a block into a toggle while the other inserts a block
-// after it at the top level: the new block stays at the top level, where
-// it was put, whichever side is primary.
 func TestMergeInsertAfterABlockMovedElsewhere(t *testing.T) {
 	toggle := func(kids ...*Node) *Node {
 		n := para("t", "t")
@@ -527,8 +496,6 @@ func TestMergeInsertAfterABlockMovedElsewhere(t *testing.T) {
 	}
 }
 
-// A block's time never goes back, so an edit on a device whose clock is
-// behind the one it merged from still wins.
 func TestStampingNeverGoesBack(t *testing.T) {
 	before := page(map[string]int64{"a": 100, "b": 100}, para("a", "one"), para("b", "two"))
 	after := page(map[string]int64{}, para("a", "one!"))
@@ -542,8 +509,6 @@ func TestStampingNeverGoesBack(t *testing.T) {
 	}
 }
 
-// Two devices merging the same two versions, each as its local one, keep
-// the same block when the times are equal.
 func TestMergeTiesAgree(t *testing.T) {
 	base := page(map[string]int64{"a": 1}, para("a", "one"))
 	mine := page(map[string]int64{"a": 7}, para("a", "mine"))
@@ -556,7 +521,6 @@ func TestMergeTiesAgree(t *testing.T) {
 	if len(hc) != 1 || len(tc) != 1 || hc[0].Kept() == tc[0].Kept() {
 		t.Errorf("kept here %v there %v", hc, tc)
 	}
-	// A tie on a move too.
 	base = page(map[string]int64{"a": 1, "b": 1, "c": 1}, para("a", "a"), para("b", "b"), para("c", "c"))
 	mine = page(map[string]int64{"a": 1, "b": 1, "c": 5}, para("c", "c"), para("a", "a"), para("b", "b"))
 	theirs = page(map[string]int64{"a": 1, "b": 1, "c": 5}, para("a", "a"), para("c", "c"), para("b", "b"))
@@ -618,8 +582,6 @@ func TestFailedMoveKeepsTheBlock(t *testing.T) {
 	}
 }
 
-// A block moves into a list, but not into a block of another kind, nor
-// into or out of a table.
 func TestMoveOnlyIntoWhatHoldsBlocks(t *testing.T) {
 	table, _ := TableNode([][]string{{"x", "y"}}, "t")
 	cell := table.Children[0]
@@ -643,15 +605,12 @@ func TestMoveOnlyIntoWhatHoldsBlocks(t *testing.T) {
 			t.Errorf("move of %s to %+v changed the page:\n%s", tc.id, tc.p, got)
 		}
 	}
-	// Cells still move within their table, as a merge moves them.
 	c := FromBlocks([]*Node{table.Clone()})
 	if err := c.Move(cell.ID, Position{After: table.Children[1].ID}); err != nil {
 		t.Error(err)
 	}
 }
 
-// Undo run puts a deleted block back even when the block it went after
-// has gone since, and once only when it is back already.
 func TestUndoRunInsertsWhatIsMissing(t *testing.T) {
 	c := FromBlocks([]*Node{para("a", "a"), para("x", "x"), para("b", "b")})
 	o := c.DeleteOp([]string{"x"})
@@ -679,7 +638,6 @@ func TestUndoRunInsertsWhatIsMissing(t *testing.T) {
 		t.Errorf("back already: %v", got)
 	}
 
-	// A list whose item came back on its own comes back without it.
 	list := &Node{ID: "l", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
 	list.SetDelta(Delta{{Text: "l"}})
 	c = FromBlocks([]*Node{para("a", "a"), list})
@@ -693,7 +651,6 @@ func TestUndoRunInsertsWhatIsMissing(t *testing.T) {
 		t.Errorf("child back already: %v", got)
 	}
 
-	// An item whose list became a paragraph since comes back after it.
 	list = &Node{ID: "l", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
 	list.SetDelta(Delta{{Text: "l"}})
 	c = FromBlocks([]*Node{list, para("z", "z")})
@@ -708,9 +665,6 @@ func TestUndoRunInsertsWhatIsMissing(t *testing.T) {
 	}
 }
 
-// One side makes a list item, moves a child into it and deletes the
-// child's old parent, while the other edits elsewhere: the child lands in
-// the new item whichever side is primary and whichever is local.
 func TestMergeMoveOutOfADeletedBlock(t *testing.T) {
 	item := func(id, text string, kids ...*Node) *Node {
 		n := &Node{ID: id, Type: "bulleted_list", Children: kids}
@@ -737,9 +691,6 @@ func TestMergeMoveOutOfADeletedBlock(t *testing.T) {
 	}
 }
 
-// Text that looks like markup is escaped, so it reads back as written.
-// Spaces at the ends of a formatted run go outside its markers, and so
-// read back unformatted.
 func TestInlineMarkdownEscapes(t *testing.T) {
 	for _, tc := range []struct{ d, want Delta }{
 		{d: Delta{{Text: "2*3*4"}}},
@@ -774,7 +725,6 @@ func TestInlineMarkdownEscapes(t *testing.T) {
 	}
 }
 
-// Links as agents write them: parentheses in the url, or in brackets.
 func TestInlineMarkdownLinks(t *testing.T) {
 	for md, href := range map[string]string{
 		"[w](https://en.wikipedia.org/wiki/Go_(game))": "https://en.wikipedia.org/wiki/Go_(game)",
@@ -787,15 +737,6 @@ func TestInlineMarkdownLinks(t *testing.T) {
 	}
 }
 
-// Links are read in time in proportion to the text: one of [s that no ]
-// closes, or of links whose url no ) closes, as a comment can be written
-// to make, reads in about sixteen times what one a sixteenth as long
-// takes, not the 256 times of reading on to the end from each [, both as
-// rich text and as Markdown's lines written out. So does one with a [ and
-// code spans after it, of two backticks, or of runs that close none or
-// another's. The text a sixteenth as long fits in the processor's cache,
-// which the longer one leaves, more so on a busy machine: up to 64 times
-// passes.
 func TestInlineLinksReadInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times reads")
@@ -820,9 +761,6 @@ func TestInlineLinksReadInLinearTime(t *testing.T) {
 	}
 }
 
-// Markers that close nowhere read in time in proportion to the text, as
-// links do, and formats and links nest only so deep: past that, text is
-// read as written, as the server's copy reads it.
 func TestInlineFormatsReadInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times reads")
@@ -852,7 +790,6 @@ func TestInlineFormatsReadInLinearTime(t *testing.T) {
 	if got := FromMarkdown(nested(40)).Plain(); !strings.Contains(got, "x](u)") {
 		t.Errorf("links nested 40 deep read as %q", got)
 	}
-	// A mention's name is read within the same limit.
 	name := "x"
 	for range 40 {
 		name = "[" + name + "](mention:user:u1)"
@@ -862,8 +799,6 @@ func TestInlineFormatsReadInLinearTime(t *testing.T) {
 	}
 }
 
-// Text that is all <s reads in time in proportion to it, in a table's cell
-// and a toggle's summary, each < looked at once.
 func TestTagsInTextReadInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times reads")
@@ -883,9 +818,6 @@ func TestTagsInTextReadInLinearTime(t *testing.T) {
 	}
 }
 
-// Runs side by side in any formats Markdown can say read back as they
-// were: bold and italic together, one run's markers touching the next's,
-// code beside code, markup characters in the text.
 func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
 	for _, d := range []Delta{
 		{{Text: "x", Attrs: Attrs{Bold: true, Italic: true}}},
@@ -902,7 +834,7 @@ func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
 	}
 	words := []string{"a", "bc", "x_y", "*", "**", "_", "`", "[", "]", "(", ")", "\\", "~", "中文", "@"}
 	hrefs := []string{"https://a.b", "https://c.d/x_(y)"}
-	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- seeded, for runs a test can repeat.
+	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404
 	for range 5000 {
 		var d Delta
 		for range 1 + rng.IntN(6) {
@@ -912,8 +844,6 @@ func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
 			}
 			var text strings.Builder
 			for i := range 1 + rng.IntN(3) {
-				// Spaces only between words: at the ends of a format they
-				// go outside its markers.
 				if i > 0 {
 					text.WriteString(" ")
 				}
@@ -931,8 +861,6 @@ func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
 	}
 }
 
-// A format that runs on into a link stays open around it, rather than
-// closing after a space, where its marker would read as text.
 func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 	for _, tc := range []struct {
 		d    Delta
@@ -944,8 +872,6 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 			"*[docs](https://x.dev) here*"},
 		{Delta{{Text: "a ", Attrs: Attrs{Italic: true}}, {Text: "b", Attrs: Attrs{Italic: true, Bold: true}}},
 			"*a __b__*"},
-		// A format closed at a link's end and opened again past it keeps
-		// its markers off the spaces there, which lose it.
 		{Delta{{Text: "read ", Attrs: Attrs{Href: "https://x.dev"}}, {Text: "this ", Attrs: Attrs{Href: "https://x.dev", Italic: true}},
 			{Text: "and that", Attrs: Attrs{Italic: true}}},
 			"[read *this* ](https://x.dev)*and that*"},
@@ -963,11 +889,9 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 			t.Errorf("%q reads back as %+v", md, got)
 		}
 	}
-	// Runs with spaces at their ends, which go outside the markers of a
-	// format ending there, links' text included.
 	words := []string{"a", "bc", "*", "_", "[", "中文"}
 	hrefs := []string{"https://a.b", "https://c.d"}
-	rng := rand.New(rand.NewPCG(3, 4)) // #nosec G404 -- seeded, for runs a test can repeat.
+	rng := rand.New(rand.NewPCG(3, 4)) // #nosec G404
 	for range 5000 {
 		var d Delta
 		for range 1 + rng.IntN(5) {
@@ -991,13 +915,9 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 	}
 }
 
-// trimSpans trims marks as it did one character at a time, each with its
-// formats, which allocated for every character of every text: random
-// texts, in every format, trim the same, and one with no mark to trim
-// allocates no more than its runs.
 func TestTrimSpansAsCharByChar(t *testing.T) {
 	texts := []string{"a", " ", "  ", "\n", " b ", "中文", "\t", "x\n", "é ", "👍", ""}
-	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404 -- seeded, for runs a test can repeat.
+	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404
 	for range 20000 {
 		var d Delta
 		for range 1 + rng.IntN(6) {
@@ -1028,7 +948,6 @@ func TestTrimSpansAsCharByChar(t *testing.T) {
 	}
 }
 
-// trimSpansByChar is trimSpans as it was, one character at a time.
 func trimSpansByChar(d Delta) Delta {
 	type char struct {
 		r   rune
@@ -1085,9 +1004,6 @@ func trimSpansByChar(d Delta) Delta {
 	return out.Compact()
 }
 
-// sameShown reports whether two texts read the same: the same characters
-// in the same formats, but for bold, italic and strike on spaces, which
-// Markdown can't always say.
 func sameShown(a, b Delta) bool {
 	type char struct {
 		r rune
@@ -1143,8 +1059,6 @@ func TestEscapeBlockStart(t *testing.T) {
 	}
 }
 
-// A table replaced with a list keeps none of its cells, whoever made the
-// op; a list's own items stay.
 func TestReplaceTableWithListDropsCells(t *testing.T) {
 	table, _ := TableNode([][]string{{"a", "b"}}, "t")
 	c := FromBlocks([]*Node{table})
@@ -1163,9 +1077,6 @@ func TestReplaceTableWithListDropsCells(t *testing.T) {
 	}
 }
 
-// A replace that kept the block's children, applied to the page as it is
-// now, keeps the children it has now: one edited or added since the agent
-// read the page stays. A replace with children of its own sets them.
 func TestReplaceKeepingChildrenKeepsTheirEdits(t *testing.T) {
 	read := &Node{ID: "t", Type: "toggle_list", Children: []*Node{para("a", "A")}}
 	read.SetDelta(Delta{{Text: "T"}})
@@ -1173,7 +1084,6 @@ func TestReplaceKeepingChildrenKeepsTheirEdits(t *testing.T) {
 	agent := read.Clone()
 	agent.SetDelta(Delta{{Text: "T2"}})
 	op := Op{Op: "replace", ID: "t", Node: agent, PrevNode: read}
-	// Meanwhile, in the editor.
 	tg := c.Find("t")
 	tg.Children[0].SetDelta(Delta{{Text: "A2"}})
 	tg.Children = append(tg.Children, para("b", "B"))
@@ -1193,10 +1103,6 @@ func TestReplaceKeepingChildrenKeepsTheirEdits(t *testing.T) {
 	}
 }
 
-// Rebase takes back what edits changed, on the page as it is since: a
-// block they changed comes back as it was, over a change from outside
-// too; a block they made goes, one they deleted comes back, and the
-// blocks from outside stay.
 func TestRebase(t *testing.T) {
 	old := page(map[string]int64{"a": 1, "b": 1, "d": 1}, para("a", "a"), para("b", "b"), para("d", "gone"))
 	after := page(map[string]int64{"a": 1, "b": 1, "n": 1}, para("a", "a1"), para("b", "b"), para("n", "made"))
@@ -1208,8 +1114,6 @@ func TestRebase(t *testing.T) {
 	}
 }
 
-// JSON that is not a page's content, or is of a newer version, is refused
-// rather than read as an empty page.
 func TestDecodeRefusesWhatIsNotContent(t *testing.T) {
 	for _, s := range []string{"null", "{}", `{"meta":{"v":1}}`, `{"document":null}`, `{"document":{"children":[]},"meta":{"v":2}}`} {
 		if _, err := Decode(s); !errors.Is(err, ErrNotContent) {
@@ -1223,10 +1127,6 @@ func TestDecodeRefusesWhatIsNotContent(t *testing.T) {
 	}
 }
 
-// A table cell one side deleted, by writing the table anew or taking out
-// its row, stays deleted when the other side edited it: brought back, it
-// would share its row and column with a cell of the table kept. The table
-// as the editing side had it is a conflict, whichever side is newer.
 func TestMergeTableCellDeletedAndEdited(t *testing.T) {
 	table, _ := TableNode([][]string{{"a", "b"}, {"c", "d"}}, "T")
 	base := FromBlocks([]*Node{table})
@@ -1286,9 +1186,6 @@ func TestMergeTableCellDeletedAndEdited(t *testing.T) {
 	}
 }
 
-// A list item one side nested a block under while the other turned it
-// into a paragraph stays a paragraph, and the nested block comes out to
-// right after it, where it shows.
 func TestMergeChildrenOfABlockThatHoldsNone(t *testing.T) {
 	item := para("A", "item")
 	item.Type = "bulleted_list"
@@ -1314,11 +1211,6 @@ func TestMergeChildrenOfABlockThatHoldsNone(t *testing.T) {
 	}
 }
 
-// A page written as Markdown reads back as the same blocks: each line of a
-// quote or an item is in it and escaped where it would start another
-// block, a heading stays one line, blocks nested under an item stay
-// indented and apart from the item's text, and titles and links of cards
-// are escaped.
 func TestPageMarkdownKeepsBlocksApart(t *testing.T) {
 	n := func(typ, text string, kids ...*Node) *Node {
 		x := &Node{ID: NewBlockID(), Type: typ, Children: kids}
@@ -1380,18 +1272,12 @@ func TestPlainCopy(t *testing.T) {
 	}
 }
 
-// Rows and columns each side put inside a table, as Add row below does,
-// each numbered among those it had, come out in the order of both, so no
-// cell has another's place, where only the first shows: whichever side is
-// local, with no conflict, and the same merged with either side again.
 func TestMergeTableLinesAddedInside(t *testing.T) {
 	table, _ := TableNode([][]string{{"h", "i"}, {"a", "b"}, {"c", "d"}}, "T")
 	base := FromBlocks([]*Node{table})
 	for id := range base.Blocks {
 		base.Blocks[id] = 1000
 	}
-	// insert puts text in a new line of a table at place at, moving those
-	// from it on, along key, with sizeKey its size and across the other way.
 	insert := func(c *Content, key, across, sizeKey string, at int, text string) {
 		tt := c.Find("T")
 		size := tt.Int(sizeKey, 0)
@@ -1461,8 +1347,6 @@ func TestMergeTableLinesAddedInside(t *testing.T) {
 			}
 		}
 	}
-	// A row taken out on one side and a column put in on the other: a row's
-	// cells, each with one side's place, stay a row.
 	less := side(2000, func(c *Content) {
 		tt := c.Find("T")
 		tt.Children = slices.DeleteFunc(tt.Children, func(k *Node) bool { return k.Int("rowPosition", 0) == 1 })
@@ -1481,8 +1365,6 @@ func TestMergeTableLinesAddedInside(t *testing.T) {
 			t.Errorf("a row out and a column in: rows %q, want %q", rows, want)
 		}
 	}
-	// Both wrote it anew, keeping no cell: one's rows after the other's,
-	// in their own columns.
 	anew := func(text string, at int64) *Content {
 		c := base.Copy()
 		fresh, _ := TableNode([][]string{{text, text + "!"}}, "T")
@@ -1496,11 +1378,6 @@ func TestMergeTableLinesAddedInside(t *testing.T) {
 	}
 }
 
-// Rows both sides added to a table, at the same places, are both kept, the
-// other side's after the primary's, as every reader shows them; so are
-// columns. Each merge places them alike, whichever side is local, with no
-// conflict, and merging the result with either side's version again keeps
-// it.
 func TestMergeTableRowsAddedOnBothSides(t *testing.T) {
 	table, _ := TableNode([][]string{{"a", "b"}, {"c", "d"}}, "T")
 	base := FromBlocks([]*Node{table})
@@ -1561,10 +1438,6 @@ func TestMergeTableRowsAddedOnBothSides(t *testing.T) {
 	}
 }
 
-// Moves on each side keep to what each side did: a block whose neighbour
-// moved did not move itself, and a move next to a block the other side
-// made lands next to it once it is in. Each comes out the same whichever
-// side is local.
 func TestMergeKeepsMovesApart(t *testing.T) {
 	order := func(c *Content) string {
 		var ids []string
@@ -1584,7 +1457,7 @@ func TestMergeKeepsMovesApart(t *testing.T) {
 		name          string
 		base          *Content
 		local, remote *Content
-		want          []string // any one of these
+		want          []string
 	}{
 		{"a deleted block stays deleted as its neighbour moves",
 			base, at(5, page(nil, para("a", "a"), para("c", "c")), base), at(4, page(nil, para("b", "b"), para("c", "c"), para("a", "a")), base),
@@ -1620,8 +1493,6 @@ func TestMergeKeepsMovesApart(t *testing.T) {
 	}
 }
 
-// A save drops the tombstones older than TombstoneLife, and keeps the
-// newer.
 func TestOldTombstonesGo(t *testing.T) {
 	now := int64(400 * 24 * 60 * 60 * 1000)
 	prev := &Content{Children: []*Node{{ID: "a", Type: "paragraph"}}, Blocks: map[string]int64{"a": 1},
@@ -1635,10 +1506,6 @@ func TestOldTombstonesGo(t *testing.T) {
 	}
 }
 
-// Blocks of one ID, as a paste can make, and blocks without one, read
-// with the same IDs on every device and every read of the page, so that a
-// merge of three reads, as each device reads base, local and remote,
-// keeps one of each rather than every read's own copy.
 func TestRepairedIDsAreTheSameEachRead(t *testing.T) {
 	stored := `{"document":{"type":"page","id":"root","children":[` +
 		`{"id":"a","type":"paragraph","data":{"delta":[{"insert":"one"}]}},` +
@@ -1666,11 +1533,6 @@ func TestRepairedIDsAreTheSameEachRead(t *testing.T) {
 	}
 }
 
-// Blocks two devices make without IDs, each on its own, get IDs of their
-// own, whether an editor sends them (DecodeEdit), a page is made of them
-// (FromBlocks) or a page is copied (CopyPages): merged, both devices' blocks
-// are kept, not taken for one, as the IDs every reader gives stored
-// content would have them.
 func TestNewBlocksOnTwoDevicesKeepApart(t *testing.T) {
 	base := FromBlocks([]*Node{para("a", "first")})
 	edit := func(text string) *Content {
@@ -1696,10 +1558,6 @@ func TestNewBlocksOnTwoDevicesKeepApart(t *testing.T) {
 	}
 }
 
-// A merge takes time in proportion to the page: a one-line edit on each
-// side of a page of 8,000 blocks, as a long transcript or a big table
-// makes, merges in about eight times what one of 1,000 takes, not the
-// sixty-four times of a merge that goes over the page for each block.
 func TestMergeIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times merges")
@@ -1722,12 +1580,6 @@ func TestMergeIsLinear(t *testing.T) {
 	}
 }
 
-// bestInTurns times small and large in turns, five times each, and gives
-// the best time of each: a load on the machine meanwhile, as the other
-// packages' tests running beside these, slows both alike, not one. Each
-// runs again until the clock has moved far enough to read, and its time is
-// that of one run: Windows' clock moves in ticks, and reads 0 for what ends
-// within one.
 func bestInTurns(small, large func()) (time.Duration, time.Duration) {
 	timed := func(fn func()) time.Duration {
 		runtime.GC()
@@ -1747,9 +1599,6 @@ func bestInTurns(small, large func()) (time.Duration, time.Duration) {
 	return bestSmall, bestLarge
 }
 
-// Nulls among an op's blocks, as a run on the server could send, go as
-// they do from stored content: the op applies, and undoes, as it would
-// without them.
 func TestOpsDropNulls(t *testing.T) {
 	var insert Op
 	raw := `{"op":"insert","position":{"at":"end"},"nodes":[null,{"id":"a","type":"bulleted_list","children":[null,{"id":"b","type":"paragraph"}]}]}`
@@ -1784,8 +1633,6 @@ func TestOpsDropNulls(t *testing.T) {
 	}
 }
 
-// Page ops go as the protocol has them and come back the same, and each
-// undoes to its reverse, as the run that made it is undone.
 func TestPageOpsRoundTripAndInvert(t *testing.T) {
 	ops := []Op{
 		{Op: "move_page", PageID: "p1", Title: "Plan", Place: &PagePlace{ParentID: "p2"}, PrevPlace: &PagePlace{FolderID: "f1", SortKey: "a1"}},
@@ -1826,7 +1673,6 @@ func TestPageOpsRoundTripAndInvert(t *testing.T) {
 	if (Op{Op: "insert"}).IsPageOp() {
 		t.Error("an insert is a page op")
 	}
-	// A page op leaves the blocks as they are.
 	c := Empty()
 	before := c.Encode()
 	if err := c.Apply(ops[0]); err != nil || c.Encode() != before {
@@ -1834,8 +1680,6 @@ func TestPageOpsRoundTripAndInvert(t *testing.T) {
 	}
 }
 
-// Colors read and write as spans in agents' Markdown, and stay out of
-// Markdown for people.
 func TestColorSpans(t *testing.T) {
 	red, mark := "#ef4444ff", "#eab30840"
 	d := Delta{
@@ -1873,7 +1717,6 @@ func TestColorSpans(t *testing.T) {
 		}
 	}
 
-	// Text that looks like a tag reads back as text.
 	for _, text := range []string{`<span style="color:#ef4444">x</span>`, `</span>`, `a <span style="`} {
 		for _, a := range []Attrs{{}, {Color: red}} {
 			d := Delta{{Text: text, Attrs: a}}
@@ -1884,12 +1727,10 @@ func TestColorSpans(t *testing.T) {
 	}
 }
 
-// sameRuns reports whether two texts have the same runs.
 func sameRuns(a, b Delta) bool {
 	return slices.EqualFunc(a, b, func(x, y Run) bool { return x.Text == y.Text && x.Attrs.Equal(y.Attrs) })
 }
 
-// Tags that end nowhere take no longer than other text.
 func TestColorSpansAreLinear(t *testing.T) {
 	src := strings.Repeat(`<span style="color:#ef4444">a `, 20000)
 	start := time.Now()
@@ -1901,7 +1742,6 @@ func TestColorSpansAreLinear(t *testing.T) {
 	}
 }
 
-// Pasted or imported lines read color spans, on lines of any kind.
 func TestColorSpansInLines(t *testing.T) {
 	nodes := MarkdownBlocks("<span style=\"color:#ef4444\">first</span> line\n- <span style=\"color:#ef4444\">item</span>")
 	if len(nodes) != 2 || nodes[0].Type != "paragraph" || nodes[1].Type != "bulleted_list" {

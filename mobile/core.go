@@ -15,79 +15,36 @@ import (
 	"leaflet/internal/store"
 )
 
-// Core is Leaflet's core, open for the app. Its methods may be called
-// from any thread but the core's own, and wait for their answer; the app
-// calls them off its main thread. They run one at a time on the core's
-// queue, which plays the part the desktop's main thread plays.
 type Core struct {
-	core *core.Core
-	plat Platform
-	ev   *events
-	q    *queue
-	// pages are the pages open in the app, by ID; touched only on q.
-	pages map[string]*openPage
-	// editors counts the page editors OpenPage has opened, to number
-	// each; touched only on q.
-	editors int64
-	// cards are where deleted pages' cards were in their parents, by
-	// page, for RestorePages to put them back; touched only on q.
-	cards map[string]doc.Position
-	// locale is the language the core says its messages in, as SetLocale
-	// last chose it.
-	locale atomic.Value
-	// chatgpt is a ChatGPT sign-in begun or made in the provider form,
-	// until SaveProvider keeps it.
-	chatgpt chatgptSignIn
-	// micTesting is whether Settings' test of the microphone runs, and
-	// micHeard what the last one heard, or why it heard nothing; touched
-	// only on q.
+	core       *core.Core
+	plat       Platform
+	ev         *events
+	q          *queue
+	pages      map[string]*openPage
+	editors    int64
+	cards      map[string]doc.Position
+	locale     atomic.Value
+	chatgpt    chatgptSignIn
 	micTesting bool
 	micHeard   string
-	// recSent is the recording's state last told the app, but its time,
-	// and levelsSent its levels; touched only on q (tellRecording).
 	recSent    string
 	levelsSent []float64
-	// voiceNote is the page a recording RecordNewPage started is for,
-	// until its microphone comes on and the page is made, or it never
-	// does; touched only on q (settleVoiceNote).
-	voiceNote *voiceNote
-	// cancels are the calls running that the app may give up on, by the
-	// token it gave each, and cancelled the tokens it gave up on before
-	// their calls began (Cancel).
-	cancelMu  sync.Mutex
-	cancels   map[int64]context.CancelFunc
-	cancelled map[int64]bool
-	// linkAsked are the links whose pages were asked for their link
-	// cards' info this run, but for those that could not be read a while
-	// ago (fillLinks); touched only on q.
-	linkAsked map[string]bool
-	// settled are the runs whose Undo no longer shows, by page, as a
-	// version restored since put the page back to before or after them,
-	// until the page's runs change again; touched only on q.
-	settled map[string]string
-	// copying is set while a copy of pages is made (copyOf), one at a
-	// time.
-	copying atomic.Bool
+	voiceNote  *voiceNote
+	cancelMu   sync.Mutex
+	cancels    map[int64]context.CancelFunc
+	cancelled  map[int64]bool
+	linkAsked  map[string]bool
+	settled    map[string]string
+	copying    atomic.Bool
 }
 
-// config is how the app opens the core, as JSON.
 type config struct {
-	// DataDir is the folder of the database and the files kept on this
-	// device: Application Support, which the device's backups hold, for
-	// pages kept on this device alone the only other copy of them.
-	DataDir string `json:"data_dir"`
-	// ICloudRoot is the Leaflet folder in iCloud Drive the user picked,
-	// or "" while none is.
+	DataDir    string `json:"data_dir"`
 	ICloudRoot string `json:"icloud_root"`
-	// Locale is the language the app shows, as a BCP 47 tag.
-	Locale string `json:"locale"`
-	// Dev is set by the app's Debug build, which syncs through the
-	// desktop's development project, as a development build there does.
-	Dev bool `json:"dev"`
+	Locale     string `json:"locale"`
+	Dev        bool   `json:"dev"`
 }
 
-// Open opens the core with settings, a config as JSON. Start then starts
-// what runs in the background.
 func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 	defer catch(&err)
 	var cfg config
@@ -95,7 +52,7 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 		return nil, err
 	}
 	if cfg.DataDir == "" {
-		return nil, errors.New("Leaflet needs a folder for its data") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New("Leaflet needs a folder for its data") //nolint:staticcheck
 	}
 	if cfg.Dev {
 		provision.ProjectName = provision.DevProjectName
@@ -136,7 +93,6 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 			},
 			OnChange: func(ch store.Change) {
 				c.ev.changed(ch)
-				// Who may change a page comes with whom it is shared.
 				if ch.Table == "*" || ch.Table == "page_members" {
 					c.q.post(c.sharingChanged)
 				}
@@ -149,9 +105,6 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 	return c, nil
 }
 
-// sharingChanged lets the user change the open pages, or keeps them from
-// it, as the desktop does as who a page is shared with changes: the app
-// hears PageReadOnly for each page that changes so. Run on the queue.
 func (c *Core) sharingChanged() {
 	for id, p := range c.pages {
 		if readOnly := !c.canEdit(id) || p.live.Unreadable(); readOnly != p.live.ReadOnly() {
@@ -160,9 +113,6 @@ func (c *Core) sharingChanged() {
 	}
 }
 
-// SetLocale says the core's messages in locale, a tag of the catalogs, as
-// the app's language changes in its settings. A core opened without a
-// locale keeps the catalogs' own.
 func (c *Core) SetLocale(locale string) {
 	defer catch(nil)
 	if locale != "" && c.locale.Load() != nil {
@@ -170,17 +120,11 @@ func (c *Core) SetLocale(locale string) {
 	}
 }
 
-// Start starts what runs in the background: sync, and watching iCloud
-// Drive while iCloud sync is on. The app calls it as it comes to the
-// foreground; Stop, as it goes to the background.
 func (c *Core) Start() {
 	defer catch(nil)
 	c.q.do(c.core.Start)
 }
 
-// cancellable is the context of a call the app may give up on, by token
-// (Cancel; 0 for one it won't), which ends after d at the latest; done
-// ends it.
 func (c *Core) cancellable(token int64, d time.Duration) (ctx context.Context, done func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	if token == 0 {
@@ -205,8 +149,6 @@ func (c *Core) cancellable(token int64, d time.Duration) (ctx context.Context, d
 	}
 }
 
-// Cancel gives up on the call the app gave token, as a picture's download
-// whose page closed: it returns at once, with an error.
 func (c *Core) Cancel(token int64) {
 	defer catch(nil)
 	c.cancelMu.Lock()
@@ -215,49 +157,38 @@ func (c *Core) Cancel(token int64) {
 		cancel()
 		return
 	}
-	// Given up on before it began.
 	if c.cancelled == nil {
 		c.cancelled = map[int64]bool{}
 	}
 	c.cancelled[token] = true
 }
 
-// Stop stops the sync loop. A pass running, the loop's or SyncNow's, is
-// cut short; the changes it didn't send go on the next.
 func (c *Core) Stop() {
 	defer catch(nil)
 	c.core.Sync.Stop()
 }
 
-// Kick asks for a sync pass soon, as another device writing to iCloud
-// Drive does.
 func (c *Core) Kick() {
 	defer catch(nil)
 	c.core.Sync.Kick()
 }
 
-// SyncNow runs a sync pass now and waits for it, for pull to refresh and
-// the app's background refresh.
 func (c *Core) SyncNow() (err error) {
 	defer catch(&err)
 	return c.core.Sync.SyncNow()
 }
 
-// status is who uses the app and how sync stands, as Status returns it.
 type status struct {
 	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
 	SpaceID     string `json:"space_id"`
-	// SignedIn is signed in to a Supabase project, to sync through it.
-	SignedIn bool `json:"signed_in"`
-	// Pending counts the changes waiting to go up.
-	Pending  int  `json:"pending"`
-	ICloudOn bool `json:"icloud_on"`
-	CanSync  bool `json:"can_sync"`
+	SignedIn    bool   `json:"signed_in"`
+	Pending     int    `json:"pending"`
+	ICloudOn    bool   `json:"icloud_on"`
+	CanSync     bool   `json:"can_sync"`
 }
 
-// Status returns who is signed in and how sync stands, as a status in JSON.
 func (c *Core) Status() (_ string, err error) {
 	defer catch(&err)
 	var s status
@@ -273,11 +204,8 @@ func (c *Core) Status() (_ string, err error) {
 	return encode(s)
 }
 
-// host is the core as the agents' host.
 type host struct{ c *Core }
 
-// Update runs fn on the core's queue, where the hub changes its state,
-// and tells the app the page's changed.
 func (h host) Update(pageID string, fn func()) {
 	h.c.q.post(func() {
 		fn()
@@ -302,18 +230,9 @@ func (h host) Online() bool { return h.c.plat.Online() }
 
 func (h host) Settings() store.Settings { return h.c.core.Store.Settings() }
 
-func (h host) FlushPage(ctx context.Context, pageID string) error {
-	return h.c.core.Sync.FlushPage(ctx, pageID)
-}
-
-func (h host) SyncNow() { h.c.core.Sync.Kick() }
-
-// Pages changes pages as the core has them, for agents: those open in the
-// app through their live pages, their subpages' cards kept in step.
 func (h host) Pages() agents.Pages { return h.c.pageCore() }
 
 func (h host) Tint(pageID string, ids []string) {
-	// A run that edits, or is undone or redone, is the one to undo next.
 	h.c.q.post(func() { delete(h.c.settled, pageID) })
 	h.c.ev.tint(pageID, ids)
 }

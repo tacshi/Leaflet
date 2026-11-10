@@ -23,8 +23,6 @@ func TestRecoverInterrupted(t *testing.T) {
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
-	// Cut off while recording: a header still saying 0 bytes, and a second
-	// of audio after it.
 	wav := filepath.Join(dir, "cut.wav")
 	if err := os.WriteFile(wav, append(wavHeader(0), make([]byte, 2*SampleRate)...), 0o600); err != nil {
 		t.Fatal(err)
@@ -35,14 +33,12 @@ func TestRecoverInterrupted(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Quit while the transcript was finished: the live text is kept.
 	live, _ := st.CreateRecording("p", "b2", "soniox", "", "", "auto")
 	if _, err := st.UpdateRecording(live.ID, func(r *store.Recording) {
 		r.Status, r.Transcript = "transcribing", []store.Segment{{Text: "Hello, hello."}}
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Quit before any words came: nothing to keep.
 	empty, _ := st.CreateRecording("p", "b3", "openai-compatible", "", "", "auto")
 	if _, err := st.UpdateRecording(empty.ID, func(r *store.Recording) { r.Status = "transcribing" }); err != nil {
 		t.Fatal(err)
@@ -64,7 +60,6 @@ func TestRecoverInterrupted(t *testing.T) {
 	}
 }
 
-// uploading stands in for sync: audio goes up.
 type uploading struct{}
 
 func (uploading) Uploads() bool  { return true }
@@ -73,8 +68,6 @@ func (uploading) Fetch(context.Context, string, string) ([]byte, error) {
 	return nil, errors.New("not here")
 }
 
-// A recording settled after a quit has its audio go up, as one finished
-// before it would: nothing else queues it.
 func TestRecoverInterruptedUploadsAudio(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.OpenMemory(dir)
@@ -108,7 +101,6 @@ func TestRecoverInterruptedUploadsAudio(t *testing.T) {
 	}
 }
 
-// fetching stands in for sync, with the audio of other devices.
 type fetching struct{ asked *string }
 
 func (fetching) Uploads() bool  { return true }
@@ -118,8 +110,6 @@ func (f fetching) Fetch(_ context.Context, _, path string) ([]byte, error) {
 	return nil, errors.New("fetched")
 }
 
-// Transcribing again on this device a recording whose audio is not here,
-// made on another device, fetches the audio first.
 func TestRetranscribeLocallyFetchesStoredAudio(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -136,9 +126,6 @@ func TestRetranscribeLocallyFetchesStoredAudio(t *testing.T) {
 	}
 }
 
-// Transcribing again a recording being transcribed is refused, as is a
-// second ask before the first has finished: the one ending last would
-// write over the other's transcript.
 func TestRetranscribeOneAtATime(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -172,7 +159,6 @@ func TestRetranscribeOneAtATime(t *testing.T) {
 	if err := c.Retranscribe(rec.ID, stt, true); err == nil {
 		t.Error("a second transcription started before the first finished")
 	}
-	// The first runs its course: started, then done.
 	for range 2 {
 		(<-updates)()
 	}
@@ -181,10 +167,6 @@ func TestRetranscribeOneAtATime(t *testing.T) {
 	}
 }
 
-// A transcription a quit stopped may have finished without this run, on
-// the server or the device that started it: settling it goes up only over
-// a recording still transcribing there. One cut off while recording was
-// nowhere else, and goes up as it is.
 func TestRecoverInterruptedGivesWayToAFinishedTranscription(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.OpenMemory(dir)
@@ -222,7 +204,6 @@ func TestRecoverInterruptedGivesWayToAFinishedTranscription(t *testing.T) {
 	}
 }
 
-// timed stands in for sync, and keeps how long each fetch was given.
 type timed struct{ gave *time.Duration }
 
 func (timed) Uploads() bool  { return true }
@@ -239,8 +220,6 @@ func (t timed) FetchReader(ctx context.Context, _, _ string) (io.ReadCloser, err
 	return nil, errors.New("fetched")
 }
 
-// Long audio fetched to transcribe on this device is given as long as it
-// takes over a slow connection, not a few minutes for any length.
 func TestLongAudioHasTimeToDownload(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -251,7 +230,6 @@ func TestLongAudioHasTimeToDownload(t *testing.T) {
 	c := NewController(st, nil)
 	c.Blobs = timed{&gave}
 	ctx := context.Background()
-	// Three hours, 345 MB.
 	_, _ = c.storedAudio(ctx, store.Recording{ID: "r1", AudioPath: "u1/r1.wav", DurationMs: 3 * 3600 * 1000})
 	if gave < 2*time.Hour {
 		t.Errorf("three hours of a recording given %v to download", gave)
@@ -261,7 +239,6 @@ func TestLongAudioHasTimeToDownload(t *testing.T) {
 	if gave < 2*time.Hour {
 		t.Errorf("a file of 345 MB given %v to download", gave)
 	}
-	// Short audio keeps the few minutes it had.
 	gave = 0
 	_, _ = c.fileHere(ctx, store.File{ID: "f2", StoragePath: "u1/f2.m4a", SizeBytes: 1 << 20})
 	if gave < 4*time.Minute {

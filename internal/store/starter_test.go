@@ -8,9 +8,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// starter makes a starter set as a new device does: a guide with a
-// picture and a comment, a page inside it, and a template, beside a page
-// of the user's own.
 func starter(t *testing.T, s *Store) (guide, sub, tmpl, mine Page, pic File) {
 	t.Helper()
 	var err error
@@ -48,9 +45,6 @@ func starter(t *testing.T, s *Store) (guide, sub, tmpl, mine Page, pic File) {
 	return guide, sub, tmpl, mine, pic
 }
 
-// A device joining a library other devices made leaves its starter
-// pages out of it, with all they hold and nothing of them waiting to go
-// up; its own pages go.
 func TestStarterPagesGoWhenJoiningALibrary(t *testing.T) {
 	s := open(t)
 	guide, sub, tmpl, mine, pic := starter(t, s)
@@ -84,8 +78,6 @@ func TestStarterPagesGoWhenJoiningALibrary(t *testing.T) {
 	}
 }
 
-// Starter pages the user has taken up stay, all of them, joining a
-// library or not, and are settled for good; deleted ones go anyway.
 func TestStarterPagesTakenUpStay(t *testing.T) {
 	for name, take := range map[string]func(s *Store, guide, sub, tmpl Page) error{
 		"renamed": func(s *Store, guide, _, _ Page) error { return s.RenamePage(guide.ID, "Mine now") },
@@ -146,8 +138,6 @@ func TestStarterPagesTakenUpStay(t *testing.T) {
 	})
 }
 
-// A device starting a library keeps its starter pages as the library's:
-// joining another later leaves them be.
 func TestStarterPagesStayStartingALibrary(t *testing.T) {
 	s := open(t)
 	guide, _, _, _, _ := starter(t, s)

@@ -15,12 +15,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// A device revoked in Account › Devices signs out, the app's session too,
-// and forgets its ID: signing in again, it registers as a new device, not
-// as the one revoked, which would sign it out again on every pass. What
-// iCloud sync kept of the old ID goes too, so iCloud sync under the new
-// one starts afresh, but for the folder's space, which what went up to it
-// is fetched from.
 func TestRevokedDeviceRegistersAnew(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -55,14 +49,11 @@ func TestRevokedDeviceRegistersAnew(t *testing.T) {
 	}
 }
 
-// While the project is brought up to date, the changes wait to go up, and
-// go once it is.
 func TestChangesWaitForTheProjectUpdate(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
 		t.Fatal(err)
 	}
-	// The space is adopted, as after the first pass.
 	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
 		t.Fatal(err)
 	}

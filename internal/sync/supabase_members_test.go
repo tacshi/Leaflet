@@ -15,9 +15,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// An answer that is no list of members, as a network's sign-in page in the
-// server's place, or none at all, keeps the members there are: read as
-// none, the page would look shared with no one.
 func TestMembersStayWhenTheAnswerSaysNothing(t *testing.T) {
 	for _, answer := range []string{"<html>Sign in to the wifi</html>", ""} {
 		st := openStore(t)
@@ -42,8 +39,6 @@ func TestMembersStayWhenTheAnswerSaysNothing(t *testing.T) {
 	}
 }
 
-// A page whose share the server could not be asked about keeps its
-// members until it can: forgotten, the page would turn read-only here.
 func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {
 	st := openStore(t)
 	old := "2026-01-01T00:00:00Z"
@@ -54,7 +49,6 @@ func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {
 	if err := st.SetMembers(page, []store.Member{{UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
 		t.Fatal(err)
 	}
-	// The page's members are refused, and the server fails to say more.
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/rpc/page_members") {
 			w.WriteHeader(http.StatusForbidden)
@@ -72,7 +66,6 @@ func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {
 	if st.MembersOrNil(page) == nil {
 		t.Error("members forgotten")
 	}
-	// Nor do they count as loaded, so the next pass tries again.
 	if err := svc.LoadMembers(context.Background(), page); err == nil {
 		t.Error("no error from a server that failed")
 	}
@@ -84,10 +77,6 @@ func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {
 	}
 }
 
-// Sync loads the members of a page shared with the user, so an agent
-// outside the app may edit it and the pages inside it as the share says,
-// opened in the app or not. A share accepted before sync loaded them gets
-// them on the next pull.
 func TestPullLoadsSharedPagesMembers(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -165,8 +154,6 @@ func TestPullLoadsSharedPagesMembers(t *testing.T) {
 		t.Errorf("shared to view: can edit %v, members %+v", st.CanEdit(p), st.MembersOrNil(earlier))
 	}
 
-	// The share changes to view only. The members kept of a page inside
-	// the tree, as for one opened, load again with the top page's.
 	if err := st.SetMembers(child, []store.Member{{PageID: child, UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
 		t.Fatal(err)
 	}
@@ -186,10 +173,6 @@ func TestPullLoadsSharedPagesMembers(t *testing.T) {
 	}
 }
 
-// A share withdrawn takes the page from this device, with the pages under
-// it and their changes waiting, once pullMembers loads its members again
-// and is refused; the user's own pages stay. A page the server still
-// shows, though refused, stays without the roles that let it be edited.
 func TestWithdrawnShareLeavesTheDevice(t *testing.T) {
 	const (
 		root  = "00000000-0000-0000-0000-0000000000e1"
@@ -265,8 +248,6 @@ func TestWithdrawnShareLeavesTheDevice(t *testing.T) {
 	}
 }
 
-// A share withdrawn while it was pulled is handled once its page is gone:
-// the pull goes on past it to the comments and the content.
 func TestPullGoesOnPastAWithdrawnShare(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
@@ -304,10 +285,6 @@ func TestPullGoesOnPastAWithdrawnShare(t *testing.T) {
 	}
 }
 
-// Sync keeps who the user's own pages are shared with, so an agent on one
-// knows whether someone else writes in it: the shares the server lists
-// load the page's members, or stand for them when they do not load, and
-// members of a share withdrawn go.
 func TestPullKeepsOwnPagesMembers(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {

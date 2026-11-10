@@ -10,8 +10,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// typeWhileStoring saves an edit to block b once, between a merge and its
-// store, standing in for the user typing then.
 func typeWhileStoring(t *testing.T, st *store.Store, pageID string) *bool {
 	t.Helper()
 	typed := false
@@ -31,8 +29,6 @@ func typeWhileStoring(t *testing.T, st *store.Store, pageID string) *bool {
 	return &typed
 }
 
-// A merge stored while the user typed goes again over what they typed, and
-// the app hears of the content once, as it is stored.
 func TestStoreMergeGoesAgainOverASave(t *testing.T) {
 	st := openStore(t)
 	svc := New(st, nil)
@@ -64,8 +60,6 @@ func TestStoreMergeGoesAgainOverASave(t *testing.T) {
 	}
 }
 
-// A merge of a page that keeps changing while it merges is never stored:
-// it gives up after three tries, and the app hears of nothing.
 func TestStoreMergeGivesUpOnAPageThatKeepsChanging(t *testing.T) {
 	st := openStore(t)
 	svc := New(st, nil)
@@ -99,9 +93,6 @@ func TestStoreMergeGivesUpOnAPageThatKeepsChanging(t *testing.T) {
 	}
 }
 
-// A merge with nothing to store, or that stores the content as it is,
-// leaves the page and tells the app nothing; a page with no content here
-// merges as none.
 func TestStoreMergeOfNothing(t *testing.T) {
 	st := openStore(t)
 	svc := New(st, nil)
@@ -133,8 +124,6 @@ func TestStoreMergeOfNothing(t *testing.T) {
 	}
 }
 
-// unreadableValue has the value kept under key fail to read, as a disk
-// that fails part way does, though it can still be written.
 func unreadableValue(t *testing.T, st *store.Store, key string) {
 	t.Helper()
 	for _, q := range []string{
@@ -153,9 +142,6 @@ func unreadableValue(t *testing.T, st *store.Store, key string) {
 	}
 }
 
-// A set of pages that wait for their content, which cannot be read, is
-// not written over with only the pages added to it: they would stop
-// waiting.
 func TestWaitingPagesUnreadAreNotWrittenOver(t *testing.T) {
 	st := openStore(t)
 	svc := New(st, remote.New(remote.Settings{}, st))

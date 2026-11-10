@@ -1,15 +1,10 @@
 import SwiftUI
 
-/// RecordControl is the page's Record button, as the desktop's header has
-/// it, and, while a recording runs, its pill: how long it has run, Pause
-/// and Stop.
 struct RecordControl: View {
     let pageID: String
-    /// canRecord says the page can be changed, which a recording does.
     let canRecord: Bool
     let editor: EditorController?
     @Environment(\.palette) private var palette
-    /// pause is the size of Pause, as the text size scales it.
     @ScaledMetric(relativeTo: .footnote) private var pause: CGFloat = 28
 
     var body: some View {
@@ -18,8 +13,6 @@ struct RecordControl: View {
         if state.recording, !state.testing {
             pill(recorder, state)
         } else {
-            // With more than one speech provider set up, recording asks
-            // which transcribes it: there is no default.
             if let picked = recorder.choices(for: pageID), picked.choices.count > 1 {
                 Menu(L.pageRecord, systemImage: "record.circle") {
                     ForEach(picked.choices) { p in
@@ -57,8 +50,6 @@ struct RecordControl: View {
                     Text(state.starting ? L.recStarting : Self.time(recorder.elapsed(at: t.date)))
                         .font(.footnote.weight(.semibold).monospacedDigit())
                         .foregroundStyle(palette.dangerText)
-                        // On one line and whole: squeezed by a long title in
-                        // the bar, the time would wrap to "0:" over "…".
                         .lineLimit(1)
                         .fixedSize()
                 }
@@ -73,7 +64,6 @@ struct RecordControl: View {
             }
             .accessibilityLabel(state.paused ? LI.resumeRecording : L.commonPause)
             .disabled(state.starting)
-            // A square in a circle, which needs no room for a word.
             Button {
                 recorder.stop()
             } label: {
@@ -88,11 +78,9 @@ struct RecordControl: View {
         .buttonStyle(.plain)
         .foregroundStyle(palette.danger)
         .padding(.leading, 10).padding(.trailing, 4)
-        // The bar shortens the page's title before the pill.
         .fixedSize()
     }
 
-    /// time is a duration as the desktop shows it: 1:05, or 1:02:05.
     static func time(_ seconds: TimeInterval) -> String {
         let s = max(Int(seconds), 0)
         return s >= 3600

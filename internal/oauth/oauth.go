@@ -1,5 +1,3 @@
-// Package oauth is the part of a browser sign-in that runs on this device:
-// a loopback redirect, PKCE and the page the browser lands on.
 package oauth
 
 import (
@@ -18,20 +16,15 @@ import (
 	"leaflet/locales"
 )
 
-// NewState is a sign-in's random state, which the browser's answer must
-// come back with.
 func NewState() string { return RandomString(32) }
 
-// NewVerifier is a sign-in's random PKCE verifier.
 func NewVerifier() string { return RandomString(48) }
 
-// Challenge is the S256 PKCE challenge of verifier.
 func Challenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// RandomString is n random bytes, base64url.
 func RandomString(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -40,12 +33,8 @@ func RandomString(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// Loopback waits for the browser to come back to this device with a
-// sign-in's answer.
 type Loopback struct {
-	// Redirect is the redirect_uri to send.
-	Redirect string
-	// State and Verifier are the sign-in's state and PKCE verifier.
+	Redirect        string
 	State, Verifier string
 
 	name string
@@ -59,15 +48,10 @@ type answer struct {
 	err   error
 }
 
-// Listen starts a loopback for a sign-in with name, such as "ChatGPT", on
-// port; anyPort lets another port do when that one is taken, for providers
-// that take any loopback port.
 func Listen(name string, port int, anyPort bool) (*Loopback, error) {
 	return ListenFor(name, port, anyPort, NewState(), NewVerifier())
 }
 
-// ListenFor starts a loopback as Listen does, for a sign-in begun with
-// state and verifier.
 func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Loopback, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil && anyPort {
@@ -85,8 +69,6 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 		ln:       ln,
 		done:     make(chan answer, 1),
 	}
-	// The first answer counts: another, such as the tab loaded again,
-	// finds done full and is dropped rather than waiting for ever.
 	finish := func(a answer) {
 		select {
 		case l.done <- a:
@@ -120,10 +102,8 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 	return l, nil
 }
 
-// Challenge is the S256 PKCE challenge of the verifier.
 func (l *Loopback) Challenge() string { return Challenge(l.Verifier) }
 
-// Wait returns the query the browser came back with, which has the code.
 func (l *Loopback) Wait(ctx context.Context) (url.Values, error) {
 	select {
 	case a := <-l.done:
@@ -133,7 +113,6 @@ func (l *Loopback) Wait(ctx context.Context) (url.Values, error) {
 	}
 }
 
-// Close stops waiting.
 func (l *Loopback) Close() {
 	_ = l.srv.Close()
 	_ = l.ln.Close()

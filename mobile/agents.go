@@ -13,35 +13,22 @@ import (
 	"leaflet/locales"
 )
 
-// Agents run in the core, as on the desktop: the app asks, and reads the
-// page's agent state again on each AgentsChanged.
-
-// agentState is a page's agent state, as AgentState returns it.
 type agentState struct {
-	Messages []agentMessage `json:"messages"`
-	Runs     []agentRun     `json:"runs"`
-	Running  bool           `json:"running"`
-	// Options are the agents to pick from; Available says one can run.
-	Options   []agentOption `json:"options"`
-	Available bool          `json:"available"`
-	// Current is the agent the chat asks: the one picked for the page,
-	// else the one last picked anywhere; nil while none can run.
-	Current *agentChoice `json:"current,omitempty"`
-	// DefaultAgent is the agent asked where none is named: the one last
-	// picked; nil while none can run.
-	DefaultAgent *agentChoice `json:"default_agent,omitempty"`
-	// Past are the page's earlier conversations, the latest first.
-	Past []pastConversation `json:"past"`
+	Messages     []agentMessage     `json:"messages"`
+	Runs         []agentRun         `json:"runs"`
+	Running      bool               `json:"running"`
+	Options      []agentOption      `json:"options"`
+	Available    bool               `json:"available"`
+	Current      *agentChoice       `json:"current,omitempty"`
+	DefaultAgent *agentChoice       `json:"default_agent,omitempty"`
+	Past         []pastConversation `json:"past"`
 }
 
-// pastConversation is an earlier conversation to go back to.
 type pastConversation struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 }
 
-// agentChoice is an agent and the model it runs, as the chat's picker
-// has them.
 type agentChoice struct {
 	ProviderID string `json:"provider_id"`
 	Model      string `json:"model"`
@@ -54,9 +41,7 @@ type agentMessage struct {
 	Pending   bool   `json:"pending"`
 	Error     bool   `json:"error"`
 	AgentName string `json:"agent_name,omitempty"`
-	// Streamed is a pending reply whose text is the answer as far as it
-	// has come, not what the run is doing.
-	Streamed bool `json:"streamed"`
+	Streamed  bool   `json:"streamed"`
 }
 
 type agentRun struct {
@@ -68,23 +53,13 @@ type agentRun struct {
 	Undone      bool     `json:"undone"`
 	Error       string   `json:"error,omitempty"`
 	Edits       []string `json:"edits"`
-	// EditPages are the pages the edits made, an edit each, "" for one
-	// that made none: a tap on one opens its page.
-	EditPages []string `json:"edit_pages"`
-	BlockIDs  []string `json:"block_ids"`
-	// Summary says what the run did, in words for the user.
-	Summary   string `json:"summary"`
-	Stoppable bool   `json:"stoppable"`
-	// Answer is the model's answer as far as it has come, while the run
-	// works and has not edited the page.
-	Answer string `json:"answer,omitempty"`
-	// Activity is what the run is doing while a call takes a while, as
-	// searching the web.
-	Activity string `json:"activity,omitempty"`
-	// Settled is a run whose Undo no longer shows outside the chat, as
-	// the desktop's run bar hides it: a version restored since put the
-	// page back to before or after it.
-	Settled bool `json:"settled"`
+	EditPages   []string `json:"edit_pages"`
+	BlockIDs    []string `json:"block_ids"`
+	Summary     string   `json:"summary"`
+	Stoppable   bool     `json:"stoppable"`
+	Answer      string   `json:"answer,omitempty"`
+	Activity    string   `json:"activity,omitempty"`
+	Settled     bool     `json:"settled"`
 }
 
 type agentOption struct {
@@ -92,11 +67,8 @@ type agentOption struct {
 	Model      string `json:"model"`
 	Name       string `json:"name"`
 	Label      string `json:"label"`
-	Local      bool   `json:"local"`
 }
 
-// AgentState returns a page's agent state: its chat, its runs, and the
-// agents to pick from, as JSON.
 func (c *Core) AgentState(pageID string) (_ string, err error) {
 	defer catch(&err)
 	var out agentState
@@ -131,8 +103,6 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 		if o, err := c.core.Hub.Resolve(nil); err == nil {
 			out.DefaultAgent = &agentChoice{ProviderID: o.Provider.ID, Model: o.Model}
 		}
-		// The one picked shows as picked even while it can't run, as
-		// offline.
 		if o, err := c.core.Hub.Resolve(s.Selected); err == nil {
 			out.Current = &agentChoice{ProviderID: o.Provider.ID, Model: o.Model}
 		} else if s.Selected != nil {
@@ -146,15 +116,12 @@ func (c *Core) options() []agentOption {
 	out := []agentOption{}
 	for _, o := range c.core.Hub.Options() {
 		out = append(out, agentOption{
-			ProviderID: o.Provider.ID, Model: o.Model, Name: o.Name(), Label: o.Label(), Local: o.Local(),
+			ProviderID: o.Provider.ID, Model: o.Model, Name: o.Name(), Label: o.Label(),
 		})
 	}
 	return out
 }
 
-// SelectAgent picks the agent and model the page's chat asks, as the
-// desktop panel's picker does. There is no default to set: the agent last
-// picked is the one a page not picked for yet asks.
 func (c *Core) SelectAgent(pageID, providerID, model string) {
 	defer catch(nil)
 	c.q.do(func() {
@@ -168,8 +135,6 @@ func (c *Core) SelectAgent(pageID, providerID, model string) {
 	c.ev.agentsChanged(pageID)
 }
 
-// Chat sends a message to the page's agent chat, about the blocks in
-// focus, a JSON array of IDs.
 func (c *Core) Chat(pageID, text, focus string) {
 	defer catch(nil)
 	var ids []string
@@ -177,20 +142,11 @@ func (c *Core) Chat(pageID, text, focus string) {
 	c.q.do(func() { c.core.Hub.Chat(pageID, text, ids) })
 }
 
-// WorkspaceChat sends a message to the workspace agent, the agent of all
-// the user's pages, telling it of the page open, "" for none. Its state,
-// its runs' Undo and the rest are those of the page "workspace"
-// (agents.WorkspaceID).
 func (c *Core) WorkspaceChat(text, openPageID string) {
 	defer catch(nil)
 	c.q.do(func() { c.core.Hub.ChatWorkspace(text, openPageID) })
 }
 
-// Ask starts an agent run from the editor: surface is "inline" or
-// "selection", focus a JSON array of block IDs, and agent the provider
-// and model to run, or "" for the default. It returns the run's ID, or why
-// it could not start, as when another run of the page's is working or no
-// agent can run: such a run is never one of the page's runs.
 func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, model string) (_ string, err error) {
 	defer catch(&err)
 	var ids []string
@@ -204,8 +160,6 @@ func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, m
 		run := c.core.Hub.Start(pageID, agents.RunOptions{
 			Surface: surface, Instruction: instruction, Focus: ids, Selection: selection, Agent: agent,
 		})
-		// The run reports from its goroutine through the queue, after this:
-		// failed now, it failed to start.
 		if run.Status == "failed" {
 			err = errors.New(run.Error)
 			return
@@ -215,15 +169,11 @@ func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, m
 	return id, err
 }
 
-// StopAgent stops a page's run that is still working.
 func (c *Core) StopAgent(pageID, runID string) {
 	defer catch(nil)
 	c.q.do(func() { c.core.Hub.Stop(pageID, runID) })
 }
 
-// UndoRun takes a run's edits back off the page, as one step. Edits it
-// can't take back, as later ones changed their blocks, leave the run as it
-// was, and it fails saying why.
 func (c *Core) UndoRun(pageID, runID string) (err error) {
 	defer catch(&err)
 	agent := ""
@@ -240,12 +190,6 @@ func (c *Core) UndoRun(pageID, runID string) (err error) {
 	return nil
 }
 
-// ReplyBlocks returns a run's answer in words as the blocks of its
-// Markdown, a JSON array of nodes, for the page's editor to put after the
-// block it was asked about, as the desktop's Insert does, as one step to
-// undo: of a run that read beyond the page or the web, its pictures as
-// links to them (agents.ReplyBlocks). A run that edited the page, or has
-// no answer, gives none.
 func (c *Core) ReplyBlocks(pageID, runID string) (_ string, err error) {
 	defer catch(&err)
 	nodes := []*doc.Node{}
@@ -259,8 +203,6 @@ func (c *Core) ReplyBlocks(pageID, runID string) (_ string, err error) {
 	return encode(nodes)
 }
 
-// RedoRun puts an undone run's edits back. Edits it can't put back leave
-// the run undone, and it fails saying why.
 func (c *Core) RedoRun(pageID, runID string) (err error) {
 	defer catch(&err)
 	agent := ""
@@ -277,22 +219,16 @@ func (c *Core) RedoRun(pageID, runID string) (err error) {
 	return nil
 }
 
-// NewConversation starts the page's agent chat over.
 func (c *Core) NewConversation(pageID string) {
 	defer catch(nil)
 	c.q.do(func() { c.core.Hub.NewConversation(pageID) })
 }
 
-// OpenConversation goes back to an earlier conversation of a page, keeping
-// the one it had among the earlier ones.
 func (c *Core) OpenConversation(pageID, id string) {
 	defer catch(nil)
 	c.q.do(func() { c.core.Hub.OpenConversation(pageID, id) })
 }
 
-// Comments.
-
-// commentJSON is a comment, as Threads gives it.
 type commentJSON struct {
 	ID         string `json:"id"`
 	BlockID    string `json:"block_id"`
@@ -301,29 +237,18 @@ type commentJSON struct {
 	Body       string `json:"body"`
 	Quote      string `json:"quote,omitempty"`
 	Resolved   bool   `json:"resolved"`
-	// CreatedAt is in milliseconds since 1970.
-	CreatedAt int64 `json:"created_at"`
-	// Deleted is a first comment deleted, kept for the replies under it:
-	// its words are gone, as the desktop says "Comment deleted".
-	Deleted bool `json:"deleted,omitempty"`
-	// MayDelete is whether the user may delete it, as the server lets
-	// them: their own, or a guest's on a page of theirs.
-	MayDelete bool `json:"may_delete"`
-	// AskedBy says who else had an agent write it, in words for the user.
-	AskedBy string `json:"asked_by,omitempty"`
+	CreatedAt  int64  `json:"created_at"`
+	Deleted    bool   `json:"deleted,omitempty"`
+	MayDelete  bool   `json:"may_delete"`
+	AskedBy    string `json:"asked_by,omitempty"`
 }
 
 type threadJSON struct {
-	Root    commentJSON   `json:"root"`
-	Replies []commentJSON `json:"replies"`
-	// MayResolve is whether the user may resolve or reopen the thread, as
-	// the server lets them: its author, or someone who may edit the page.
-	// Another's change would never go up.
-	MayResolve bool `json:"may_resolve"`
+	Root       commentJSON   `json:"root"`
+	Replies    []commentJSON `json:"replies"`
+	MayResolve bool          `json:"may_resolve"`
 }
 
-// commentOf is m as Threads lists it to uid, on a page of theirs or not,
-// shared with members.
 func commentOf(m store.Comment, uid string, owns bool, members []store.Member) commentJSON {
 	j := commentJSON{
 		ID: m.ID, BlockID: m.BlockID, AuthorKind: m.AuthorKind, AuthorName: m.AuthorName, Body: m.Body,
@@ -338,13 +263,10 @@ func commentOf(m store.Comment, uid string, owns bool, members []store.Member) c
 	return j
 }
 
-// mine reports whether a comment is uid's own.
 func mine(m store.Comment, uid string) bool {
 	return m.AuthorKind == "user" && (m.AuthorID == "" || m.AuthorID == uid)
 }
 
-// askedBy says who other than uid had an agent write comment m, as the
-// desktop's comments say it; "" for another comment, or one uid asked for.
 func askedBy(m store.Comment, uid string, members []store.Member) string {
 	if m.AuthorKind != "agent" || m.AuthorID == "" || m.AuthorID == uid {
 		return ""
@@ -357,7 +279,6 @@ func askedBy(m store.Comment, uid string, members []store.Member) string {
 	return locales.PanelAskedBySomeone()
 }
 
-// Threads returns a page's comment threads, as JSON.
 func (c *Core) Threads(pageID string) (_ string, err error) {
 	defer catch(&err)
 	var ts []store.Thread
@@ -389,9 +310,6 @@ func (c *Core) Threads(pageID string) (_ string, err error) {
 	return encode(out)
 }
 
-// AddComment adds a comment on a block, quoting the text it is on, or a
-// reply to the thread of parentID. A comment that mentions @agent, or an
-// agent by name, has that agent answer in the thread, as on the desktop.
 func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err error) {
 	defer catch(&err)
 	c.q.do(func() {
@@ -412,10 +330,6 @@ func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err er
 	return err
 }
 
-// agentInComment runs the agent a comment mentions on its thread's block,
-// where the comment shows it marked, as the desktop does: one named, or
-// the default for @agent. A run that fails says why in a notice, as the
-// desktop's toast.
 func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
 	agent, mentioned, err := core.CommentAgent(c.core.Hub, body)
 	if err != nil {
@@ -436,21 +350,17 @@ func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
 	})
 }
 
-// ResolveThread resolves a thread, or opens it again.
 func (c *Core) ResolveThread(rootID string, resolved bool) (err error) {
 	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.SetResolved(rootID, resolved) })
 	return err
 }
 
-// DeleteComment deletes a comment.
 func (c *Core) DeleteComment(id string) (err error) {
 	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.DeleteComment(id) })
 	return err
 }
-
-// Providers.
 
 type presetJSON struct {
 	ID          string   `json:"id"`
@@ -464,27 +374,20 @@ type presetJSON struct {
 }
 
 type providerJSON struct {
-	ID           string   `json:"id"`
-	Preset       string   `json:"preset"`
-	Name         string   `json:"name"`
-	BaseURL      string   `json:"base_url"`
-	AuthKind     string   `json:"auth_kind"`
-	DefaultModel string   `json:"default_model"`
-	IsLocal      bool     `json:"is_local"`
-	Models       []string `json:"models"`
-	// HasKey says a local provider's API key is kept on this device.
-	HasKey bool `json:"has_key"`
-	// APIKey is the key to keep, as SaveProvider takes it.
-	APIKey string `json:"api_key,omitempty"`
-	// SupportsTools is what a test found, kept with a local provider.
-	SupportsTools *bool `json:"supports_tools,omitempty"`
-	// Email is who a ChatGPT provider signed in as.
-	Email string `json:"email,omitempty"`
+	ID            string   `json:"id"`
+	Preset        string   `json:"preset"`
+	Name          string   `json:"name"`
+	BaseURL       string   `json:"base_url"`
+	AuthKind      string   `json:"auth_kind"`
+	DefaultModel  string   `json:"default_model"`
+	IsLocal       bool     `json:"is_local"`
+	Models        []string `json:"models"`
+	HasKey        bool     `json:"has_key"`
+	APIKey        string   `json:"api_key,omitempty"`
+	SupportsTools *bool    `json:"supports_tools,omitempty"`
+	Email         string   `json:"email,omitempty"`
 }
 
-// providerForm is a provider as SaveProvider takes it, as the core tests
-// and saves one: with the key kept here of one edited, which the app's
-// form never shows.
 func providerForm(in providerJSON) agents.Form {
 	key := strings.TrimSpace(in.APIKey)
 	if key == "" && in.ID != "" {
@@ -496,7 +399,6 @@ func providerForm(in providerJSON) agents.Form {
 	}
 }
 
-// providerTest is what TestProvider found.
 type providerTest struct {
 	OK            bool     `json:"ok"`
 	SupportsTools bool     `json:"supports_tools"`
@@ -504,12 +406,6 @@ type providerTest struct {
 	Models        []string `json:"models"`
 }
 
-// TestProvider tries a provider, given as SaveProvider takes it, and
-// returns what it found, as JSON: whether its model answers and calls
-// tools, and the models it serves, chat models first. A key typed in is
-// tried from this device, before it goes to the server; a saved cloud
-// provider is tried by the server, which keeps its key; as on the
-// desktop.
 func (c *Core) TestProvider(provider string) (_ string, err error) {
 	defer catch(&err)
 	var in providerJSON
@@ -526,8 +422,6 @@ func (c *Core) TestProvider(provider string) (_ string, err error) {
 	return encode(providerTest{OK: res.OK, SupportsTools: res.SupportsTools, Message: res.Message, Models: res.Models})
 }
 
-// Presets returns the providers to add, as JSON, as the desktop offers
-// them.
 func (c *Core) Presets() (_ string, err error) {
 	defer catch(&err)
 	out := []presetJSON{}
@@ -540,7 +434,6 @@ func (c *Core) Presets() (_ string, err error) {
 	return encode(out)
 }
 
-// Providers returns the agent providers, as JSON.
 func (c *Core) Providers() (_ string, err error) {
 	defer catch(&err)
 	var ps []store.Provider
@@ -552,7 +445,7 @@ func (c *Core) Providers() (_ string, err error) {
 	for _, p := range ps {
 		row := providerJSON{
 			ID: p.ID, Preset: p.Preset, Name: p.Name, BaseURL: p.BaseURL, AuthKind: p.AuthKind,
-			DefaultModel: p.DefaultModel, IsLocal: p.IsLocal, Models: p.Models, HasKey: agents.LocalKey(p.ID) != "",
+			DefaultModel: p.DefaultModel, IsLocal: (agents.Option{Provider: p}).Offline(), Models: p.Models, HasKey: agents.LocalKey(p.ID) != "",
 			SupportsTools: p.SupportsTools,
 		}
 		if p.AuthKind == "account" {
@@ -565,11 +458,6 @@ func (c *Core) Providers() (_ string, err error) {
 	return encode(out)
 }
 
-// SaveProvider adds or changes a provider, given as JSON: a local one is
-// kept on this device with its key in the keychain, and so is a cloud one
-// while signed out; signed in, a cloud one is kept on the server, which
-// keeps its key; as on the desktop. The first provider is the default
-// agent.
 func (c *Core) SaveProvider(provider string) (err error) {
 	defer catch(&err)
 	var in providerJSON
@@ -579,7 +467,6 @@ func (c *Core) SaveProvider(provider string) (err error) {
 	f := providerForm(in)
 	account := agents.PresetByID(in.Preset).Auth == "account"
 	if account {
-		// One edited without signing in again keeps the sign-in it has.
 		f.ChatGPT = c.madeChatGPT()
 	}
 	p, err := c.core.Hub.SaveProvider(f)
@@ -593,7 +480,6 @@ func (c *Core) SaveProvider(provider string) (err error) {
 	return nil
 }
 
-// defaultAgent makes a provider the default agent while there is none.
 func (c *Core) defaultAgent(providerID string) {
 	s := c.core.Store.Settings()
 	if s.DefaultModel == "" {
@@ -602,10 +488,6 @@ func (c *Core) defaultAgent(providerID string) {
 	}
 }
 
-// RemoveProvider removes a provider, with its key or sign-in, as the
-// desktop does: one kept on the server goes there first, since removed
-// only here, sync would bring it back. The default agent it was stops
-// being one.
 func (c *Core) RemoveProvider(id string) (err error) {
 	defer catch(&err)
 	return c.core.Hub.RemoveProvider(id)

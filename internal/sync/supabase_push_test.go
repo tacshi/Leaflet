@@ -22,8 +22,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// A file that is there but cannot be read now waits to go up again; only
-// one that is gone leaves the queue.
 func TestUploadOfAFileItCannotReadWaits(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root reads every file")
@@ -47,8 +45,6 @@ func TestUploadOfAFileItCannotReadWaits(t *testing.T) {
 	}
 }
 
-// Resolving someone else's comment updates only what may change, and a
-// comment the server does not have yet goes in whole.
 func TestCommentsPushAsUpdates(t *testing.T) {
 	st := openStore(t)
 	var requests []string
@@ -84,8 +80,6 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	if strings.Join(requests, ",") != "PATCH eq.theirs,PATCH eq.new,POST " {
 		t.Errorf("requests %v", requests)
 	}
-	// A resolve made here, of a comment deleted elsewhere, sends only the
-	// resolve, not this device's deleted_at.
 	patched = nil
 	done, err = svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "theirs"}, map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
 		"deleted_at": nil, store.ChangedKey: []any{"resolved", "updated_at"}})
@@ -97,9 +91,6 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	}
 }
 
-// A page changed here sends only what changed, with when it changed, so an
-// offline rename does not undo a move or a deletion made on another device
-// meanwhile; one the server does not have goes up whole.
 func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -112,7 +103,7 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 			_ = st.Dequeue(e)
 		}
 	}
-	clear() // the server has the page now
+	clear()
 	if err := st.RenamePage(p.ID, "Plan for Q3"); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +140,6 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 		t.Errorf("%d still queued", st.PendingCount())
 	}
 
-	// Nothing changed: nothing queued.
 	if err := st.RenamePage(p.ID, "Plan for Q4"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,10 +162,6 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	}
 }
 
-// A change to a page the user may no longer change, as one shared with
-// them to view since, gives way to the server's page, rather than wait
-// forever with every change made to the page elsewhere passed over. One
-// the server does not show stays queued.
 func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -196,7 +182,7 @@ func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "PATCH":
-			_, _ = w.Write([]byte("[]")) // not the user's to change
+			_, _ = w.Write([]byte("[]"))
 		case "POST":
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"code":"42501","message":"new row violates row-level security policy"}`))
@@ -229,9 +215,6 @@ func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 	}
 }
 
-// A refused page change stays queued while the server's page cannot be
-// stored over it: gone from the queue first, it would be neither sent
-// nor replaced.
 func TestRefusedPageChangeStaysQueuedWhenTheServersCannotStore(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -271,8 +254,6 @@ func TestRefusedPageChangeStaysQueuedWhenTheServersCannotStore(t *testing.T) {
 	}
 }
 
-// A file's move goes up as only that, so it does not undo a deletion made
-// elsewhere meanwhile.
 func TestFilePushSendsOnlyItsChanges(t *testing.T) {
 	st := openStore(t)
 	folder, err := st.CreateFolder("Folder")
@@ -314,9 +295,6 @@ func TestFilePushSendsOnlyItsChanges(t *testing.T) {
 	}
 }
 
-// A deleted file's object leaves Storage once the server has the row that
-// says so, and not before: while the row cannot go up, the removal waits.
-// An object the server does not have counts as removed.
 func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
@@ -378,7 +356,6 @@ func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 		t.Errorf("requests %v", requests)
 	}
 
-	// Gone from the server already.
 	g, err := st.AddFile(src, "", "", "text/plain")
 	if err != nil {
 		t.Fatal(err)
@@ -395,9 +372,6 @@ func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 	}
 }
 
-// An upload stays queued while the recording cannot take its path here:
-// else nothing would send the audio again, and the other devices could
-// not play it.
 func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Standup"})
@@ -422,7 +396,6 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	if err := st.QueueUpload(r); err != nil {
 		t.Fatal(err)
 	}
-	// The disk refuses the recording's path, as a full one would.
 	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON recordings
 		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
 		t.Fatal(err)
@@ -441,8 +414,6 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
 
-	// A failure here is the upload's own: it stays queued, and the rest of
-	// the queue goes on.
 	if err := svc.push(ctx); err != nil {
 		t.Errorf("the pass stopped: %v", err)
 	}
@@ -461,10 +432,6 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	}
 }
 
-// A copy of a file and a recording queued by an earlier version, from
-// what this device had only stored, goes up as the copy's own, from the
-// originals' stored copies; a copy whose original is gone has nothing to
-// send.
 func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -549,8 +516,6 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	}
 }
 
-// A file deleted while a copy of it an earlier version queued waits to go
-// up from it stays in Storage until the copy has gone up.
 func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -605,7 +570,6 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 
-	// The server failing stops the push, the copy waiting.
 	if err := svc.push(context.Background()); !remote.IsBusy(err) {
 		t.Fatalf("push: %v", err)
 	}
@@ -621,10 +585,6 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}
 }
 
-// A recording a quit left transcribing, settled at startup, does not go up
-// over the transcript the server finished meanwhile: it takes the
-// server's. One still transcribing there is settled there too, and one
-// the server does not have goes up whole.
 func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -651,7 +611,7 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 	srv := &refusing{rows: map[string]map[string]any{"recordings": finished}}
 	srv.patch = func(_ string, r *http.Request) []map[string]any {
 		patched = append(patched, r.URL.Query().Get("status"))
-		return nil // no longer transcribing there
+		return nil
 	}
 	hs := httptest.NewServer(srv)
 	defer hs.Close()
@@ -669,7 +629,6 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 		t.Errorf("patched where %v; requests %v", patched, srv.requests)
 	}
 
-	// Still transcribing there: it is settled there too.
 	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
 		t.Fatal(err)
 	}
@@ -684,8 +643,6 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 	}
 }
 
-// A recording's change the server refuses, as on a page the user may no
-// longer edit, gives way to the server's recording, as a page's does.
 func TestRefusedRecordingTakesTheServers(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -716,9 +673,6 @@ func TestRefusedRecordingTakesTheServers(t *testing.T) {
 	}
 }
 
-// A change to someone else's comment the server refuses, as resolving it
-// on a page shared to view, gives way to the server's comment: waiting, it
-// would keep the author's later edits from this device.
 func TestRefusedCommentTakesTheServers(t *testing.T) {
 	st := openStore(t)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -745,9 +699,6 @@ func TestRefusedCommentTakesTheServers(t *testing.T) {
 	}
 }
 
-// A file's deletion the server refuses gives way to the server's file,
-// which keeps its stored copy: the removal queued with the deletion does
-// not take it.
 func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
@@ -780,10 +731,6 @@ func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
 	}
 }
 
-// A copy an earlier version queued, whose original is only in the Leaflet
-// folder of iCloud Drive this device synced through, and not downloaded
-// yet, waits for a later pass without holding this one up or counting as
-// a failure: the copy's row waits with it. It goes up once iCloud has it.
 func TestCopyWaitsForAnOriginalICloudHasNotDownloaded(t *testing.T) {
 	root := cloudRoot(t)
 	d := newCloudDevice(t, root)
@@ -818,7 +765,6 @@ func TestCopyWaitsForAnOriginalICloudHasNotDownloaded(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		if strings.HasPrefix(req.URL.Path, "/storage/v1/object/authenticated/") {
-			// The server never had the original: it went through iCloud Drive.
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{"message": "not found"})
 			return
@@ -862,8 +808,6 @@ func TestCopyWaitsForAnOriginalICloudHasNotDownloaded(t *testing.T) {
 	}
 }
 
-// oldRecordingCopy is oldFileCopy for a recording whose audio is stored:
-// the copy plays the original's until its own has gone up.
 func oldRecordingCopy(t *testing.T, st *store.Store, pageID string, orig store.Recording) store.Recording {
 	t.Helper()
 	c := orig
@@ -881,9 +825,6 @@ func oldRecordingCopy(t *testing.T, st *store.Store, pageID string, orig store.R
 	return c
 }
 
-// A file's row goes up after its contents, in the same pass: a device
-// that pulls the row can fetch them, and never takes a file still
-// uploading for one that is gone.
 func TestFileRowGoesAfterItsContents(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
@@ -924,125 +865,9 @@ func TestFileRowGoesAfterItsContents(t *testing.T) {
 	}
 }
 
-// A cloud agent's job refers to the page, the pages it is inside, and the
-// comment its thread starts with: flushing the page sends them all first,
-// and leaves another page's changes queued.
-func TestFlushSendsWhatTheJobRefersTo(t *testing.T) {
-	st := openStore(t)
-	parent, err := st.CreatePage(store.NewPageOptions{Title: "Projects"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", ParentID: parent.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := st.AddComment(p.ID, "b1", "@Agent sum this up", "", "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	aside, err := st.AddComment(other.ID, "b1", "later", "", "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, _ := fullPass(t, st, nil)
-
-	if err := svc.FlushPage(context.Background(), p.ID); err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range [][2]string{{"pages", parent.ID}, {"pages", p.ID}, {"page_content", p.ID}, {"comments", thread.ID}} {
-		if st.HasPending(e[0], e[1]) {
-			t.Errorf("%s %s still waits", e[0], e[1])
-		}
-	}
-	if !st.HasPending("pages", other.ID) || !st.HasPending("comments", aside.ID) {
-		t.Error("another page's changes went")
-	}
-}
-
-// A flush of no page, as a workspace agent's run asks for, sends every
-// change: its agent reads all the user's pages.
-func TestFlushOfNoPageSendsEverything(t *testing.T) {
-	st := openStore(t)
-	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, _ := fullPass(t, st, nil)
-
-	if err := svc.FlushPage(context.Background(), ""); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{p.ID, other.ID} {
-		if st.HasPending("pages", id) || st.HasPending("page_content", id) {
-			t.Errorf("page %s still waits", id)
-		}
-	}
-}
-
-// A page in a folder not up yet goes after the folder: the server refuses
-// a page in a folder it does not have, so the job would refer to a page
-// that is not there. Another folder stays queued.
-func TestFlushSendsThePagesFolderFirst(t *testing.T) {
-	st := openStore(t)
-	folder, err := st.CreateFolder("Work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := st.CreateFolder("Home")
-	if err != nil {
-		t.Fatal(err)
-	}
-	top, err := st.CreatePage(store.NewPageOptions{Title: "Projects", FolderID: folder.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", ParentID: top.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, requests := fullPass(t, st, nil)
-
-	if err := svc.FlushPage(context.Background(), p.ID); err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range [][2]string{{"folders", folder.ID}, {"pages", top.ID}, {"pages", p.ID}} {
-		if st.HasPending(e[0], e[1]) {
-			t.Errorf("%s %s still waits", e[0], e[1])
-		}
-	}
-	if !st.HasPending("folders", other.ID) {
-		t.Error("another folder went")
-	}
-	folders := slices.IndexFunc(*requests, func(r string) bool { return strings.HasSuffix(r, "/rest/v1/folders") })
-	pages := slices.IndexFunc(*requests, func(r string) bool { return strings.HasSuffix(r, "/rest/v1/pages") })
-	if folders < 0 || pages < 0 || folders > pages {
-		t.Errorf("sent %v", *requests)
-	}
-}
-
-// Rows sent again whole as a device's pages join an account go over the
-// server's only when they changed here later than there, by when each
-// change was made, not when it reached the server: one another device
-// renamed since, which this device has from iCloud Drive as it was, takes
-// the server's; one this device renamed after the copy another device
-// uploaded late, as it joined the account first, goes up over that copy;
-// and one the server does not have goes up. A server that keeps no change
-// time has only its own.
 func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		// changed and uploaded are when the server's copy changed and when
-		// it reached the server, from the change here; no changed leaves
-		// the server's row without one.
+		name              string
 		changed, uploaded time.Duration
 		noChanged         bool
 		serverNewer       bool
@@ -1130,20 +955,10 @@ func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
 	}
 }
 
-// A row this device pulled from the server, and has not changed since,
-// sends nothing as its pages join the account again, as after a while of
-// syncing through iCloud Drive: the server's row stays, also when another
-// device changed it there since, in a change it made offline before this
-// one took the row, which by their times alone would lose to this copy.
-// One changed here since, or by a device through iCloud Drive, goes up,
-// as changed there.
 func TestAdoptedPulledRowsGoOnlyWhenChangedHere(t *testing.T) {
 	const id = "00000000-0000-0000-0000-0000000000f1"
 	for _, tc := range []struct {
-		name string
-		// renamedThere is the title another device gave the row on the
-		// server since, in a change made before this device took it; ""
-		// for none.
+		name                                string
 		renamedThere, renamedHere, fromPeer string
 		want                                string
 	}{
@@ -1169,10 +984,8 @@ func TestAdoptedPulledRowsGoOnlyWhenChangedHere(t *testing.T) {
 			if err := st.RenamePage(id, tc.renamedHere); err != nil {
 				t.Fatal(err)
 			}
-			dequeueAll(t, st) // gone through iCloud Drive
+			dequeueAll(t, st)
 		case tc.fromPeer != "":
-			// As applyRow stores it: the change is the other device's, made
-			// before this one took the row, so the row's time stays.
 			peer := maps.Clone(there)
 			peer["title"], peer[store.PeerKey] = tc.fromPeer, true
 			if err := st.PutRemotePage(peer); err != nil {
@@ -1231,10 +1044,6 @@ func TestAdoptedPulledRowsGoOnlyWhenChangedHere(t *testing.T) {
 	}
 }
 
-// A page renamed, then moved under a page made after, keeps its place in
-// the queue, before that page: the server refuses the move under a page it
-// does not have yet, and the page goes once that one has, in the same
-// push, with its rename, counting no failure.
 func TestMoveUnderANewPageWaitsForIt(t *testing.T) {
 	st := openStore(t)
 	a, err := st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -1272,7 +1081,6 @@ func TestMoveUnderANewPageWaitsForIt(t *testing.T) {
 				known[store.S(row, "id")] = true
 				out = append(out, row)
 			case http.MethodPatch:
-				// As pages_guard raises it, which PostgREST answers 500.
 				if parent := store.S(row, "parent_id"); parent != "" && !known[parent] {
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = io.WriteString(w, `{"code":"P0002","message":"parent_not_found"}`)
@@ -1310,11 +1118,6 @@ func TestMoveUnderANewPageWaitsForIt(t *testing.T) {
 	}
 }
 
-// Two devices moving pages under each other at once: the server takes the
-// first move and refuses the second (page_cycle) for good. This device's
-// pull stores the first while its own waits, which would leave both pages
-// out of the tree in a loop: its own page goes to the top level meanwhile,
-// and its refused move gives way to the server's row, with no retries.
 func TestMovesUnderEachOtherSettleOnTheServers(t *testing.T) {
 	st := openStore(t)
 	a, err := st.CreatePage(store.NewPageOptions{Title: "A"})
@@ -1361,7 +1164,6 @@ func TestMovesUnderEachOtherSettleOnTheServers(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 
-	// The pull brings B under A, as the other device moved it.
 	if err := svc.putServerPage(row(b, a.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -1387,10 +1189,6 @@ func TestMovesUnderEachOtherSettleOnTheServers(t *testing.T) {
 	}
 }
 
-// A snapshot goes up as an insert the server keeps if it has it, without
-// reading it back: sent again, as when the answer to its upload was lost,
-// it is done, though no one may change a snapshot, and the server refuses
-// an upsert of one it has.
 func TestHistorySentAgainIsDone(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1420,7 +1218,6 @@ func TestHistorySentAgainIsDone(t *testing.T) {
 		id := store.S(row, "id")
 		ignore := strings.Contains(r.Header.Get("Prefer"), "ignore-duplicates")
 		if have[id] && !ignore {
-			// As page_history's policies have it: no one may update one.
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, `{"code":"42501","message":"new row violates row-level security policy"}`)
 			return
@@ -1430,7 +1227,6 @@ func TestHistorySentAgainIsDone(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	// Its first upload went, but its answer was lost: it is still queued.
 	h, _ := st.History(p.ID)
 	have[h[0].ID] = true
 	if err := svc.push(context.Background()); err != nil {
@@ -1441,9 +1237,6 @@ func TestHistorySentAgainIsDone(t *testing.T) {
 	}
 }
 
-// A server failing, or asking for a wait, stops the push without counting
-// against the entries, which go as soon as it is back; the loop leaves it
-// alone for the wait it asks.
 func TestBusyServerCountsNoFailure(t *testing.T) {
 	st := openStore(t)
 	if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
@@ -1487,10 +1280,6 @@ func TestBusyServerCountsNoFailure(t *testing.T) {
 	}
 }
 
-// A page whose parent neither waits here nor is on the server, as one that
-// came through iCloud Drive before its parent did, is refused with a 500
-// (parent_not_found, P0002), which is that page's own: the rest of the
-// queue and the pull go on, and it waits as a failure does.
 func TestAPageWithoutItsParentHoldsUpNothing(t *testing.T) {
 	st := openStore(t)
 	const child = "00000000-0000-0000-0000-0000000000c1"
@@ -1540,8 +1329,6 @@ func TestAPageWithoutItsParentHoldsUpNothing(t *testing.T) {
 	}
 }
 
-// A comment queued before comments were cut to what the server keeps goes
-// up cut: whole, it would be refused every time.
 func TestACommentTooLongGoesUpCut(t *testing.T) {
 	st := openStore(t)
 	long := strings.Repeat("字", 100005)
@@ -1580,8 +1367,6 @@ func TestACommentTooLongGoesUpCut(t *testing.T) {
 	}
 }
 
-// The account having as many devices as it may leaves this one out of its
-// list, and it syncs all the same.
 func TestTooManyDevicesStopsNoPass(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1622,8 +1407,6 @@ func TestTooManyDevicesStopsNoPass(t *testing.T) {
 	}
 }
 
-// refusesNUL is a server that refuses what Postgres does, in text or jsonb,
-// and keeps the rows of the writes it takes.
 type refusesNUL struct {
 	mu      gosync.Mutex
 	refused int
@@ -1656,7 +1439,6 @@ func (s *refusesNUL) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode([]map[string]any{row})
 }
 
-// holdsNUL reports whether a NUL is in a value decoded from JSON.
 func holdsNUL(v any) bool {
 	switch v := v.(type) {
 	case string:
@@ -1673,9 +1455,6 @@ func holdsNUL(v any) bool {
 	return false
 }
 
-// A page, its title and its comment holding a NUL, which Postgres refuses
-// whole, go up with U+FFFD for it, a new page and an entry queued long ago
-// alike, and the page here takes what went: it and the server agree.
 func TestWhatPostgresRefusesGoesUpClean(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1731,9 +1510,6 @@ func TestWhatPostgresRefusesGoesUpClean(t *testing.T) {
 	}
 }
 
-// timingOut is a server that ends statements as out of time: every one, or
-// with heavy, those heavy says, a light read of spaces answered all the
-// same. It counts the requests.
 type timingOut struct {
 	mu       gosync.Mutex
 	requests int
@@ -1759,9 +1535,6 @@ func (s *timingOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "[]")
 }
 
-// A database whose statements all run out of time is the server in
-// trouble: the push stops at once, counting against no entry, or each
-// would wait long after the server is back.
 func TestADatabaseTimingOutCountsAgainstNoEntry(t *testing.T) {
 	st := openStore(t)
 	for range 10 {
@@ -1787,9 +1560,6 @@ func TestADatabaseTimingOutCountsAgainstNoEntry(t *testing.T) {
 	}
 }
 
-// A statement too heavy for a server that answers otherwise is its entry's
-// own: it waits, and the queue behind it goes, which it would stop each
-// pass for good.
 func TestAPageTooHeavyToSaveHoldsUpNothing(t *testing.T) {
 	st := openStore(t)
 	heavy, err := st.CreatePage(store.NewPageOptions{Title: "Heavy"})
@@ -1817,9 +1587,6 @@ func TestAPageTooHeavyToSaveHoldsUpNothing(t *testing.T) {
 	}
 }
 
-// A server that answers reads and times out every write is in trouble
-// however it reads: past a few, the push stops counting them against their
-// entries.
 func TestAServerTimingOutEveryWriteStopsCounting(t *testing.T) {
 	st := openStore(t)
 	for range 10 {
@@ -1846,9 +1613,6 @@ func TestAServerTimingOutEveryWriteStopsCounting(t *testing.T) {
 	}
 }
 
-// A page under one whose own change the server refused, and that waits to
-// be tried again, waits with it unsent: sent, it would be refused too, on
-// every pass until that one goes.
 func TestAPageUnderOneRefusedWaitsUnsent(t *testing.T) {
 	st := openStore(t)
 	top, err := st.CreatePage(store.NewPageOptions{Title: "Project"})

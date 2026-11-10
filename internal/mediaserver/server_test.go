@@ -46,8 +46,6 @@ func get(t *testing.T, method, address string, headers map[string]string) (*http
 	return res, string(body)
 }
 
-// A player's page comes with its policy, and it can read any part of the
-// file, which tells only what the app says it is.
 func TestServesPageAndFile(t *testing.T) {
 	_, address := registered(t, "<audio>")
 	res, body := get(t, "GET", address, nil)
@@ -68,8 +66,6 @@ func TestServesPageAndFile(t *testing.T) {
 	}
 }
 
-// A file with no page is served at the address it gets.
-// A cover goes with its token, of the type the app says; none, there is none.
 func TestCover(t *testing.T) {
 	s := &Server{}
 	defer s.Close()
@@ -108,8 +104,6 @@ func TestFileAlone(t *testing.T) {
 	}
 }
 
-// Nothing goes by a wrong token, one revoked, another host's name, or a
-// way of asking but reading.
 func TestRefuses(t *testing.T) {
 	s, address := registered(t, "<audio>")
 	wrong := strings.TrimSuffix(address, "/") + "0/media"
@@ -131,7 +125,6 @@ func TestRefuses(t *testing.T) {
 	}
 }
 
-// A file gone from the device is not found, nor is a folder served.
 func TestFileGone(t *testing.T) {
 	s := &Server{}
 	t.Cleanup(s.Close)

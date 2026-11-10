@@ -22,9 +22,6 @@ import (
 	"leaflet/locales"
 )
 
-// Signing in as another account than the one whose pages this device
-// keeps, with changes of theirs not uploaded, asks first: Cancel keeps
-// them, Sign in removes them.
 func TestSignInAsAnotherAccountAsks(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
@@ -58,7 +55,6 @@ func TestSignInAsAnotherAccountAsks(t *testing.T) {
 	a.settings.ICloudSync = true
 	a.signedIn(other)
 	tt.Frame()
-	// Sign in, the alert's default button; the page has one of its own.
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
 	if _, err := a.st.Page(p.ID); err == nil {
@@ -67,14 +63,11 @@ func TestSignInAsAnotherAccountAsks(t *testing.T) {
 	if !a.session.SignedIn || a.session.UserID != "u2" {
 		t.Errorf("session %+v", a.session)
 	}
-	// iCloud sync is off for the server's, and says so once signed out.
 	if a.settings.ICloudSync {
 		t.Error("iCloud sync still on in Settings")
 	}
 }
 
-// A sign-in that finishes after the person has gone to a page asks there,
-// and once done leaves them on the page.
 func TestSignInFinishedOnAPage(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
@@ -103,7 +96,6 @@ func TestSignInFinishedOnAPage(t *testing.T) {
 	}
 	tt.Frame()
 
-	// Signing in with nothing to lose leaves the page open.
 	if err := a.st.SetValue("account", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +106,6 @@ func TestSignInFinishedOnAPage(t *testing.T) {
 	}
 }
 
-// Signing in as another account that fails to become the session, as when
-// the previous account's pages cannot be removed, signs it out again.
 func TestSignInThatFailsSignsOut(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
@@ -145,8 +135,6 @@ func TestSignInThatFailsSignsOut(t *testing.T) {
 	}
 }
 
-// A file that takes longer to go up than a push waits is waited for: it
-// is no change left behind, to ask about.
 func TestSignOutWaitsForAnUpload(t *testing.T) {
 	defer syncsvc.UploadWaitForTest(10 * time.Millisecond)()
 	a := templatesApp(t)
@@ -182,16 +170,12 @@ func TestSignOutWaitsForAnUpload(t *testing.T) {
 	a.post = func(fn func()) { posted <- fn }
 	a.signOut()
 	(<-posted)()
-	// What is told once the device has left, as it does only with nothing
-	// to ask about, redraws the app, which a test has none of.
 	<-posted
 	if a.account.unsynced != 0 || a.backend.SignedIn() {
 		t.Fatalf("asked about %d, signed in %v", a.account.unsynced, a.backend.SignedIn())
 	}
 }
 
-// A change stored while signing out, by leaflet mcp after the upload, is
-// asked about rather than removed with the account's pages.
 func TestSignOutAsksAboutAChangeStoredMeanwhile(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Uploaded"})
@@ -223,9 +207,6 @@ func TestSignOutAsksAboutAChangeStoredMeanwhile(t *testing.T) {
 	}
 }
 
-// A change stored as signing out removes the account's pages, which the
-// removal finds and stops for, is asked about, not shown as an error, and
-// leaves the device signed in, as a change found before does.
 func TestSignOutAsksAboutAChangeFoundAsItRemoves(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
@@ -238,9 +219,6 @@ func TestSignOutAsksAboutAChangeFoundAsItRemoves(t *testing.T) {
 	}
 }
 
-// The open page takes no typing while signing out removes the account's
-// pages, which would remove it unsaved, and takes it again when the
-// sign-out stops to ask about the changes waiting.
 func TestSignOutKeepsThePageReadOnlyUntilItEnds(t *testing.T) {
 	a := templatesApp(t)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
@@ -257,7 +235,6 @@ func TestSignOutKeepsThePageReadOnlyUntilItEnds(t *testing.T) {
 	if !a.page.editor.ReadOnly {
 		t.Error("the page takes typing as signing out removes it")
 	}
-	// A change meanwhile, as leaflet mcp stores, leaves it so.
 	a.reload(store.Change{Table: "pages", PageID: p.ID})
 	if !a.page.editor.ReadOnly {
 		t.Error("a change made the page take typing as signing out removes it")
@@ -269,8 +246,6 @@ func TestSignOutKeepsThePageReadOnlyUntilItEnds(t *testing.T) {
 	}
 }
 
-// Deleting the account wipes the device's settings with it: those the app
-// shows then are a new device's, not the ones gone.
 func TestWipeResetsSettings(t *testing.T) {
 	a := templatesApp(t)
 	a.settings = a.st.Settings()
@@ -285,9 +260,6 @@ func TestWipeResetsSettings(t *testing.T) {
 	}
 }
 
-// Signing in as another account while the open page's edits cannot be
-// saved stops, as signing out does: the previous account's pages stay,
-// with the page open and what was typed in it.
 func TestSignInAsAnotherAccountStopsForAnUnsavedPage(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
@@ -319,8 +291,6 @@ func TestSignInAsAnotherAccountStopsForAnUnsavedPage(t *testing.T) {
 	}
 }
 
-// Pages sync one way at a time: with iCloud sync on, signing in with
-// Supabase is disabled, and its tip says how to use it instead.
 func TestICloudSyncDisablesSupabaseSignIn(t *testing.T) {
 	a := templatesApp(t)
 	if !a.hasServer() {
@@ -348,8 +318,6 @@ func TestICloudSyncDisablesSupabaseSignIn(t *testing.T) {
 	}
 }
 
-// A second click on a project while the first one's setup starts does
-// nothing: one setup runs at a time.
 func TestChooseProjectOnce(t *testing.T) {
 	auth, base := supabaseapi.Auth, supabaseapi.Base
 	supabaseapi.Auth, supabaseapi.Base = "http://127.0.0.1:1", "http://127.0.0.1:1"
@@ -373,8 +341,6 @@ func TestChooseProjectOnce(t *testing.T) {
 	}
 }
 
-// An emailed code comes again, as one mistyped or too old, or goes to
-// another email; a send that fails says so alone, not that a code went.
 func TestEmailCodeSendsAgain(t *testing.T) {
 	a := templatesApp(t)
 	var sends atomic.Int32

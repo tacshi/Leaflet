@@ -2,17 +2,11 @@ import LeafletCore
 import SwiftUI
 import UIKit
 
-/// EditorStyle is how the editor shows blocks: their fonts, indents and
-/// colors, from the page text size and the palette. It sets the
-/// attributes that show a paragraph from the ones that say what it is
-/// (BlockInfo and the inline formats), which it never changes.
 struct EditorStyle {
     var textSize: CGFloat
     var palette: Palette
 
-    /// indent is how far each level of nesting goes in.
     static let indent: CGFloat = 26
-    /// marker is the room a list's bullet, number or checkbox takes.
     static let marker: CGFloat = 26
 
     private var metrics: UIFontMetrics { UIFontMetrics(forTextStyle: .body) }
@@ -22,7 +16,6 @@ struct EditorStyle {
         var weight = UIFont.Weight.regular
         switch info.type {
         case "heading":
-            // The desktop's sizes (internal/editor/layout.go).
             weight = .semibold
             switch info.level {
             case 1: size = textSize * 1.75
@@ -40,7 +33,6 @@ struct EditorStyle {
             for: font(family: Fonts.page, size: size, weight: weight, italic: info.type == "quote"))
     }
 
-    /// spacing is the room above and below a block, as the desktop's.
     static func spacing(_ info: BlockInfo) -> (top: CGFloat, bottom: CGFloat) {
         switch info.type {
         case "heading":
@@ -66,7 +58,6 @@ struct EditorStyle {
         return f.familyName == family ? f : .systemFont(ofSize: size, weight: weight)
     }
 
-    /// leading is where a block's text starts, from the page's edge.
     static func leading(_ info: BlockInfo) -> CGFloat {
         var x = CGFloat(info.depth) * indent
         switch info.type {
@@ -87,9 +78,6 @@ struct EditorStyle {
         if info.type == "code" {
             p.lineHeightMultiple = 1.1
         } else {
-            // Lines as high as the desktop's: one and a half times the
-            // text, or none extra for a heading; more for CJK text, whose
-            // characters fill their square.
             let font = baseFont(info)
             let line = font.pointSize * (info.type == "heading" ? 1.25 : cjk ? 1.8 : 1.5)
             p.lineHeightMultiple = max(line / font.lineHeight, 1)
@@ -97,14 +85,10 @@ struct EditorStyle {
         (p.paragraphSpacingBefore, p.paragraphSpacing) = Self.spacing(info)
         switch info.type {
         case "code", "callout":
-            // Room for the card's padding (BlockLayoutFragment.cardPadding)
-            // on each side, a code card's bar, and a gap between two cards.
             p.tailIndent = -14
             p.paragraphSpacingBefore = 16 + (info.type == "code" ? BlockLayoutFragment.codeBar : 0)
             p.paragraphSpacing = 18
         case "todo_list":
-            // Room at the ends of its lines for its due date's chip
-            // (DueChip), which goes after its text.
             p.tailIndent = -DueChip.room(info)
         default:
             break
@@ -112,7 +96,6 @@ struct EditorStyle {
         return p
     }
 
-    /// apply shows the paragraphs in range as their blocks and formats say.
     @MainActor
     func apply(to storage: NSMutableAttributedString, in range: NSRange) {
         let ns = storage.string as NSString
@@ -120,9 +103,6 @@ struct EditorStyle {
         let whole = ns.paragraphRange(
             for: NSIntersectionRange(range, NSRange(location: 0, length: ns.length)))
         var at = whole.location
-        // The numbers given so far, by where their items are, for the
-        // next item to go on from its last: counted from the list's start
-        // each time, a long list's numbering would take as many walks.
         var numbers: [Int: Int] = [:]
         while at < NSMaxRange(whole) {
             let para = ns.paragraphRange(for: NSRange(location: at, length: 0))
@@ -183,9 +163,6 @@ struct EditorStyle {
             } else if a[.leafletTinted] as? Bool == true {
                 update[.backgroundColor] = UIColor(palette.agentSection)
             }
-            // The lines under and through the text show its formats, a
-            // link and a checked to-do: they are drawn here alone, so
-            // what no longer asks for one loses it.
             let link = a[.leafletHref] != nil
             if a[.leafletUnderline] as? Bool == true || link {
                 update[.underlineStyle] = NSUnderlineStyle.single.rawValue
@@ -197,8 +174,6 @@ struct EditorStyle {
                 update[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
                 if checked { update[.strikethroughColor] = UIColor(palette.textMuted) }
             }
-            // A link the page can open is one to VoiceOver and to a tap
-            // on a page that can't be changed: a page's, or the web's.
             if let target = Self.linkTarget(a) { update[.link] = target }
             s.addAttributes(update, range: r)
             for key: NSAttributedString.Key in [
@@ -209,8 +184,6 @@ struct EditorStyle {
             }
         }
         if info.type == "code", para.length > 0 {
-            // A code block's text in its language's colors, its line
-            // breaks read as the newlines they are.
             let code = (s.string as NSString).substring(with: para)
                 .replacingOccurrences(of: String(lineBreak), with: "\n")
             let language = info.data["language"]?.string ?? ""
@@ -224,11 +197,6 @@ struct EditorStyle {
         }
     }
 
-    /// linkTarget is where text of attributes a links to, when it is a link
-    /// the page opens: a page, by its mention or its leaflet:// link, or a
-    /// web or mail link, as the core has it (mobile.LinkTarget). A link to
-    /// a file or an app, as a shared page or an agent can write one, opens
-    /// nothing.
     static func linkTarget(_ a: [NSAttributedString.Key: Any]) -> URL? {
         if let m = a[.leafletMention] as? Mention {
             return m.kind == "page" ? URL(string: "leaflet://page/\(m.id)") : nil
@@ -238,15 +206,8 @@ struct EditorStyle {
         return target.isEmpty ? nil : URL(string: target)
     }
 
-    /// mostlyCJK reports whether text is mostly Chinese, Japanese or
-    /// Korean, whose lines the desktop sets higher, as the core has it
-    /// (mobile.MostlyCJK).
     static func mostlyCJK(_ text: String) -> Bool { MobileMostlyCJK(text) }
 
-    /// ordinal is a numbered item's number: one more than the numbered
-    /// item before it at its depth, with nothing shallower between. known
-    /// are numbers already given, by where their items are, which the
-    /// count goes on from.
     static func ordinal(
         _ s: NSAttributedString, at location: Int, _ info: BlockInfo, known: [Int: Int] = [:]
     ) -> Int {
@@ -272,7 +233,6 @@ struct EditorStyle {
 }
 
 extension UIColor {
-    /// init(hex:) reads "#rrggbb" or "#rrggbbaa", as the core keeps colors.
     convenience init?(hex: String) {
         var s = hex
         if s.hasPrefix("#") { s.removeFirst() }

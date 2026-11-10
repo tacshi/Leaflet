@@ -27,9 +27,6 @@ func TestCodeLanguages(t *testing.T) {
 	}
 }
 
-// A language named with backticks, as a spec may name one, keeps none: a
-// fence's line holds none after those it opens with, and the code would
-// read back as text, with all after it as code.
 func TestCodeLanguageKeepsNoBackticks(t *testing.T) {
 	for in, want := range map[string]string{"c`": "c", "`": "", "``` Objective `C` ```": "objective-c", "J`S": "javascript"} {
 		if got := CodeLanguageID(in); got != want {
@@ -39,7 +36,6 @@ func TestCodeLanguageKeepsNoBackticks(t *testing.T) {
 		if err != nil || n.Str("language") != want {
 			t.Fatalf("%q: got %+v, %v", in, n, err)
 		}
-		// One kept from before reads back the same.
 		n.Set("language", in)
 		md := PageMarkdown("", FromBlocks([]*Node{n, textNode("paragraph", Delta{{Text: "after"}})}), MarkdownOptions{})
 		want := []string{"code language=" + want + ` "x := 1"`, `paragraph "after"`}
@@ -62,7 +58,6 @@ func TestCodeBlocks(t *testing.T) {
 	if v := BlockViews(c)[0]; v["text"] != code || v["language"] != "go" {
 		t.Errorf("view %v", v)
 	}
-	// A fence longer than the backticks in the code.
 	if md := PageMarkdown("", c, MarkdownOptions{}); md != "````go\n"+code+"\n````\n" {
 		t.Errorf("markdown %q", md)
 	}

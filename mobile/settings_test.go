@@ -14,11 +14,6 @@ import (
 	"leaflet/internal/store"
 )
 
-// Settings › Account, Sync and storage, the Tags tab and the byline, as
-// the phone has them.
-
-// The name is saved on this device, without the spaces around it; none
-// changes nothing. Signed out, there is no account to delete.
 func TestDisplayName(t *testing.T) {
 	c, _ := open(t)
 	if err := c.SetDisplayName("  Ada  "); err != nil {
@@ -35,8 +30,6 @@ func TestDisplayName(t *testing.T) {
 	}
 }
 
-// Export all writes a zip of every page, the open page's edits saved
-// first, and its templates in a folder of their own.
 func TestExportAll(t *testing.T) {
 	c, _ := open(t)
 	trip := create(t, c, `{"title":"Trip"}`)
@@ -85,8 +78,6 @@ func TestExportAll(t *testing.T) {
 	}
 }
 
-// A tag renamed is renamed on its pages, merging into one of that name; a
-// tag deleted comes back on Undo.
 func TestRenameAndDeleteTags(t *testing.T) {
 	c, _ := open(t)
 	a := create(t, c, `{"title":"A"}`)
@@ -142,9 +133,6 @@ func conflicts(t *testing.T, c *Core) []conflictRow {
 	return out
 }
 
-// A conflict lists the text kept over the other side's; this device's
-// version can be put back, the page as it was kept in its history, and a
-// block one device deleted can be deleted again.
 func TestResolveConflicts(t *testing.T) {
 	c, _ := open(t)
 	p := create(t, c, `{"title":"Plans"}`)
@@ -184,7 +172,6 @@ func TestResolveConflicts(t *testing.T) {
 	if len(list) != 1 || list[0].Deleted != "there" || list[0].Kept != "Edited there" {
 		t.Fatalf("conflicts %+v", list)
 	}
-	// A way it doesn't know deletes nothing.
 	if err := c.ResolveConflict(list[0].ID, "this-device"); err == nil {
 		t.Fatal("resolved a conflict a way it doesn't know")
 	}
@@ -197,14 +184,11 @@ func TestResolveConflicts(t *testing.T) {
 	if got := texts(content(t, c, p.ID)); strings.Contains(got, "Edited there") {
 		t.Fatalf("deleted again, still %q", got)
 	}
-	// One resolved already, as in another window, says so.
 	if err := c.ResolveConflict(list[0].ID, "keep"); err == nil {
 		t.Error("resolved a conflict that is gone")
 	}
 }
 
-// An edit says the page is saving, and the save shortly after says it no
-// longer is; a page no one shares has no members.
 func TestPageSavingAndMembers(t *testing.T) {
 	c, ev := open(t)
 	p := create(t, c, `{"title":"Notes"}`)
@@ -233,8 +217,6 @@ func TestPageSavingAndMembers(t *testing.T) {
 	}
 }
 
-// A save the timer doesn't run, as naming a version runs one, still says
-// the page is no longer saving.
 func TestEverySaveTellsTheByline(t *testing.T) {
 	c, ev := open(t)
 	p := create(t, c, `{"title":"Notes"}`)
@@ -263,8 +245,6 @@ func TestEverySaveTellsTheByline(t *testing.T) {
 	}
 }
 
-// A page shared with the user turns read-only while open as they are made
-// a viewer of it, and back as they are made an editor, as on the desktop.
 func TestSharingChangesReadOnly(t *testing.T) {
 	c, ev := open(t)
 	const id = "00000000-0000-0000-0000-0000000000bb"
@@ -287,7 +267,6 @@ func TestSharingChangesReadOnly(t *testing.T) {
 	if pg.ReadOnly {
 		t.Fatal("an editor's page opened read-only")
 	}
-	// Opening says so too.
 	select {
 	case got := <-ev.readOnly:
 		if got {

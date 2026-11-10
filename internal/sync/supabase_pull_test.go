@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -53,7 +52,6 @@ func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	if err := svc.pullTable(ctx, "pages", "*", apply); err != nil {
 		t.Fatal(err)
 	}
-	// From the overlap behind the cursor, where p1 is passed over.
 	if queries[1] != "" {
 		t.Errorf("second pull asked for %s", queries[1])
 	}
@@ -65,9 +63,6 @@ func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	}
 }
 
-// A row whose change commits after rows stamped later, which the pull has
-// passed, is found by the next pull, which looks again behind its cursor.
-// The rows it has already are not stored again.
 func TestPullFindsARowThatCommittedLate(t *testing.T) {
 	st := openStore(t)
 	t2 := time.Date(2026, 10, 26, 9, 0, 5, 123456000, time.UTC)
@@ -81,7 +76,6 @@ func TestPullFindsARowThatCommittedLate(t *testing.T) {
 		filters = append(filters, r.URL.Query().Get("updated_at"))
 		rows := []map[string]any{row("p1", t2)}
 		if len(filters) > 1 {
-			// p0 committed late, stamped before p1.
 			rows = []map[string]any{row("p0", t1), row("p1", t2)}
 		}
 		_ = json.NewEncoder(w).Encode(rows)
@@ -113,8 +107,6 @@ func TestPullFindsARowThatCommittedLate(t *testing.T) {
 	}
 }
 
-// PulledAt has no time before a table's first pull, the time of the newest
-// row after, as the server writes it, and none for a cursor it cannot read.
 func TestPulledAt(t *testing.T) {
 	st := openStore(t)
 	if at, ok := PulledAt(st, "pages"); ok {
@@ -139,7 +131,6 @@ func TestPulledAt(t *testing.T) {
 	}
 }
 
-// An overlap fuller than a page of rows reads on past it.
 func TestPullReadsPastAFullOverlap(t *testing.T) {
 	st := openStore(t)
 	at := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
@@ -163,44 +154,6 @@ func TestPullReadsPastAFullOverlap(t *testing.T) {
 	}
 }
 
-// A cloud model connection deleted on another device, which the server
-// removes outright, goes here too; one kept on this device alone stays.
-func TestPullRemovesDeletedProviders(t *testing.T) {
-	st := openStore(t)
-	for _, p := range []store.Provider{
-		{ID: "kept", Preset: "openai", Name: "Kept", BaseURL: "https://example.com", AuthKind: "api_key"},
-		{ID: "gone", Preset: "openai", Name: "Gone", BaseURL: "https://example.com", AuthKind: "api_key"},
-		{ID: "local", Preset: "ollama", Name: "Local", BaseURL: "http://localhost:11434", AuthKind: "none", IsLocal: true},
-	} {
-		if err := st.PutProvider(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out := []map[string]any{}
-		if r.URL.Path == "/rest/v1/model_providers" && r.URL.Query().Get("select") == "id" {
-			out = append(out, map[string]any{"id": "kept"})
-		}
-		_ = json.NewEncoder(w).Encode(out)
-	}))
-	defer hs.Close()
-	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	if err := svc.pullProviderRemovals(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	var left []string
-	providers, _ := st.Providers()
-	for _, p := range providers {
-		left = append(left, p.ID)
-	}
-	slices.Sort(left)
-	if strings.Join(left, ",") != "kept,local" {
-		t.Errorf("left %v", left)
-	}
-}
-
-// A page shared with the user arrives with the pages under it and their
-// comments, though none of them changed since the pulls last looked.
 func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	st := openStore(t)
 	const (
@@ -264,14 +217,11 @@ func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	if w := waitingOn(t, svc); !w[root] || !w[child] {
 		t.Errorf("content not asked for: %v", w)
 	}
-	// The next pull has nothing new.
 	if err := svc.pullShared(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// A shared page pulled again keeps a rename made here that has not gone
-// up yet.
 func TestPullSharedKeepsChangesWaiting(t *testing.T) {
 	st := openStore(t)
 	const (
@@ -308,8 +258,6 @@ func TestPullSharedKeepsChangesWaiting(t *testing.T) {
 	}
 }
 
-// A shared page's tree comes whole however many rows it has: the server
-// sends a page of them at a time, and leaves out the rest without saying.
 func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
 	st := openStore(t)
 	treeIDs, treeRows = 1, 2
@@ -335,7 +283,6 @@ func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
 		tables["comments"] = append(tables["comments"], map[string]any{"id": "c" + string(rune('1'+i)), "page_id": pageID,
 			"block_id": "b1", "author_id": "u2", "body": "Look here", "created_at": old, "updated_at": old})
 	}
-	// in reports whether a row's col is one a filter names.
 	in := func(filter, v string) bool {
 		list, ok := strings.CutPrefix(filter, "in.(")
 		return ok && strings.Contains(strings.TrimSuffix(list, ")"), `"`+v+`"`)
@@ -360,8 +307,6 @@ func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
 					out = append(out, row)
 				}
 			}
-			// The server sends at most two rows here, as it sends at most
-			// 1,000.
 			if len(out) > 2 {
 				out = out[:2]
 			}
@@ -385,8 +330,6 @@ func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
 	}
 }
 
-// A first sync of many rows reads them all in one pass, a page at a time,
-// rather than a page each pass.
 func TestPullReadsEveryPageOfChanges(t *testing.T) {
 	st := openStore(t)
 	pullRows = 2
@@ -417,9 +360,6 @@ func TestPullReadsEveryPageOfChanges(t *testing.T) {
 	}
 }
 
-// A comment comes only as it changes, so one whose author's name could not
-// be read waits for it, the cursor where it was, rather than be stored as
-// "Someone" for good.
 func TestCommentsWaitForTheirAuthorsNames(t *testing.T) {
 	st := openStore(t)
 	down := true
@@ -458,8 +398,6 @@ func TestCommentsWaitForTheirAuthorsNames(t *testing.T) {
 	}
 }
 
-// A share brings every page under it, as deep as a tree goes, and a loop
-// of parents ends with the pages seen.
 func TestASharedTreeComesWhole(t *testing.T) {
 	st := openStore(t)
 	const depth = 80
@@ -484,7 +422,6 @@ func TestASharedTreeComesWhole(t *testing.T) {
 					out = append(out, row(i))
 				}
 			}
-			// The last page holds the first, as no server would have it.
 			if strings.Contains(parents, id(depth-1)) {
 				out = append(out, row(0))
 			}

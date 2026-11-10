@@ -1,10 +1,6 @@
 import LeafletCore
 import UIKit
 
-/// BlockCommands are the editor's commands on blocks, from the keyboard,
-/// the menus and the page: nesting blocks and taking them out, moving
-/// them, turning them into another kind, and putting blocks in, as an
-/// agent's answer or a block's sheet gives them.
 @MainActor
 final class BlockCommands {
     private unowned let editor: EditorController
@@ -15,13 +11,8 @@ final class BlockCommands {
 
     init(_ editor: EditorController) { self.editor = editor }
 
-    /// indent nests the blocks chosen in the block before each, or takes
-    /// them out a level, with the blocks nested in them.
     func indent(by step: Int) {
-        // Text being composed is the keyboard's, which a change to the
-        // text under it would end.
         guard textView.isEditable, textView.markedTextRange == nil else { return }
-        // In code, Tab indents its lines, as on the desktop.
         if text.paragraph(at: textView.selectedRange.location).info.type == "code" {
             indentCode(by: step)
             return
@@ -41,11 +32,6 @@ final class BlockCommands {
             let info = all[i].info
             let depth = max(info.depth + step, 0)
             if step > 0 {
-                // A block nests in the block before it at its depth, as the
-                // core's rules have it (mobile.Nests): list items in list
-                // items, and any text in a toggle, but not in a block folded
-                // away. The blocks go in together: none does when the first
-                // can't.
                 defer { first = false }
                 guard let under = sibling(before: i, in: all),
                     !editor.layout.folded.contains(under.id), MobileNests(info.type, under.type)
@@ -53,15 +39,12 @@ final class BlockCommands {
                     if first { return }
                     continue
                 }
-                // A closed toggle opens to take it, as on the desktop.
                 if under.type == "toggle_list" { shown = info.id }
             }
             guard depth != info.depth else { continue }
             if step < 0, chosen.count == 1, !info.isList, info.depth > 0,
                 last + 1 < all.count, all[last + 1].info.depth == info.depth
             {
-                // Text that is not a list item takes no blocks: the blocks
-                // after it stay where they are, and it goes after them.
                 var end = last + 1
                 while end + 1 < all.count, all[end + 1].info.depth >= info.depth { end += 1 }
                 let moved = all[i...last].map { p in
@@ -84,26 +67,18 @@ final class BlockCommands {
         if let shown { editor.layout.keepShown(shown) }
     }
 
-    /// sibling is the block before the paragraph i of all at its depth, in
-    /// the block it is in, or nil for the first there.
     private func sibling(before i: Int, in all: [DocumentMapper.Paragraph]) -> BlockInfo? {
         var k = i - 1
         while k >= 0, all[k].info.depth > all[i].info.depth { k -= 1 }
         return k >= 0 && all[k].info.depth == all[i].info.depth ? all[k].info : nil
     }
 
-    /// Indented is code indented, as the core's rules give it
-    /// (mobile.IndentCode).
     private struct Indented: Decodable {
         var code: String
         var anchor: Int
         var focus: Int
     }
 
-    /// indentCode indents the lines of the code block at the selection, or
-    /// takes an indent off them, as the desktop's does (mobile.IndentCode):
-    /// a tab where the code indents with tabs, two spaces otherwise, at the
-    /// caret for Tab with no selection.
     private func indentCode(by step: Int) {
         let sel = textView.selectedRange
         let (para, info) = text.paragraph(at: sel.location)
@@ -117,7 +92,6 @@ final class BlockCommands {
         }
         let lines = made.code.replacingOccurrences(of: "\n", with: br)
         if step > 0, sel.length == 0 {
-            // Tab at the caret puts a step there, as typed.
             let unit = (lines as NSString).substring(
                 with: NSRange(location: from, length: made.anchor - from))
             edits.insert(unit, replacing: sel)
@@ -130,10 +104,6 @@ final class BlockCommands {
         textView.selectedRange = NSRange(location: a, length: abs(made.focus - made.anchor))
     }
 
-    /// indented is code, a code block's text, with its lines as lines has
-    /// them, as IndentCode left them: an indent put at a line's start, or
-    /// taken off it. The rest of each line keeps its own formats, links
-    /// and mentions; an indent put in has only the block, info.
     static func indented(_ code: NSAttributedString, _ lines: String, _ info: BlockInfo)
         -> NSAttributedString
     {
@@ -149,8 +119,6 @@ final class BlockCommands {
             at += (line as NSString).length + 1
         }
         let out = NSMutableAttributedString(attributedString: code)
-        // From the last line back, for the lines before to stay where they
-        // are.
         for k in was.indices.reversed() {
             let old = (was[k] as NSString).length
             let new = now[k] as NSString
@@ -180,9 +148,6 @@ final class BlockCommands {
         }
     }
 
-    /// moveBlock moves the block at the caret, with the blocks nested in
-    /// it, past the block before or after it at its depth. The first block
-    /// in a list item goes before it, and the last after it, at its depth.
     func moveBlock(by step: Int) {
         guard textView.isEditable, textView.markedTextRange == nil else { return }
         let caret = text.position(at: textView.selectedRange.location)
@@ -199,7 +164,6 @@ final class BlockCommands {
             var k = i - 1
             while k >= 0, all[k].info.depth > depth { k -= 1 }
             guard k >= 0 else { return }
-            // Past the block before, or out before the one it is in.
             let shift = all[k].info.depth - depth
             edits.rewrite(
                 all, k, last,
@@ -213,8 +177,6 @@ final class BlockCommands {
                     all, i, end,
                     all[(last + 1)...end].map { block($0) } + all[i...last].map { block($0) })
             } else {
-                // The last block in another goes out after it, where it
-                // is, at its depth.
                 edits.rewrite(all, i, last, all[i...last].map { block($0, by: -1) })
             }
         }
@@ -222,23 +184,14 @@ final class BlockCommands {
         editor.layout.keepShown(caret.id)
     }
 
-    /// softBreak breaks the line within the block, as Shift-Return does on
-    /// the desktop: the block stays one.
     func softBreak() {
         guard textView.isEditable, textView.markedTextRange == nil else { return }
-        // A block without text has no line to break: the break would go in
-        // its place.
         let chosen = text.paragraphs(touching: textView.selectedRange)
         guard chosen.allSatisfy(\.info.isText) else { return }
         edits.insert(String(lineBreak), replacing: textView.selectedRange)
     }
 
-    /// replaceBlock puts node in place of the block without text of its
-    /// ID, as a table's sheet gives it with its cells; a node of no type
-    /// keeps the block's.
     func replaceBlock(_ node: DocNode) {
-        // A page the user may only view changes from no command: its
-        // change would never be saved, and would go with their next one.
         guard textView.isEditable else { return }
         guard let p = text.blocks().first(where: { $0.info.id == node.id }), !p.info.isText
         else { return }
@@ -252,9 +205,6 @@ final class BlockCommands {
         }
     }
 
-    /// removeBlock takes the block without text of id out of the page, with
-    /// the blocks in it, as one step to undo, the page staying where it is:
-    /// a recording's, from its menu.
     func removeBlock(_ id: String) {
         guard textView.isEditable else { return }
         let all = text.paragraphs()
@@ -267,10 +217,8 @@ final class BlockCommands {
             if last + 1 < all.count {
                 edits.rewrite(all, i, last, [])
             } else if i > 0 {
-                // Last on the page, it goes with the separator before it.
                 edits.rewrite(all, i - 1, last, [(all[i - 1].info, all[i - 1].text)])
             } else {
-                // The page keeps a block to write on.
                 let blank = BlockInfo(id: BlockInfo.newID(), type: "paragraph", depth: 0)
                 edits.rewrite(all, i, last, [(blank, NSAttributedString())])
             }
@@ -278,10 +226,6 @@ final class BlockCommands {
         restoreCaret(caret)
     }
 
-    /// insertBlock puts a block without text at the caret, or in the
-    /// paragraph at location: in place of an empty block, or after the
-    /// block there, with an empty block after it to write on, where the
-    /// caret goes. One put at location leaves the caret where it is.
     func insertBlock(_ node: DocNode, at location: Int? = nil) {
         guard textView.isEditable else { return }
         let caret = location == nil ? nil : text.position(at: textView.selectedRange.location)
@@ -303,13 +247,6 @@ final class BlockCommands {
         if let caret { restoreCaret(caret) }
     }
 
-    /// shareToVideo puts video in place of the paragraph of id while it
-    /// holds only link, a video's share link pasted on a line of its own,
-    /// once the share is followed to the video, as insertBlock puts the
-    /// video's link pasted there: with an empty block after it to write
-    /// on, where the caret goes when it was on the line. It is a step of
-    /// its own to undo, which takes it back to the link. A line changed
-    /// since stays as it is.
     func shareToVideo(_ id: String, link: String, video: DocNode) {
         guard textView.isEditable,
             let p = text.paragraphs().first(where: { $0.info.id == id }),
@@ -338,12 +275,6 @@ final class BlockCommands {
         if caret.id != id { restoreCaret(caret) }
     }
 
-    /// insertBlocks puts blocks in the page after the block of id, and those
-    /// in it, at its depth, or at the page's end once it is gone, as one
-    /// step to undo, the caret and the page staying where they are: an
-    /// agent's answer, or a recording's transcript, as the desktop's editor
-    /// puts them in. Put in by the core, they would be a change from
-    /// outside, which no Undo takes back and which clears the steps before.
     func insertBlocks(_ nodes: [DocNode], after id: String) {
         guard textView.isEditable, !nodes.isEmpty else { return }
         let caret = text.position(at: textView.selectedRange.location)
@@ -373,7 +304,6 @@ final class BlockCommands {
         let r = NSRange(location: at, length: made.length)
         edits.keepingScroll {
             edits.replace(NSRange(location: at, length: 0), with: made)
-            // The separator after them, the block's before, is theirs now.
             if let last, NSMaxRange(r) < storage.length {
                 storage.addAttribute(
                     .leafletBlock, value: last, range: NSRange(location: NSMaxRange(r), length: 1))
@@ -383,7 +313,6 @@ final class BlockCommands {
         }
     }
 
-    /// restoreCaret puts the caret back at caret, where its block now is.
     func restoreCaret(_ caret: BlockText.Position?) {
         guard let caret, let at = text.place(caret) else { return }
         textView.selectedRange = NSRange(location: at, length: 0)

@@ -55,13 +55,11 @@ func TestInline(t *testing.T) {
 			t.Errorf("%q makes %q", text, m.Format)
 		}
 	}
-	// UTF-16 offsets, as iOS counts them, past a character of two units.
 	text := utf16.Encode([]rune("😀 **hi**"))
 	m, ok := Inline(text, len(text), none)
 	if !ok || m.Open != 3 || m.Inner != 5 || m.Close != 7 || m.End != 9 {
 		t.Errorf("UTF-16 match %+v", m)
 	}
-	// A marker in a mention is no marker.
 	inMention := func(from, to int) bool { return from < 3 }
 	if _, ok := Inline([]rune("*a* b*"), 6, inMention); ok {
 		t.Error("a pair cut a mention")
@@ -76,9 +74,6 @@ func TestOpensMenu(t *testing.T) {
 	}
 }
 
-// The full-width "／" and "＠" open their menus as "/" and "@" do, and
-// "、" the / menu, but only where it is no comma: at a block's start or
-// after a space.
 func TestMenu(t *testing.T) {
 	for _, tc := range []struct {
 		r, before, want rune

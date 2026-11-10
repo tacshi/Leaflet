@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"testing"
 
 	"leaflet/internal/agents"
@@ -9,21 +8,15 @@ import (
 	"leaflet/internal/store"
 )
 
-// host is the app as the hub sees it, with the default agent set.
 type host struct{ settings store.Settings }
 
-func (h host) Update(_ string, fn func())              { fn() }
-func (h host) Live(string) agents.LiveDoc              { return nil }
-func (h host) SaveNow(string)                          {}
-func (h host) Online() bool                            { return true }
-func (h host) Settings() store.Settings                { return h.settings }
-func (h host) FlushPage(context.Context, string) error { return nil }
-func (h host) SyncNow()                                {}
-func (h host) Tint(string, []string)                   {}
+func (h host) Update(_ string, fn func()) { fn() }
+func (h host) Live(string) agents.LiveDoc { return nil }
+func (h host) SaveNow(string)             {}
+func (h host) Online() bool               { return true }
+func (h host) Settings() store.Settings   { return h.settings }
+func (h host) Tint(string, []string)      {}
 
-// A comment's agent is one it names, the first the hub lists, or else the
-// default for @agent; one that mentions none has none, and @agent with no
-// agent to run says why.
 func TestCommentAgent(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -39,8 +32,8 @@ func TestCommentAgent(t *testing.T) {
 		t.Error("@agent with no agent to run")
 	}
 	for _, p := range []store.Provider{
-		{ID: "a", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true},
-		{ID: "b", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true},
+		{ID: "a", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3"},
+		{ID: "b", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen"},
 	} {
 		if err := st.PutProvider(p); err != nil {
 			t.Fatal(err)

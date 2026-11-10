@@ -16,23 +16,9 @@ import (
 	"leaflet/locales"
 )
 
-// welcomeImage is a dawn over mountains and a lake, drawn for the guide.
-//
 //go:embed welcome/dawn.jpg
 var welcomeImage []byte
 
-// createWelcome gives a new space one page that shows what pages can do,
-// with an example subpage inside it: writing, blocks, media, charts,
-// embeds, to-dos, recordings, agents, organizing and finding pages,
-// comments, history, sync and shortcuts. A comment shows a thread, and the
-// subpage is also kept as a template. The guide and the meeting carry a tag
-// each, so tags show from the start: in their bylines, the sidebar's Tags
-// tab and search. They are written in the language the app shows when they
-// are made, and are the device's starter pages (store.MarkStarterPages)
-// until it joins a library. Pages that could not all be made go again:
-// a guide half made would not be a starter page, to join a library with,
-// and the next launch would take the device for one with pages of its
-// own, and make none.
 func (c *Core) createWelcome() (err error) {
 	if _, ok := c.Store.Value("welcome.created"); ok {
 		return nil
@@ -47,8 +33,6 @@ func (c *Core) createWelcome() (err error) {
 		}
 	}()
 	m := locales.In(i18n.Locale())
-	// The picture is a file of the page and the subpage a page inside it,
-	// so the page comes first and its blocks after.
 	p, err := c.Store.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle(), Tags: []string{m.WelcomeTagGuide()}})
 	if err != nil {
 		return err
@@ -82,16 +66,12 @@ func (c *Core) createWelcome() (err error) {
 	if err := c.Store.SetValue("welcome.page", p.ID); err != nil {
 		return err
 	}
-	// A device that goes on to join a library other devices made leaves
-	// them out of it, which has its own.
 	if err := c.Store.MarkStarterPages([]string{p.ID, sub.ID, tmpl.ID}); err != nil {
 		return err
 	}
 	return c.Store.SetValue("welcome.created", "true")
 }
 
-// welcomeImageFile adds the guide's picture as a file of its page, named
-// name.
 func (c *Core) welcomeImageFile(pageID, name string) (store.File, error) {
 	dir, err := os.MkdirTemp("", "leaflet-welcome")
 	if err != nil {
@@ -105,9 +85,6 @@ func (c *Core) welcomeImageFile(pageID, name string) (store.File, error) {
 	return c.Store.AddFile(path, "", pageID, "image/jpeg")
 }
 
-// welcomeBlocks are the guide's blocks in m's language, with its picture
-// and a card for and a link to its subpage, and the ID of the block about
-// comments, which the guide's example comment is on.
 func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.Node, string, error) {
 	var blocks []*doc.Node
 	var bad error
@@ -222,8 +199,6 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	heading(m.WelcomeOrganizingHeading())
 	text("paragraph", m.WelcomeOrganizingNest())
 	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": subID}})
-	// The message says where the link to the subpage goes, by a mark in
-	// its place.
 	const mark = "￼"
 	if link, err := doc.SpecToNode(map[string]any{"type": "paragraph", "text": m.WelcomeOrganizingLink(mark)}, "", "Leaflet"); err == nil {
 		title := m.WelcomeSubTitle()
@@ -261,7 +236,6 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	return blocks, commentsID, bad
 }
 
-// withRun puts run in d where mark is, in place of the mark.
 func withRun(d doc.Delta, mark string, run doc.Run) doc.Delta {
 	var out doc.Delta
 	for _, r := range d {
@@ -281,8 +255,6 @@ func withRun(d doc.Delta, mark string, run doc.Run) doc.Delta {
 	return out
 }
 
-// welcomeSubpage is the content of the guide's example subpage, in m's
-// language: where it lives, that it is a template too, and the meeting.
 func welcomeSubpage(m locales.Messages) *doc.Content {
 	var blocks []*doc.Node
 	for _, spec := range []map[string]any{
@@ -296,8 +268,6 @@ func welcomeSubpage(m locales.Messages) *doc.Content {
 	return doc.FromBlocks(append(blocks, welcomeMeeting(m)...))
 }
 
-// welcomeMeeting are the blocks of the example meeting's notes, which the
-// subpage shows and the template it is kept as starts with.
 func welcomeMeeting(m locales.Messages) []*doc.Node {
 	var blocks []*doc.Node
 	for _, spec := range []map[string]any{
@@ -323,7 +293,6 @@ func welcomeMeeting(m locales.Messages) []*doc.Node {
 	return blocks
 }
 
-// welcomeCode is the guide's code example, its comment in m's language.
 func welcomeCode(m locales.Messages) string {
 	return "// " + m.WelcomeCodeComment() + `
 function wordCount(text) {
@@ -333,8 +302,6 @@ function wordCount(text) {
 console.log(wordCount("Pages are living documents")); // 4`
 }
 
-// fillEmbed puts an embed's texts in its HTML: {{key}} as HTML text and
-// {{js:key}} as a JavaScript string.
 func fillEmbed(page string, texts map[string]string) string {
 	pairs := make([]string, 0, 4*len(texts))
 	for k, v := range texts {
@@ -344,12 +311,8 @@ func fillEmbed(page string, texts map[string]string) string {
 	return strings.NewReplacer(pairs...).Replace(page)
 }
 
-// The embeds' texts that count a number say it with "%1" in its place,
-// which their scripts fill in.
 const embedNumber = "%1"
 
-// solarSystemEmbed draws the planets orbiting the sun, with a speed slider
-// and a pause button, in m's language.
 func solarSystemEmbed(m locales.Messages) string {
 	return fillEmbed(solarSystemPage, map[string]string{
 		"pause": m.WelcomeSolarPause(), "play": m.WelcomeSolarPlay(), "speed": m.WelcomeSolarSpeed(),
@@ -434,8 +397,6 @@ function frame(now) {
 requestAnimationFrame(frame);
 </script></body></html>`
 
-// savingsEmbed works out savings from a monthly deposit, a rate and the
-// years, with a bar for each year, in m's language.
 func savingsEmbed(m locales.Messages) string {
 	return fillEmbed(savingsPage, map[string]string{
 		"monthly": m.WelcomeSavingsMonthly(), "return": m.WelcomeSavingsReturn(), "years": m.WelcomeSavingsYears(),
@@ -512,9 +473,6 @@ function update() {
 update();
 </script></body></html>`
 
-// pianoEmbed is an octave and a half to play with the pointer or the
-// keyboard, through the Web Audio API, in m's language. The keys shrink to
-// a narrow frame, as a phone's, and sit in the middle of what room is left.
 func pianoEmbed(m locales.Messages) string {
 	return fillEmbed(pianoPage, map[string]string{"hint": m.WelcomePianoHint()})
 }

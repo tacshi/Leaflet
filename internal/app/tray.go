@@ -13,21 +13,14 @@ import (
 	"leaflet/locales"
 )
 
-// trayIcon is the leaf of the app's icon as a template image, which macOS
-// tints for light and dark menu bars. docs/icon/tray.svg draws it.
-//
 //go:embed tray.png
 var trayIcon []byte
 
-// trayState is what the menu bar menu shows that can change: the menu is
-// made again when it does.
 type trayState struct {
 	recording bool
-	update    string // the version installed and waiting for a restart
+	update    string
 }
 
-// startTray puts Leaflet's icon in the menu bar. With it the app keeps
-// running when its window closes, which only hides it.
 func (a *App) startTray() {
 	t, err := mygo.NewTray(mygo.TrayOptions{ID: "leaflet", Icon: trayIcon, IconIsTemplate: true, ToolTip: "Leaflet"})
 	if err != nil {
@@ -38,8 +31,6 @@ func (a *App) startTray() {
 	a.refreshTray()
 }
 
-// refreshTray makes the menu bar menu again when what it shows changed.
-// The view calls it every frame; it costs a comparison.
 func (a *App) refreshTray() {
 	if a.tray == nil {
 		return
@@ -73,8 +64,6 @@ func (a *App) refreshTray() {
 	}))
 }
 
-// updateMenuItem is "Check for Updates…", or "Restart to Update" once an
-// update is installed and waits for the app to start again.
 func (a *App) updateMenuItem() *mygo.MenuItem {
 	if a.updateReady != "" {
 		return &mygo.MenuItem{Label: locales.TrayRestartToUpdate(), Click: func(*mygo.MenuItem, *mygo.Window) { a.restartToUpdate() }}
@@ -82,7 +71,6 @@ func (a *App) updateMenuItem() *mygo.MenuItem {
 	return updater.MenuItem()
 }
 
-// showWindow brings the window back, from the menu bar or the Dock.
 func (a *App) showWindow() {
 	if a.win == nil {
 		return
@@ -92,12 +80,8 @@ func (a *App) showWindow() {
 	mygo.App.Focus()
 }
 
-// newRecordingPage starts a recording in a page of its own, named after
-// when it began.
 func (a *App) newRecordingPage() {
 	a.showWindow()
-	// The open page saves first: one whose edits can't be saved stays
-	// open, and the recording would go into a page not shown.
 	if !a.flush() {
 		return
 	}
@@ -111,20 +95,13 @@ func (a *App) newRecordingPage() {
 	a.startRecording(p.ID, "")
 }
 
-// updateEvery is how long a running app waits to look for a newer version
-// again: with the menu bar icon, closing its window leaves it running, for
-// weeks perhaps.
 var updateEvery = 4 * time.Hour
 
-// newerVersion is a version to update to, and how to install it.
 type newerVersion struct {
 	version string
 	install func(context.Context) error
 }
 
-// lookForUpdate asks for a version newer than this one, nil when this is
-// the latest. Tests stand in for it, as mygo.Updater only looks in a build
-// with updates.
 var lookForUpdate = func(ctx context.Context) (*newerVersion, error) {
 	up, err := mygo.Updater.Check(ctx)
 	if err != nil || up == nil {
@@ -133,18 +110,11 @@ var lookForUpdate = func(ctx context.Context) (*newerVersion, error) {
 	return &newerVersion{up.Version, func(ctx context.Context) error { return up.Install(ctx, nil) }}, nil
 }
 
-// checkForUpdate looks for a newer version as the app starts, and every
-// updateEvery while it runs, and installs it in the background, quietly;
-// the update runs once the app starts again, from the icon beside Settings
-// or the menu bar. "Check for Updates…" of the menus is the updater
-// plugin's, with its window.
 func (a *App) checkForUpdate() {
-	time.Sleep(5 * time.Second) // let the app open first
+	time.Sleep(5 * time.Second)
 	a.update(a.keepLookingForUpdates)
 }
 
-// keepLookingForUpdates looks for a newer version now, and again every
-// updateEvery. It runs on the main thread.
 func (a *App) keepLookingForUpdates() {
 	if !a.updatable {
 		return
@@ -153,13 +123,6 @@ func (a *App) keepLookingForUpdates() {
 	a.later(updateEvery, a.keepLookingForUpdates)
 }
 
-// findUpdate checks for a newer version and installs it in the
-// background, unless a check is under way or an update waits already.
-// asked is set when the user asked, from the icon beside Settings: the
-// app then says it is up to date, or that the check failed; otherwise a
-// check that fails, as one made offline, is only logged. An install that
-// fails says so asked or not, unasked once for each version: nothing else
-// would show why the app stays as it is. It runs on the main thread.
 func (a *App) findUpdate(asked bool) {
 	if !a.updatable || a.updateBusy != "" || a.updateReady != "" {
 		return
@@ -203,7 +166,6 @@ func (a *App) findUpdate(asked bool) {
 	}()
 }
 
-// restartToUpdate starts the installed update, saving the open page first.
 func (a *App) restartToUpdate() {
 	a.flush()
 	mygo.App.Relaunch()

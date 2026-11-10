@@ -48,81 +48,41 @@ import (
 	"leaflet/locales"
 )
 
-// A public link shares one page with anyone who has it, for as long as
-// Leaflet keeps it: a server on this device's loopback has the page as a
-// web page, and cloudflared opens it to the web through a Cloudflare Quick
-// Tunnel, at a random trycloudflare.com address. The server keeps the page
-// as it was last rendered, in memory, and never reads the database; the
-// page renders again as it is saved. Its address has a secret path, so
-// the bare hostname shows nothing.
-
-// pubLink is the page shared through a public link; the app has one at a
-// time. Its fields are the main thread's, but those under mu, which the
-// server reads too.
 type pubLink struct {
-	page, token string
-	// emails, when set, are who may open the link, by cloudflared's
-	// --allowed-mail: each signs in with a code Cloudflare emails them.
-	// They are set as the link starts and never change.
-	emails []string
-	// state is "starting", "live" or "failed"; url is the link once live,
-	// and err why it failed.
+	page, token     string
+	emails          []string
 	state, url, err string
-	// qr is url as a QR code, to open the link on a phone.
-	qr  *ui.Bitmap
-	cmd *exec.Cmd
-	srv *http.Server
-	// lease, set while the pages go to other devices, stops saying that
-	// this device serves the link (agents' ServePublicLink), so agents on
-	// other devices and in the cloud read no other pages into the page;
-	// leaseWay is the way it said so (leasePub).
-	lease    func()
-	leaseWay string
-	// timer waits for saves to settle before the page renders again; seq
-	// numbers the renders asked for.
-	timer *time.Timer
-	seq   int
+	qr              *ui.Bitmap
+	cmd             *exec.Cmd
+	srv             *http.Server
+	lease           func()
+	leaseWay        string
+	timer           *time.Timer
+	seq             int
 
-	mu sync.Mutex
-	// snap is the page as visitors see it, from the render numbered shown.
-	snap  pubSnapshot
-	shown int
-	// host is the tunnel's hostname, once live, which the page posts from.
-	host string
-	// comments says whether visitors may comment; threads are the
-	// threads visitors started through this link, the only ones they see.
+	mu       sync.Mutex
+	snap     pubSnapshot
+	shown    int
+	host     string
 	comments bool
 	threads  map[string]bool
-	// posts are when each visitor, by address, last commented, and total
-	// how many comments came through this link.
-	posts map[string][]time.Time
-	total int
+	posts    map[string][]time.Time
+	total    int
 }
 
 type pubSnapshot struct {
-	html string
-	// files are the pictures of this device the page shows, by name, and
-	// embeds the embeds' HTML, by block.
+	html   string
 	files  map[string]pubFile
 	embeds map[string]string
-	// blocks are the page's blocks, which a comment may be on, with their
-	// text, which a comment's quote is from.
 	blocks map[string]string
 }
 
-// pubFile is a file the shared page serves, a picture, a file or a
-// recording's audio, by its path: it is read as it is asked for, a part
-// at a time for a player, never kept with the page. One with a name
-// downloads as it; one with no type is served as its content says.
 type pubFile struct {
 	typ  string
 	path string
 	name string
 }
 
-// pubJob is what a render needs from the main thread. known renders the
-// videos as this run of the app knows them, asking no site: for a render
-// a visitor waits for.
 type pubJob struct {
 	st                 *store.Store
 	seq                int
@@ -135,16 +95,12 @@ type pubJob struct {
 	known              bool
 }
 
-// cloudflaredInfo is what the app found of cloudflared.
 type cloudflaredInfo struct {
 	checked, busy bool
 	path, version string
-	// at is when the app last looked.
-	at time.Time
+	at            time.Time
 }
 
-// cloudflaredCommand installs cloudflared from a terminal, or is "" on a
-// system with no one way to.
 func cloudflaredCommand() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -155,8 +111,6 @@ func cloudflaredCommand() string {
 	return ""
 }
 
-// cloudflaredPrompt asks an AI agent that can run commands to install
-// cloudflared on this system.
 func cloudflaredPrompt() string {
 	system := map[string]string{"darwin": "macOS", "windows": "Windows"}[runtime.GOOS]
 	if system == "" {
@@ -168,33 +122,22 @@ func cloudflaredPrompt() string {
 	return locales.PubInstallPromptGuide(system, cloudflaredDownloads)
 }
 
-// pubFavicon is the app's icon, its tile cropped from docs/icon/icon.svg,
-// as the public page's favicon.
-//
 //go:embed favicon.png
 var pubFavicon []byte
 
-// cloudflaredMailVersion is the first cloudflared with --allowed-mail.
 const cloudflaredMailVersion = "2026.9.3"
 
 const (
-	// Visitors comment at most this often, and this many times a link.
 	pubPostsPerMinute = 5
 	pubPostsPerLink   = 200
 	pubMaxComment     = 4000
 	pubMaxName        = 80
 )
 
-// pubCSP lets the page run only its own scripts, and frame only the
-// video players the app plays videos in, and its embeds, each of which is
-// served at its own path, sandboxed off the network.
 const pubCSP = "default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'; script-src 'self'; " +
 	"frame-src 'self' " + doc.VideoPlayers + "; media-src 'self' https: http:; " +
 	"connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
-// findCloudflared looks for cloudflared on the login shell's PATH, which
-// an app opened from the Finder lacks, and where its installers put it,
-// and asks it its version.
 func findCloudflared() (path, version string) {
 	name := "cloudflared"
 	dirs := filepath.SplitList(loginPath())
@@ -215,13 +158,12 @@ func findCloudflared() (path, version string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, path, "--version").Output() // #nosec G204 -- cloudflared, found where it installs.
+	out, _ := exec.CommandContext(ctx, path, "--version").Output() // #nosec G204
 	return path, cloudflaredVersion(string(out))
 }
 
 var versionRe = regexp.MustCompile(`\b(\d{4}\.\d+\.\d+)\b`)
 
-// cloudflaredVersion reads the version cloudflared --version says.
 func cloudflaredVersion(out string) string {
 	if m := versionRe.FindStringSubmatch(out); m != nil {
 		return m[1]
@@ -229,15 +171,12 @@ func cloudflaredVersion(out string) string {
 	return ""
 }
 
-// canRestrict says whether this cloudflared can keep a link to emails.
 func (c cloudflaredInfo) canRestrict() bool {
 	return c.version != "" && compareVersions(c.version, cloudflaredMailVersion) >= 0
 }
 
 var tunnelRe = regexp.MustCompile(`https://([a-z0-9-]+)\.trycloudflare\.com`)
 
-// parseTunnelURL finds the Quick Tunnel's address in a line cloudflared
-// logs, or returns "". Its API's address, in errors, is none.
 func parseTunnelURL(line string) string {
 	for _, m := range tunnelRe.FindAllStringSubmatch(line, -1) {
 		if m[1] != "api" {
@@ -247,9 +186,6 @@ func parseTunnelURL(line string) string {
 	return ""
 }
 
-// qrBitmap is text as a QR code, one pixel a module, in black on white
-// with its quiet zone of 4 modules all round; it is nil for text too long
-// for one. The code's own Image leaves the zone out at the top and left.
 func qrBitmap(text string) *ui.Bitmap {
 	code, err := qr.Encode(text, qr.M)
 	if err != nil {
@@ -267,8 +203,6 @@ func qrBitmap(text string) *ui.Bitmap {
 	return ui.NewBitmap(img).Pixelated()
 }
 
-// splitEmails reads the emails field: addresses or *@domain, by commas,
-// spaces or lines.
 func splitEmails(s string) []string {
 	var out []string
 	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t' }) {
@@ -279,7 +213,6 @@ func splitEmails(s string) []string {
 	return out
 }
 
-// validEmails reports whether each is an address or *@domain.
 func validEmails(emails []string) bool {
 	for _, e := range emails {
 		local, domain, ok := strings.Cut(e, "@")
@@ -296,7 +229,6 @@ func randomToken() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// checkCloudflared looks for cloudflared again, off the main thread.
 func (a *App) checkCloudflared() {
 	if a.cloudflared.busy {
 		return
@@ -308,9 +240,6 @@ func (a *App) checkCloudflared() {
 	}()
 }
 
-// startPub shares page through a new public link, in place of any other.
-// A new link for the page already shared, as for other emails or after a
-// failure, keeps the threads visitors started through the old one.
 func (a *App) startPub(page string, emails []string, comments bool) {
 	threads := map[string]bool{}
 	if old := a.pub; old != nil && old.page == page {
@@ -324,11 +253,6 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 		comments: comments, threads: threads, posts: map[string][]time.Time{}}
 	a.setPub(p)
 	a.leasePub()
-	// Agents at work on a page that had no link may read the user's other
-	// pages into it, which its visitors would read: they stop, each
-	// keeping what it did, and those asked for from now on keep to the
-	// page. Its content comes down as it changes elsewhere, as an open
-	// page's does, for visitors to read it as it is saved.
 	if !linked {
 		a.stopRunsOn(page)
 	}
@@ -348,7 +272,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	if len(emails) > 0 {
 		args = append(args, "--allowed-mail", strings.Join(emails, ","))
 	}
-	cmd := exec.Command(a.cloudflared.path, args...) // #nosec G204 -- cloudflared, found where it installs, with arguments Leaflet writes.
+	cmd := exec.Command(a.cloudflared.path, args...) // #nosec G204
 	logs, err := cmd.StderrPipe()
 	if err != nil {
 		fail(err)
@@ -360,7 +284,6 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	}
 	p.cmd = cmd
 	go func() {
-		// The last lines say why it stopped, if it does.
 		var tail []string
 		found := false
 		sc := bufio.NewScanner(logs)
@@ -395,7 +318,6 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 			a.pubFailed(p, msg)
 		})
 	}()
-	// A tunnel that has no address by now will not get one.
 	time.AfterFunc(45*time.Second, func() {
 		a.update(func() {
 			if a.pub == p && p.state == "starting" && p.cmd != nil {
@@ -405,7 +327,6 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	})
 }
 
-// stopPub stops the public link: its address stops working at once.
 func (a *App) stopPub() {
 	if p := a.pub; p != nil {
 		a.setPub(nil)
@@ -414,9 +335,6 @@ func (a *App) stopPub() {
 	}
 }
 
-// pubFailed stops the link p, which failed for why: it stays, failed, for
-// the Share dialog to say why and start it again, and renders no more. A
-// link that stops while the dialog doesn't show it says so in a toast.
 func (a *App) pubFailed(p *pubLink, why string) {
 	p.state, p.err = "failed", why
 	if a.pub == p {
@@ -431,27 +349,18 @@ func (a *App) pubFailed(p *pubLink, why string) {
 	}
 }
 
-// serving says whether the link still serves the page, or will once live.
 func (p *pubLink) serving() bool { return p.state != "failed" }
 
-// pulled reports whether page id's content comes down as it changes
-// elsewhere, as sync brings an open page's (SetOpen): it is open, or a
-// public link serves it.
 func (a *App) pulled(id string) bool {
 	return a.page != nil && a.page.id == id || a.pub != nil && a.pub.page == id && a.pub.serving()
 }
 
-// pullStops has sync no longer bring page id's content down as it changes
-// elsewhere, once neither the page open nor a public link needs it.
 func (a *App) pullStops(id string) {
 	if a.sync != nil && !a.pulled(id) {
 		a.sync.SetOpen(id, false)
 	}
 }
 
-// stopRunsOn stops the agent runs at work on page id on this device, each
-// keeping what it did, as its chat's Stop does. A run in the cloud has no
-// Stop here: it goes on on the server.
 func (a *App) stopRunsOn(id string) {
 	if a.hub == nil {
 		return
@@ -463,9 +372,6 @@ func (a *App) stopRunsOn(id string) {
 	}
 }
 
-// leaseWay is the way the pages go to the other devices, which a public
-// link's lease goes too: "server" signed in, "icloud" while iCloud sync is
-// on, or "" for neither, the pages kept on this device alone.
 func (a *App) leaseWay() string {
 	switch {
 	case a.session.SignedIn:
@@ -476,13 +382,6 @@ func (a *App) leaseWay() string {
 	return ""
 }
 
-// leasePub says that this device serves the public link, while it does,
-// the way the pages go to the other devices (leaseWay): on the server or
-// in iCloud Drive, from when the link starts, or the pages start going
-// another way with one serving, which no device heard of before; until
-// they go there no more, after which what other devices write to the page
-// no longer reaches the page the link serves. Call it again as the way
-// changes: signing in or out, or iCloud sync turning on or off.
 func (a *App) leasePub() {
 	p := a.pub
 	if p == nil || a.hub == nil {
@@ -513,7 +412,6 @@ func (p *pubLink) close() {
 	}
 }
 
-// setPubComments lets visitors comment, or stops them, without a new link.
 func (a *App) setPubComments(on bool) {
 	p := a.pub
 	if p == nil {
@@ -527,8 +425,6 @@ func (a *App) setPubComments(on bool) {
 	}
 }
 
-// pubChanged renders the shared page again once a change to it settles,
-// and stops sharing a page that went.
 func (a *App) pubChanged(ch store.Change) {
 	p := a.pub
 	if p == nil {
@@ -547,7 +443,6 @@ func (a *App) pubChanged(ch store.Change) {
 		a.stopPub()
 		return
 	}
-	// A link that failed shows the page to no one.
 	if !p.serving() {
 		return
 	}
@@ -563,7 +458,6 @@ func (a *App) pubChanged(ch store.Change) {
 	})
 }
 
-// pubJob is what the next render of p needs, read on the main thread.
 func (a *App) pubJob(p *pubLink) pubJob {
 	p.seq++
 	titles := a.pageTitles()
@@ -574,8 +468,6 @@ func (a *App) pubJob(p *pubLink) pubJob {
 		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead("/"+p.token+"/", comments)}
 }
 
-// pageTitles are the pages' titles for display, by ID, for work off the
-// main thread.
 func (a *App) pageTitles() map[string]string {
 	titles := map[string]string{}
 	for _, pg := range a.pages {
@@ -584,8 +476,6 @@ func (a *App) pageTitles() map[string]string {
 	return titles
 }
 
-// render renders the page for visitors, off the main thread, unless a
-// later render is already shown.
 func (p *pubLink) render(job pubJob) {
 	c := job.st.Content(job.page)
 	if c == nil {
@@ -598,7 +488,6 @@ func (p *pubLink) render(job pubJob) {
 	if len(job.threads) > 0 {
 		all, _ := job.st.Threads(job.page)
 		for _, t := range all {
-			// A thread the owner resolved is done with.
 			if job.threads[t.Root.ID] && !t.Root.Resolved {
 				threads[t.Root.BlockID] = append(threads[t.Root.BlockID], t)
 			}
@@ -615,8 +504,6 @@ func (p *pubLink) render(job pubJob) {
 		Lang:   i18n.Locale(),
 		Head:   job.head,
 		Tail:   commentsPanel(c, threads, job.comments),
-		// A Bilibili video's player in a phone's browser asks Bilibili for
-		// nothing but what it plays given its part, which is asked here.
 		Video: func(v doc.Video) doc.Video {
 			if job.known {
 				return web.KnownVideoPart(v)
@@ -625,7 +512,6 @@ func (p *pubLink) render(job pubJob) {
 			return v
 		},
 		Script: func(name string) string {
-			// Visitors see the link's threads even once commenting stops.
 			if name == "comments" && !job.comments && len(threads) == 0 {
 				return ""
 			}
@@ -652,14 +538,10 @@ func (p *pubLink) render(job pubJob) {
 	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, blocks: blocks}
 }
 
-// pubServer serves the shared page's files under its secret path, by
-// the names it gives them as the page renders.
 type pubServer struct {
 	prefix string
 	files  map[string]pubFile
-	// names are the pictures' names by path: a picture shown twice is
-	// served once.
-	names map[string]string
+	names  map[string]string
 }
 
 func (s *pubServer) Image(path, typ string) string {
@@ -673,8 +555,6 @@ func (s *pubServer) Image(path, typ string) string {
 
 func (s *pubServer) File(path, name string) string {
 	served := strconv.Itoa(len(s.files)+1) + servedExt(name)
-	// Audio and video say what they are, for the page's players; anything
-	// else is bytes to download.
 	typ := "application/octet-stream"
 	if t := doc.FileMediaType(name, ""); strings.HasPrefix(t, "audio/") || strings.HasPrefix(t, "video/") {
 		typ = t
@@ -689,9 +569,6 @@ func (s *pubServer) Audio(path string) string {
 	return s.prefix + "f/" + served
 }
 
-// servedExt is the extension a file of name is served with, in lower
-// case: one of letters and digits alone, which its address takes as it
-// is, or none.
 func servedExt(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
 	for _, r := range strings.TrimPrefix(ext, ".") {
@@ -702,9 +579,6 @@ func servedExt(name string) string {
 	return ext
 }
 
-// pubHead is the visitor page's look, with the app's icon under prefix,
-// and its words for the comments script, which lets visitors comment
-// while comments says they may.
 func pubHead(prefix string, comments bool) string {
 	var b strings.Builder
 	b.WriteString(`<link rel="icon" type="image/png" href="` + html.EscapeString(prefix+pubStatic().names["favicon.png"]) + `">`)
@@ -727,14 +601,10 @@ func pubHead(prefix string, comments bool) string {
 	return b.String()
 }
 
-// pubLook is the visitor page in Leaflet's colors, light and dark. It is
-// written the first time a page is shared.
 var pubLook = sync.OnceValue(func() string {
 	return pageLook(theme.For(false)) + "\n@media (prefers-color-scheme:dark){" + pageLook(theme.For(true)) + "}\n"
 })
 
-// pageLook is a web page of a page in a palette's colors: its tokens,
-// MyGo's colors of code tokens, and the callouts' tints.
 func pageLook(pal *theme.Palette) string {
 	ct := editor.CodeTheme(pal)
 	var b strings.Builder
@@ -764,7 +634,6 @@ func pageLook(pal *theme.Palette) string {
 	return b.String()
 }
 
-// cssColor writes a color as CSS.
 func cssColor(c ui.Color) string {
 	if c.A == 255 {
 		return hexOf(c)
@@ -772,8 +641,6 @@ func cssColor(c ui.Color) string {
 	return fmt.Sprintf("rgba(%d,%d,%d,%.3g)", c.R, c.G, c.B, float64(c.A)/255)
 }
 
-// codeHTML colors code with MyGo's highlighting of its language, as the
-// app's code blocks are, each token in a class of its kind.
 func codeHTML(code, language string) string {
 	lang := codeeditor.LanguageNamed(language)
 	if lang == nil || lang.Tokenizer == nil {
@@ -804,9 +671,6 @@ func codeHTML(code, language string) string {
 	return b.String()
 }
 
-// pubCommentBody is a comment as the panel shows it: its Markdown's
-// formatting, escaped, or that it was deleted. Colors stay out: a visitor
-// writes these, and could hide words in the paper's color.
 func pubCommentBody(c store.Comment) string {
 	if !c.DeletedAt.IsZero() {
 		return html.EscapeString(commentBody(c))
@@ -814,9 +678,6 @@ func pubCommentBody(c store.Comment) string {
 	return doc.FromMarkdown(c.Body).Uncolored().HTML()
 }
 
-// commentsPanel writes the comments visitors see: a badge for each block
-// with threads, which the script sets in the margin by its block, and the
-// Comments panel it opens, with the threads in the page's order.
 func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments bool) string {
 	if len(threads) == 0 {
 		return ""
@@ -858,12 +719,8 @@ func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments b
 		groups.String() + `</div></aside>`
 }
 
-// squash is text with its runs of spaces and lines as one space, as a
-// browser's selection and a block's text both read.
 func squash(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// blockQuote is a line of a block's text, or its title, over its threads
-// in the panel.
 func blockQuote(n *doc.Node) string {
 	q := n.Delta().Plain()
 	for _, k := range []string{"title", "alt", "caption"} {
@@ -878,12 +735,8 @@ func blockQuote(n *doc.Node) string {
 	return q
 }
 
-// pubHandler serves the shared page under its secret path, and nothing
-// else.
 func (a *App) pubHandler(p *pubLink) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// What is refused is answered with its status and no words: a
-		// visitor's browser says what it means in their language.
 		refuse := func(status int) { w.WriteHeader(status) }
 		h := w.Header()
 		h.Set("Content-Security-Policy", pubCSP)
@@ -921,9 +774,6 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			serve("text/html; charset=utf-8", snap.html)
 		case static:
-			// Named by what it is, it is the same as long as its name is:
-			// a visitor's browser keeps it, and loads the page again, as
-			// after a comment, without it.
 			h.Set("Cache-Control", "public, max-age=31536000, immutable")
 			h.Set("Content-Type", asset.typ)
 			_, _ = w.Write(asset.body)
@@ -933,8 +783,6 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				refuse(http.StatusNotFound)
 				return
 			}
-			// The embed runs in an opaque origin even when opened alone,
-			// and reaches nothing but itself.
 			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
 			serve("text/html; charset=utf-8", pubEmbedPage(src))
 		case strings.HasPrefix(rest, "f/"):
@@ -943,7 +791,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				refuse(http.StatusNotFound)
 				return
 			}
-			file, err := os.Open(f.path) // #nosec G304 -- a file of the app's own.
+			file, err := os.Open(f.path) // #nosec G304
 			if err != nil {
 				refuse(http.StatusNotFound)
 				return
@@ -954,11 +802,9 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				refuse(http.StatusNotFound)
 				return
 			}
-			// Without a type, the file's first bytes say it.
 			if f.typ != "" {
 				h.Set("Content-Type", f.typ)
 			}
-			// A file downloads, never opens as a page of the link's.
 			if f.name != "" {
 				h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.name}))
 			}
@@ -975,11 +821,7 @@ var (
 	errPubNoAnswer = errors.New("the app did not answer")
 )
 
-// pubComment takes a visitor's comment, or reply, and stores it on the
-// main thread; the page renders again with it before the answer.
 func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
-	// A refusal says why in the app's log, for its owner, quoted: much of
-	// it is the visitor's. The page words it by its status alone.
 	refuse := func(status int, why string) {
 		log.Printf("public link: comment refused (%d): %q", status, why)
 		w.WriteHeader(status)
@@ -989,8 +831,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusMethodNotAllowed, r.Method)
 		return
 	}
-	// Only the page itself posts: from the tunnel's address, or the one
-	// the request came to, sending JSON, which another site's form cannot.
 	p.mu.Lock()
 	host := p.host
 	p.mu.Unlock()
@@ -1008,9 +848,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusBadRequest, err.Error())
 		return
 	}
-	// A visitor comments as the name they give, on a link kept to emails
-	// too: cloudflared checks a visitor's email itself and tells the page
-	// none, so a header that names one is the visitor's own.
 	in.Name, in.Body, in.Quote = strings.TrimSpace(in.Name), strings.TrimSpace(in.Body), squash(in.Quote)
 	if in.Body == "" || in.Name == "" || utf8.RuneCountInString(in.Body) > pubMaxComment || utf8.RuneCountInString(in.Name) > pubMaxName {
 		refuse(http.StatusBadRequest, "no name or text, or too long")
@@ -1027,7 +864,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 	case !p.comments:
 		status, why = http.StatusForbidden, "comments are off"
 	case in.Parent != "":
-		// A reply quotes nothing: its thread does.
 		in.Quote = ""
 		if !p.threads[in.Parent] {
 			status, why = http.StatusBadRequest, "no thread "+in.Parent
@@ -1037,7 +873,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			status, why = http.StatusBadRequest, "no block "+in.Block
 		}
-		// A quote is text selected in the block: anything else is not.
 		if in.Quote != "" && !strings.Contains(text, in.Quote) {
 			in.Quote = ""
 		}
@@ -1062,9 +897,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		err error
 	}
 	done := make(chan result, 1)
-	// started is set once the main thread takes the comment to store,
-	// abandoned once the visitor was told it was not stored: then it
-	// isn't. Both are under p.mu.
 	started, abandoned := false, false
 	a.update(func() {
 		p.mu.Lock()
@@ -1085,8 +917,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 				done <- result{err: err}
 				return
 			}
-			// Visitors no longer see a thread the owner resolved or
-			// deleted, and it takes no more of their replies.
 			if root.Resolved || !root.DeletedAt.IsZero() {
 				done <- result{err: errPubNoThread}
 				return
@@ -1105,8 +935,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 	select {
 	case res = <-done:
 	case <-time.After(pubAnswerWait):
-		// Not yet taken to store, the comment never is; taken, it is
-		// waited for, to say how that went.
 		p.mu.Lock()
 		taken := started
 		abandoned = !taken
@@ -1118,7 +946,6 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if res.err != nil {
-		// A comment not stored counts against no one's limit.
 		p.mu.Lock()
 		if i := slices.Index(p.posts[visitor], now); i >= 0 {
 			p.posts[visitor] = slices.Delete(p.posts[visitor], i, i+1)
@@ -1135,34 +962,22 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(status, res.err.Error())
 		return
 	}
-	// The page renders again with the comment before the answer, for the
-	// visitor's page to show it as it loads again: with its videos as
-	// known, asking no site, which the render the comment's change asks
-	// for shortly after does.
 	job := res.job
 	job.known = true
 	p.render(job)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pubAsset is a file the shared page serves that never changes while the
-// app runs: a script or its icon, of type typ.
 type pubAsset struct {
 	typ  string
 	body []byte
 }
 
-// pubAssets are the shared page's pubAsset files, by the names they are
-// served at, and those names by the names the page knows them by, as
-// "math.js": each served name has a hash of the file in it, so that one
-// changed in another version of the app is never one a browser kept.
 type pubAssets struct {
 	names  map[string]string
 	assets map[string]pubAsset
 }
 
-// pubStatic are the shared page's pubAsset files, made the first time a
-// page is shared.
 var pubStatic = sync.OnceValue(func() pubAssets {
 	a := pubAssets{names: map[string]string{}, assets: map[string]pubAsset{}}
 	add := func(name, ext, typ, body string) {
@@ -1181,23 +996,14 @@ var pubStatic = sync.OnceValue(func() pubAssets {
 	return a
 })
 
-// pubAnswerWait is how long a visitor's comment waits for the main
-// thread to take it.
 var pubAnswerWait = 15 * time.Second
 
-// pubEmbedPage is an embed's HTML for a visitor's sandboxed frame: in the
-// visitor's light or dark, as rendered.EmbedPage gives it the app's, and telling
-// the page how tall it is, so its frame grows to fit.
 func pubEmbedPage(src string) string {
 	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + rendered.EmbedNoRTC +
 		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + rendered.EmbedFit
 	return rendered.LeadWith(meta, src)
 }
 
-// recordingScript plays a recording from a line of its transcript, or from
-// a link to a moment of it, as a click on one does in the app, unless the
-// click ends selecting text. A link to one elsewhere in the page shows it
-// first.
 const recordingScript = `document.addEventListener("click", function (e) {
   var sel = getSelection();
   if (!e.target.closest || sel && !sel.isCollapsed) return;
@@ -1221,13 +1027,6 @@ const recordingScript = `document.addEventListener("click", function (e) {
 });
 `
 
-// videoScript plays a video of the page from a time in its notes, or from
-// a link to a moment of it, as a click on one does in the app, unless the
-// click ends selecting text: its player goes there, where its site's takes
-// word from the page and has loaded, or loads again there. A link to a
-// video elsewhere in the page shows it first. One player plays at a time,
-// as in the app: one started so, or a file or a recording started from
-// its own controls, pauses the others, as far as their sites let them.
 const videoScript = rendered.VideoSeekJS + `(function () {
   // A player is ready once its site's page has loaded in its frame. One
   // that came before this script did, which runs once the page is read,
@@ -1268,9 +1067,6 @@ const videoScript = rendered.VideoSeekJS + `(function () {
 })();
 `
 
-// embedScript grows each embed's frame to the height its content says,
-// as the app's embed blocks grow, from the height the block keeps up to
-// 1200 pixels.
 const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;
@@ -1279,9 +1075,6 @@ const embedScript = `addEventListener("message", function (e) {
   });
 });`
 
-// diagramScript draws the page's diagrams with Pele and zooms them with
-// rendered.ZoomScript, which come before it. Each has a button that shows it alone,
-// filling the window, to zoom and move about it with the app's bar.
 const diagramScript = `{
   const word = (n) => document.querySelector('meta[name="leaflet-' + n + '"]')?.content || "";
   const button = (cls, label, icon) => {
@@ -1344,9 +1137,6 @@ const diagramScript = `{
   });
 }`
 
-// diagramCSS is the look of a diagram's full-window button, which shows
-// over the diagram while it is pointed at, or under it on a touch screen,
-// and of the diagram filling the window under its bar.
 const diagramCSS = `.diagram{position:relative}
 .dbtn{display:flex;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer}
 .dbtn:hover{color:var(--fg)}
@@ -1419,10 +1209,6 @@ background:var(--bg);color:var(--fg)}
 .cform button[type=submit]{background:var(--link);border-color:var(--link);color:#fff}
 @media (max-width:600px){.cform input,.cform textarea{font-size:16px}}`
 
-// commentsScript sets a badge by each block with threads, which previews
-// them while hovered and opens them in the Comments panel when clicked.
-// Where visitors may comment, a button by the block under the pointer
-// comments on it, and each thread has Reply.
 const commentsScript = `(function () {
   function word(n) { var m = document.querySelector('meta[name="leaflet-' + n + '"]'); return m ? m.content : ""; }
   var main = document.querySelector("main");

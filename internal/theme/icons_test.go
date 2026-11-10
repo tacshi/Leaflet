@@ -7,8 +7,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestIconsParse checks that every bundled icon draws, as a hand-made one
-// such as record.svg may not.
 func TestIconsParse(t *testing.T) {
 	for _, name := range icons.Names() {
 		data, ok := icons.Read(name)

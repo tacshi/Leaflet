@@ -5,17 +5,16 @@ import (
 	"time"
 )
 
-// Job is an agent run.
 type Job struct {
 	ID             string
 	PageID         string
-	Surface        string // inline | selection | sidebar | comment
+	Surface        string
 	FocusBlockIDs  []string
 	CommentID      string
 	ConversationID string
 	ProviderID     string
 	Model          string
-	Status         string // queued | running | done | failed | reverted
+	Status         string
 	Request        map[string]any
 	Result         map[string]any
 	Error          string
@@ -23,7 +22,6 @@ type Job struct {
 	UpdatedAt      time.Time
 }
 
-// PutJob stores an agent run.
 func (s *Store) PutJob(j Job) error {
 	focus, _ := json.Marshal(j.FocusBlockIDs)
 	if j.FocusBlockIDs == nil {
@@ -50,8 +48,6 @@ func (s *Store) PutJob(j Job) error {
 	return err
 }
 
-// SetJobStatus changes an agent run's status, and reports whether this
-// device keeps its job: a local run's, which has no row on the server.
 func (s *Store) SetJobStatus(id, status string) (bool, error) {
 	res, err := s.db.Exec(`UPDATE ai_jobs SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UnixMilli(), id)
 	if err != nil {

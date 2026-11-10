@@ -7,24 +7,17 @@ import (
 	"leaflet/internal/doc"
 )
 
-// maxCommentLen is the most characters a comment's body or quote has, as
-// the server's comments table checks (comments_body_length,
-// comments_quote_length): a comment with a longer one would be refused
-// every time it went up.
 const maxCommentLen = 100000
 
-// ClampComment is a comment's body or quote as it is kept: its first
-// maxCommentLen characters, and nothing else changed.
 func ClampComment(text string) string { return clampChars(text, maxCommentLen) }
 
-// Comment is one comment of a thread anchored to a block.
 type Comment struct {
 	ID              string
 	PageID          string
 	BlockID         string
 	ParentCommentID string
 	AuthorID        string
-	AuthorKind      string // user | agent
+	AuthorKind      string
 	AuthorName      string
 	Body            string
 	Quote           string
@@ -34,13 +27,11 @@ type Comment struct {
 	DeletedAt       time.Time
 }
 
-// Thread is a first comment and its replies.
 type Thread struct {
 	Root    Comment
 	Replies []Comment
 }
 
-// All is the root then the replies.
 func (t Thread) All() []Comment { return append([]Comment{t.Root}, t.Replies...) }
 
 const commentCols = `id, page_id, block_id, parent_comment_id, author_id, author_kind, author_name, body, quote, resolved, created_at, updated_at, deleted_at`
@@ -56,36 +47,27 @@ func scanComment(sc scanner) (Comment, error) {
 	return c, err
 }
 
-// Comment returns one comment.
 func (s *Store) Comment(id string) (Comment, error) { return commentIn(s.db, id) }
 
 func commentIn(q querier, id string) (Comment, error) {
 	return scanComment(q.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
 }
 
-// HasGuestComments reports whether a page has a comment a visitor of its
-// public link posted, deleted ones too.
 func (s *Store) HasGuestComments(pageID string) (bool, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM comments WHERE page_id = ? AND author_kind = 'guest'`, pageID).Scan(&n)
 	return n > 0, err
 }
 
-// GuestCommented returns the pages HasGuestComments reports, all at once.
 func (s *Store) GuestCommented() (map[string]bool, error) {
 	return pageSet(s.db.Query(`SELECT DISTINCT page_id FROM comments WHERE author_kind = 'guest'`))
 }
 
-// AllComments returns every comment, deleted ones too.
 func (s *Store) AllComments() ([]Comment, error) {
 	rows, err := s.db.Query(`SELECT ` + commentCols + ` FROM comments ORDER BY created_at`)
 	return collect(rows, err, scanComment)
 }
 
-// Threads returns a page's comment threads, oldest first. A thread whose
-// first comment was deleted stays while it has replies, that comment with
-// DeletedAt set, so the replies stay readable: show it as deleted, never
-// its text.
 func (s *Store) Threads(pageID string) ([]Thread, error) {
 	rows, err := s.db.Query(`SELECT `+commentCols+` FROM comments WHERE page_id = ? ORDER BY created_at`, pageID)
 	all, err := collect(rows, err, scanComment)
@@ -111,13 +93,8 @@ func (s *Store) Threads(pageID string) ([]Thread, error) {
 	return out, nil
 }
 
-// PutComment stores a comment row as it is, without queueing it to go up:
-// for tests, which set rows up so.
 func (s *Store) PutComment(c Comment) error { return putComment(s.db, c) }
 
-// putComment stores a comment. One deleted keeps no text (protocol §7),
-// whether deleted here or where it came from: its row stays only so its
-// replies keep their thread.
 func putComment(q querier, c Comment) error {
 	if !c.DeletedAt.IsZero() {
 		c.Body, c.Quote = "", ""
@@ -132,14 +109,10 @@ func putComment(q querier, c Comment) error {
 	return err
 }
 
-// changeComments changes the comments where says, as stored, and queues
-// the columns fn changed, in one transaction: a resolve made offline then
-// no longer undoes a delete made elsewhere, nor a delete a resolve. It
-// returns how many it changed.
 func (s *Store) changeComments(label string, fn func(*Comment), where string, args ...any) (int, error) {
 	var all []Comment
 	err := s.inTx(func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT `+commentCols+` FROM comments WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
+		rows, err := tx.Query(`SELECT `+commentCols+` FROM comments WHERE `+where, args...) // #nosec G202
 		if all, err = collect(rows, err, scanComment); err != nil {
 			return err
 		}
@@ -148,11 +121,6 @@ func (s *Store) changeComments(label string, fn func(*Comment), where string, ar
 			old := CommentToRemote(c)
 			fn(&c)
 			c.UpdatedAt = now
-			// A deleted comment's text goes with it, here and wherever its
-			// deletion goes, as the server's trigger clears it there: the
-			// change goes up as the deletion alone, which the page's owner
-			// may make of another's comment, whose text only its author
-			// may change.
 			if !c.DeletedAt.IsZero() {
 				c.Body, c.Quote = "", ""
 				old["body"], old["quote"] = "", nil
@@ -174,8 +142,6 @@ func (s *Store) changeComments(label string, fn func(*Comment), where string, ar
 	return len(all), nil
 }
 
-// saveComment stores a comment changed here and queues it to go up, in one
-// transaction.
 func (s *Store) saveComment(c Comment, label string) error {
 	err := s.inTx(func(tx *sql.Tx) error {
 		if err := putComment(tx, c); err != nil {
@@ -191,9 +157,6 @@ func (s *Store) saveComment(c Comment, label string) error {
 	return nil
 }
 
-// AddComment adds a comment, or a reply when parentID is set, its body and
-// quote cut to the characters one may have (ClampComment). An empty
-// authorName is the user's.
 func (s *Store) AddComment(pageID, blockID, body, parentID, quote, authorKind, authorName string) (Comment, error) {
 	sess := s.Session()
 	if authorKind == "" {
@@ -215,7 +178,6 @@ func (s *Store) AddComment(pageID, blockID, body, parentID, quote, authorKind, a
 	return c, s.saveComment(c, label)
 }
 
-// SetResolved resolves or reopens a thread.
 func (s *Store) SetResolved(rootID string, resolved bool) error {
 	label := "reopened"
 	if resolved {
@@ -228,7 +190,6 @@ func (s *Store) SetResolved(rootID string, resolved bool) error {
 	return err
 }
 
-// DeleteComment deletes a comment, and its text with it.
 func (s *Store) DeleteComment(id string) error {
 	n, err := s.changeComments("deleted comment", func(c *Comment) { c.DeletedAt = time.Now() }, `id = ?`, id)
 	if err == nil && n == 0 {

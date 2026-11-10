@@ -1,7 +1,5 @@
 import Foundation
 
-/// JSONValue is any JSON value, as a block's data holds them: the core
-/// owns what the keys mean, and the app reads the ones it knows.
 enum JSONValue: Codable, Hashable, Sendable {
     case null
     case bool(Bool)

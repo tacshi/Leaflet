@@ -1,5 +1,3 @@
-/// Lucide maps the Lucide icons the core names, as the desktop draws them,
-/// to SF Symbols.
 enum Lucide {
     static func symbol(_ name: String) -> String {
         switch name {

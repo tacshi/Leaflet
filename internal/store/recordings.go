@@ -12,7 +12,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-// Segment is one timestamped piece of a transcript.
 type Segment struct {
 	StartMs int    `json:"start_ms"`
 	EndMs   int    `json:"end_ms"`
@@ -20,7 +19,6 @@ type Segment struct {
 	Speaker string `json:"speaker,omitempty"`
 }
 
-// Recording is the audio and transcript of a recording block.
 type Recording struct {
 	ID          string
 	PageID      string
@@ -30,7 +28,7 @@ type Recording struct {
 	DurationMs  int
 	SttProvider string
 	SttModel    string
-	Status      string // recording | transcribing | ready | failed
+	Status      string
 	Transcript  []Segment
 	Language    string
 	Error       string
@@ -54,21 +52,17 @@ func scanRecording(dir string, sc scanner) (Recording, error) {
 	return r, err
 }
 
-// Recording returns one recording.
 func (s *Store) Recording(id string) (Recording, error) { return recordingIn(s.db, s.Dir, id) }
 
 func recordingIn(q querier, dir, id string) (Recording, error) {
 	return scanRecording(dir, q.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id))
 }
 
-// Recordings returns every recording, newest first.
 func (s *Store) Recordings() ([]Recording, error) {
 	rows, err := s.db.Query(`SELECT ` + recordingCols + ` FROM recordings ORDER BY created_at DESC`)
 	return collect(rows, err, func(sc scanner) (Recording, error) { return scanRecording(s.Dir, sc) })
 }
 
-// PutRecording stores a recording row as it is, without queueing it to go
-// up: for tests, which set rows up so.
 func (s *Store) PutRecording(r Recording) error { return putRecording(s.db, s.Dir, r) }
 
 func putRecording(q querier, dir string, r Recording) error {
@@ -87,7 +81,6 @@ func putRecording(q querier, dir string, r Recording) error {
 	return err
 }
 
-// CreateRecording starts a recording.
 func (s *Store) CreateRecording(pageID, blockID, provider, model, localPath, language string) (Recording, error) {
 	now := time.Now()
 	r := Recording{ID: doc.NewRowID(), PageID: pageID, BlockID: blockID, LocalPath: localPath, SttProvider: provider,
@@ -99,34 +92,16 @@ func (s *Store) CreateRecording(pageID, blockID, provider, model, localPath, lan
 	return r, nil
 }
 
-// UpdateRecording changes a recording and queues it once it is no longer
-// recording, in one transaction, over the recording as stored then.
 func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, error) {
 	return s.updateRecording(id, "", false, fn)
 }
 
-// FinishRecording is UpdateRecording for a recording whose audio is whole,
-// as one stopped or transcribed: with upload, its audio goes up too, unless
-// it has, queued in the same transaction. Queued apart, a quit between the
-// two would keep the audio here alone, as nothing queues it again for a
-// recording finished.
 func (s *Store) FinishRecording(id string, upload bool, fn func(*Recording)) (Recording, error) {
 	return s.updateRecording(id, "", upload, fn)
 }
 
-// IfStatusKey names, in a queued recording, the status the row elsewhere
-// must still have for the change to apply there. A recording settled
-// after a quit stopped its transcription (SettleRecording) goes so: the
-// server may have finished the transcription meanwhile, or the device
-// that started it, and their transcript would be lost under this one.
 const IfStatusKey = "_if_status"
 
-// SettleRecording is UpdateRecording for a recording a quit left at
-// status, which nothing here finishes now: the change it makes for the
-// page applies on the server and the other devices only while the
-// recording is still at status there, and gives way to the row they have
-// otherwise. With status "", it is FinishRecording. Its audio goes up with
-// upload, as FinishRecording's does.
 func (s *Store) SettleRecording(id, status string, upload bool, fn func(*Recording)) (Recording, error) {
 	return s.updateRecording(id, status, upload, fn)
 }
@@ -172,7 +147,6 @@ func (s *Store) updateRecording(id, ifStatus string, upload bool, fn func(*Recor
 	return r, nil
 }
 
-// QueueUpload queues a recording's audio for upload.
 func (s *Store) QueueUpload(r Recording) error {
 	if r.LocalPath == "" {
 		return nil
@@ -180,23 +154,14 @@ func (s *Store) QueueUpload(r Recording) error {
 	return s.Queue("storage", "recordings/"+r.ID, audioUpload(s.Dir, r), "audio waiting to upload", r.PageID)
 }
 
-// audioUpload is the entry that uploads a recording's audio on this device.
 func audioUpload(dir string, r Recording) map[string]any {
 	return map[string]any{"bucket": "recordings", "local_path": relPath(dir, r.LocalPath), "content_type": "audio/wav", "recording_id": r.ID}
 }
 
-// DownloadedAudio keeps a recording's audio downloaded from where it went
-// up, whole on the disk before its row names it, as DownloadedFile keeps a
-// file's, for a copy of its page to copy
-// (CopyNeeds). A recording removed before or while it came keeps none.
 func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
 	return s.DownloadedAudioFrom(id, bytes.NewReader(data))
 }
 
-// DownloadedAudioFrom is DownloadedAudio for audio read from r as it
-// comes, written to the disk as it is read, never all in memory, as a
-// recording of hours is hundreds of megabytes. One that fails part way
-// keeps nothing.
 func (s *Store) DownloadedAudioFrom(id string, r io.Reader) (string, error) {
 	if _, err := s.Recording(id); err != nil {
 		return "", err
@@ -220,7 +185,6 @@ func (s *Store) DownloadedAudioFrom(id string, r io.Reader) (string, error) {
 	return local, nil
 }
 
-// ClearLocalPath forgets a recording's audio on this device.
 func (s *Store) ClearLocalPath(id string) error {
 	if _, err := s.db.Exec(`UPDATE recordings SET local_path = NULL WHERE id = ?`, id); err != nil {
 		return err

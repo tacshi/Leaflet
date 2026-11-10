@@ -1,7 +1,3 @@
-// Package doc is the page document model shared with the backend: blocks
-// with stable IDs in appflowy's node JSON, per-block edit times and
-// tombstones, inline markdown for agents, block ops and their inverses, and
-// the per-block merge used by sync. See docs/protocol.md §1–3.
 package doc
 
 import (
@@ -13,9 +9,6 @@ import (
 	"time"
 )
 
-// Node is one block: appflowy_editor's node JSON plus a stable ID. Data
-// holds only JSON values (maps, slices, strings, numbers, booleans), so two
-// equal blocks always encode alike.
 type Node struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
@@ -23,7 +16,6 @@ type Node struct {
 	Children []*Node        `json:"children,omitempty"`
 }
 
-// Block types that hold rich text in data.delta; a code block's is plain.
 var TextTypes = map[string]bool{
 	"paragraph":     true,
 	"heading":       true,
@@ -36,7 +28,6 @@ var TextTypes = map[string]bool{
 	"toggle_list":   true,
 }
 
-// Block types that may hold nested blocks in children.
 var NestableTypes = map[string]bool{
 	"bulleted_list": true,
 	"numbered_list": true,
@@ -44,13 +35,8 @@ var NestableTypes = map[string]bool{
 	"toggle_list":   true,
 }
 
-// TypedKeys are a text block's data that belong to its type, which it
-// loses as it becomes another kind of block.
 var TypedKeys = []string{"checked", "due", "level", "language", "tone", "collapsed"}
 
-// TypeData is the data a text block takes as it becomes typ: a heading's
-// level, a to-do unchecked, a code block of no language, an info callout
-// and an open toggle.
 func TypeData(typ string, level int) map[string]any {
 	switch typ {
 	case "heading":
@@ -67,10 +53,8 @@ func TypeData(typ string, level int) map[string]any {
 	return map[string]any{}
 }
 
-// IsText reports whether the block holds rich text.
 func (n *Node) IsText() bool { return TextTypes[n.Type] }
 
-// Clone returns a deep copy of the block and its subtree.
 func (n *Node) Clone() *Node {
 	if n == nil {
 		return nil
@@ -85,7 +69,6 @@ func (n *Node) Clone() *Node {
 	return out
 }
 
-// Delta returns the block's rich text.
 func (n *Node) Delta() Delta {
 	if n == nil || n.Data == nil {
 		return nil
@@ -93,7 +76,6 @@ func (n *Node) Delta() Delta {
 	return DeltaFromJSON(n.Data["delta"])
 }
 
-// SetDelta stores rich text in the block.
 func (n *Node) SetDelta(d Delta) {
 	if n.Data == nil {
 		n.Data = map[string]any{}
@@ -101,7 +83,6 @@ func (n *Node) SetDelta(d Delta) {
 	n.Data["delta"] = d.JSON()
 }
 
-// Str returns a string field of the block's data.
 func (n *Node) Str(key string) string {
 	if n == nil || n.Data == nil {
 		return ""
@@ -110,7 +91,6 @@ func (n *Node) Str(key string) string {
 	return s
 }
 
-// Int returns a number field of the block's data, or def.
 func (n *Node) Int(key string, def int) int {
 	if n == nil || n.Data == nil {
 		return def
@@ -118,7 +98,6 @@ func (n *Node) Int(key string, def int) int {
 	return AsInt(n.Data[key], def)
 }
 
-// Bool returns a boolean field of the block's data.
 func (n *Node) Bool(key string) bool {
 	if n == nil || n.Data == nil {
 		return false
@@ -127,7 +106,6 @@ func (n *Node) Bool(key string) bool {
 	return b
 }
 
-// Set sets a field of the block's data.
 func (n *Node) Set(key string, v any) {
 	if n.Data == nil {
 		n.Data = map[string]any{}
@@ -135,11 +113,6 @@ func (n *Node) Set(key string, v any) {
 	n.Data[key] = normalize(v)
 }
 
-// AsInt reads a JSON number as an int, whole numbers only being kept of a
-// fraction. One beyond the integers a JSON number holds exactly (±2^53),
-// as another client, or a hostile one, can write, is def: as an int it
-// would be the platform's to choose, the largest on arm64, and a table
-// sized from it overflows.
 func AsInt(v any, def int) int {
 	var i int64
 	switch x := v.(type) {
@@ -166,12 +139,8 @@ func AsInt(v any, def int) int {
 	return int(i)
 }
 
-// maxExactInt is the largest integer a JSON number, a float64, holds
-// exactly.
 const maxExactInt = 1 << 53
 
-// AsFloat reads a JSON number as a float64. Only a finite one is: JSON
-// has no NaN or infinity, so data holding one could not be stored.
 func AsFloat(v any) (float64, bool) {
 	var f float64
 	switch x := v.(type) {
@@ -196,8 +165,6 @@ func AsFloat(v any) (float64, bool) {
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-// NewBlockID returns a short random block ID, unique within a page, which
-// is all block IDs need to be.
 func NewBlockID() string {
 	b := make([]byte, 8)
 	max := big.NewInt(int64(len(alphabet)))
@@ -211,7 +178,6 @@ func NewBlockID() string {
 	return string(b)
 }
 
-// NewRowID returns a UUID v4 for rows that also live in Postgres.
 func NewRowID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -222,12 +188,8 @@ func NewRowID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// NowMs is the time in milliseconds since the epoch.
 func NowMs() int64 { return time.Now().UnixMilli() }
 
-// normalize turns a Go value into plain JSON values through an encoding
-// round trip, so typed slices and structs stored in Data encode the same as
-// decoded JSON does.
 func normalize(v any) any {
 	switch v.(type) {
 	case nil, string, bool, float64, int, int64, map[string]any, []any:
@@ -270,7 +232,6 @@ func cloneValue(v any) any {
 	}
 }
 
-// canonical encodes v with map keys sorted, as signatures compare.
 func canonical(v any) string {
 	raw, _ := json.Marshal(v)
 	return string(raw)

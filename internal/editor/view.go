@@ -13,7 +13,6 @@ import (
 
 const blinkPeriod = 530 * time.Millisecond
 
-// View builds the editor.
 func (e *Editor) View(c *ui.Context) ui.Element {
 	pal := theme.Of(c)
 	e.services = c.Services()
@@ -25,12 +24,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	}
 	root.HandleInput(e.HandleInput)
 	e.focused = root.Focused()
-	// The root paints before its blocks, which are where it is, as they
-	// were last drawn, until they draw again.
 	root.Draw(func(_ *ui.Painter, r ui.Rect) { e.root = r })
-	// The page's own text is drawn here, not in MyGo's text inputs, so
-	// MyGo's EditItems would add nothing: Cut, Copy and Paste are the
-	// editor's.
 	root.PopoverMenu(func(m *ui.Menu) {
 		some := !e.Collapsed() || e.blockSelected()
 		if m.Item(locales.EditorCut()).Disabled(!some || e.ReadOnly).Chosen() {
@@ -70,8 +64,6 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 		}
 	})
 	e.reshape()
-	// The chips shown fill this in again as they draw, and the blocks
-	// built laid as they build.
 	clear(e.chips)
 	clear(e.laid)
 	e.laidTop = root.Bounds().Y
@@ -86,9 +78,6 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	return root
 }
 
-// shapeEntry is a block as what folds hide, the units and the blocks'
-// depths are worked out from it: which it is and where in the tree, its
-// kind, and for a heading or a toggle, its level and whether it is folded.
 type shapeEntry struct {
 	n       *doc.Node
 	id, typ string
@@ -97,10 +86,6 @@ type shapeEntry struct {
 	folded  bool
 }
 
-// shaped is what the page's blocks were worked out to be as it last
-// built: the blocks as shapeEntry has them, in order, and from them what
-// folds hide, each unit's place and each block's depth. at is the page's
-// gen then.
 type shaped struct {
 	entries []shapeEntry
 	hid     map[string]bool
@@ -109,7 +94,6 @@ type shaped struct {
 	at      uint64
 }
 
-// entryOf is block n, depth deep, as shapeEntry has it.
 func entryOf(n *doc.Node, depth int) shapeEntry {
 	en := shapeEntry{n: n, id: n.ID, typ: n.Type, depth: depth}
 	if n.Type == "heading" || n.Type == "toggle_list" {
@@ -118,10 +102,6 @@ func entryOf(n *doc.Node, depth int) shapeEntry {
 	return en
 }
 
-// reshape finds what folds hide, each unit's place and each block's
-// depth, for the blocks to build: as the page last built while its blocks
-// are as they were then, which each frame tells by walking them, without
-// working them out again.
 func (e *Editor) reshape() {
 	s := &e.shaped
 	i := 0
@@ -155,8 +135,6 @@ func (e *Editor) reshape() {
 	e.hid, e.order, e.depths, e.hidAt = s.hid, s.order, s.depths, e.gen
 }
 
-// HasBlock reports whether block id is in the page: from what the page
-// last built, while nothing changed since, without looking for it.
 func (e *Editor) HasBlock(id string) bool {
 	if s := &e.shaped; s.depths != nil && s.at == e.gen {
 		_, ok := s.depths[id]
@@ -165,8 +143,6 @@ func (e *Editor) HasBlock(id string) bool {
 	return e.node(id) != nil
 }
 
-// forgetUnbuilt drops what the editor keeps of blocks the page did not
-// build, deleted or folded away: their boxes, layouts and looks.
 func (e *Editor) forgetUnbuilt() {
 	for id := range e.rel {
 		if _, ok := e.laid[id]; !ok {
@@ -207,8 +183,6 @@ func (e *Editor) blocks(c *ui.Context, nodes []*doc.Node, pal *theme.Palette) {
 	}
 }
 
-// inSelection returns the part of a block's text the selection covers, in
-// runes, and whether it covers any.
 func (e *Editor) inSelection(n *doc.Node) (int, int, bool) {
 	if e.Collapsed() {
 		return 0, 0, false
@@ -231,7 +205,6 @@ func (e *Editor) inSelection(n *doc.Node) (int, int, bool) {
 	return from, to, true
 }
 
-// placeholderSpan is an empty block's placeholder in the block's font.
 func (l *blockLayout) placeholderSpan(n *doc.Node, only bool, pal *theme.Palette) ui.Span {
 	return ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
 		Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder}
@@ -344,8 +317,6 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 			}
 		}
 		if showPlaceholder {
-			// A span takes its font's own line height: it is centered on
-			// the block's first line, which may be taller.
 			hint := l.placeholderSpan(n, only, pal)
 			_, h := p.MeasureText(r.W-l.x, hint)
 			p.RichText(ox, oy+first.Y+(first.H-h)/2, r.W-l.x, hint)
@@ -372,8 +343,6 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	box.Children(func() {
 		if e.reveal == n.ID {
 			if isFocus {
-				// The caret's line, not the block: a block taller than the
-				// window would show its top, the caret out of sight below.
 				cr := textCaret(l.layout, caret)
 				revealSpan(c, l.y+cr.Y-revealAbove, cr.H+revealAbove)
 			} else {
@@ -397,9 +366,6 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		}
 		if n.Type == "todo_list" {
 			end := l.layout.Caret(utf16Off(n, textLen(n)))
-			// An empty to-do's date goes after its placeholder, shown or
-			// not: it stays put as the caret comes, and off where a click
-			// starts typing.
 			x := end.X
 			if empty {
 				x, _ = c.MeasureText(0, l.placeholderSpan(n, only, pal))
@@ -412,18 +378,12 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	})
 }
 
-// peekGrace is how long a badge's preview stays once the pointer leaves
-// it and the badge, to cross the gap between them.
 const peekGrace = 250 * time.Millisecond
 
-// commentBadge is the count of a block's open threads, in the margin:
-// hovered, it shows them in brief below it; clicked, it opens them in the
-// Comments panel.
 func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, pal *theme.Palette) {
 	b := ui.ButtonBase(c.Key("comments:"+id)).Absolute().Top(top).Right(-52).Padding(2, 7).Radius(999).
 		Gap(4).Background(pal.WarnBg).Border(1, pal.WarnBorder).TextColor(pal.WarnText).Cursor(ui.CursorPointer).
 		Label(locales.EditorCommentCount(count))
-	// A press on it is the badge's, not the text's beside it.
 	b.Draw(func(_ *ui.Painter, r ui.Rect) { e.chips["comments:"+id] = r })
 	hovered := b.Hovered()
 	if hovered {
@@ -463,8 +423,6 @@ func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, 
 	}
 }
 
-// atomicBlock builds a block selected whole: a divider, image, table,
-// chart, embed, video, recording or subpage.
 func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	_, _, inSel := e.inSelection(n)
 	selected := (e.focus.ID == n.ID && e.Collapsed() && e.focused) || inSel
@@ -519,11 +477,6 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	})
 }
 
-// markerControl is the control a to-do's box or a toggle's chevron, drawn
-// at left in the block, at middle down it, stands for, for assistive
-// technology, which presses it: a check box, or a disclosure that shows
-// the toggle's children, named label. The pointer's presses go to the
-// page, which does the same.
 func (e *Editor) markerControl(c *ui.Context, n *doc.Node, label string, left, middle float32) {
 	m := ui.ButtonBase(c.Key("marker")).Absolute().Left(left+3).Top(middle-8).Size(16, 16).Label(label).IgnoreInput(true)
 	if n.Type == "todo_list" {
@@ -540,9 +493,6 @@ func (e *Editor) markerControl(c *ui.Context, n *doc.Node, label string, left, m
 	}
 }
 
-// textCaret is the caret drawn at a place: as tall as its line's text,
-// from the top of its fonts to their bottom, not the whole line with the
-// room prose leaves between lines.
 func textCaret(l *ui.TextLayout, at ui.TextCaretPosition) ui.Rect {
 	cr := l.CaretAt(at)
 	for _, line := range l.Lines() {
@@ -554,9 +504,6 @@ func textCaret(l *ui.TextLayout, at ui.TextCaretPosition) ui.Rect {
 	return cr
 }
 
-// mediaEdit is the context menu's item changing what a block shows: an
-// uploaded image takes another file, an image or video from the web
-// another link.
 func mediaEdit(n *doc.Node) string {
 	switch {
 	case n.Type == "image" && n.Str("file_id") != "":
@@ -567,8 +514,6 @@ func mediaEdit(n *doc.Node) string {
 	return ""
 }
 
-// mediaLink is the context menu's item that shows a link to a video or a
-// picture as its block, or "".
 func mediaLink(href string) string {
 	if _, ok := doc.ParseVideoURL(href); ok {
 		return locales.EditorShowAsVideo()
@@ -604,8 +549,6 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		row.Justify(ui.Center)
 	}
 	row.Children(func() {
-		// An animated GIF plays once its player is made, from the frame
-		// its picture shows.
 		if video != nil {
 			ui.Video(c.Key("video"), video).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
 			return
@@ -637,8 +580,6 @@ func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	}
 }
 
-// overlays builds the / and @ menus, the selection toolbar and the link
-// editor, above the page.
 func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 	if e.trigger != nil {
 		t := *e.trigger
@@ -655,8 +596,6 @@ func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 		}
 		return
 	}
-	// The toolbar stays while the focus is in it, or its color picker is
-	// open.
 	if !e.Collapsed() && (e.focused || e.colorOpen || e.bar.FocusWithin(c)) && !e.dragging && !e.ReadOnly {
 		a, _ := e.ordered()
 		if n := e.node(a.ID); n != nil && n.IsText() {
@@ -666,18 +605,14 @@ func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 			}
 		}
 	}
-	// With no toolbar, its color picker is closed.
 	e.colorOpen = false
 }
 
-// menuChoice is a choice of the / or @ menu, among what a trigger found.
 type menuChoice struct {
 	trigger Trigger
 	key     string
 }
 
-// findMenuItems asks the host for the open menu's choices, as it has them
-// now.
 func (e *Editor) findMenuItems() {
 	t := *e.trigger
 	if t.Kind == '/' {
@@ -697,7 +632,6 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		panel := ui.Column(c.Key("block-menu")).Absolute().Left(at.X-6).Width(300).Padding(6).Gap(1).
 			Radius(10).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 10, 30, 0, pal.Shadow)
 		h := float32(min(len(e.menuItems), 9))*34 + 16
-		// Above the line when it would go under the bars at the bottom.
 		if at.Y+at.H+6+h > wh-revealMargin {
 			panel.Top(max(at.Y-6-h, 8))
 		} else {
@@ -721,9 +655,6 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					row := ui.ButtonBase(c.Key("item:"+item.Key)).Gap(10).Padding(6, 10).Radius(6).AlignItems(ui.Center).KeepFocus()
 					if i == e.menuIndex {
 						row.Background(pal.NavSelected)
-						// Into view as the choice moves to it, and not
-						// again: in every frame, it would pull the list
-						// back from the wheel.
 						if at := (menuChoice{e.menuFor, item.Key}); e.menuShown != at {
 							e.menuShown = at
 							row.ScrollIntoView()
@@ -755,9 +686,6 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	})
 }
 
-// toolbar is the selection's: MyGo's Toolbar on a panel in the theme's
-// colors, as MyGo's popovers are, its controls leaving the keys in the
-// page.
 func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	ui.Overlay(c, func() {
 		t := c.Theme()
@@ -773,8 +701,6 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 						fn()
 					}
 				}
-				// Copy as plain text comes first, apart from the formats,
-				// with its own icon: a clipboard of text, not Copy's.
 				copied := time.Since(e.plainCopiedAt) < 1500*time.Millisecond
 				icon, label := "clipboard-type", locales.EditorCopyPlainText()
 				if copied {
@@ -783,7 +709,6 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 				plain := ui.Button(c.Key("copy-plain"), "").Label(label).Tooltip(label).KeepFocus()
 				plain.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
 				if copied {
-					// Show its icon again once the check has been seen.
 					wait := 1500*time.Millisecond - time.Since(e.plainCopiedAt)
 					plain.Draw(func(p *ui.Painter, _ ui.Rect) { p.After(wait) })
 				}
@@ -791,7 +716,6 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					e.CopyPlainText()
 					e.plainCopiedAt = time.Now()
 				}
-				// Code takes no formats.
 				if !e.inCode() {
 					ui.Divider(c.Key("formats"))
 					toggle("bold", locales.EditorBold(), e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
@@ -800,7 +724,6 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					toggle("link", locales.EditorLink(), e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
 					e.colorButton(c, pal)
 				}
-				// Comment and Ask agent apart, as the copy is.
 				ui.Divider(c.Key("actions"))
 				comment := ui.Button(c.Key("comment"), "").Label(locales.CommonComment()).Tooltip(locales.CommonComment()).KeepFocus()
 				comment.Children(func() { ui.Icon(c, theme.Icon("message-square")).FontSize(15) })
@@ -840,7 +763,6 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		panel.Children(func() {
 			ui.Icon(c, theme.Icon("link")).TextColor(pal.TextMuted).Margin(0, 2, 0, 6)
 			in := ui.TextInputBase(c.Key("link-url"), &e.linkDraft).Placeholder(locales.EditorPasteLink()).Grow(1).AutoFocus()
-			// What no link opens is not taken: the editor stays with it.
 			href, ok := linkHref(e.linkDraft)
 			apply := func() {
 				e.SetLink(href)
@@ -862,17 +784,10 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	})
 }
 
-// revealMargin is the room kept under a block brought into view: the bars
-// at the bottom of the page, an agent's run and its Undo, cover what is
-// under them.
 const revealMargin = 80
 
-// revealAbove is the room kept over a caret's line brought into view.
 const revealAbove = 8
 
-// revealSpan scrolls the span of height h at top in the block being built
-// into view with revealMargin under it, as ScrollIntoView alone would leave
-// it at the window's edge.
 func revealSpan(c *ui.Context, top, h float32) {
 	ui.Box(c.Key("reveal")).Absolute().Left(0).Top(top).Width(1).Height(h + revealMargin).ScrollIntoView()
 }

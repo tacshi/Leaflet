@@ -126,7 +126,7 @@ func TestTranscribeSonioxFromHere(t *testing.T) {
 				Speakers bool     `json:"enable_speaker_diarization"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body.Model != "stt-async-v3" || body.FileID != "f1" || len(body.Hints) != 1 || body.Hints[0] != "zh" || !body.Speakers {
+			if body.Model != "stt-async-v6" || body.FileID != "f1" || len(body.Hints) != 1 || body.Hints[0] != "zh" || !body.Speakers {
 				http.Error(w, "wrong transcription", http.StatusBadRequest)
 				return
 			}
@@ -152,7 +152,7 @@ func TestTranscribeSonioxFromHere(t *testing.T) {
 	defer func() { sonioxAPI, sonioxPoll = api, poll }()
 
 	src := struct{ io.Reader }{bytes.NewReader(audio)}
-	segs, err := TranscribeSoniox(context.Background(), "sk-here", "stt-rt-v3", src, int64(len(audio)), "audio.m4a", []string{"zh"}, true)
+	segs, err := TranscribeSoniox(context.Background(), "sk-here", "stt-rt-v6", src, int64(len(audio)), "audio.m4a", []string{"zh"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

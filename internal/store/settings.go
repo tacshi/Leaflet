@@ -19,6 +19,12 @@ type SttSettings struct {
 	LanguageHints  []string `json:"language_hints"`
 }
 
+// SonioxModel is Soniox's real-time model. Settings naming none, or one
+// Soniox retired or deprecated, which it routes to this one, move to it.
+const SonioxModel = "stt-rt-v6"
+
+var oldSonioxModels = []string{"stt-rt-preview", "stt-rt-preview-v2", "stt-rt-v3", "stt-rt-v4", "stt-rt-v5"}
+
 type ModelChoice struct {
 	ProviderID string
 	Model      string
@@ -66,7 +72,7 @@ func DefaultSettings() Settings {
 		SidebarWidth: 264, PanelWidth: 360,
 		Stt: SttSettings{
 			Provider: "openai-compatible", ModelSize: "qwen3-asr-0.6b", RunOn: "auto", Language: "auto",
-			LiveTranscript: true, SonioxModel: "stt-rt-v5", LanguageHints: []string{"en", "zh"},
+			LiveTranscript: true, SonioxModel: SonioxModel, LanguageHints: []string{"en", "zh"},
 		},
 	}
 }
@@ -91,6 +97,9 @@ func (s *Store) Settings() Settings {
 	}
 	if !slices.Contains([]string{"soniox", "moss", "openai-compatible", "on-device"}, out.Stt.Provider) {
 		out.Stt.Provider = "openai-compatible"
+	}
+	if m := strings.TrimSpace(out.Stt.SonioxModel); m == "" || slices.Contains(oldSonioxModels, m) {
+		out.Stt.SonioxModel = SonioxModel
 	}
 	if def, ok := out.Default(); ok {
 		var n int

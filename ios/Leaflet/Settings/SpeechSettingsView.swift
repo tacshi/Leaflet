@@ -298,7 +298,7 @@ struct SpeechSettingsView: View {
             .disabled(saving || sonioxKey.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .buttonStyle(.borderless)
-        field(L.commonModel, "stt-rt-v5", stt.sonioxModel)
+        field(L.commonModel, "stt-rt-v6", stt.sonioxModel)
     }
 
     @ViewBuilder

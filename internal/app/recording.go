@@ -827,7 +827,7 @@ func (a *App) speechFields(c *ui.Context, p recording.SpeechProvider, stt *store
 			})
 		})
 		settingRow(c, "model", locales.CommonModel(), "", false, func() {
-			if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(sttControlW - 20).Changed() {
+			if field(c, "model", &stt.SonioxModel, store.SonioxModel).Width(sttControlW - 20).Changed() {
 				*changed = true
 			}
 		})

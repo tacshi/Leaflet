@@ -2,6 +2,7 @@ package filepreview
 
 import (
 	"errors"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -48,6 +49,22 @@ func TestReadCut(t *testing.T) {
 	}
 	if _, err := Read(path+"x", 8, "en"); err == nil {
 		t.Error("a file that isn't there read")
+	}
+}
+
+// A file in a legacy encoding cut within a character keeps its encoding,
+// rather than going to one that reads any bytes.
+func TestDecodeCutLegacy(t *testing.T) {
+	gb, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("中文文本"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(gb[:len(gb)-1], "zh", true)
+	if err != nil || got.Encoding != "GB18030" || got.Text != "中文文" {
+		t.Errorf("%+v, %v", got, err)
+	}
+	if got, err = Decode(gb[:len(gb)-1], "zh", false); err == nil && got.Encoding == "GB18030" {
+		t.Errorf("a whole file lost its end: %+v", got)
 	}
 }
 

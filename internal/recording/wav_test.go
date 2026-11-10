@@ -50,6 +50,42 @@ func TestLatePunctuationEndsTheLine(t *testing.T) {
 	}
 }
 
+// Punctuation Soniox sends as tokens of its own ends a sentence as a word's
+// does: the line ends there four seconds in, and not inside a number.
+func TestPunctuationTokensEndLines(t *testing.T) {
+	segs := TokensToSegments([]Token{
+		{Text: "It", StartMs: 0, EndMs: 200},
+		{Text: " costs", StartMs: 200, EndMs: 3000},
+		{Text: " 3", StartMs: 3000, EndMs: 4200},
+		{Text: ".", StartMs: 4200, EndMs: 4200},
+		{Text: "5", StartMs: 4200, EndMs: 4500},
+		{Text: ".", StartMs: 4500, EndMs: 4500},
+		{Text: "\"", StartMs: 4500, EndMs: 4500},
+		{Text: " So", StartMs: 4600, EndMs: 4800},
+		{Text: " short", StartMs: 4800, EndMs: 5000},
+		{Text: ".", StartMs: 5000, EndMs: 5000},
+		{Text: " And", StartMs: 5100, EndMs: 9500},
+		{Text: "。", StartMs: 9500, EndMs: 9500},
+		{Text: "好", StartMs: 9600, EndMs: 9800},
+		{Text: "很好", StartMs: 9800, EndMs: 14000},
+		{Text: "。", StartMs: 14000, EndMs: 14000},
+		{Text: "2024", StartMs: 14100, EndMs: 14500},
+		{Text: "年", StartMs: 14500, EndMs: 14700},
+	})
+	want := []string{"It costs 3.5.\"", "So short. And。", "好很好。", "2024年"}
+	if len(segs) != len(want) {
+		t.Fatalf("segments %+v", segs)
+	}
+	for i, w := range want {
+		if segs[i].Text != w {
+			t.Errorf("line %d: %q", i, segs[i].Text)
+		}
+	}
+	if segs[1].StartMs != 4600 || segs[1].EndMs != 9500 {
+		t.Errorf("times %+v", segs[1])
+	}
+}
+
 func TestTidyJoinsPunctuationLines(t *testing.T) {
 	got := Tidy([]store.Segment{{StartMs: 23000, EndMs: 23600, Text: "I think"}, {StartMs: 26000, EndMs: 26100, Text: "."}})
 	if len(got) != 1 || got[0].Text != "I think." || got[0].EndMs != 26100 {

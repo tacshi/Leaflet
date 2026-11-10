@@ -99,6 +99,26 @@ func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (_ stri
 	return encode(out)
 }
 
+// FinishProjectSignIn finishes signing in to Supabase again, begun with
+// BeginSupabaseSignIn as a sign-in is, for the project in use, whose kept
+// sign-in ended: it brings the project up to this version of Leaflet and
+// keeps the new sign-in for the versions to come. The account signed in
+// stays as it is.
+func (c *Core) FinishProjectSignIn(callbackURL, state, verifier string) (err error) {
+	defer catch(&err)
+	answer, err := url.Parse(callbackURL)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), signInTimeout)
+	defer cancel()
+	api, err := supabaseapi.FinishSignIn(ctx, answer.Query(), state, verifier)
+	if err != nil {
+		return err
+	}
+	return c.core.RenewProject(ctx, api)
+}
+
 // leafletProject finds the Leaflet project the desktop set up in the
 // account, to sign in to: the oldest, when there are more, as the desktop
 // asks which. One that is paused, as Supabase pauses a free project left
@@ -268,6 +288,10 @@ type account struct {
 	// through.
 	Project    string `json:"project"`
 	ProjectRef string `json:"project_ref"`
+	// ProjectNeedsSignIn says the project waits to be brought up to this
+	// version of Leaflet for the person to sign in to Supabase again
+	// (FinishProjectSignIn).
+	ProjectNeedsSignIn bool `json:"project_needs_sign_in"`
 }
 
 // Account returns who is signed in, and to which project, as an account in
@@ -280,7 +304,7 @@ func (c *Core) Account() (_ string, err error) {
 		p := c.core.Remote.Project()
 		a = account{
 			SignedIn: c.core.Remote.SignedIn(), Email: se.Email, DisplayName: se.DisplayName,
-			Project: p.Name, ProjectRef: p.Ref,
+			Project: p.Name, ProjectRef: p.Ref, ProjectNeedsSignIn: c.core.ProjectNeedsSignIn(),
 		}
 	})
 	return encode(a)

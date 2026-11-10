@@ -181,6 +181,24 @@
         }
       }
     },
+    "Stopped": {
+      "comment": "A recording's Live Activity: the recording stopped, as the app quit while it recorded.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已停止"
+          }
+        }
+      }
+    },
     "Voice Note": {
       "comment": "Control Center, the Lock Screen and the Action Button: the control that records a voice note.",
       "extractionState": "manual",

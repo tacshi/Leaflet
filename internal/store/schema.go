@@ -203,6 +203,16 @@ var migrations = []func(context.Context, *sql.Conn) error{
 		}
 		return addColumns(ctx, c, cols)
 	},
+	// 10: the recordings' transcripts, indexed until now as the JSON that
+	// keeps them, are indexed again as what was said (searchedText), as
+	// search next runs.
+	func(ctx context.Context, c *sql.Conn) error {
+		if err := execIfTable(ctx, c, "search_index", `DELETE FROM search_index WHERE rowid IN
+			(SELECT n FROM text_writes WHERE kind = 'recording' AND indexed IS NOT NULL)`); err != nil {
+			return err
+		}
+		return execIfTable(ctx, c, "text_writes", `UPDATE text_writes SET indexed = NULL WHERE kind = 'recording'`)
+	},
 }
 
 // execIfTable runs a statement of a migration's on a table, when the

@@ -1426,10 +1426,11 @@ export function normalizeNotes(s: string): string {
 
 /**
  * A code block's language as the ID it keeps (doc.CodeLanguageID): its
- * spaces dashes, as a fence, which ends a language at a space, can write it.
+ * spaces dashes, as a fence, which ends a language at a space, can write
+ * it, and without its backticks, which a fence's line can't hold.
  */
 export function codeLanguage(name: unknown): string {
-  const id = goLower(fields(String(name ?? "")).join("-"));
+  const id = goLower(fields(String(name ?? "").replaceAll("`", "")).join("-"));
   return Object.hasOwn(LANGUAGE_ALIASES, id) ? LANGUAGE_ALIASES[id] : id;
 }
 

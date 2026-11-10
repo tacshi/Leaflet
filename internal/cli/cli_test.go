@@ -370,6 +370,81 @@ func TestBadTitleKept(t *testing.T) {
 	}
 }
 
+// What is listed for people to read holds no control character of a
+// title's, a name's, a comment's or a selection's: a terminal would obey
+// an escape, and a line break would start a row of the writer's making.
+// --json and cat print them as they are kept.
+func TestControlCharactersStayOffTheTerminal(t *testing.T) {
+	dir := pages(t)
+	id := strings.TrimSpace(ok(t, dir, "Hello.\n", "new", "Plan", "--stdin"))
+	folder := strings.TrimSpace(ok(t, dir, "", "folder", "new", "Work"))
+	ok(t, dir, "", "mv", "Plan", "--folder", "Work")
+	title, name := "Plan\x1b[2J\r\n00000000  Forged\u009b1mrow\x7f", "Work\x1b]0;x\x07\nmore\tnames"
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(id, title); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenameFolder(store.Folder{ID: folder}, name); err != nil {
+		t.Fatal(err)
+	}
+	view := &store.OpenView{PageID: id, Selection: store.ViewSelection{Text: "ship\x1b[31m it\r\nand\tmore\u0085", Color: "#ef4444ff\x1b[0m"}}
+	if err := st.SetOpenView(view); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	clean := func(what, out string) {
+		t.Helper()
+		for _, c := range strings.TrimSuffix(out, "\n") {
+			if c < 0x20 && c != '\n' && c != '\t' || c >= 0x7f && c <= 0x9f {
+				t.Errorf("%s holds %U:\n%q", what, c, out)
+				return
+			}
+		}
+	}
+	shownTitle, shownName := "Plan [2J  00000000  Forged 1mrow ", "Work ]0;x  more names"
+	ls := ok(t, dir, "", "ls")
+	clean("ls", ls)
+	if want := folder[:8] + "  " + shownName + "/\n" + id[:8] + "    " + shownTitle + "\n"; ls != want {
+		t.Errorf("ls:\n%q\nwant\n%q", ls, want)
+	}
+	search := ok(t, dir, "", "search", "Hello")
+	clean("search", search)
+	if !strings.HasPrefix(search, id[:8]+"  "+shownTitle+"\n") || strings.Count(search, "\n") > 2 {
+		t.Errorf("search:\n%q", search)
+	}
+	current := ok(t, dir, "", "current")
+	clean("current", current)
+	if want := id[:8] + "  " + shownTitle + "\nColor: #ef4444ff [0m\nSelected:\nship [31m it\nand\tmore \n"; current != want {
+		t.Errorf("current:\n%q\nwant\n%q", current, want)
+	}
+	for want, args := range map[string][]string{
+		shownTitle + "\tin " + shownName + "/\n": {"__complete", "cat", "p"},
+		shownName + "\n":                         {"__complete", "new", "X", "--folder", "w"},
+	} {
+		out := ok(t, dir, "", args...)
+		clean(strings.Join(args, " "), out)
+		if !strings.HasPrefix(out, want) {
+			t.Errorf("%v:\n%q", args, out)
+		}
+	}
+	for _, args := range [][]string{{"ls", "--json"}, {"current", "--json"}} {
+		if out := ok(t, dir, "", args...); !strings.Contains(out, `\u001b[2J\r\n00000000`) {
+			t.Errorf("%v changed the title:\n%s", args, out)
+		}
+	}
+	if md := ok(t, dir, "", "cat", id); !strings.Contains(md, "\x1b") || !strings.Contains(md, "\r\n00000000") {
+		t.Errorf("cat changed the title: %q", md)
+	}
+}
+
 // A title alone reads nothing: not what a loop's next turns read, nor a
 // pipe that stays open.
 func TestNewReadsOnlyWhenAsked(t *testing.T) {

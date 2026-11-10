@@ -53,6 +53,35 @@ const minPrefix = 4
 
 func shortID(id string) string { return id[:min(idLen, len(id))] }
 
+// shown is s as a line for people to read holds it: each control
+// character, a line break or an escape among them, is a space. A title, a
+// name or a comment is whatever its writer made it, a guest of a shared
+// page too, and a terminal would obey what it holds: move the cursor,
+// change its colors, or start a line that reads as a row of its own. What
+// --json prints, and a page's own text, stay as they are.
+func shown(s string) string { return strings.Map(plainRune(false), s) }
+
+// shownLines is s as shown has it, its line breaks and tabs kept: text of
+// several lines, printed as such.
+func shownLines(s string) string {
+	return strings.Map(plainRune(true), strings.ReplaceAll(s, "\r\n", "\n"))
+}
+
+// plainRune maps the control characters, ASCII's and those from U+0080 to
+// U+009F, which some terminals take as escapes too, to spaces, but for
+// the line breaks and tabs where lines are kept.
+func plainRune(lines bool) func(rune) rune {
+	return func(c rune) rune {
+		switch {
+		case lines && (c == '\n' || c == '\t'):
+			return c
+		case c < 0x20 || c >= 0x7f && c <= 0x9f:
+			return ' '
+		}
+		return c
+	}
+}
+
 // page is the page ref names: its ID; else its title, as given, then in
 // any case; else the start of its ID. Several pages of a title, or of an
 // ID's start, are listed for one to be chosen by ID.
@@ -141,7 +170,7 @@ func (r *runner) where(l *listing, p listedPage) string {
 	}
 	for _, f := range l.Folders {
 		if f.ID == p.FolderID && p.FolderID != "" {
-			return fmt.Sprintf("in %s/", f.Name)
+			return fmt.Sprintf("in %s/", shown(f.Name))
 		}
 	}
 	if p.Shared {
@@ -169,7 +198,7 @@ func (r *runner) completeInto(_ *cobra.Command, _ []string, toComplete string) (
 	var out []cobra.Completion
 	for _, p := range l.Pages {
 		if strings.HasPrefix(strings.ToLower(p.Title), strings.ToLower(toComplete)) {
-			out = append(out, cobra.CompletionWithDesc(p.Title, r.where(l, p)))
+			out = append(out, cobra.CompletionWithDesc(shown(p.Title), r.where(l, p)))
 		}
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp
@@ -184,7 +213,7 @@ func (r *runner) completeFolder(_ *cobra.Command, _ []string, toComplete string)
 	var out []cobra.Completion
 	for _, f := range l.Folders {
 		if strings.HasPrefix(strings.ToLower(f.Name), strings.ToLower(toComplete)) {
-			out = append(out, f.Name)
+			out = append(out, shown(f.Name))
 		}
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp

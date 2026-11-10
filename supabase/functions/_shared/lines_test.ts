@@ -328,3 +328,23 @@ Deno.test("only spaces and tabs indent a fence, as CommonMark has it", () => {
   assertEquals(markdownSpecs("\u3000```"), [{ type: "paragraph", text: "\u3000```" }]);
   assertEquals(markdownSpecs("  ```go\nx\n```"), [{ type: "code", text: "x", language: "go" }]);
 });
+
+Deno.test("the space before a hard break after a web address is no part of the text", () => {
+  assertEquals(markdownSpecs("see https://x.dev/~a \\\nwww.x.dev  \\\nHTTP://X.DEV\\\nend"), [{
+    type: "paragraph",
+    text: "see https://x.dev/~a\nwww.x.dev \nHTTP://X.DEV\nend",
+  }]);
+  assertEquals(markdownSpecs("- a \\\n  https://x.dev b \\\n  c"), [{
+    type: "bulleted_list",
+    text: "a \nhttps://x.dev b \nc",
+  }]);
+});
+
+Deno.test("a code block's language keeps no backticks, which a fence can't write", () => {
+  for (
+    const [language, want] of [["c`", "c"], ["`", ""], ["``` Objective `C` ```", "objective-c"], ["J`S", "javascript"]]
+  ) {
+    const node = specToNode({ type: "code", text: "x", language }, { newId: () => "x" });
+    assertEquals(node.data?.language, want);
+  }
+});

@@ -136,6 +136,9 @@ func headingWith(c *ui.Context, title, desc string, action func()) {
 
 type accountState struct {
 	name string
+	// renewing is set while the person signs in to Supabase again and the
+	// project is brought up to date (renewProject).
+	renewing bool
 	// nameEdited is set once the user changes the name field: until then
 	// it shows the account's name as it is now, and nothing saves from it.
 	// nameShown is set in a frame that showed the field, the section, and
@@ -294,6 +297,36 @@ func (a *App) accentDots(c *ui.Context) {
 	})
 }
 
+// renewProject signs in to Supabase again in the browser and brings the
+// project up to this version of Leaflet with that sign-in, kept from then
+// on in place of the one that ended.
+func (a *App) renewProject() {
+	s := &a.account
+	if s.renewing {
+		return
+	}
+	s.renewing = true
+	cr := a.core()
+	go func() {
+		wait, stop := context.WithTimeout(context.Background(), 5*time.Minute)
+		api, err := cr.SignInWithSupabase(wait, nil)
+		stop()
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			err = cr.RenewProject(ctx, api)
+			cancel()
+		}
+		a.update(func() {
+			s.renewing = false
+			if err != nil {
+				a.toast(err.Error())
+				return
+			}
+			a.toast(locales.SettingsProjectUpdated())
+		})
+	}()
+}
+
 func (a *App) accountSettings(c *ui.Context) {
 	s := &a.account
 	if !s.nameEdited {
@@ -341,6 +374,19 @@ func (a *App) accountSettings(c *ui.Context) {
 				a.signInButton(c)
 			}
 		})
+		// The sign-in that brings the project up to a new version of
+		// Leaflet ended: only signing in to Supabase again does it now.
+		if a.session.SignedIn && (s.renewing || a.core().ProjectNeedsSignIn()) {
+			settingRow(c, "project", locales.SettingsProjectSignIn(), locales.SettingsProjectSignInDesc(), false, func() {
+				label := locales.CommonSignIn()
+				if s.renewing {
+					label = locales.SettingsProjectSigningIn()
+				}
+				if primary(c, "renew", "", label).Disabled(s.renewing).Clicked() {
+					a.renewProject()
+				}
+			})
+		}
 	})
 	if a.session.SignedIn {
 		label(c, locales.SettingsDevices())

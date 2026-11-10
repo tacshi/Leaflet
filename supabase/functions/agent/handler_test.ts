@@ -480,6 +480,9 @@ Deno.test("earlier turns that read other pages stay out where the run may not re
     assert(read.includes("You're welcome."), `cross-page ${cross}`);
     assertEquals(events.filter((e) => e.type === "op").length, 0, `cross-page ${cross}`);
     assertEquals(events.at(-1)!.guarded, true);
+    // A run that read the turn holds what it read, and kept to its page
+    // no more than that one did.
+    assertEquals(events.at(-1)!.kept_to_page, !cross, `cross-page ${cross}`);
     const history = p.requests.map(decodeURIComponent).find((r) => r.includes("conversation_id=eq.talk"))!;
     assert(
       history.includes(
@@ -1047,6 +1050,29 @@ Deno.test("a workspace job leaves a page the app serves a link to as it is", asy
   const answer = JSON.parse(String(m.asked[1].messages.find((x) => x.role === "tool")!.content));
   assert(String(answer.error).includes("shared with others"), String(answer.error));
   assertEquals(p.rows("pages").find((row) => row.id === "plan")!.title, "Plan");
+});
+
+// A workspace run that reads an earlier turn which read the person's pages
+// holds what it read, and kept to its page no more than that one did; one
+// that may not read their pages has that turn left out, and did.
+Deno.test("a workspace run after a turn that read the person's pages says it held it", async () => {
+  for (const reading of [true, false]) {
+    const p = workspaceProject({ allow_cross_page: reading });
+    p.tables.ai_jobs.unshift(job("notes", {
+      page_id: null,
+      surface: "workspace",
+      status: "done",
+      conversation_id: "convo",
+      created_at: new Date(Date.now() - 10_000).toISOString(),
+      request: { instruction: "What do my notes say?" },
+      result: { reply: "They say the salary is 90k.", ops: [] },
+    }));
+    const m = model(says("Done."));
+    const { events } = await run(p, deps(p, m.chat));
+    assertEquals(JSON.stringify(m.asked[0].messages).includes("90k"), reading, `reading ${reading}`);
+    assertEquals(events.at(-1)!.kept_to_page, !reading, `reading ${reading}`);
+    assertEquals((jobOf(p).result as { kept_to_page: boolean }).kept_to_page, !reading, `reading ${reading}`);
+  }
 });
 
 // A turn that read other pages closes the web to every later turn of its

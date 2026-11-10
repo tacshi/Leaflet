@@ -24,6 +24,22 @@ func TestMarkMentions(t *testing.T) {
 		{"code:\n\n    @agent\n\t@agent\n\n@agent", "code:\n\n    @agent\n\t@agent\n\n<mark><b>@agent</b></mark>"},
 		// An indented line going on with a paragraph is not code.
 		{"ask\n    @agent", "ask\n    <mark><b>@agent</b></mark>"},
+		// Backticks with a backtick after them on their line are a code
+		// span, opening no block.
+		{"```x``` is wrong\n@agent", "```x``` is wrong\n<mark><b>@agent</b></mark>"},
+		{"``` a`b\n@agent", "``` a`b\n<mark><b>@agent</b></mark>"},
+		{"~~~ a`b\n@agent\n~~~", "~~~ a`b\n@agent\n~~~"},
+		// What is indented under a list item is its text, after a blank
+		// line too; indented as code from there, or under an item that
+		// ended, it is code.
+		{"- one\n\n    @agent", "- one\n\n    <mark><b>@agent</b></mark>"},
+		{"1. one\n\n   two\n\n    @agent", "1. one\n\n   two\n\n    <mark><b>@agent</b></mark>"},
+		{"- one\n  - two\n\n      @agent", "- one\n  - two\n\n      <mark><b>@agent</b></mark>"},
+		{"- one\n\n      @agent", "- one\n\n      @agent"},
+		{"- one\n\ntwo\n\n    @agent", "- one\n\ntwo\n\n    @agent"},
+		{"-one\n\n    @agent", "-one\n\n    @agent"},
+		// A fence under an item opens and closes there.
+		{"1. one\n\n    - two\n\n      ```\n      @agent\n      ```\n      @agent", "1. one\n\n    - two\n\n      ```\n      @agent\n      ```\n      <mark><b>@agent</b></mark>"},
 	} {
 		if got := MarkMentions(tc.in, names, mark); got != tc.want {
 			t.Errorf("MarkMentions(%q) = %q, want %q", tc.in, got, tc.want)

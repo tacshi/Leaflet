@@ -574,6 +574,35 @@ func TestURLsWrittenAfterReadingStayOut(t *testing.T) {
 	}
 }
 
+// A file's notes are text the run writes: after reading another page they
+// hold no URL the user did not give it, which the next run would take for
+// the user's own. Notes without one, or with one the user gave, go.
+func TestFileNotesKeepToTheURLsARunMayWrite(t *testing.T) {
+	leak := "https://evil.example/x.png?d=secret"
+	c := page()
+	c.Children = append(c.Children, &doc.Node{ID: "f1", Type: "file", Data: map[string]any{"file_id": "f", "name": "call.m4a"}})
+	x := executor(c)
+	x.Ctx.Request = "Note https://example.com/asked under the file"
+	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{{"id": "p", "title": "Salary review"}} }
+	if out := x.Call("list_pages", nil); out["error"] != nil {
+		t.Fatal(out)
+	}
+	notes := func(s string) map[string]any {
+		return map[string]any{"id": "f1", "block": map[string]any{"type": "file", "file": map[string]any{"notes": s}}}
+	}
+	if out := x.Call("replace_block", notes("0:05 See "+leak)); !strings.Contains(toolText(out), "After reading another page") {
+		t.Errorf("wrote %s into a file's notes after reading another page: %v", leak, out)
+	}
+	if len(x.Ops) != 0 || x.block("f1").Str("notes") != "" {
+		t.Errorf("%d ops, notes %q", len(x.Ops), x.block("f1").Str("notes"))
+	}
+	for _, s := range []string{"0:05 Hello", "0:05 See https://example.com/asked"} {
+		if out := x.Call("replace_block", notes(s)); out["error"] != nil || x.block("f1").Str("notes") != s {
+			t.Errorf("notes %q: %v, the block's %q", s, out, x.block("f1").Str("notes"))
+		}
+	}
+}
+
 // A run in a conversation, where reading other pages is on, keeps to the
 // URLs the user gave from its start: an earlier turn may hold what a run
 // read on another page, which this one would write in.
@@ -1391,6 +1420,12 @@ func TestEarlierTurnsWhereOtherPagesAreOff(t *testing.T) {
 		}
 		if !strings.Contains(string(raw), "You're welcome.") {
 			t.Errorf("cross-page %v: a turn kept to the page was left out", cross)
+		}
+		// A run that read the turn holds what it read, and kept to its
+		// page no more than that one did: the web stays closed after it
+		// though that run is undone.
+		if res.KeptToPage == cross {
+			t.Errorf("cross-page %v: kept to its page %v", cross, res.KeptToPage)
 		}
 	}
 }

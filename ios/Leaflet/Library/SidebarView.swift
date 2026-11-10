@@ -50,6 +50,8 @@ struct SidebarView: View {
     @State private var renamingTag: String?
     /// id is this sidebar's, by which it tells the app it shows the to-dos.
     @State private var id = UUID()
+    /// open are the pages whose subpages show, by ID.
+    @State private var open: Set<String> = []
 
     /// showsTodos says the sidebar shows the To-dos tab, which the app then
     /// keeps current (AppModel.showsTodos).
@@ -215,11 +217,9 @@ struct SidebarView: View {
         let lib = app.library
         Section {
             ForEach(lib.folders) { folder in
-                FolderRowView(folder: folder, actions: actions)
+                FolderRowView(folder: folder, actions: actions, open: $open)
             }
-            ForEach(lib.topPages) { page in
-                PageTree(page: page, actions: actions)
-            }
+            PageRows(pages: lib.topPages, actions: actions, open: $open)
             ForEach(lib.topFiles) { FileRowView(file: $0) }
             if lib.topPages.isEmpty && lib.folders.isEmpty && lib.topFiles.isEmpty {
                 Text(L.sidebarNoPages).foregroundStyle(.secondary)
@@ -228,9 +228,7 @@ struct SidebarView: View {
         .withoutTopLine()
         if !lib.sharedPages.isEmpty {
             Section(L.sidebarSharedWithMe) {
-                ForEach(lib.sharedPages) { page in
-                    PageTree(page: page, actions: actions)
-                }
+                PageRows(pages: lib.sharedPages, actions: actions, open: $open)
             }
             .withoutTopLine()
         }
@@ -536,26 +534,35 @@ struct RowActions {
     var openInNewWindow: (String) -> Void
 }
 
-/// PageTree is a page and the pages nested in it, which fold away: each
-/// a row of the list, those inside indented by depth.
-struct PageTree: View {
-    let page: PageRow
+/// PageRows are pages and the pages nested in them, which fold away: each
+/// a row of the list, those inside indented by depth. They are one run of
+/// rows, made anew as a page opens or closes, so the list only ever gains
+/// and loses rows: rows a page's own view added and took away could stay
+/// behind, drawn over the row that took their place.
+struct PageRows: View {
+    let pages: [PageRow]
     let actions: RowActions
-    var depth = 0
+    /// open are the pages whose subpages show, by ID.
+    @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
-    @State private var expanded = false
 
     var body: some View {
-        let children = app.library.children(of: page)
-        PageLink(
-            page: page, actions: actions, depth: depth,
-            expanded: children.isEmpty ? nil : $expanded
-        )
-        // Pages are in order here: a tag's are by title.
-        .modifier(PageDrops(page: page))
-        if expanded {
-            ForEach(children) { PageTree(page: $0, actions: actions, depth: depth + 1) }
+        ForEach(app.library.rows(of: pages, open: open)) { row in
+            PageLink(
+                page: row.page, actions: actions, depth: row.depth,
+                expanded: row.folds ? expanded(row.page.id) : nil
+            )
+            // Pages are in order here: a tag's are by title.
+            .modifier(PageDrops(page: row.page))
         }
+    }
+
+    private func expanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { open.contains(id) },
+            set: { shown in
+                if shown { open.insert(id) } else { open.remove(id) }
+            })
     }
 }
 
@@ -632,13 +639,15 @@ struct PageLink: View {
 struct FolderRowView: View {
     let folder: FolderRow
     let actions: RowActions
+    /// open are the pages whose subpages show, by ID.
+    @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
     @State private var expanded = true
     @State private var uploading = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            ForEach(app.library.pages(in: folder)) { PageTree(page: $0, actions: actions) }
+            PageRows(pages: app.library.pages(in: folder), actions: actions, open: $open)
             ForEach(app.library.files(in: folder)) { FileRowView(file: $0) }
         } label: {
             Label(folder.name, systemImage: "folder")

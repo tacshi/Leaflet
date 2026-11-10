@@ -26,23 +26,40 @@ enum EditorAccessibility {
         let (para, info) = editor.text.paragraph(at: caret)
         let at = para.location
         let editable = textView.isEditable
+        // The block where it is as the action runs: the page may have
+        // changed above it since VoiceOver was given the action.
+        let id = info.id
+        func offerOnBlock(
+            _ name: String, _ run: @escaping @MainActor (EditorController, BlockInfo, Int) -> Void
+        ) {
+            offer(name) { c in
+                guard let p = c.text.blocks().first(where: { $0.info.id == id }),
+                    p.info.type == info.type
+                else { return }
+                run(c, p.info, p.range.location)
+            }
+        }
         let collapsed = info.data["collapsed"]?.bool == true
         switch info.type {
         case "todo_list" where editable:
-            offer(info.checked ? LI.markNotDone : LI.markDone) { $0.taps.tapMarker(info, at: at) }
+            offerOnBlock(info.checked ? LI.markNotDone : LI.markDone) {
+                $0.taps.tapMarker($1, at: $2)
+            }
             offer(Due(info)?.label() ?? L.editorAddDate) { $0.due.openAtCaret(info) }
         case "toggle_list":
-            offer(collapsed ? LI.expand : LI.collapse) { $0.taps.tapMarker(info, at: at) }
+            offerOnBlock(collapsed ? LI.expand : LI.collapse) { $0.taps.tapMarker($1, at: $2) }
         case "heading":
-            offer(collapsed ? L.editorUnfoldSection : L.editorFoldSection) {
-                $0.taps.tapMarker(info, at: at)
+            offerOnBlock(collapsed ? L.editorUnfoldSection : L.editorFoldSection) {
+                $0.taps.tapMarker($1, at: $2)
             }
         case "code":
             // What the code's bar offers, Copy and its language.
-            offer(L.editorCopyCode) { $0.taps.tapCodeBar(info, at: at, copy: true, from: .zero) }
+            offerOnBlock(L.editorCopyCode) {
+                $0.taps.tapCodeBar($1, at: $2, copy: true, from: .zero)
+            }
             if editable {
                 let name = CodeLanguage.name(info.data["language"]?.string ?? "")
-                offer(L.editorCodeLanguage(name: name)) { c in
+                offerOnBlock(L.editorCodeLanguage(name: name)) { c, info, at in
                     let caret = c.textView.selectedTextRange.map {
                         c.textView.caretRect(for: $0.end)
                     }

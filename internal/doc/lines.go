@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -371,11 +372,15 @@ func (p *lineParser) closeCode() {
 }
 
 // addLine puts a line of Markdown in the block: a hard break that ended
-// the line before is the line break between them.
+// the line before is the line break between them, with the space
+// TextMarkdown puts before one to keep it out of a web address.
 func (t *textBlock) addLine(s string) {
 	if t.hard {
 		last := len(t.md) - 1
 		t.md[last] = strings.TrimSuffix(t.md[last], `\`)
+		if line, ok := strings.CutSuffix(t.md[last], " "); ok && endsInAddress(strings.TrimRight(line, " ")) {
+			t.md[last] = line
+		}
 	}
 	t.md = append(t.md, s)
 	t.hard = hardBreak(s)
@@ -387,6 +392,17 @@ func (t *textBlock) addLine(s string) {
 func hardBreak(s string) bool {
 	slashes := len(s) - len(strings.TrimRight(s, `\`))
 	return slashes%2 == 1
+}
+
+// addressStart is how a web address written out starts, as GitHub's
+// Markdown finds one to make a link of.
+var addressStart = regexp.MustCompile(`[Hh][Tt][Tt][Pp][Ss]?://|[Ww][Ww][Ww]\.`)
+
+// endsInAddress reports whether a line of Markdown ends in a web address
+// written out: one starts in its last word, which a backslash right after
+// would be part of.
+func endsInAddress(s string) bool {
+	return addressStart.MatchString(s[strings.LastIndexAny(s, " \t")+1:])
 }
 
 // startsBlock reports whether a line starts a block of its own, so it

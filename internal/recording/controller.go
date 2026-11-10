@@ -683,8 +683,12 @@ func (r *Controller) startSoniox(session string, stt store.SttSettings) {
 		}
 	}
 	r.mu.Lock()
+	// Only its own recording's: one started since is connecting a stream
+	// of its own, and keeps the audio it holds for it.
 	same := r.session == session && r.connecting
-	r.connecting, r.early, r.earlyLen = false, nil, 0
+	if r.session == session {
+		r.connecting, r.early, r.earlyLen = false, nil, 0
+	}
 	r.mu.Unlock()
 	if same {
 		r.update(func() { r.State.Error = locales.RecErrLive(err.Error()) })
@@ -1114,6 +1118,60 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 	}); err != nil && !store.IsNotFound(err) {
 		log.Printf("recording: %v", err)
 	}
+	// Audio that went up to be transcribed has no upload to come that
+	// would take it from this device.
+	if done, err := r.st.Recording(rec.ID); err == nil {
+		r.sweepAudio(done, time.Now())
+	}
+}
+
+// keepAudioFor is how long audio stays on this device once it is uploaded,
+// kept for 30 days.
+const keepAudioFor = 30 * 24 * time.Hour
+
+// SweepAudio removes from this device the audio of the recordings that
+// Keep the audio no longer keeps here, each still to be had from where it
+// was uploaded: after 30 days, or, kept only until it is uploaded, audio
+// that went up some other way than sync sends it, as for the server to
+// transcribe, and audio kept before the setting was that.
+func (r *Controller) SweepAudio() {
+	recs, err := r.st.Recordings()
+	if err != nil {
+		return
+	}
+	for _, rec := range recs {
+		r.sweepAudio(rec, time.Now())
+	}
+}
+
+// sweepAudio removes rec's audio from this device if SweepAudio would.
+// Only audio this device uploaded, of a recording with its transcript, and
+// not what was brought back since to play: that stays as long again.
+func (r *Controller) sweepAudio(rec store.Recording, now time.Time) {
+	keep := r.st.Settings().KeepAudioOnDevice
+	if rec.LocalPath == "" || rec.AudioPath == "" || rec.UploadedAt.IsZero() || rec.Status != "ready" {
+		return
+	}
+	fi, err := os.Stat(rec.LocalPath)
+	if err != nil {
+		return
+	}
+	switch keep {
+	case "until_uploaded":
+		if fi.ModTime().After(rec.UploadedAt) {
+			return
+		}
+	case "30_days":
+		if now.Sub(rec.UploadedAt) < keepAudioFor || now.Sub(fi.ModTime()) < keepAudioFor {
+			return
+		}
+	default:
+		return
+	}
+	if err := os.Remove(rec.LocalPath); err != nil {
+		return
+	}
+	_ = r.st.ClearLocalPath(rec.ID)
 }
 
 // lostReason is why a stream ended early, in the app's language where it
@@ -1175,6 +1233,14 @@ func transferWait(size int64) time.Duration {
 func downloadWait(size int64) time.Duration {
 	return max(5*time.Minute, transferWait(size))
 }
+
+// DownloadWait is how long fetching size bytes of a file is given, as a
+// recording's audio is.
+func DownloadWait(size int64) time.Duration { return downloadWait(size) }
+
+// AudioSize is about how many bytes the recorder's audio of a recording
+// that lasts ms milliseconds takes.
+func AudioSize(ms int) int64 { return int64(ms) * SampleRate * 2 / 1000 }
 
 // openAudio opens a recording's audio file at path to read, with its
 // size: it goes up or to an endpoint as it is read, never all in memory,

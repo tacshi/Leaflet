@@ -1520,6 +1520,15 @@ struct EditorTests {
         #expect(r.last?.1?["bold"]?.bool == true)
     }
 
+    /// A text replacement's link takes its shortcut's place, as its phrase
+    /// does: it is not a link pasted over the shortcut.
+    @Test func aTextReplacementsLinkTakesItsShortcutsPlace() {
+        let c = editor([block("a", "paragraph", "Go to gh")])
+        c.textView.selectedRange = NSRange(location: 8, length: 0)
+        c.correct(NSRange(location: 6, length: 2), with: "https://github.com")
+        #expect(blocks(c).map(\.text) == ["Go to https://github.com"])
+    }
+
     /// An empty last to-do draws checked as it is checked, and unchecked
     /// again: a tap on its box goes by what it draws.
     @Test func anEmptyLastToDoDrawsAsItIsChecked() {

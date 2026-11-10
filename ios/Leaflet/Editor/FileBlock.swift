@@ -148,6 +148,8 @@ struct FileBlock: View {
                         [String].self, from: Data(MobileFileSpeakers(notes, names).utf8))) ?? []
                 )
             }.value
+            // Notes changed meanwhile are read by their own task.
+            guard !Task.isCancelled else { return }
             (lines, speakers) = read
             starts = lines.map { Double($0.at) }
         }

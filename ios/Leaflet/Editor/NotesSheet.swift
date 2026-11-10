@@ -59,7 +59,12 @@ struct NotesSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L.commonSave) {
-                        save(kept)
+                        // What is there now: kept is of the last pause,
+                        // before what was typed or pasted since.
+                        let now = MobileNormalizeNotes(text)
+                        kept = now
+                        guard now.unicodeScalars.count <= Int(MobileMaxNotes) else { return }
+                        save(now)
                         dismiss()
                     }
                     .disabled(tooLong || !dirty)

@@ -133,6 +133,9 @@ final class FilePlayback {
     /// it was; playing with no time asked, it pauses it. A file that isn't
     /// here comes first.
     func play(block id: String, file fileID: String, at: Int? = nil, client: CoreClient?) {
+        // Not while a recording runs, as a recording's own audio: playing
+        // takes the audio session, and the microphone with it.
+        guard !Recorder.shared.state.recording else { return }
         if block == id, let player {
             if let at { player.seek(to: CMTime(seconds: Double(at), preferredTimescale: 600)) }
             if playing && at == nil {
@@ -165,7 +168,7 @@ final class FilePlayback {
                     return
                 }
                 let picture = await Self.cover(of: asset)
-                guard current(this) else { return }
+                guard current(this), !Recorder.shared.state.recording else { return }
                 let session = AVAudioSession.sharedInstance()
                 try session.setCategory(.playback, mode: .spokenAudio)
                 try session.setActive(true)
@@ -206,8 +209,16 @@ final class FilePlayback {
     }
 
     private func resume(_ player: AVPlayer) {
+        guard !Recorder.shared.state.recording else { return }
         VideoPlayback.shared.pauseAll()
         Recorder.shared.pausePlaying()
+        // A file played to its end starts over, as a recording does: a
+        // player at its end plays nothing.
+        if let length = player.currentItem?.duration.seconds, length.isFinite,
+            player.currentTime().seconds >= length - 0.05
+        {
+            player.seek(to: .zero)
+        }
         player.play()
     }
 
@@ -504,7 +515,9 @@ struct FileBar: View {
         .foregroundStyle(palette.textMuted)
         .task(id: ObjectIdentifier(player)) {
             while !Task.isCancelled {
-                if !dragging { at = max(player.currentTime().seconds, 0) }
+                if !dragging, case let time = player.currentTime().seconds, time.isFinite {
+                    at = max(time, 0)
+                }
                 if let d = player.currentItem?.duration.seconds, d.isFinite { length = d }
                 try? await Task.sleep(for: .milliseconds(250))
             }

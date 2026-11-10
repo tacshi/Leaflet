@@ -225,6 +225,14 @@ func (s *Store) HasPending(entity, id string) bool {
 	return waits || err != nil
 }
 
+// PendingFailed reports whether a row's change waits in the queue after
+// the server refused it.
+func (s *Store) PendingFailed(entity, id string) bool {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ? AND attempts > 0`, entity, id).Scan(&n)
+	return err == nil && n > 0
+}
+
 func pending(q querier, entity, id string) (bool, error) {
 	var n int
 	err := q.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)

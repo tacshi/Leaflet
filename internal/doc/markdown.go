@@ -19,11 +19,11 @@ import (
 // back as written. A format over several runs is
 // one span, the others nested in it, so runs side by side read back as
 // they were.
-func (d Delta) ToMarkdown() string { return d.markdown(escapeText, LinkDestination) }
+func (d Delta) ToMarkdown() string { return d.markdown(escapeText, escapeText, LinkDestination) }
 
-// markdown writes d as ToMarkdown does, its text escaped by escape and
-// its links' urls written by dest.
-func (d Delta) markdown(escape, dest func(string) string) string {
+// markdown writes d as ToMarkdown does, its text escaped by escape, a
+// link's by linked, and its links' urls written by dest.
+func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	var toks []mdToken
 	var open []mdMark
 	runs := trimSpans(d.Compact())
@@ -71,7 +71,7 @@ func (d Delta) markdown(escape, dest func(string) string) string {
 			if name == "" {
 				name = strings.TrimPrefix(r.Text, "@")
 			}
-			toks = append(toks, mdToken{text: "[@" + escape(name) + "](" + dest(MentionLink(m.Kind, m.ID)) + ")"})
+			toks = append(toks, mdToken{text: "[@" + linked(name) + "](" + dest(MentionLink(m.Kind, m.ID)) + ")"})
 		case r.Attrs.Code:
 			// Code spans side by side differ only in what Markdown can't
 			// say: they are one span, as backticks touching would not
@@ -81,6 +81,8 @@ func (d Delta) markdown(escape, dest func(string) string) string {
 			} else {
 				toks = append(toks, mdToken{text: r.Text, code: true})
 			}
+		case r.Attrs.Href != "":
+			toks = append(toks, mdToken{text: linked(r.Text)})
 		default:
 			toks = append(toks, mdToken{text: escape(r.Text)})
 		}
@@ -420,28 +422,51 @@ func hasRunes(s []rune, prefix string) bool {
 // escapeText escapes the characters that would read as markup: all the
 // markers but a _ inside a word, which can't start or end italics, and the
 // < of a color's tags.
-func escapeText(s string) string { return escapeMarkup(s, false) }
+func escapeText(s string) string { return escapeMarkup(s, false, false) }
 
 // escapeCommonMark is escapeText for a CommonMark reader, which reads
 // more as markup than Leaflet does: an & that starts an entity or a
 // numeric character reference, as &amp; or &#65;, and a < that could
 // start an autolink or HTML, before a letter, a /, a ! or a ?, or before
-// an email address, as <1@x.io>.
-func escapeCommonMark(s string) string { return escapeMarkup(s, true) }
+// an email address, as <1@x.io>. GitHub's makes a link of a web address
+// written out, and takes a backslash in one for part of it: a ~ and a _
+// in an address's path stay as they are where Leaflet reads them as text
+// too, as in https://x.edu/~user/ and https://x.dev/Foo_(bar).
+func escapeCommonMark(s string) string { return escapeMarkup(s, true, true) }
 
-// escapeMarkup is escapeText, or escapeCommonMark where commonMark is set.
-func escapeMarkup(s string, commonMark bool) string {
+// escapeLinkText is escapeCommonMark for a link's text, where an address
+// written out is no link of its own, and a ~ of its path could strike
+// text through.
+func escapeLinkText(s string) string { return escapeMarkup(s, true, false) }
+
+// escapeMarkup is escapeText, or escapeCommonMark where commonMark is
+// set, the paths of addresses left as they are where addresses is.
+func escapeMarkup(s string, commonMark, addresses bool) string {
 	var runes []rune
 	var at []int // where each rune is in s
 	for i, c := range s {
 		runes, at = append(runes, c), append(at, i)
 	}
+	var path []bool
+	if addresses {
+		path = addressPaths(runes)
+	}
 	var b strings.Builder
 	for i, c := range runes {
 		switch c {
-		case '\\', '*', '`', '~', '[', ']':
+		case '~':
+			// One alone is text to Leaflet; two are a strike's marker.
+			if path == nil || !path[i] || runes[i-1] == '~' || runes[i+1] == '~' {
+				b.WriteByte('\\')
+			}
+		case '\\', '*', '`', '[', ']':
 			b.WriteByte('\\')
 		case '_':
+			// After a word, one alone opens no italics, and closes none:
+			// those that could open them are escaped.
+			if path != nil && path[i] && isWord(runes[i-1]) && runes[i+1] != '_' {
+				break
+			}
 			if i == 0 || i+1 == len(runes) || !isWord(runes[i-1]) || !isWord(runes[i+1]) {
 				b.WriteByte('\\')
 			}
@@ -458,6 +483,62 @@ func escapeMarkup(s string, commonMark bool) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// addressPaths is, for each character of a text, whether it is in the
+// path of a web address written out, which GitHub's Markdown makes a
+// link: one that starts with http://, https:// or www., in either case,
+// at the text's start or after a space, a (, a *, a _ or a ~, and goes on to a space or
+// a <. Its path is what follows its host, from the first /, ? or #, but
+// for its last character: a marker there may close a format, and GitHub
+// leaves a ~ or a _ that ends an address out of its link. nil when the
+// text has none.
+func addressPaths(s []rune) []bool {
+	var path []bool
+	for i := 0; i < len(s); i++ {
+		if i > 0 && !unicode.IsSpace(s[i-1]) && !strings.ContainsRune("(*_~", s[i-1]) {
+			continue
+		}
+		starts := func(prefix string) bool {
+			if len(s)-i < len(prefix) {
+				return false
+			}
+			for k, c := range prefix {
+				if at := s[i+k]; at != c && at != unicode.ToUpper(c) {
+					return false
+				}
+			}
+			return true
+		}
+		host := i
+		switch {
+		case starts("http://"):
+			host += len("http://")
+		case starts("https://"):
+			host += len("https://")
+		case !starts("www."):
+			continue
+		}
+		j := host
+		for j < len(s) && (isWord(s[j]) || s[j] == '.' || s[j] == '-' || s[j] == ':') {
+			j++
+		}
+		if j == host || j == len(s) || !strings.ContainsRune("/?#", s[j]) {
+			continue
+		}
+		end := j
+		for end < len(s) && !unicode.IsSpace(s[end]) && s[end] != '<' {
+			end++
+		}
+		if path == nil {
+			path = make([]bool, len(s))
+		}
+		for k := j; k < end-1; k++ {
+			path[k] = true
+		}
+		i = end - 1
+	}
+	return path
 }
 
 // startsReference reports whether s starts with an entity or a numeric
@@ -539,7 +620,9 @@ func (d Delta) ReadableMarkdown() string {
 }
 
 // commonMark is ToMarkdown escaped for a CommonMark reader.
-func (d Delta) commonMark() string { return d.markdown(escapeCommonMark, commonMarkDestination) }
+func (d Delta) commonMark() string {
+	return d.markdown(escapeCommonMark, escapeLinkText, commonMarkDestination)
+}
 
 // Uncolored is d without its colors and highlights.
 func (d Delta) Uncolored() Delta {
@@ -608,7 +691,9 @@ func linkDestination(href string, commonMark bool) string {
 // EscapeBlockStart escapes what at the start of a block's text would
 // read as another kind of block: a heading's #, a list item's marker, a
 // quote's >, a table's |, a math block's $$, a rule, a line only of ='s
-// or -'s, which makes the line before it a heading, a tag, a comment or
+// or -'s, which makes the line before it a heading, the line under a
+// table's header as GitHub reads one without its first |, as "--- | ---"
+// or ":--", which makes the line before it a table, a tag, a comment or
 // another start of HTML, as a toggle's <details>, or the ! that would
 // make a link a picture. They are looked for past spaces of any kind, as
 // a no-break or an ideographic space, which ParseLines passes over
@@ -623,6 +708,7 @@ func EscapeBlockStart(md string) string {
 		return md
 	case len(hashes) < len(s) && len(s)-len(hashes) <= 6 && (hashes == "" || hashes[0] == ' '),
 		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), strings.HasPrefix(s, "!["), IsRule(s), underline(s),
+		tableRule(s),
 		s[0] == '<' && len(s) > 1 && htmlStart(rune(s[1])),
 		(s[0] == '-' || s[0] == '+') && (len(s) == 1 || s[1] == ' '):
 		return lead + "\\" + s
@@ -639,6 +725,13 @@ func EscapeBlockStart(md string) string {
 func underline(s string) bool {
 	s = strings.TrimRight(s, " \t")
 	return s != "" && (strings.Trim(s, "=") == "" || strings.Trim(s, "-") == "")
+}
+
+// tableRule reports whether a line is the one under a table's header in
+// GitHub's Markdown, which needs no | at its start: only -'s, :'s, |'s
+// and spaces, with a - and a | or a : among them.
+func tableRule(s string) bool {
+	return strings.Trim(s, "-:| \t") == "" && strings.Contains(s, "-") && strings.ContainsAny(s, "|:")
 }
 
 // headingMarkdown escapes the # that starts a run of them ending a

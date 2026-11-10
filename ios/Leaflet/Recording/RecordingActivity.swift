@@ -25,6 +25,21 @@ final class RecordingActivity {
     private var declined = false
     /// swept says the activities an earlier launch left have gone.
     private var swept = false
+    /// refreshing tells the activity, while it shows, that the app still
+    /// records.
+    private var refreshing: Task<Void, Never>?
+
+    /// fresh is how long what a recording's activity says holds without
+    /// word from the app: an app that quit while it recorded, as one iOS
+    /// ended, can't take its activity away, which then says the recording
+    /// stopped rather than count on over nothing.
+    private nonisolated static let fresh: TimeInterval = 120
+
+    /// staleAfter is when state stops holding. A paused recording says
+    /// nothing more, and the app, with no microphone on, may not run.
+    private nonisolated static func staleAfter(_ state: State) -> Date? {
+        state.paused ? nil : Date().addingTimeInterval(fresh)
+    }
 
     private init() {}
 
@@ -40,10 +55,12 @@ final class RecordingActivity {
         let state = State(started: Date(), paused: false, elapsed: 0, starting: true)
         do {
             let activity = try Activity.request(
-                attributes: RecordingAttributes(), content: .init(state: state, staleDate: nil))
+                attributes: RecordingAttributes(),
+                content: .init(state: state, staleDate: Self.staleAfter(state)))
             id = activity.id
             shown = state
             watch(activity)
+            keepFresh()
             return true
         } catch {
             Logger.app.error("recording activity: \(error.localizedDescription, privacy: .public)")
@@ -77,10 +94,31 @@ final class RecordingActivity {
         Task { await Self.update(id, to: state) }
     }
 
+    /// keepFresh says the recording still runs, twice as often as the
+    /// activity needs to hear it, for as long as one shows.
+    private func keepFresh() {
+        guard refreshing == nil else { return }
+        refreshing = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.fresh / 2))
+                guard !Task.isCancelled, let self else { return }
+                if let id = self.id, let shown = self.shown, !shown.paused {
+                    await Self.update(id, to: shown)
+                }
+            }
+        }
+    }
+
+    private func letGoStale() {
+        refreshing?.cancel()
+        refreshing = nil
+    }
+
     /// end takes the activity away, and those an earlier launch left.
     func end() {
         last = nil
         declined = false
+        letGoStale()
         guard id != nil || !swept else { return }
         id = nil
         shown = nil
@@ -107,6 +145,7 @@ final class RecordingActivity {
         guard watched == id else { return }
         id = nil
         shown = nil
+        letGoStale()
         if byUser {
             declined = true
             return
@@ -135,7 +174,7 @@ final class RecordingActivity {
     private nonisolated static func update(_ id: String, to state: State) async {
         guard let activity = Activity<RecordingAttributes>.activities.first(where: { $0.id == id })
         else { return }
-        await activity.update(.init(state: state, staleDate: nil))
+        await activity.update(.init(state: state, staleDate: staleAfter(state)))
     }
 
     private nonisolated static func end(_ ids: [String]) async {

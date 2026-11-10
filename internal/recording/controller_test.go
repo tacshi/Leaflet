@@ -1128,3 +1128,71 @@ func TestTranscribeFileWithSonioxHere(t *testing.T) {
 	// Soniox has nothing left of it to be told about.
 	r.FileTranscribed(f, stt)
 }
+
+// Audio this device uploaded goes from it as Keep the audio says: at once
+// where it is kept only until uploaded, after 30 days where it is kept
+// that long, and never while its recording still waits for its transcript
+// or the audio was brought back since.
+func TestSweepAudioFollowsKeepTheAudio(t *testing.T) {
+	r, st, _ := newTestController(t)
+	now := time.Now()
+	add := func(status string, uploaded, written time.Time) store.Recording {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "a.wav")
+		if err := os.WriteFile(path, []byte("audio"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, written, written); err != nil {
+			t.Fatal(err)
+		}
+		rec, err := st.CreateRecording("p", "b", "soniox", "m", path, "en")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err = st.UpdateRecording(rec.ID, func(x *store.Recording) {
+			x.Status, x.UploadedAt = status, uploaded
+			if !uploaded.IsZero() {
+				x.AudioPath = "u/" + x.ID + ".wav"
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	here := func(rec store.Recording) bool {
+		t.Helper()
+		got, err := st.Recording(rec.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.LocalPath != ""
+	}
+	keep := func(k string) {
+		t.Helper()
+		s := st.Settings()
+		s.KeepAudioOnDevice = k
+		if err := st.SaveSettings(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, hour := now.Add(-40*24*time.Hour), now.Add(-time.Hour)
+	uploaded := add("ready", hour, hour.Add(-time.Minute))
+	aged := add("ready", old, old.Add(-time.Minute))
+	back := add("ready", old, hour)
+	waiting := add("transcribing", old, old.Add(-time.Minute))
+	notUp := add("ready", time.Time{}, old)
+
+	keep("always")
+	r.SweepAudio()
+	keep("30_days")
+	r.SweepAudio()
+	if !here(uploaded) || here(aged) || !here(back) || !here(waiting) || !here(notUp) {
+		t.Errorf("30 days: uploaded %v aged %v back %v waiting %v not up %v", here(uploaded), here(aged), here(back), here(waiting), here(notUp))
+	}
+	keep("until_uploaded")
+	r.SweepAudio()
+	if here(uploaded) || !here(back) || !here(waiting) || !here(notUp) {
+		t.Errorf("until uploaded: uploaded %v back %v waiting %v not up %v", here(uploaded), here(back), here(waiting), here(notUp))
+	}
+}

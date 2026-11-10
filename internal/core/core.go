@@ -104,6 +104,9 @@ type Core struct {
 	// rather than renew the sign-in again; guarded by mgmtMu.
 	mgmtMu sync.Mutex
 	mgmt   *supabaseapi.Client
+	// signInEnded is what ProjectNeedsSignIn last read for the project in
+	// use: 1 no, 2 yes, 0 to read again.
+	signInEnded atomic.Int32
 
 	// OpenURL and WatchICloud are the Platform's.
 	OpenURL     func(url string)
@@ -169,6 +172,8 @@ func Open(cfg Config) (*Core, error) {
 	c.startICloud(cfg.ICloudRoot)
 	// Once it knows whether audio goes up, to the server or iCloud Drive.
 	c.Rec.RecoverInterrupted()
+	// Off the start's path: it reads every recording.
+	guard.Go(c.Rec.SweepAudio)
 	if cfg.OnChange != nil {
 		st.Subscribe(cfg.OnChange)
 	}

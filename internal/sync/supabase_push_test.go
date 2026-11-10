@@ -1845,3 +1845,52 @@ func TestAServerTimingOutEveryWriteStopsCounting(t *testing.T) {
 		t.Errorf("%d of %d entries counted a failure", counted, len(entries))
 	}
 }
+
+// A page under one whose own change the server refused, and that waits to
+// be tried again, waits with it unsent: sent, it would be refused too, on
+// every pass until that one goes.
+func TestAPageUnderOneRefusedWaitsUnsent(t *testing.T) {
+	st := openStore(t)
+	top, err := st.CreatePage(store.NewPageOptions{Title: "Project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	under, err := st.CreatePage(store.NewPageOptions{Title: "Plan", ParentID: top.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	sent := map[string]int{}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/rest/v1/pages" && r.Method != http.MethodGet {
+			var row map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&row)
+			sent[store.S(row, "id")]++
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	base, most := retryBase, retryMax
+	retryBase, retryMax = time.Minute, time.Hour
+	t.Cleanup(func() { retryBase, retryMax = base, most })
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if e.Entity == "pages" && e.EntityID == top.ID {
+			svc.failed(e, io.ErrUnexpectedEOF)
+		}
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sent[top.ID] != 0 || sent[under.ID] != 0 {
+		t.Errorf("sent %v", sent)
+	}
+	if !st.HasPending("pages", under.ID) {
+		t.Error("the page under it left the queue")
+	}
+}

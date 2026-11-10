@@ -4405,6 +4405,22 @@
   "@settingsOpenSupabase": {
     "description": "Settings › Account: tooltip of the button opening the project in the Supabase dashboard."
   },
+  "settingsProjectSignIn": "Sign in to Supabase again",
+  "@settingsProjectSignIn": {
+    "description": "Settings › Account: a row shown when the kept Supabase sign-in that updates the user's project has ended; its title."
+  },
+  "settingsProjectSignInDesc": "This version of Leaflet has updates for your Supabase project, and the sign-in that applies them has ended. Until they are applied, parts of sync may not work.",
+  "@settingsProjectSignInDesc": {
+    "description": "Settings › Account: under Sign in to Supabase again, why."
+  },
+  "settingsProjectSigningIn": "Updating your project…",
+  "@settingsProjectSigningIn": {
+    "description": "Settings › Account: beside Sign in to Supabase again, while the browser's sign-in and the project's update run."
+  },
+  "settingsProjectUpdated": "Your Supabase project is up to date.",
+  "@settingsProjectUpdated": {
+    "description": "A toast after signing in to Supabase again brought the project up to date."
+  },
   "settingsDevices": "Devices",
   "@settingsDevices": {
     "description": "Settings › Account: the heading over the devices signed in."

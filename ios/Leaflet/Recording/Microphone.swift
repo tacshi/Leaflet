@@ -171,6 +171,12 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     private func wake(_ session: Int) {
         guard let rec = recordings[session], !rec.stopped, !rec.paused else { return }
         guard let engine = rec.engine else { return rebuild(session) }
+        // An engine left without its tap, by an input that changed to one
+        // with no audio, would run and hear nothing.
+        guard tapped(session, rec, engine) else {
+            rec.sink.stalled(LI.microphoneTaken)
+            return
+        }
         if !engine.isRunning { turnOn(rec, engine) }
     }
 
@@ -228,16 +234,51 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         guard let rec = recordings[session], rec.engine === engine, !rec.stopped else { return }
         if rewire {
             endTap(session, rec)
-            do {
-                try tap(engine, session: session, rec)
-            } catch {
+            guard tapped(session, rec, engine) else {
                 // An input with no audio, as it changes: the next change
-                // brings one.
+                // brings one, most often. Where none comes, as with the
+                // input taken for good, the recording would count on over
+                // nothing: it is looked at again in a moment.
+                queue.asyncAfter(deadline: .now() + Self.rewireWait) { [weak self] in
+                    self?.rewire(session, engine)
+                }
                 return
             }
         }
         guard !rec.paused, !engine.isRunning else { return }
         turnOn(rec, engine)
+    }
+
+    /// rewireWait is how long an input that came without audio is given
+    /// to change again before its recording says the microphone is gone.
+    private static let rewireWait: TimeInterval = 2
+
+    /// tapped makes sure rec, recording session, has its tap on engine,
+    /// making it for the input as it is now where it has none, and reports
+    /// whether it has; on queue.
+    private func tapped(_ session: Int, _ rec: Recording, _ engine: AVAudioEngine) -> Bool {
+        if rec.resampler != nil { return true }
+        do {
+            try tap(engine, session: session, rec)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// rewire gives recording session its tap on engine once more, where
+    /// a change of input left it none and no change since made it one,
+    /// and starts it; with still no audio to tap, the microphone is gone,
+    /// which it says, and the core pauses the recording; on queue.
+    private func rewire(_ session: Int, _ engine: AVAudioEngine) {
+        guard let rec = recordings[session], rec.engine === engine, !rec.stopped,
+            rec.resampler == nil
+        else { return }
+        guard tapped(session, rec, engine) else {
+            rec.sink.stalled(LI.microphoneTaken)
+            return
+        }
+        if !rec.paused, !engine.isRunning { turnOn(rec, engine) }
     }
 
     /// turnOn starts engine again, the audio session first, as a call may
@@ -328,6 +369,11 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
             guard let rec = self.recordings[session], !rec.stopped else { return }
             rec.paused = false
             if let engine = rec.engine {
+                // As wake: with no tap, it would go on hearing nothing.
+                guard self.tapped(session, rec, engine) else {
+                    rec.sink.stalled(LI.microphoneTaken)
+                    return
+                }
                 if !engine.isRunning { self.turnOn(rec, engine) }
             } else {
                 self.rebuild(session)

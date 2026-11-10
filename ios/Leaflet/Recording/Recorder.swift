@@ -142,7 +142,7 @@ final class Recorder {
     /// it is "".
     func start(pageID: String, editor: EditorController?, provider: String = "") {
         guard let client, !state.recording else { return }
-        stopPlaying()
+        quiet()
         Task {
             do {
                 let node = try await client.startRecording(pageID, provider: provider)
@@ -417,6 +417,14 @@ final class Recorder {
 
     /// speedChanged plays the recording at the speed now asked for.
     func speedChanged() { player?.rate = PlaySpeed.current }
+
+    /// quiet stops what plays as a recording starts: a recording's audio,
+    /// and the files and videos, which would play on into it.
+    func quiet() {
+        stopPlaying()
+        FilePlayback.shared.pause()
+        VideoPlayback.shared.pauseAll()
+    }
 
     /// stopPlaying stops the recording playing, and one on its way.
     func stopPlaying() {

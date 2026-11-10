@@ -476,9 +476,9 @@ func (r *runner) ls(_ []string) error {
 	var b strings.Builder
 	var tree func(p listedPage, depth int)
 	tree = func(p listedPage, depth int) {
-		line := shortID(p.ID) + "  " + strings.Repeat("  ", depth) + p.Title
+		line := shortID(p.ID) + "  " + strings.Repeat("  ", depth) + shown(p.Title)
 		for _, t := range p.Tags {
-			line += "  #" + t
+			line += "  #" + shown(t)
 		}
 		if p.Shared && depth == 0 {
 			line += "  (shared with you)"
@@ -491,7 +491,7 @@ func (r *runner) ls(_ []string) error {
 	// As the sidebar has them: the folders with their pages, the pages
 	// outside folders, then the pages shared with the user.
 	for _, f := range l.Folders {
-		b.WriteString(shortID(f.ID) + "  " + f.Name + "/\n")
+		b.WriteString(shortID(f.ID) + "  " + shown(f.Name) + "/\n")
 		for _, p := range inFolder[f.ID] {
 			tree(p, 1)
 		}
@@ -523,13 +523,13 @@ func (r *runner) search(args []string) error {
 	}
 	var b strings.Builder
 	for _, h := range found.Results {
-		b.WriteString(shortID(h.PageID) + "  " + h.Title)
+		b.WriteString(shortID(h.PageID) + "  " + shown(h.Title))
 		if h.Kind != "page" {
-			b.WriteString("  (" + h.Kind + ")")
+			b.WriteString("  (" + shown(h.Kind) + ")")
 		}
 		b.WriteString("\n")
 		if h.Snippet != "" {
-			b.WriteString(strings.Repeat(" ", idLen+2) + strings.Join(strings.Fields(h.Snippet), " ") + "\n")
+			b.WriteString(strings.Repeat(" ", idLen+2) + strings.Join(strings.Fields(shown(h.Snippet)), " ") + "\n")
 		}
 	}
 	return r.print(b.String())
@@ -563,22 +563,22 @@ func (r *runner) current(_ []string) error {
 	}
 	s := at.Selection
 	var b strings.Builder
-	b.WriteString(shortID(at.PageID) + "  " + at.Title)
+	b.WriteString(shortID(at.PageID) + "  " + shown(at.Title))
 	if !at.Open {
 		b.WriteString("  (opened last, not open now)")
 	}
 	b.WriteString("\n")
 	if s.Color != "" {
-		b.WriteString("Color: " + s.Color + "\n")
+		b.WriteString("Color: " + shown(s.Color) + "\n")
 	}
 	if s.Highlight != "" {
-		b.WriteString("Highlight: " + s.Highlight + "\n")
+		b.WriteString("Highlight: " + shown(s.Highlight) + "\n")
 	}
 	if s.MixedColors {
 		b.WriteString("Colors differ across the selection\n")
 	}
 	if s.Text != "" {
-		b.WriteString("Selected:\n" + s.Text + "\n")
+		b.WriteString("Selected:\n" + shownLines(s.Text) + "\n")
 	}
 	if s.Truncated {
 		b.WriteString("(the selection goes on)\n")

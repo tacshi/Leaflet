@@ -684,6 +684,12 @@ func (a *App) speechSettings(c *ui.Context) {
 	changed := false
 	keys := recording.KeysOf(*stt, s.sonioxSaved, s.mossSaved, a.session.SignedIn, a.rec.Engine != nil)
 	set, addable := recording.SpeechProviders(*stt, keys)
+	// A provider open whose settings no longer set it up, as an endpoint's
+	// address emptied to type another, is being added again: it would go
+	// from the list with the field being typed in.
+	if s.adding == "" && s.open != "" && !recording.SetUp(s.open, *stt, keys) {
+		s.adding = s.open
+	}
 	// A provider being added shows with its settings until it is set up.
 	if s.adding != "" {
 		if recording.SetUp(s.adding, *stt, keys) {

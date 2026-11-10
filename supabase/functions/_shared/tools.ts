@@ -1135,7 +1135,7 @@ export interface SessionOptions {
   /**
    * Earlier turns of the conversation that read beyond the page are among
    * what the model reads: the run holds what they read, as one that read
-   * it itself (linkedNow).
+   * it itself (linkedNow, keptToPage).
    */
   heldPages?: boolean;
 }
@@ -1302,7 +1302,6 @@ export class PageEditSession {
     return this.ops.some((op) => !PAGE_OPS.has(op.op));
   }
 
-  /** A run that read nothing beyond its page. */
   /** A run whose page gained a public link after it read beyond the page: it ends (stoppedByLink). */
   get stopped(): boolean {
     return this.stoppedByLink;
@@ -1322,8 +1321,13 @@ export class PageEditSession {
     this.readOthers = true;
   }
 
+  /**
+   * A run that read nothing beyond its page, and held nothing an earlier
+   * turn read beyond it (heldPages): one that held it may say it again, so
+   * the turns after it count it as one that read it (Go's RunLocal).
+   */
   get keptToPage(): boolean {
-    return !this.readPages;
+    return !this.readPages && !this.opts.heldPages;
   }
 
   /**

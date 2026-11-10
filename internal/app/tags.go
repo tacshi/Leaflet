@@ -76,7 +76,8 @@ func (a *App) tagsTree(c *ui.Context) {
 	}
 	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.tagItem(c, key, counts) }).Grow(1).Padding(0, 8, 12)
-	pressed, submitted := a.tagIn.after(list), list.Submitted()
+	pressed, clicked := a.tagIn.after(list)
+	submitted := list.Submitted()
 	if (list.Changed() || submitted) && s.Open.Len() == opened && a.tagRow >= 0 && a.tagRow < s.Rows() {
 		key := s.Item(a.tagRow)
 		if id, ok := taggedPage(key); ok {
@@ -87,6 +88,12 @@ func (a *App) tagsTree(c *ui.Context) {
 		} else {
 			s.Open.Add(key)
 		}
+	}
+	if clicked && clickedOff(s, a.tagRow, func(key string) bool { _, ok := taggedPage(key); return ok }) {
+		a.tagRow = openRow(s, roots, children, func(key string) bool {
+			id, ok := taggedPage(key)
+			return ok && a.route.Kind == "page" && id == a.route.ID
+		})
 	}
 }
 

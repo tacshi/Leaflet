@@ -210,7 +210,8 @@ func (a *App) tree(c *ui.Context) {
 	case folderDrag:
 		a.treeFolderDrop(c, list, nil, &d)
 	}
-	pressed, submitted := a.treeIn.after(list), list.Submitted()
+	pressed, clicked := a.treeIn.after(list)
+	submitted := list.Submitted()
 	if (list.Changed() || submitted) && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
 		kind, id, _ := strings.Cut(key, ":")
@@ -234,13 +235,53 @@ func (a *App) tree(c *ui.Context) {
 			}
 		}
 	}
+	if clicked && clickedOff(s, a.treeRow, func(key string) bool { return strings.HasPrefix(key, "page:") }) {
+		a.treeRow = openRow(s, roots, children, func(key string) bool { return a.route.Kind == "page" && key == "page:"+a.route.ID })
+	}
 }
 
 type treeInput struct {
-	focused   bool
-	pressedAt time.Time
-	open      string
-	wait      int
+	focused bool
+	// pressedAt is when the pointer pressed the list, since the choice last
+	// changed or was submitted, and clickedAt since it last changed: a
+	// double click submits as it presses, and changes the choice as it
+	// lets go.
+	pressedAt, clickedAt time.Time
+	open                 string
+	wait                 int
+}
+
+// handled forgets the press of a click that a row took for itself.
+func (in *treeInput) handled() { in.pressedAt, in.clickedAt = time.Time{}, time.Time{} }
+
+// clickedOff reports whether row, which a click chose, is not a page: a
+// click on a folder or a tag opens or closes it, and on a file previews
+// it, leaving the page open chosen, as a click on their menu button does.
+// The keys still move the choice to them.
+func clickedOff(s *ui.OutlineState[string], row int, page func(key string) bool) bool {
+	return row >= 0 && row < s.Rows() && !page(s.Item(row))
+}
+
+// openRow returns the row of the first item is matches, with the items
+// open now: -1 when none shows.
+func openRow(s *ui.OutlineState[string], roots []string, children func(string) []string, is func(key string) bool) int {
+	row := 0
+	var walk func(items []string) int
+	walk = func(items []string) int {
+		for _, item := range items {
+			if is(item) {
+				return row
+			}
+			row++
+			if kids := children(item); kids != nil && s.Open.Has(item) {
+				if r := walk(kids); r >= 0 {
+					return r
+				}
+			}
+		}
+		return -1
+	}
+	return walk(roots)
 }
 
 const clickChooses = time.Second
@@ -256,19 +297,26 @@ func (in *treeInput) follows(id string) bool {
 	return !in.focused
 }
 
-func (in *treeInput) after(list ui.Element) bool {
+// after reports whether the pointer pressed the list since its choice
+// last changed or was submitted, and whether a click chose the row chosen
+// now, not a key.
+func (in *treeInput) after(list ui.Element) (pressed, clicked bool) {
 	in.focused = list.Focused()
 	list.HandleInput(func(ev ui.InputEvent) bool {
 		if ev.Kind == ui.InputPointerDown {
-			in.pressedAt = time.Now()
+			in.pressedAt, in.clickedAt = time.Now(), time.Now()
 		}
 		return false
 	})
-	pressed := !in.pressedAt.IsZero() && time.Since(in.pressedAt) < clickChooses
+	recent := func(t time.Time) bool { return !t.IsZero() && time.Since(t) < clickChooses }
+	pressed, clicked = recent(in.pressedAt), list.Changed() && recent(in.clickedAt)
 	if list.Changed() || list.Submitted() {
 		in.pressedAt = time.Time{}
 	}
-	return pressed
+	if list.Changed() {
+		in.clickedAt = time.Time{}
+	}
+	return pressed, clicked
 }
 
 func (a *App) treeLabel(key string) string {
@@ -351,7 +399,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			} else {
 				a.treeState.Open.Add(key)
 			}
-			a.treeIn.pressedAt = time.Time{}
+			a.treeIn.handled()
 		}
 		a.pageDrop(c, row, key)
 	case "page":
@@ -380,7 +428,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			}
 			if row.Clicked() {
 				a.openPage(id)
-				a.treeIn.pressedAt = time.Time{}
+				a.treeIn.handled()
 			}
 		}
 		a.pageDrop(c, row, key)

@@ -180,6 +180,23 @@ func TestSpeechProviders(t *testing.T) {
 	}
 }
 
+func TestOldSonioxModelsMoveToTheCurrentOne(t *testing.T) {
+	s := open(t)
+	for model, want := range map[string]string{
+		"stt-rt-v5": SonioxModel, "stt-rt-v3": SonioxModel, "stt-rt-preview-v2": SonioxModel,
+		"stt-rt-v6": "stt-rt-v6", "stt-rt-custom": "stt-rt-custom", "": SonioxModel,
+	} {
+		settings := s.Settings()
+		settings.Stt.SonioxModel = model
+		if err := s.SaveSettings(settings); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Settings().Stt.SonioxModel; got != want {
+			t.Errorf("%q reads as %q, want %q", model, got, want)
+		}
+	}
+}
+
 func TestFileCopiesAreWholeOrNone(t *testing.T) {
 	s := open(t)
 	if _, err := s.AddFile(t.TempDir(), "", "", ""); err == nil {

@@ -829,6 +829,47 @@ func TestTreeArrowsGoByFolders(t *testing.T) {
 	}
 }
 
+func TestClickOnFolderLeavesPageChosen(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	f, err := a.st.CreateFolder("Product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", FolderID: f.ID}); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	clickOn(t, tt, "Notes")
+	tt.Frame()
+	chosen := func() string {
+		if a.treeRow < 0 || a.treeRow >= a.treeState.Rows() {
+			return ""
+		}
+		return a.treeState.Item(a.treeRow)
+	}
+	folder := "folder:" + f.ID
+	// The row's left edge, before its arrow, is the list's and not the row
+	// content's, which handles its own clicks: the list chooses the row.
+	for _, open := range []bool{true, false, true} {
+		_, y := middleOf(t, tt, "Product")
+		tt.ClickAt(12, y)
+		tt.Frame()
+		tt.Advance(time.Second) // not a double click
+		if a.treeState.Open.Has(folder) != open {
+			t.Fatalf("the click left the folder open %v", !open)
+		}
+		if got := chosen(); got != "page:"+notes.ID {
+			t.Fatalf("with the folder open %v, the click chose %q", open, got)
+		}
+	}
+}
+
 func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 	a := templatesApp(t)
 	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Plans")})})

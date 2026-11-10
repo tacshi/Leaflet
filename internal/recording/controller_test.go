@@ -1049,7 +1049,7 @@ func TestTranscribeFileWithSonioxHere(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := make(chan []store.Segment, 1)
-	stt := store.SttSettings{Provider: "soniox", SonioxModel: "stt-rt-v3"}
+	stt := store.SttSettings{Provider: "soniox", SonioxModel: "stt-rt-v6"}
 	if err := r.TranscribeFile(f, "b", stt, true, func(segs []store.Segment, err error) {
 		if err != nil {
 			t.Error(err)

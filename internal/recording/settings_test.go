@@ -43,7 +43,7 @@ func TestKeysOf(t *testing.T) {
 }
 
 func TestSpeechProviders(t *testing.T) {
-	stt := store.SttSettings{Provider: Moss, BaseURL: "http://localhost:8000/v1", Model: "whisper", SonioxModel: "stt-rt-v5"}
+	stt := store.SttSettings{Provider: Moss, BaseURL: "http://localhost:8000/v1", Model: "whisper", SonioxModel: "stt-rt-v6"}
 	set, addable := SpeechProviders(stt, Keys{SonioxHere: true, MossHere: true})
 	var ids []string
 	for _, p := range set {
@@ -52,7 +52,7 @@ func TestSpeechProviders(t *testing.T) {
 	if strings.Join(ids, " ") != "soniox moss openai-compatible" {
 		t.Errorf("set up %v", ids)
 	}
-	if set[0].Name != "Soniox · stt-rt-v5" || !set[0].Removable || set[0].Place != locales.RecSttSonioxOnDevice() {
+	if set[0].Name != "Soniox · stt-rt-v6" || !set[0].Removable || set[0].Place != locales.RecSttSonioxOnDevice() {
 		t.Errorf("Soniox %+v", set[0])
 	}
 	if set[2].Name != locales.CommonEndpoint()+" · whisper" || !set[2].Removable {

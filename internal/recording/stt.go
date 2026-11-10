@@ -132,7 +132,7 @@ var sonioxAPI = "https://api.soniox.com/v1"
 
 var sonioxPoll = 2 * time.Second
 
-const sonioxAsyncModel = "stt-async-v3"
+const sonioxAsyncModel = "stt-async-v6"
 
 func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, size int64, name string, hints []string, speakers bool) ([]store.Segment, error) {
 	if !strings.HasPrefix(model, "stt-async") {

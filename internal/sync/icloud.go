@@ -450,6 +450,7 @@ func (s *Service) rowEntry(me string, entry *store.OutboxEntry) (icloud.Entry, e
 		}
 	}
 	delete(row, store.ChangedKey)
+	delete(row, store.AdoptKey)
 	changed, err := s.st.RowUpdatedAt(e.Entity, e.EntityID)
 	if err != nil {
 		return icloud.Entry{}, err

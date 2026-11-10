@@ -209,7 +209,7 @@ struct PageScreen: View {
                 var data = now.data ?? [:]
                 data["url"] = made.data?["url"]
                 data["title"] = made.data?["title"] ?? .string("")
-                VideoPlayback.shared.stop([node.id])
+                VideoPlayback.shared.stop([editor.player(node.id)])
                 editor.setData(data, ofBlock: node.id)
             }
         }

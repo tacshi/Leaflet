@@ -9,7 +9,11 @@ enum VersionDiff {
         let text: String
     }
 
-    static func rows(from old: String, to new: String, context: Int = 2) -> [Row] {
+    @concurrent nonisolated static func found(from old: String, to new: String) async -> [Row] {
+        rows(from: old, to: new)
+    }
+
+    nonisolated static func rows(from old: String, to new: String, context: Int = 2) -> [Row] {
         let before = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let after = new.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var removed = Set<Int>()
@@ -60,18 +64,28 @@ enum VersionDiff {
 }
 
 struct VersionChanges: View {
-    let rows: [VersionDiff.Row]
+    let old: String
+    let new: String
+    @State private var rows: [VersionDiff.Row]?
 
     var body: some View {
-        if rows.isEmpty {
-            ContentUnavailableView(L.dialogHistoryNoChanges, systemImage: "checkmark.circle")
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows) { line(for: $0) }
+        Group {
+            if let rows, rows.isEmpty {
+                ContentUnavailableView(
+                    L.dialogHistoryNoChanges, systemImage: "checkmark.circle")
+            } else if let rows {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows) { line(for: $0) }
+                    }
+                    .padding(.vertical, 12)
                 }
-                .padding(.vertical, 12)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .task(id: [old, new]) {
+            rows = await VersionDiff.found(from: old, to: new)
         }
     }
 

@@ -246,9 +246,9 @@ func (c *Core) ProjectNeedsSignIn() bool {
 	}
 	_, ended := c.Store.Value(projectSignInKey(ref))
 	if ended {
-		c.signInEnded.Store(2)
+		c.signInEnded.CompareAndSwap(0, 2)
 	} else {
-		c.signInEnded.Store(1)
+		c.signInEnded.CompareAndSwap(0, 1)
 	}
 	return ended
 }

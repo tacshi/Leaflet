@@ -338,7 +338,7 @@ if ! $NO_UPLOAD; then
 		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
 	fi
 	check_manifests "$ASSETS"
-	if ! $RESUME; then run git tag -a "$TAG" -F "$STAGE_DIR/notes.md" "$COMMIT"; fi
+	if ! $RESUME; then run git tag -a "$TAG" --cleanup=whitespace -F "$STAGE_DIR/notes.md" "$COMMIT"; fi
 	if ! $RESUME || [[ -z "$REMOTE_TAG" ]]; then run git push origin "$TAG"; fi
 	run gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Leaflet $VERSION" --notes-file "$STAGE_DIR/notes.md"
 fi

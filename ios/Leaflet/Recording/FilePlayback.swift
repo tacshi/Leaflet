@@ -92,6 +92,8 @@ struct SpeedMenu: View {
 final class FilePlayback {
     static let shared = FilePlayback()
     private(set) var block: String?
+    /// The editor whose player this is (`EditorController.players`).
+    private(set) var owner: String?
     private(set) var player: AVPlayer?
     private(set) var loading: String?
     private(set) var playing = false
@@ -103,9 +105,16 @@ final class FilePlayback {
 
     private init() {}
 
-    func play(block id: String, file fileID: String, at: Int? = nil, client: CoreClient?) {
+    func plays(_ id: String, in editor: String?) -> Bool { block == id && owner == editor }
+
+    func loads(_ id: String, in editor: String?) -> Bool { loading == id && owner == editor }
+
+    func play(
+        block id: String, in editor: String?, file fileID: String, at: Int? = nil,
+        client: CoreClient?
+    ) {
         guard !Recorder.shared.state.recording else { return }
-        if block == id, let player {
+        if plays(id, in: editor), let player {
             if let at { player.seek(to: CMTime(seconds: Double(at), preferredTimescale: 600)) }
             if playing && at == nil {
                 player.pause()
@@ -117,6 +126,7 @@ final class FilePlayback {
         guard let client, loading == nil else { return }
         stop()
         loading = id
+        owner = editor
         fetch += 1
         let this = fetch
         fetching = Task { [self] in
@@ -178,6 +188,11 @@ final class FilePlayback {
         guard !Recorder.shared.state.recording else { return }
         VideoPlayback.shared.pauseAll()
         Recorder.shared.pausePlaying()
+        // A recording made since this file was loaded left the session set
+        // for the microphone.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .spokenAudio)
+        try? session.setActive(true)
         if let length = player.currentItem?.duration.seconds, length.isFinite,
             player.currentTime().seconds >= length - 0.05
         {
@@ -220,11 +235,12 @@ final class FilePlayback {
         player = nil
         cover = nil
         block = nil
+        owner = nil
         playing = false
     }
 
-    func stop(_ blocks: Set<String>) {
-        if let playing = block ?? loading, blocks.contains(playing) { stop() }
+    func stop(_ blocks: Set<String>, in editor: String?) {
+        if owner == editor, let playing = block ?? loading, blocks.contains(playing) { stop() }
         failed.subtract(blocks)
     }
 }

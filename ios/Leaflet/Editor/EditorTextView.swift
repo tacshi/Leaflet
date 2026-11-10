@@ -1,4 +1,4 @@
-import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 final class EditorTextView: UITextView {
     weak var controller: EditorController?
@@ -81,6 +81,7 @@ final class EditorTextView: UITextView {
 
     init() {
         super.init(frame: .zero, textContainer: nil)
+        addGestureRecognizer(finger)
         alwaysBounceVertical = true
         keyboardDismissMode = .interactive
         textContainer.lineFragmentPadding = 0
@@ -189,8 +190,14 @@ final class EditorTextView: UITextView {
         guard let screen = window?.windowScene?.screen else { return }
         var covered: CGFloat = 0
         if let end = Self.keyboardEnd, end.screen == nil || end.screen == screen {
+            // An iPad's floating keyboard, narrower than the screen and
+            // off its bottom edge, covers no strip along the bottom to keep
+            // clear of. Any other counts as before.
+            let floating =
+                end.frame.width < screen.bounds.width - 1
+                && end.frame.maxY < screen.bounds.maxY - 1
             let keyboard = convert(end.frame, from: screen.coordinateSpace)
-            covered = max(0, bounds.maxY - keyboard.minY)
+            covered = floating ? 0 : max(0, bounds.maxY - keyboard.minY)
         }
         guard contentInset.bottom != covered else { return }
         contentInset.bottom = covered
@@ -234,6 +241,34 @@ final class EditorTextView: UITextView {
 
     override var frame: CGRect {
         didSet { if frame.size != oldValue.size { setNeedsLayout() } }
+    }
+
+    /// The fastest the page moves under a selection handle held at its edge,
+    /// in points a second. The system speeds up without end the longer the
+    /// handle is held there, soon past anything a finger can stop on a line.
+    private static let fastestUnderHandle: CGFloat = 260
+    private let finger = TouchWatch()
+    private var movedAt: CFTimeInterval = 0
+
+    private var extendingSelection: Bool {
+        finger.down && selectedRange.length > 0 && !isDragging && !isDecelerating
+    }
+
+    override var contentOffset: CGPoint {
+        get { super.contentOffset }
+        set {
+            let was = super.contentOffset
+            let now = CACurrentMediaTime()
+            defer { movedAt = now }
+            guard extendingSelection, newValue.x == was.x else {
+                super.contentOffset = newValue
+                return
+            }
+            let since = min(max(now - movedAt, 1.0 / 120), 1.0 / 30)
+            let most = Self.fastestUnderHandle * since
+            let step = min(max(newValue.y - was.y, -most), most)
+            super.contentOffset = CGPoint(x: newValue.x, y: was.y + step)
+        }
     }
 
     override func layoutSubviews() {
@@ -521,6 +556,27 @@ final class EditorTextView: UITextView {
         controller?.copiedOut()
     }
 
+    /// True from a Paste until its text is put in: text typed, dictated or
+    /// picked from the emoji keyboard that reads the same as what was last
+    /// copied here is no paste, and takes none of the copy's formatting.
+    /// The text of a Paste comes after `paste(_:)` has returned, once the
+    /// pasteboard has been read, so the mark waits for it, for a moment.
+    var isPasting: Bool { pasteStarted.map { Date().timeIntervalSince($0) < 2 } ?? false }
+    private var pasteStarted: Date?
+
+    override func paste(_ sender: Any?) {
+        pasteStarted = Date()
+        super.paste(sender)
+    }
+
+    func pasteTaken() { pasteStarted = nil }
+
+    func whilePasting(_ run: () -> Void) {
+        pasteStarted = Date()
+        defer { pasteStarted = nil }
+        run()
+    }
+
     override func cut(_ sender: Any?) {
         controller?.copied()
         super.cut(sender)
@@ -605,4 +661,45 @@ extension UIView {
     var holdsFirstResponder: Bool {
         isFirstResponder || subviews.contains { $0.holdsFirstResponder }
     }
+}
+
+/// Tells whether a finger is on the view, and takes no touch from anything.
+private final class TouchWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private var touches = 0
+    var down: Bool { touches > 0 }
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        self.touches += touches.count
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        lifted(touches.count)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        lifted(touches.count)
+    }
+
+    private func lifted(_ count: Int) {
+        touches = max(touches - count, 0)
+        if touches == 0 { state = .failed }
+    }
+
+    override func reset() { touches = 0 }
+
+    override func canPrevent(_ other: UIGestureRecognizer) -> Bool { false }
+
+    override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
+
+    func gestureRecognizer(
+        _ one: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool { true }
 }

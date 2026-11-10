@@ -141,7 +141,7 @@ final class Recorder {
 
     func testMicrophone() {
         guard let client else { return }
-        stopPlaying()
+        quiet()
         Task {
             do { try await client.testMicrophone() } catch { toast?(error.localizedDescription) }
         }

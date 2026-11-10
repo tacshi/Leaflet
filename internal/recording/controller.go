@@ -234,6 +234,9 @@ func (r *Controller) RecoverInterrupted() {
 			continue
 		}
 		cutOff := rec.Status == "recording"
+		if !cutOff && !r.startedHere(rec) {
+			continue
+		}
 		var duration int
 		if cutOff && rec.LocalPath != "" {
 			duration = repairWav(rec.LocalPath)
@@ -254,7 +257,33 @@ func (r *Controller) RecoverInterrupted() {
 		}); err != nil {
 			log.Printf("recording: %v", err)
 		}
+		r.unmark(rec.ID)
 	}
+}
+
+// A row another device is transcribing reads the same as one this device
+// was transcribing when it quit, so each transcription this device starts
+// leaves a mark, and only a marked row, or one too old for anyone to still
+// be working on, is settled.
+func transcribingKey(id string) string { return "recording.transcribing." + id }
+
+const longestTranscription = 6 * time.Hour
+
+func (r *Controller) mark(id string) {
+	if err := r.st.SetValue(transcribingKey(id), "1"); err != nil {
+		log.Printf("recording: %v", err)
+	}
+}
+
+func (r *Controller) unmark(id string) {
+	if err := r.st.DeleteValue(transcribingKey(id)); err != nil {
+		log.Printf("recording: %v", err)
+	}
+}
+
+func (r *Controller) startedHere(rec store.Recording) bool {
+	_, marked := r.st.Value(transcribingKey(rec.ID))
+	return marked || time.Since(rec.UpdatedAt) > longestTranscription
 }
 
 func (r *Controller) Attach(c Capture, update func(func())) {
@@ -365,6 +394,7 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 	rec, err := r.st.CreateRecording(pageID, blockID, stt.Provider, model(stt), path, stt.Language)
 	if err != nil {
 		_ = wav.Close()
+		_ = os.Remove(path)
 		return err
 	}
 	insert(&doc.Node{ID: blockID, Type: "recording", Data: map[string]any{
@@ -913,6 +943,7 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 }
 
 func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt store.SttSettings) {
+	r.mark(rec.ID)
 	r.update(func() {
 		r.Transcribing[rec.ID] = true
 		if stream != nil {
@@ -949,6 +980,7 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 		}); err != nil && !store.IsNotFound(err) {
 			log.Printf("recording: %v", err)
 		}
+		r.unmark(rec.ID)
 	})
 	<-done
 	if done, err := r.st.Recording(rec.ID); err == nil {

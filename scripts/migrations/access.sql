@@ -1973,6 +1973,37 @@ begin
 end;
 $$;
 
+-- A page restored under a share is read again by those it was hidden
+-- from: what is on it moves its updated_at on, so their pulls bring it. So
+-- does a page moved out from under a deleted one within the same shares.
+do $$
+declare
+  v_root constant uuid := 'fa000000-0000-0000-0000-000000000002';
+  v_top constant uuid := 'fa000000-0000-0000-0000-0000000000e1';
+  v_sub constant uuid := 'fa000000-0000-0000-0000-0000000000e2';
+  v_comment constant uuid := 'fa000000-0000-0000-0000-0000000000e3';
+  v_before timestamptz;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set deleted_at = now() where id = v_top;
+  v_before := clock_timestamp();
+  update public.pages set deleted_at = null where id = v_top;
+  if (select updated_at from public.pages where id = v_sub) <= v_before
+     or (select updated_at from public.comments where id = v_comment) <= v_before then
+    raise exception 'a page restored under a share did not touch what is on it';
+  end if;
+
+  update public.pages set deleted_at = now() where id = v_top;
+  v_before := clock_timestamp();
+  update public.pages set parent_id = v_root where id = v_sub;
+  if (select updated_at from public.comments where id = v_comment) <= v_before then
+    raise exception 'a page moved out from under a deleted one did not touch what is on it';
+  end if;
+  update public.pages set parent_id = v_top where id = v_sub;
+  update public.pages set deleted_at = null where id = v_top;
+end;
+$$;
+
 -- A walk of the tree ends on a cycle, should one ever get past
 -- pages_guard: the page moved under Ideas made its parent. It stops 1,000
 -- pages up, as deep as a tree may go; one that went round for good would

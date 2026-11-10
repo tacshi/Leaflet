@@ -140,7 +140,7 @@ final class AppModel {
             if ["key_values", "session", "*"].contains(table) { Recorder.shared.reloadChoices() }
             if ["pages", "folders", "spaces", "session"].contains(table) {
                 Task { await reload() }
-            } else if table == "files" {
+            } else if table == "files" || table == "page_members" {
                 Task { await reload(.library) }
             } else if table == "page_contents" {
                 var parts: Reload = [.library, .todos, .status]

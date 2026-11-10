@@ -362,6 +362,11 @@ final class VideoPlayback {
         let script: String
     }
 
+    /// A player is a block's in one editor: see `EditorController.players`.
+    static func key(_ block: String, in editor: EditorController?) -> String {
+        editor?.player(block) ?? block
+    }
+
     func play(_ id: String) {
         playing.insert(id)
         playAlone(id)
@@ -450,7 +455,8 @@ struct VideoBlock: View {
     @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 28
 
     private var playback: VideoPlayback { VideoPlayback.shared }
-    private var playing: Bool { playback.playing.contains(node.id) }
+    private var key: String { VideoPlayback.key(node.id, in: editor) }
+    private var playing: Bool { playback.playing.contains(key) }
     private var link: String { node.data?["url"]?.string ?? "" }
     private var title: String {
         let title = node.data?["title"]?.string ?? ""
@@ -482,8 +488,8 @@ struct VideoBlock: View {
     }
 
     var body: some View {
-        let start = playback.start[node.id] ?? -1
-        let loads = playback.loads[node.id] ?? 0
+        let start = playback.start[key] ?? -1
+        let loads = playback.loads[key] ?? 0
         let player = made?.player
         let lines = Self.lines(node)
         VStack(alignment: .leading, spacing: 0) {
@@ -495,7 +501,7 @@ struct VideoBlock: View {
                         WebPage(
                             html: made.player.page + "<!-- \(made.loads) -->",
                             base: URL(string: made.player.origin), interactive: true,
-                            script: playback.seeks[node.id], player: node.id)
+                            script: playback.seeks[key], player: key)
                     } else if let thumb = player?.thumbnail, let url = URL(string: thumb) {
                         AsyncImage(url: url) {
                             $0.resizable().scaledToFill()
@@ -507,7 +513,7 @@ struct VideoBlock: View {
                 .overlay {
                     if !playing {
                         Button {
-                            playback.play(node.id)
+                            playback.play(key)
                         } label: {
                             Image(systemName: "play.fill")
                                 .font(.title)
@@ -556,7 +562,7 @@ struct VideoBlock: View {
     }
 
     private func play(_ at: Int) {
-        playback.seek(node.id, link: link, at: at)
+        playback.seek(key, link: link, at: at)
     }
 
     static func lines(_ block: DocNode) -> [Line] {
@@ -578,13 +584,14 @@ struct VideoBlock: View {
         let link = block.data?["url"]?.string ?? ""
         let lines = Self.lines(block)
         var out: [BlockAction] = []
-        if !playback.playing.contains(block.id) {
-            out.append(BlockAction(title: L.recPlay) { playback.play(block.id) })
+        let key = VideoPlayback.key(block.id, in: editor)
+        if !playback.playing.contains(key) {
+            out.append(BlockAction(title: L.recPlay) { playback.play(key) })
         }
         func offer(_ title: String, at: Int) {
             out.append(
                 BlockAction(title: L.videoPlay(title: title)) {
-                    playback.seek(block.id, link: link, at: at)
+                    playback.seek(key, link: link, at: at)
                 })
         }
         for line in lines {

@@ -238,14 +238,6 @@ func usedNames(notes string, names []string, to string) []string {
 	return kept
 }
 
-func SpeakerNamesJSON(names []string) string {
-	if names == nil {
-		names = []string{}
-	}
-	raw, _ := json.Marshal(names)
-	return string(raw)
-}
-
 func SpeakerNamesFrom(raw string) []string {
 	var names []string
 	_ = json.Unmarshal([]byte(raw), &names)

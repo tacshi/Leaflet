@@ -59,7 +59,7 @@ func Decode(b []byte, lang string, cut bool) (Text, error) {
 	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
 		return Text{Text: string(trimPartial(b[3:], cut))}, nil
 	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}), bytes.HasPrefix(b, []byte{0xFE, 0xFF}):
-		out, err := unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder().Bytes(b)
+		out, err := unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder().Bytes(trimPartialUTF16(b, cut))
 		if err != nil {
 			return Text{}, err
 		}
@@ -87,6 +87,26 @@ func Decode(b []byte, lang string, cut bool) (Text, error) {
 }
 
 const partialMax = 3
+
+// trimPartialUTF16 drops what a cut left of a character at the end: an odd
+// byte, and the first half of a surrogate pair.
+func trimPartialUTF16(b []byte, cut bool) []byte {
+	if !cut {
+		return b
+	}
+	b = b[:len(b)&^1]
+	if len(b) < 4 {
+		return b
+	}
+	high := b[len(b)-1]
+	if b[0] == 0xFE {
+		high = b[len(b)-2]
+	}
+	if high >= 0xD8 && high <= 0xDB {
+		b = b[:len(b)-2]
+	}
+	return b
+}
 
 func trimPartial(b []byte, cut bool) []byte {
 	if !cut {

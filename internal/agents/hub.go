@@ -404,6 +404,9 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 	} else if len(skipped) > 0 {
 		run.skip(at)
 	}
+	if op == nil {
+		run.Skipped = slices.DeleteFunc(run.Skipped, func(i int) bool { return i >= at })
+	}
 }
 
 func (h *Hub) keepBefore(pageID string, run *Run, option Option, before *doc.Content) error {

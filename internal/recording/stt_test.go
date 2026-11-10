@@ -252,3 +252,75 @@ func TestStartingAJobHasADeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestSonioxLostAfterTheEndOfAudio(t *testing.T) {
+	was := finishWait
+	finishWait = 2 * time.Second
+	t.Cleanup(func() { finishWait = was })
+	for name, last := range map[string]string{"dropped": "", "refused": `{"error_message":"out of credit"}`} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			c, err := websocket.Accept(w, req, nil)
+			if err != nil {
+				return
+			}
+			ctx := context.Background()
+			for {
+				kind, data, err := c.Read(ctx)
+				if err != nil {
+					return
+				}
+				if kind == websocket.MessageBinary && len(data) > 0 {
+					_ = c.Write(ctx, websocket.MessageText, []byte(`{"tokens":[{"text":"hello","start_ms":0,"end_ms":500,"is_final":true}]}`))
+				}
+				if kind == websocket.MessageText && len(data) == 0 {
+					if last != "" {
+						_ = c.Write(ctx, websocket.MessageText, []byte(last))
+					}
+					_ = c.CloseNow()
+					return
+				}
+			}
+		}))
+		conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newSoniox(conn)
+		s.Send([]byte{1, 2})
+		for range 200 {
+			s.mu.Lock()
+			heard := len(s.final) > 0
+			s.mu.Unlock()
+			if heard {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		segs, _ := s.Finish()
+		if len(segs) != 1 || s.Lost() == nil {
+			t.Errorf("%s: segments %+v, lost %v", name, segs, s.Lost())
+		}
+		srv.Close()
+	}
+}
+
+func TestPolledAsksAgainAfterAPassingFailure(t *testing.T) {
+	calls := 0
+	err := polled(context.Background(), time.Millisecond, func() error {
+		if calls++; calls < 3 {
+			return transientError{errors.New("dropped")}
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Errorf("%d calls, %v", calls, err)
+	}
+	calls = 0
+	if err := polled(context.Background(), time.Millisecond, func() error { calls++; return errors.New("rejected") }); err == nil || calls != 1 {
+		t.Errorf("a lasting failure: %d calls, %v", calls, err)
+	}
+	calls = 0
+	if err := polled(context.Background(), time.Millisecond, func() error { calls++; return transientError{errors.New("down")} }); err == nil || calls != pollRetries+1 {
+		t.Errorf("a service that stays down: %d calls, %v", calls, err)
+	}
+}

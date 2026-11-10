@@ -411,6 +411,13 @@ func clampInt(v any, def, lo, hi int) int {
 	return min(max(AsInt(v, def), lo), hi)
 }
 
+// A table is as wide as its widest row, each other row filled out to it,
+// so a few long rows among many short ones make far more cells than there
+// is text: the size is checked before any cell is made.
+func errTableTooLarge(rows, cols int) error {
+	return toolErr("A table of %d rows and %d columns is too large: a table holds at most %d cells.", rows, cols, maxTableCells)
+}
+
 func TableNode(rows [][]string, id string) (*Node, error) {
 	cols := 0
 	for _, r := range rows {
@@ -418,6 +425,9 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 	}
 	if len(rows) == 0 || cols == 0 {
 		return nil, toolErr("A table needs rows: a list of rows, each a list of cells.")
+	}
+	if len(rows) > maxTableCells/cols {
+		return nil, errTableTooLarge(len(rows), cols)
 	}
 	if id == "" {
 		id = NewBlockID()
@@ -454,6 +464,9 @@ func SetTableRows(n *Node, rows [][]string) error {
 	}
 	if len(rows) == 0 || cols == 0 {
 		return toolErr("A table needs rows: a list of rows, each a list of cells.")
+	}
+	if len(rows) > maxTableCells/cols {
+		return errTableTooLarge(len(rows), cols)
 	}
 	grid := TableCells(n)
 	var kept []*Node

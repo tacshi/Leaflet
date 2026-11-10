@@ -210,7 +210,7 @@ struct HistorySheet: View {
             if let v = versions?.first(where: { $0.id == chosen }) {
                 Group {
                     if comparing {
-                        VersionChanges(rows: VersionDiff.rows(from: v.markdown, to: current))
+                        VersionChanges(old: v.markdown, new: current)
                     } else {
                         ScrollView {
                             MarkdownPreview(markdown: v.markdown, size: app.textSize)

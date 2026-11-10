@@ -161,6 +161,9 @@ func (a *App) dropPlayers() {
 }
 
 func (a *App) play(rec store.Recording) {
+	if rec.Status == "recording" || a.rec.Active() && a.rec.State.ID == rec.ID {
+		return
+	}
 	pl := a.players[rec.ID]
 	if pl == nil {
 		if a.players == nil {
@@ -186,7 +189,7 @@ func (a *App) play(rec store.Recording) {
 	}
 	pl.loading = true
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), recording.DownloadWait(recording.AudioSize(rec.DurationMs)))
 		defer cancel()
 		data, err := a.rec.Audio(ctx, rec)
 		var snd *audio.Sound
@@ -477,7 +480,9 @@ func (a *App) seek(rec store.Recording, t time.Duration) {
 	pl := a.players[rec.ID]
 	if pl == nil || pl.p == nil {
 		a.play(rec)
-		a.players[rec.ID].from = t
+		if pl = a.players[rec.ID]; pl != nil {
+			pl.from = t
+		}
 		return
 	}
 	pl.p.Seek(t)
@@ -980,7 +985,7 @@ func (a *App) saveMossKey() {
 			a.toast(locales.RecSttKeyNotSaved(err.Error()))
 			return
 		}
-		s.moss, s.mossSaved, s.testResult = "", true, ""
+		s.moss, s.mossSaved, s.keysRead, s.testResult = "", true, true, ""
 		a.preferSetUp()
 		a.toast(locales.RecSttSavedOnDevice())
 	})
@@ -1000,7 +1005,7 @@ func (a *App) saveSonioxKey() {
 			a.toast(err.Error())
 			return
 		}
-		s.soniox, s.sonioxSaved, s.testResult = "", true, ""
+		s.soniox, s.sonioxSaved, s.keysRead, s.testResult = "", true, true, ""
 		a.preferSetUp()
 		a.toast(locales.RecSttSavedOnDevice())
 	})

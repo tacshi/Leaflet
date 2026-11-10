@@ -82,7 +82,8 @@ final class EditingRules {
         }
         if !info.isText {
             if NSMaxRange(range) > NSMaxRange(para) { return replaceSelection(range, para, s) }
-            edits.insertParagraph(after: para, info: BlockInfo.paragraph(), text: s)
+            edits.insertParagraph(
+                after: para, info: BlockInfo.paragraph(depth: info.depth), text: s)
             return false
         }
         if s == " " || s == "\u{3000}", markdownShortcut(range, para, info, typing: s) {
@@ -93,7 +94,9 @@ final class EditingRules {
         let pasting =
             info.type != "code" && (s as NSString).length > 1
             && (range.length == 0 || range == textView.selectedRange)
-        if pasting, clipboard.pastedCopy(s, replacing: range, para, info) {
+        let fromPaste = textView.isPasting
+        textView.pasteTaken()
+        if pasting, fromPaste, clipboard.pastedCopy(s, replacing: range, para, info) {
             return false
         }
         if pasting, !s.contains("\u{FFFC}"),
@@ -339,7 +342,7 @@ final class EditingRules {
         guard textView.isEditable, textView.markedTextRange == nil else { return }
         let (para, info) = text.paragraph(at: textView.selectedRange.location)
         guard !info.isText else { return }
-        edits.insertParagraph(after: para, info: BlockInfo.paragraph(), text: "")
+        edits.insertParagraph(after: para, info: BlockInfo.paragraph(depth: info.depth), text: "")
     }
 
     private func backspaceAtStart(_ para: NSRange, _ info: BlockInfo) -> Bool {

@@ -577,22 +577,6 @@ func Signatures(c *Content) map[string]string {
 	return out
 }
 
-func ChangedBlocks(a, b *Content) map[string]bool {
-	sa, sb := Signatures(a), Signatures(b)
-	out := map[string]bool{}
-	for id, s := range sa {
-		if sb[id] != s {
-			out[id] = true
-		}
-	}
-	for id, s := range sb {
-		if sa[id] != s {
-			out[id] = true
-		}
-	}
-	return out
-}
-
 func (c *Content) Stamped(previous *Content, now int64) *Content {
 	stamp := func(id string) int64 {
 		t := now

@@ -163,7 +163,7 @@ func (e *Editor) selectedUnits(a Pos) []*doc.Node {
 
 func (e *Editor) selectedEnd(us []*doc.Node, b Pos) int {
 	ib := indexIn(us, b.ID)
-	if ib < 0 || !foldedHeading(us[ib]) || b.Off < textLen(us[ib]) {
+	if ib < 0 || !foldedHeading(us[ib]) || b.Off == 0 || b.Off < textLen(us[ib]) {
 		return ib
 	}
 	sec := e.section(us[ib])

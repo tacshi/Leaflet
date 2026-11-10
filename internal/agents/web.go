@@ -147,7 +147,7 @@ func (g *ChatGPT) SearchWeb(ctx context.Context, model, query string) (Search, e
 		return Search{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	sc := bufio.NewScanner(res.Body)
+	sc := bufio.NewScanner(capStream(res.Body))
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
 	var items []any
 	for sc.Scan() {

@@ -74,7 +74,7 @@ struct FileBlock: View {
             } else {
                 card(playback)
             }
-            if playback.block == node.id, let player = playback.player {
+            if playback.plays(node.id, in: editor?.players), let player = playback.player {
                 if kind == "video" {
                     FileVideo(player: player)
                         .frame(height: min(max(width, 1) * 9 / 16, 420))
@@ -128,8 +128,8 @@ struct FileBlock: View {
             (lines, speakers) = read
             starts = lines.map { Double($0.at) }
         }
-        .task(id: playback.block == node.id) {
-            guard playback.block == node.id else {
+        .task(id: playback.plays(node.id, in: editor?.players)) {
+            guard playback.plays(node.id, in: editor?.players) else {
                 clock.clear()
                 return
             }
@@ -157,7 +157,7 @@ struct FileBlock: View {
     private func header(_ playback: FilePlayback) -> some View {
         let palette = BlockLook.palette
         let failed = playback.failed.contains(node.id)
-        let on = playback.block == node.id && playback.playing
+        let on = playback.plays(node.id, in: editor?.players) && playback.playing
         return HStack(spacing: 10) {
             Image(systemName: "waveform")
                 .font(.footnote)
@@ -174,7 +174,7 @@ struct FileBlock: View {
                 tap(!failed)
             } label: {
                 Group {
-                    if playback.loading == node.id {
+                    if playback.loads(node.id, in: editor?.players) {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: failed ? "doc" : on ? "pause.fill" : "play.fill")
@@ -219,14 +219,14 @@ struct FileBlock: View {
     private func card(_ playback: FilePlayback) -> some View {
         let palette = BlockLook.palette
         let playable = Self.media(kind) && !playback.failed.contains(node.id)
-        let on = playback.block == node.id && playback.playing
+        let on = playback.plays(node.id, in: editor?.players) && playback.playing
         return HStack(spacing: 12) {
             Button {
                 tap(playable)
             } label: {
                 HStack(spacing: 12) {
                     Group {
-                        if playback.loading == node.id {
+                        if playback.loads(node.id, in: editor?.players) {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: playable ? (on ? "pause.fill" : "play.fill") : "doc")
@@ -266,7 +266,8 @@ struct FileBlock: View {
 
     private func tap(_ playable: Bool) {
         if playable {
-            FilePlayback.shared.play(block: node.id, file: fileID, client: editor?.client)
+            FilePlayback.shared.play(
+                block: node.id, in: editor?.players, file: fileID, client: editor?.client)
         } else {
             editor?.onOpenFile?(fileID)
         }
@@ -274,7 +275,8 @@ struct FileBlock: View {
 
     private func play(_ at: Int) {
         guard Self.media(kind) else { return }
-        FilePlayback.shared.play(block: node.id, file: fileID, at: at, client: editor?.client)
+        FilePlayback.shared.play(
+            block: node.id, in: editor?.players, file: fileID, at: at, client: editor?.client)
     }
 
     private var menu: some View {

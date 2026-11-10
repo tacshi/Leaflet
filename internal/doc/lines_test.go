@@ -367,3 +367,24 @@ func TestTogglesOnALineReadInLinearTime(t *testing.T) {
 		t.Errorf("toggles on a line read as %q, want %q", shape(got), want)
 	}
 }
+
+func TestARaggedTableTooLargeStaysText(t *testing.T) {
+	const wide = 2000
+	text := "|" + strings.Repeat("a|", wide) + "\n" + strings.Repeat("|x|\n", wide)
+	nodes := ParseLines(text)
+	if len(nodes) != wide+1 {
+		t.Fatalf("%d blocks", len(nodes))
+	}
+	for _, n := range nodes {
+		if n.Type != "paragraph" {
+			t.Fatalf("a %s", n.Type)
+		}
+	}
+	if _, err := TableNode(make([][]string, maxTableCells+1), ""); err == nil {
+		t.Error("rows with no cells made a table")
+	}
+	rows := [][]string{make([]string, maxTableCells), {"x"}}
+	if _, err := TableNode(rows, ""); err == nil {
+		t.Error("a table past the most cells was made")
+	}
+}

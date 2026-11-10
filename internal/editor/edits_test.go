@@ -688,3 +688,14 @@ func TestCodeLinesBetweenOtherBlocksStayTheirOwnBlocks(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestACompositionThatEndsEmptyIsAChange(t *testing.T) {
+	e, _ := mentionLine(t)
+	changes := 0
+	e.OnChange = func() { changes++ }
+	e.SetMarkedText(&ui.TextInputRange{Start: 0, End: 2}, "り", ui.TextInputRange{Start: 1, End: 1})
+	e.SetMarkedText(nil, "", ui.TextInputRange{})
+	if _, marked := e.MarkedRange(); marked || changes == 0 {
+		t.Errorf("marked %v, %d changes told", marked, changes)
+	}
+}

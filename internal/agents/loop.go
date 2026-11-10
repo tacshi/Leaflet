@@ -246,6 +246,9 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		}
 		cut := res.FinishReason == "length"
 		if len(res.ToolCalls) == 0 {
+			if req.Surface == "comment" && exec.endsHere() {
+				return result(""), errLinkedStop
+			}
 			reply := withoutThinking(res.Content)
 			if cut {
 				reply = strings.TrimSpace(reply + "\n\n" + locales.AgentReplyCutOff())

@@ -24,7 +24,7 @@ func (p Pages) LinkSubpageAt(parent, id string, at doc.Position) error {
 }
 
 func (p Pages) linkSubpage(parent, id string, at func(c *doc.Content) doc.Position) error {
-	return p.EditPage(parent, func(c *doc.Content) bool {
+	return p.EditKeptPage(parent, func(c *doc.Content) bool {
 		if _, ok := c.SubpagePlace(id); ok {
 			return false
 		}
@@ -37,7 +37,7 @@ func (p Pages) linkSubpage(parent, id string, at func(c *doc.Content) doc.Positi
 }
 
 func (p Pages) UnlinkSubpage(parent, id string) error {
-	return p.EditPage(parent, func(c *doc.Content) bool {
+	return p.EditKeptPage(parent, func(c *doc.Content) bool {
 		var links []string
 		c.Walk(func(n, _ *doc.Node) {
 			if n.Type == "subpage" && n.Str("page_id") == id {

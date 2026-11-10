@@ -84,3 +84,17 @@ func TestParseCSV(t *testing.T) {
 		t.Errorf("%d columns, cut %v", len(rows[0]), cut)
 	}
 }
+
+func TestDecodeCutUTF16(t *testing.T) {
+	for name, b := range map[string][]byte{
+		"an odd byte":             {0xFF, 0xFE, 'a', 0, 'b', 0, 'c'},
+		"half a pair":             {0xFF, 0xFE, 'a', 0, 'b', 0, 0x3D, 0xD8},
+		"half a pair, big end":    {0xFE, 0xFF, 0, 'a', 0, 'b', 0xD8, 0x3D},
+		"a whole pair kept whole": {0xFF, 0xFE, 'a', 0, 'b', 0},
+	} {
+		got, err := Decode(b, "", true)
+		if err != nil || got.Text != "ab" {
+			t.Errorf("%s: %q, %v", name, got.Text, err)
+		}
+	}
+}

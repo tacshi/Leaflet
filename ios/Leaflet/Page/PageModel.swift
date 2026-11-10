@@ -67,12 +67,16 @@ final class PageModel {
                 await client.closePage(id, editor: page.editor)
                 return
             }
-            if content == nil || page.rev >= rev {
+            if content == nil {
                 content = page.content
                 rev = page.rev
+                shown = rev
                 refreshOutline()
+            } else if page.rev >= rev {
+                // An update that came first has an editor showing it: this
+                // content goes to that editor as one more update.
+                show(page.content, at: page.rev)
             }
-            shown = rev
             editor = page.editor
             readOnly = page.readOnly
             unreadable = page.unreadable

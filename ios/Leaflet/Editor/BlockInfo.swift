@@ -48,7 +48,9 @@ final class BlockInfo: NSObject, @unchecked Sendable {
 
     static func newID() -> String { MobileNewBlockID() }
 
-    static func paragraph() -> BlockInfo { BlockInfo(id: newID(), type: "paragraph") }
+    static func paragraph(depth: Int = 0) -> BlockInfo {
+        BlockInfo(id: newID(), type: "paragraph", depth: depth)
+    }
 
     func newLine() -> BlockInfo {
         let made = try? JSONDecoder().decode(NewBlock.self, from: Data(MobileNewLine(type).utf8))

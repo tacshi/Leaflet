@@ -21,6 +21,14 @@ type signInState struct {
 	info   string
 	asking *store.User
 	lost   int
+	run    int
+}
+
+// leave ends what the screen was waiting for: an answer that comes later
+// is one the user no longer asked for.
+func (s *signInState) leave() {
+	s.run++
+	s.busy = false
 }
 
 func (a *App) signInView(c *ui.Context) {
@@ -53,6 +61,7 @@ func (a *App) signInView(c *ui.Context) {
 				ui.Divider(c)
 				if ghost(c, "local", "laptop", locales.SigninContinueLocal()).Clicked() {
 					a.cancelSupabase()
+					s.leave()
 					a.back()
 					if a.route.Kind == "signin" {
 						a.show(Route{Kind: "home"})
@@ -66,9 +75,17 @@ func (a *App) signInView(c *ui.Context) {
 func (a *App) runAuth(fn func() (*store.User, error)) {
 	s := &a.signIn
 	s.busy, s.err, s.info = true, "", ""
+	s.run++
+	run := s.run
 	go func() {
 		user, err := fn()
 		a.update(func() {
+			if s.run != run {
+				if err == nil {
+					go a.backend.SignOut()
+				}
+				return
+			}
 			s.busy = false
 			if err != nil {
 				s.err = err.Error()
@@ -205,6 +222,7 @@ func (a *App) emailCodeForm(c *ui.Context) {
 		}
 		ui.Text(c, "·").FontSize(13).TextColor(pal.TextMuted)
 		if ghost(c, "change", "", locales.SigninChangeEmail()).Disabled(s.busy).Clicked() {
+			s.leave()
 			s.sent, s.code, s.err, s.info = false, "", "", ""
 		}
 	})
@@ -214,8 +232,13 @@ func (a *App) doSendCode() {
 	s := &a.signIn
 	email := strings.TrimSpace(s.email)
 	s.busy, s.err, s.info = true, "", ""
+	s.run++
+	run := s.run
 	var err error
 	a.offMain(func() { err = a.backend.SendCode(email) }, func() {
+		if s.run != run {
+			return
+		}
 		s.busy = false
 		if err != nil {
 			s.err = err.Error()

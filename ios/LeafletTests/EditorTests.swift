@@ -1148,6 +1148,16 @@ struct EditorTests {
         #expect(run?["attributes"]?.object?["bold"] == .bool(true))
     }
 
+    @Test func aPasteTheSystemPaddedIsStillTheCopy() {
+        let pad = EditorClipboard.padding
+        #expect(pad("Type bold", "Type bold")! == ("", ""))
+        #expect(pad("Type bold", "\nType bold\n")! == ("", ""))
+        #expect(pad("word", " word ")! == (" ", " "))
+        #expect(pad("word", "a word") == nil)
+        #expect(pad("word", "other") == nil)
+        #expect(pad("", "\n") == nil)
+    }
+
     @Test func blocksPutInAreOneStepToUndo() async throws {
         let c = editor([
             block("a", "bulleted_list", "One", children: [block("n", "paragraph", "Nested")]),
@@ -2690,6 +2700,10 @@ extension EditorController {
     }
 
     func paste(_ text: String) {
+        textView.whilePasting { put(text) }
+    }
+
+    private func put(_ text: String) {
         let onScreen = textView.window != nil
         if #unavailable(iOS 27), onScreen { return textView.insertText(text) }
         let undo = onScreen ? textView.undoManager : nil

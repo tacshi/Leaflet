@@ -264,7 +264,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 | `create_page`, `rename_page` | Make and rename pages |
 | `set_page_tags` | Set a page's tags |
 | `move_page` | Move a page into a folder, inside another page, or to the top level |
-| `create_folder`, `rename_folder` | Make and rename folders |
+| `create_folder`, `rename_folder` | Make folders, at the top level or in another folder, and rename them |
+| `move_folder` | Move a folder into another folder or to the top level |
 | `write_markdown`, `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 
 The server opens the same database as the app, so it works with the app
@@ -301,7 +302,8 @@ adds to them, with the same tools as `leaflet mcp`:
 | `leaflet rename PAGE TITLE` | Change a page's title |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | Move a page inside another, into a folder, or to the top level |
 | `leaflet tag PAGE [TAG...]` | Set a page's tags, or print them; `--clear` takes them off |
-| `leaflet folder new NAME`, `leaflet folder rename FOLDER NAME` | Make and rename folders |
+| `leaflet folder new NAME [--in FOLDER]`, `leaflet folder rename FOLDER NAME` | Make folders, at the top level or in another folder, and rename them |
+| `leaflet folder mv FOLDER --in FOLDER \| --top` | Move a folder into another folder or to the top level |
 
 A page is named by its title, its ID, or the start of its ID as `ls`
 shows it. `--json` prints what the MCP tools return, and `leaflet

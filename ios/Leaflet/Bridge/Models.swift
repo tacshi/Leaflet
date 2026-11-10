@@ -45,6 +45,9 @@ struct FolderRow: Codable, Hashable, Identifiable, Sendable {
         case sortKey = "sort_key"
         case defaultTemplateID = "default_template_id"
     }
+
+    /// What a dragged folder carries, before its id, so drops tell it from a page.
+    static let dragPrefix = "folder:"
 }
 
 struct FileRow: Codable, Hashable, Identifiable, Sendable {
@@ -146,17 +149,21 @@ struct LibrarySnapshot: Decodable, Sendable {
     let tags: [TagRow]
     let files: [FileRow]
     let tree: LibraryTree
+    let folderTree: FolderTree
 
     enum CodingKeys: String, CodingKey {
         case pages, folders, tags, files, top, children, shared
         case spaceID = "space_id"
         case inFolder = "in_folder"
+        case rootFolders = "root_folders"
+        case subFolders = "sub_folders"
     }
 
     init(
         spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow],
         files: [FileRow] = [], top: [String] = [], inFolder: [String: [String]] = [:],
-        children: [String: [String]] = [:], shared: [String] = []
+        children: [String: [String]] = [:], shared: [String] = [],
+        rootFolders: [String]? = nil, subFolders: [String: [String]] = [:]
     ) {
         self.spaceID = spaceID
         self.pages = pages
@@ -166,6 +173,8 @@ struct LibrarySnapshot: Decodable, Sendable {
         tree = LibraryTree(
             pages: pages, tags: tags, top: top, inFolder: inFolder, children: children,
             shared: shared)
+        folderTree = FolderTree(
+            folders: folders, roots: rootFolders ?? folders.map(\.id), in: subFolders)
     }
 
     init(from decoder: any Decoder) throws {
@@ -179,7 +188,9 @@ struct LibrarySnapshot: Decodable, Sendable {
             top: try c.decode([String].self, forKey: .top),
             inFolder: try c.decode([String: [String]].self, forKey: .inFolder),
             children: try c.decode([String: [String]].self, forKey: .children),
-            shared: try c.decode([String].self, forKey: .shared))
+            shared: try c.decode([String].self, forKey: .shared),
+            rootFolders: try c.decodeIfPresent([String].self, forKey: .rootFolders),
+            subFolders: try c.decodeIfPresent([String: [String]].self, forKey: .subFolders) ?? [:])
     }
 
     static let empty = LibrarySnapshot(spaceID: "", pages: [], folders: [], tags: [])

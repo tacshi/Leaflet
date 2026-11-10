@@ -22,8 +22,9 @@ type listedPage struct {
 }
 
 type listedFolder struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ParentID string `json:"parent_folder_id,omitempty"`
 }
 
 func (r *runner) listing() (*listing, error) {

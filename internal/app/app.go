@@ -832,7 +832,7 @@ func (a *App) openPage(id string) {
 		top = &anc[0]
 	}
 	if top != nil && top.FolderID != "" {
-		a.treeOpen("folder", top.FolderID)
+		a.openFolders(top.FolderID)
 	}
 	if a.win == nil {
 		if a.closePage() {

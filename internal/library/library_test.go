@@ -119,3 +119,41 @@ func TestTagged(t *testing.T) {
 		t.Errorf("tags %v", tree.Tags)
 	}
 }
+
+func folderIDs(folders []store.Folder) string {
+	var out []string
+	for _, f := range folders {
+		out = append(out, f.ID)
+	}
+	return fmt.Sprint(out)
+}
+
+func TestNestedFolders(t *testing.T) {
+	tree := Arrange("me", []store.Page{page("p", "", "c", "me", "a")}, []store.Folder{
+		{ID: "a", SpaceID: "me", SortKey: "a"}, {ID: "b", SpaceID: "me", SortKey: "b"},
+		{ID: "c", SpaceID: "me", ParentFolderID: "a", SortKey: "b"}, {ID: "d", SpaceID: "me", ParentFolderID: "a", SortKey: "a"},
+		{ID: "e", SpaceID: "me", ParentFolderID: "c", SortKey: "a"}, {ID: "orphan", SpaceID: "me", ParentFolderID: "gone", SortKey: "c"},
+		{ID: "x", SpaceID: "me", ParentFolderID: "y", SortKey: "d"}, {ID: "y", SpaceID: "me", ParentFolderID: "x", SortKey: "e"},
+	})
+	order, depths := tree.FolderOrder()
+	for _, c := range []struct{ what, got, want string }{
+		{"roots", folderIDs(tree.RootFolders), "[a b orphan x y]"},
+		{"in a", folderIDs(tree.SubFolders["a"]), "[d c]"},
+		{"in c", folderIDs(tree.SubFolders["c"]), "[e]"},
+		{"path of e", folderIDs(tree.FolderPath("e")), "[a c e]"},
+		{"order", folderIDs(order), "[a d c e b orphan x y]"},
+		{"depths", fmt.Sprint(depths), "[0 1 1 2 0 0 0 0]"},
+		{"pages in c", ids(tree.InFolder["c"]), "[p]"},
+		{"siblings of c", folderIDs(tree.FolderSiblings("c")), "[d c]"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: %s, want %s", c.what, c.got, c.want)
+		}
+	}
+	if !tree.FolderUnder("e", "a") || tree.FolderUnder("a", "e") || !tree.FolderUnder("a", "a") || tree.FolderUnder("x", "y") {
+		t.Error("FolderUnder goes by the shown tree")
+	}
+	if tree.FolderParent("e") != "c" || tree.FolderParent("x") != "" {
+		t.Error("FolderParent goes by the shown tree")
+	}
+}

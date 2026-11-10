@@ -171,6 +171,20 @@ func (pl *plan) ready(o doc.Op) bool {
 	case "delete_folder":
 		f := pl.folder(o.FolderID)
 		return f != nil && f.DeletedAt.IsZero() && pl.empty(o.FolderID)
+	case "move_folder":
+		f := pl.folder(o.FolderID)
+		if f == nil || !f.DeletedAt.IsZero() || o.FolderPlace == nil || o.PrevFolderPlace == nil ||
+			f.ParentFolderID != o.PrevFolderPlace.ParentFolderID {
+			return false
+		}
+		to := o.FolderPlace.ParentFolderID
+		if to == "" {
+			return true
+		}
+		if parent := pl.folder(to); parent == nil || !parent.DeletedAt.IsZero() {
+			return false
+		}
+		return !pl.folderUnder(to, o.FolderID)
 	}
 	id := opTarget(o)
 	p := pl.page(id)
@@ -237,7 +251,26 @@ func (pl *plan) made(o doc.Op) {
 		pl.folder(o.FolderID).DeletedAt = time.Now()
 	case "create_folder":
 		pl.folder(o.Folder.ID).DeletedAt = time.Time{}
+	case "move_folder":
+		pl.folder(o.FolderID).ParentFolderID = o.FolderPlace.ParentFolderID
 	}
+}
+
+// folderUnder reports whether candidate is ancestor or a folder inside it, as the plan has them.
+func (pl *plan) folderUnder(candidate, ancestor string) bool {
+	seen := map[string]bool{}
+	for cursor := candidate; cursor != "" && !seen[cursor]; {
+		if cursor == ancestor {
+			return true
+		}
+		seen[cursor] = true
+		f := pl.folder(cursor)
+		if f == nil {
+			return false
+		}
+		cursor = f.ParentFolderID
+	}
+	return false
 }
 
 func (pl *plan) empty(id string) bool {
@@ -265,8 +298,10 @@ func (pl *plan) empty(id string) bool {
 		return false
 	}
 	return !slices.ContainsFunc(pl.all.folders, func(f store.Folder) bool {
-		q := pl.folders[f.ID]
-		return f.ParentFolderID == id && (q == nil || q.DeletedAt.IsZero())
+		if q := pl.folders[f.ID]; q != nil {
+			f = *q
+		}
+		return f.ParentFolderID == id && f.DeletedAt.IsZero()
 	})
 }
 
@@ -314,6 +349,8 @@ func (h *Hub) applyPage(pages Pages, run *Run, o doc.Op) error {
 		return h.st.DeleteFolder(f)
 	case "create_folder":
 		return h.st.RestoreFolder(o.Folder.ID)
+	case "move_folder":
+		return h.st.PlaceFolder(o.FolderID, o.FolderPlace.ParentFolderID, o.FolderPlace.SortKey)
 	}
 	return nil
 }

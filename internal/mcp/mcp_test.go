@@ -94,7 +94,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "current_page", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
+	for _, n := range []string{"list_pages", "search_pages", "current_page", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder", "move_folder"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}
@@ -992,5 +992,51 @@ func TestCurrentPage(t *testing.T) {
 	}
 	if v, err := st.OpenView(); v != nil || err != nil {
 		t.Fatalf("view after it ended: %v, %v", v, err)
+	}
+}
+
+func TestNestedFolders(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "0.1.0")
+	got := session(t, s, initialize,
+		call(2, "create_folder", map[string]any{"name": "Work"}),
+		call(3, "create_folder", map[string]any{"name": "Home"}))
+	out, _ := result(t, got[2])
+	work := out["folder_id"].(string)
+	out, _ = result(t, got[3])
+	home := out["folder_id"].(string)
+	got = session(t, s,
+		call(4, "create_folder", map[string]any{"name": "Plans", "parent_folder_id": work}),
+		call(5, "create_folder", map[string]any{"name": "Lost", "parent_folder_id": "nope"}),
+		call(6, "move_folder", map[string]any{"folder_id": home, "parent_folder_id": work}))
+	out, failed := result(t, got[4])
+	if failed {
+		t.Fatalf("create_folder in a folder %v", out)
+	}
+	plans := out["folder_id"].(string)
+	if out, failed := result(t, got[5]); !failed || !strings.Contains(out["error"].(string), "nope") {
+		t.Errorf("create_folder in no folder %v", out)
+	}
+	if out, failed := result(t, got[6]); failed {
+		t.Errorf("move_folder %v", out)
+	}
+	got = session(t, s,
+		call(7, "move_folder", map[string]any{"folder_id": work, "parent_folder_id": plans}),
+		call(8, "move_folder", map[string]any{"folder_id": plans}),
+		call(9, "list_pages", nil))
+	if out, failed := result(t, got[7]); !failed || !strings.Contains(out["error"].(string), "inside it") {
+		t.Errorf("move_folder into its own folder %v", out)
+	}
+	if out, failed := result(t, got[8]); failed {
+		t.Errorf("move_folder to the top %v", out)
+	}
+	out, _ = result(t, got[9])
+	parents := map[string]any{}
+	for _, f := range out["folders"].([]any) {
+		row := f.(map[string]any)
+		parents[row["name"].(string)] = row["parent_folder_id"]
+	}
+	if parents["Home"] != work || parents["Plans"] != nil || parents["Work"] != nil {
+		t.Errorf("folders %v", out["folders"])
 	}
 }

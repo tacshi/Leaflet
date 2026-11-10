@@ -30,9 +30,9 @@ extension AppModel {
         }
     }
 
-    func createFolder(named name: String) async {
+    func createFolder(named name: String, in parentID: String = "") async {
         do {
-            _ = try await client?.createFolder(name)
+            _ = try await client?.createFolder(name, in: parentID)
             await reload()
         } catch {
             show(Toast(message: L.sidebarCouldNotSave(error: error.localizedDescription)))
@@ -231,6 +231,36 @@ extension AppModel {
     func move(_ page: PageRow, parentID: String, folderID: String) async {
         do {
             try await client?.movePage(page.id, parentID: parentID, folderID: folderID)
+            await reload()
+        } catch {
+            show(Toast(message: L.sidebarCouldNotMove(error: error.localizedDescription)))
+        }
+    }
+
+    /// Puts the folder into the folder parentID, last, or at the top level when parentID is empty.
+    func moveFolder(_ id: String, into parentID: String) async {
+        guard id != parentID, library.folder(id) != nil,
+            parentID.isEmpty || !library.folder(parentID, isIn: id)
+        else { return }
+        do {
+            try await client?.moveFolder(id, parentID: parentID)
+            await reload()
+        } catch {
+            show(Toast(message: L.sidebarCouldNotMove(error: error.localizedDescription)))
+        }
+    }
+
+    /// Puts the folder beside the folder target, in the folder that one is in.
+    func placeFolder(_ id: String, beside target: String, before: Bool) async {
+        guard id != target, library.folder(id) != nil, !library.folder(target, isIn: id)
+        else { return }
+        let parent = library.folderTree.parent[target] ?? ""
+        do {
+            if before {
+                try await client?.moveFolderBefore(id, parentID: parent, beforeID: target)
+            } else {
+                try await client?.moveFolder(id, parentID: parent, afterID: target)
+            }
             await reload()
         } catch {
             show(Toast(message: L.sidebarCouldNotMove(error: error.localizedDescription)))

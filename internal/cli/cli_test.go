@@ -745,3 +745,24 @@ func TestCurrent(t *testing.T) {
 		t.Fatalf("json: %s", out)
 	}
 }
+
+func TestNestedFolders(t *testing.T) {
+	dir := pages(t)
+	work := strings.TrimSpace(ok(t, dir, "", "folder", "new", "Work"))
+	home := strings.TrimSpace(ok(t, dir, "", "folder", "new", "Home"))
+	plans := strings.TrimSpace(ok(t, dir, "", "folder", "new", "Plans", "--in", work[:8]))
+	ok(t, dir, "", "new", "Roadmap", "--folder", plans[:8])
+	ok(t, dir, "", "folder", "mv", home[:8], "--in", plans[:8])
+	ls := ok(t, dir, "", "ls")
+	want := regexp.MustCompile(`(?m)^` + work[:8] + `  Work/\n` + plans[:8] + `    Plans/\n` + home[:8] + `      Home/\n[0-9a-f]{8}      Roadmap\n`)
+	if !want.MatchString(ls) {
+		t.Errorf("ls:\n%s", ls)
+	}
+	if _, errOut, code := run(t, dir, "", "folder", "mv", work[:8], "--in", home[:8]); code == 0 || !strings.Contains(errOut, "inside it") {
+		t.Errorf("mv into a folder inside it: exit %d, %q", code, errOut)
+	}
+	ok(t, dir, "", "folder", "mv", home[:8], "--top")
+	if ls := ok(t, dir, "", "ls"); !strings.Contains(ls, home[:8]+"  Home/\n") {
+		t.Errorf("ls after mv --top:\n%s", ls)
+	}
+}

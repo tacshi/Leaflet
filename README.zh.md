@@ -236,7 +236,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | `create_page`、`rename_page` | 新建和重命名页面 |
 | `set_page_tags` | 设置页面的标签 |
 | `move_page` | 把页面移入文件夹、其他页面内，或移到顶层 |
-| `create_folder`、`rename_folder` | 新建和重命名文件夹 |
+| `create_folder`、`rename_folder` | 在顶层或其他文件夹中新建文件夹，以及重命名文件夹 |
+| `move_folder` | 把文件夹移入其他文件夹，或移到顶层 |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | 像应用内的智能体一样编辑页面 |
 
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看
@@ -270,7 +271,8 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet rename PAGE TITLE` | 修改页面标题 |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | 把页面移入其他页面、文件夹，或移到顶层 |
 | `leaflet tag PAGE [TAG...]` | 设置页面的标签，或输出它们；`--clear` 清除全部标签 |
-| `leaflet folder new NAME`、`leaflet folder rename FOLDER NAME` | 新建和重命名文件夹 |
+| `leaflet folder new NAME [--in FOLDER]`、`leaflet folder rename FOLDER NAME` | 在顶层或其他文件夹中新建文件夹，以及重命名文件夹 |
+| `leaflet folder mv FOLDER --in FOLDER \| --top` | 把文件夹移入其他文件夹，或移到顶层 |
 
 页面可以用标题、ID，或 `ls` 显示的 ID 开头来指定。`--json` 输出 MCP 工具返回的
 内容；`leaflet completion zsh`（或 bash、fish、powershell）会生成能补全页面标题的

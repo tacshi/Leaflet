@@ -70,11 +70,13 @@ struct RootView: View {
             Button(L.commonCancel, role: .cancel) {}
             Button(L.commonSave) {
                 let name = folderName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { Task { await app.createFolder(named: name) } }
+                let parent = scene.newFolderParent
+                if !name.isEmpty { Task { await app.createFolder(named: name, in: parent) } }
             }
         }
         .onChange(of: scene.newFolderShown) { if scene.newFolderShown { folderName = "" } }
         .sheet(item: $scene.moving) { MoveSheet(page: $0) }
+        .sheet(item: $scene.movingFolder) { MoveSheet(folder: $0) }
         .sheet(isPresented: $scene.workspaceShown) {
             AgentPanel(model: scene.workspace, isSheet: true)
                 .task { scene.workspace.start(app) }

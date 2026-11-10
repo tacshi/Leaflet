@@ -23,7 +23,10 @@ final class SceneModel {
 
     private enum AfterPanel { case settings, newFolder }
     var newFolderShown = false
+    /// The folder a new folder goes in, or empty for the top level.
+    var newFolderParent = ""
     var moving: PageRow?
+    var movingFolder: FolderRow?
     var history: PageRow?
     var exported: ExportFile?
     @ObservationIgnored weak var page: PageModel?
@@ -190,7 +193,10 @@ final class SceneModel {
 
     func openSettings() { showOverPanel(.settings) }
 
-    func newFolder() { showOverPanel(.newFolder) }
+    func newFolder(in parentID: String = "") {
+        newFolderParent = parentID
+        showOverPanel(.newFolder)
+    }
 
     private func showOverPanel(_ what: AfterPanel) {
         guard panelSheets > 0 else { return show(what) }

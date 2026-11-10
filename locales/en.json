@@ -1171,7 +1171,7 @@
   },
   "dialogMoveTitle": "Move “{title}”",
   "@dialogMoveTitle": {
-    "description": "Move dialog: the title, naming the page moved.",
+    "description": "Move dialog: the title, naming the page or folder moved.",
     "placeholders": {
       "title": {
         "type": "String"
@@ -1185,6 +1185,10 @@
   "dialogMoveSearch": "Search pages",
   "@dialogMoveSearch": {
     "description": "Move dialog: the search field's placeholder."
+  },
+  "dialogMoveSearchFolders": "Search folders",
+  "@dialogMoveSearchFolders": {
+    "description": "Move dialog, when moving a folder: the search field's placeholder."
   },
   "dialogMoveTopLevel": "Top level",
   "@dialogMoveTopLevel": {
@@ -2330,6 +2334,15 @@
       }
     }
   },
+  "agentEditMovedFolder": "Moved folder “{name}”",
+  "@agentEditMovedFolder": {
+    "description": "An edit the workspace agent made, in its reply and the list of its edits: it moved the folder named name into another folder or to the top level.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "agentEditCreatedPage": "Created page “{title}”",
   "@agentEditCreatedPage": {
     "description": "An edit an agent made, in its reply and the list of its edits: it made a page of its own, at the top level of the user's pages or in a folder, titled title. Clicking the edit opens the page.",
@@ -2734,6 +2747,10 @@
   "@sidebarNewPageInFolder": {
     "description": "Folder menu item."
   },
+  "sidebarNewFolderInFolder": "New folder inside",
+  "@sidebarNewFolderInFolder": {
+    "description": "Folder menu item: make a folder inside this folder."
+  },
   "sidebarUploadFile": "Upload file…",
   "@sidebarUploadFile": {
     "description": "Folder menu item."
@@ -2864,7 +2881,7 @@
   },
   "sidebarCouldNotMove": "Could not move: {error}",
   "@sidebarCouldNotMove": {
-    "description": "Toast after moving a page failed.",
+    "description": "Toast after moving a page or folder failed.",
     "placeholders": {
       "error": {
         "type": "String"
@@ -2877,7 +2894,7 @@
   },
   "sidebarMoveTo": "Move to…",
   "@sidebarMoveTo": {
-    "description": "Page menu item."
+    "description": "Page and folder menu item."
   },
   "sidebarDuplicate": "Duplicate",
   "@sidebarDuplicate": {

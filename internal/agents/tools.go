@@ -371,9 +371,17 @@ func spaceFolders(st *store.Store) []map[string]any {
 	space := st.Session().SpaceID
 	folders, _ := st.Folders()
 	out := []map[string]any{}
+	mine := map[string]bool{}
+	for _, f := range folders {
+		mine[f.ID] = f.SpaceID == space
+	}
 	for _, f := range folders {
 		if f.SpaceID == space {
-			out = append(out, map[string]any{"id": f.ID, "name": f.Name})
+			row := map[string]any{"id": f.ID, "name": f.Name}
+			if mine[f.ParentFolderID] {
+				row["parent_folder_id"] = f.ParentFolderID
+			}
+			out = append(out, row)
 		}
 	}
 	return out

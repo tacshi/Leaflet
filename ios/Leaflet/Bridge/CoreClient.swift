@@ -208,10 +208,24 @@ final class CoreClient: Sendable {
         try await call { try $0.setKeepOffline(id, keep: keep) }
     }
 
-    nonisolated(nonsending) func createFolder(_ name: String) async throws -> FolderRow {
+    nonisolated(nonsending) func createFolder(_ name: String, in parentID: String = "")
+        async throws -> FolderRow
+    {
         try await call(FolderRow.self) { core in
-            try Self.answer { e in core.createFolder(name, error: e) }
+            try Self.answer { e in core.createFolder(in: name, parentID: parentID, error: e) }
         }
+    }
+
+    nonisolated(nonsending) func moveFolder(
+        _ id: String, parentID: String = "", afterID: String = ""
+    ) async throws {
+        try await call { try $0.moveFolder(id, parentID: parentID, afterID: afterID) }
+    }
+
+    nonisolated(nonsending) func moveFolderBefore(
+        _ id: String, parentID: String = "", beforeID: String = ""
+    ) async throws {
+        try await call { try $0.moveFolder(before: id, parentID: parentID, beforeID: beforeID) }
     }
 
     nonisolated(nonsending) func renameFolder(_ id: String, name: String) async throws {

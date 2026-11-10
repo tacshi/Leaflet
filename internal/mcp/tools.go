@@ -39,6 +39,7 @@ var hints = map[string]struct {
 	"move_page":      {"Move Page", false, true},
 	"create_folder":  {"Create Folder", false, false},
 	"rename_folder":  {"Rename Folder", false, true},
+	"move_folder":    {"Move Folder", false, true},
 }
 
 func toolList() []map[string]any {
@@ -64,7 +65,7 @@ func toolList() []map[string]any {
 		}
 		return map[string]any{"type": "object", "properties": props, "required": required}
 	}
-	add("list_pages", "List the user's pages (IDs, titles, tags, the page or folder each is in) and folders.", object(map[string]any{}))
+	add("list_pages", "List the user's pages (IDs, titles, tags, the page or folder each is in) and folders (IDs, names, the folder each is in).", object(map[string]any{}))
 	add("search_pages", "Find pages by title, tag or text, recordings by transcript, and comments. Words starting with # (as #work) keep to the pages with those tags; alone they list them.",
 		object(map[string]any{"query": map[string]any{"type": "string"}}, "query"))
 	add("current_page", "Find what the user has in front of them in the Leaflet app: the open page, and its selection or caret, with the selected text, its blocks and offsets, and its text color and highlight as hex. open is false when no page is open now, with the page opened last, if any, and no selection.", object(map[string]any{}))
@@ -100,8 +101,12 @@ func toolList() []map[string]any {
 			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside."},
 			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
 		}, "page_id"))
-	add("create_folder", "Create a folder for top-level pages, last in the sidebar.", object(map[string]any{"name": map[string]any{"type": "string"}}, "name"))
+	parentFolderID := map[string]any{"type": "string", "description": "The folder to put it in; none for the top level."}
+	add("create_folder", "Create a folder for top-level pages, last among the folders where it goes.",
+		object(map[string]any{"name": map[string]any{"type": "string"}, "parent_folder_id": parentFolderID}, "name"))
 	add("rename_folder", "Change a folder's name.", object(map[string]any{"folder_id": folderID, "name": map[string]any{"type": "string"}}, "folder_id", "name"))
+	add("move_folder", "Move a folder, with what is in it, last into another folder, or with no parent_folder_id to the top level.",
+		object(map[string]any{"folder_id": folderID, "parent_folder_id": parentFolderID}, "folder_id"))
 	return out
 }
 
@@ -225,11 +230,31 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 		if name = strings.TrimSpace(name); name == "" {
 			return nil, toolErr("name is required.")
 		}
-		f, err := st.CreateFolder(name)
+		parent, err := t.parentFolder(args)
+		if err != nil {
+			return nil, err
+		}
+		f, err := st.CreateFolderIn(name, parent)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"folder_id": f.ID}, nil
+	case "move_folder":
+		f, err := t.folder(args["folder_id"])
+		if err != nil {
+			return nil, err
+		}
+		parent, err := t.parentFolder(args)
+		if err != nil {
+			return nil, err
+		}
+		if parent != "" && st.FolderUnder(parent, f.ID) {
+			return nil, toolErr("A folder cannot move into itself or a folder inside it.")
+		}
+		if err := st.MoveFolder(f.ID, parent, ""); err != nil {
+			return nil, err
+		}
+		return map[string]any{"folder_id": f.ID, "parent_folder_id": parent}, nil
 	case "rename_folder":
 		f, err := t.folder(args["folder_id"])
 		if err != nil {
@@ -283,7 +308,13 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	outFolders := []map[string]any{}
 	for _, f := range folders {
 		ids[f.ID] = true
-		outFolders = append(outFolders, map[string]any{"id": f.ID, "name": f.Name})
+	}
+	for _, f := range folders {
+		row := map[string]any{"id": f.ID, "name": f.Name}
+		if ids[f.ParentFolderID] {
+			row["parent_folder_id"] = f.ParentFolderID
+		}
+		outFolders = append(outFolders, row)
 	}
 	sess := st.Session()
 	out := []map[string]any{}
@@ -330,6 +361,15 @@ func (t *pageTools) folder(id any) (store.Folder, error) {
 		}
 	}
 	return store.Folder{}, toolErr("No folder " + s + ".")
+}
+
+func (t *pageTools) parentFolder(args map[string]any) (string, error) {
+	id, _ := args["parent_folder_id"].(string)
+	if strings.TrimSpace(id) == "" {
+		return "", nil
+	}
+	f, err := t.folder(id)
+	return f.ID, err
 }
 
 func (t *pageTools) place(args map[string]any) (parent store.Page, folderID string, err error) {

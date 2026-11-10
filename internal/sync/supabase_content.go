@@ -239,11 +239,54 @@ func (s *Service) checkRemote(ctx context.Context, pageID string) error {
 	if err != nil {
 		return err
 	}
-	if !behind(store.ContentRow{RemoteUpdatedAt: at, RemoteRevision: revision}, remoteRow) {
+	if !behind(store.ContentRow{RemoteUpdatedAt: at, RemoteRevision: revision}, remoteRow) || s.cannotRead(pageID, remoteRow) {
 		return nil
 	}
 	_, err = s.fetchRemote(ctx, pageID)
 	return err
+}
+
+// cannotRead reports whether the server's row is at the revision this build already fetched and could not decode,
+// which a newer build wrote: fetching it again would bring the same content. It is kept for as long as the app runs,
+// so an updated app tries again.
+func (s *Service) cannotRead(pageID string, remoteRow map[string]any) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	revision, known := s.unread[pageID]
+	return known && revision == store.Int(remoteRow, "revision")
+}
+
+func (s *Service) setCannotRead(pageID string, remoteRow map[string]any, cannot bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cannot {
+		s.unread[pageID] = store.Int(remoteRow, "revision")
+	} else {
+		delete(s.unread, pageID)
+	}
+}
+
+// unreadStill is the pages of ids whose content on the server is still at the revision that could not be decoded.
+func (s *Service) unreadStill(ctx context.Context, ids []string) (map[string]bool, error) {
+	s.mu.Lock()
+	doubted := slices.DeleteFunc(slices.Clone(ids), func(id string) bool {
+		_, known := s.unread[id]
+		return !known
+	})
+	s.mu.Unlock()
+	same := map[string]bool{}
+	for chunk := range slices.Chunk(doubted, contentBatch) {
+		rows, err := s.be.Select(ctx, "page_content", remote.Query{Select: "page_id, revision", Filters: []string{remote.In("page_id", chunk)}})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if id := store.S(r, "page_id"); s.cannotRead(id, r) {
+				same[id] = true
+			}
+		}
+	}
+	return same, nil
 }
 
 func (s *Service) fetchRemote(ctx context.Context, pageID string) (*doc.Content, error) {
@@ -260,6 +303,7 @@ func (s *Service) fetchRemote(ctx context.Context, pageID string) (*doc.Content,
 func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Content, error) {
 	remoteAt := store.Time(remoteRow["updated_at"])
 	remoteContent, err := contentOf(remoteRow["content"])
+	s.setCannotRead(pageID, remoteRow, err != nil)
 	if err != nil {
 		return nil, errServerUnreadable
 	}
@@ -439,6 +483,17 @@ func (s *Service) pullWaiting(ctx context.Context) error {
 
 func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[string]bool) (map[string]bool, error) {
 	done := map[string]bool{}
+	skip, err := s.unreadStill(ctx, ids)
+	if err != nil {
+		for _, id := range ids {
+			waiting[id] = true
+		}
+		return done, err
+	}
+	for id := range skip {
+		waiting[id], done[id] = true, true
+	}
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return skip[id] })
 	s.contentsAsked = s.contentsAsked || len(ids) > 0
 	for len(ids) > 0 {
 		size := contentBatch

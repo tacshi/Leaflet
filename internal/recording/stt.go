@@ -77,13 +77,16 @@ func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 		return nil, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	data, _ := io.ReadAll(res.Body)
+	data, _ := io.ReadAll(io.LimitReader(res.Body, maxAnswer+1))
 	if res.StatusCode >= 400 {
 		body := strings.TrimSpace(string(data))
 		if len(body) > 200 || strings.HasPrefix(body, "<") {
 			body = ""
 		}
 		return nil, errors.New(locales.RecErrEndpoint(res.Status, body))
+	}
+	if int64(len(data)) > maxAnswer {
+		return nil, errors.New(locales.RecErrAnswerTooLarge())
 	}
 	var out struct {
 		Text     string  `json:"text"`
@@ -109,6 +112,12 @@ func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 	}
 	return segs, nil
 }
+
+var maxAnswer int64 = 64 << 20
+
+// jobWait is how long a provider has to answer a request that starts a
+// transcription of audio it already holds.
+var jobWait = 2 * time.Minute
 
 func transcribeWait(size int64) time.Duration {
 	return 5*time.Minute + 2*time.Duration(size/(2*SampleRate))*time.Second
@@ -180,7 +189,10 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	var job struct {
 		ID string `json:"id"`
 	}
-	if err := call(ctx, "POST", "/transcriptions", create, &job); err != nil {
+	start, cancel := context.WithTimeout(ctx, jobWait)
+	err = call(start, "POST", "/transcriptions", create, &job)
+	cancel()
+	if err != nil {
 		return nil, err
 	}
 	defer remove("/transcriptions/" + job.ID)
@@ -231,7 +243,7 @@ func sonioxDo(req *http.Request, key string, out any) error {
 	case out == nil:
 		return nil
 	}
-	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(out)
+	return json.NewDecoder(io.LimitReader(res.Body, maxAnswer)).Decode(out)
 }
 
 func TestSonioxKey(ctx context.Context, key string) error {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"leaflet/locales"
 )
 
 func TestTranscribeEndpointStreamsTheAudio(t *testing.T) {
@@ -185,5 +188,67 @@ func TestTranscribeSonioxFails(t *testing.T) {
 	}
 	if len(removed) != 2 {
 		t.Errorf("removed %v", removed)
+	}
+}
+
+func TestEndpointAnswerHasALimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"text":"`+strings.Repeat("a", 4096)+`"}`)
+	}))
+	defer srv.Close()
+	limit := maxAnswer
+	maxAnswer = 1024
+	defer func() { maxAnswer = limit }()
+	audio := WavFromPCM(make([]byte, 64))
+	segs, err := TranscribeEndpoint(t.Context(), srv.URL, "whisper", bytes.NewReader(audio), int64(len(audio)), "", "auto")
+	if err == nil || err.Error() != locales.RecErrAnswerTooLarge() {
+		t.Fatalf("segments %+v, error %v", segs, err)
+	}
+	maxAnswer = 8192
+	if segs, err = TranscribeEndpoint(t.Context(), srv.URL, "whisper", bytes.NewReader(audio), int64(len(audio)), "", "auto"); err != nil || len(segs) != 1 {
+		t.Errorf("within the limit: segments %+v, error %v", segs, err)
+	}
+}
+
+func TestStartingAJobHasADeadline(t *testing.T) {
+	stuck := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/files":
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = io.WriteString(w, `{"id":"f1"}`)
+		case r.Method == "POST":
+			select {
+			case <-stuck:
+			case <-r.Context().Done():
+			}
+		}
+	}))
+	defer srv.Close()
+	defer close(stuck)
+	soniox, moss, wait := sonioxAPI, mossAPI, jobWait
+	sonioxAPI, mossAPI, jobWait = srv.URL, srv.URL, 50*time.Millisecond
+	defer func() { sonioxAPI, mossAPI, jobWait = soniox, moss, wait }()
+	audio := []byte("audio")
+	for name, transcribe := range map[string]func() error{
+		"soniox": func() error {
+			_, err := TranscribeSoniox(context.Background(), "sk", "", bytes.NewReader(audio), int64(len(audio)), "a.wav", nil, false)
+			return err
+		},
+		"moss": func() error {
+			_, err := TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "a.wav", false)
+			return err
+		},
+	} {
+		done := make(chan error, 1)
+		go func() { done <- transcribe() }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("%s: %v", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s still waits for a job that never starts", name)
+		}
 	}
 }

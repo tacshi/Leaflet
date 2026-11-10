@@ -274,8 +274,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			if made.refused != "" {
 				log.Printf("agent tool %s refused: %s", call.Name, made.refused)
 			}
-			raw, _ := json.Marshal(made.out)
-			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": cutResult(string(raw))})
+			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": cutResult(resultJSON(made.out))})
 			if exec.ended {
 				return result(""), errLinkedStop
 			}
@@ -326,7 +325,7 @@ func userMessage(req Request, views, focus []map[string]any) string {
 	if page := asData(views); len(utf16.Encode([]rune(page))) <= inlinePageLimit || !req.SupportsTools {
 		parts = append(parts, "Current page blocks (JSON):\n"+page)
 	} else {
-		parts = append(parts, "The page is long; call read_page to see all of it.")
+		parts = append(parts, "The page is long: call read_page to read it, in parts.")
 	}
 	if len(focus) > 0 {
 		parts = append(parts, "Focus blocks (JSON):\n"+asData(focus))

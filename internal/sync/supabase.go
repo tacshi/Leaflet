@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -31,15 +32,24 @@ func (s *Service) pass(ctx context.Context, pull bool) error {
 	if err := s.heartbeat(ctx); err != nil {
 		return err
 	}
+	var unpushed error
 	if s.Updating == nil || !s.Updating() {
-		if err := s.push(ctx); err != nil {
+		pushing, cancel := context.WithTimeout(ctx, pushFor)
+		err := s.push(pushing)
+		more := ranOut(pushing, err) && ctx.Err() == nil
+		cancel()
+		switch {
+		case more:
+			unpushed = fmt.Errorf("%w: %w", errPushRanOut, err)
+			s.KickPush()
+		case err != nil:
 			return err
 		}
 	}
 	if !pull {
-		return nil
+		return unpushed
 	}
-	return s.pull(ctx)
+	return cmp.Or(s.pull(ctx), unpushed)
 }
 
 func (s *Service) resolveSpace(ctx context.Context) error {

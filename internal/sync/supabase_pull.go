@@ -83,10 +83,11 @@ func (s *Service) changed(ctx context.Context, table, key, columns string, cur c
 
 func quote(v string) string { return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"` }
 
-func (s *Service) store(table, key string, rows []map[string]any, have func(map[string]any) bool, apply func(map[string]any) error) {
+// store applies the pulled rows, and reports whether it got through them all.
+func (s *Service) store(table, key string, rows []map[string]any, have func(map[string]any) bool, apply func(map[string]any) error) bool {
 	cur := s.cursor(table)
 	start := cur
-	stored := false
+	stored, all := false, true
 	for _, r := range rows {
 		again := start.passed(r, key)
 		if again && have(r) {
@@ -95,6 +96,7 @@ func (s *Service) store(table, key string, rows []map[string]any, have func(map[
 		if !s.st.HasPending(table, store.S(r, key)) {
 			if err := apply(r); err != nil {
 				log.Printf("pull %s %s: %v", table, store.S(r, key), err)
+				all = false
 				break
 			}
 			stored = true
@@ -109,6 +111,7 @@ func (s *Service) store(table, key string, rows []map[string]any, have func(map[
 	if stored || cur != start {
 		s.st.Notify(table, "")
 	}
+	return all
 }
 
 var pullPages, pullRows = 20, 500
@@ -130,18 +133,30 @@ func (s *Service) pull(ctx context.Context) error {
 		table, cols string
 		apply       func(map[string]any) error
 	}{
-		{"pages", "*", s.putServerPage},
+		{"pages", "*", s.st.PutRemotePage},
 		{"folders", "*", s.st.PutRemoteFolder},
 		{"recordings", "*", s.st.PutRemoteRecording},
 		{"files", "*", s.st.PutRemoteFile},
 	}
+	caughtUp := map[string]bool{}
 	for _, step := range steps {
-		if err := s.pullTable(ctx, step.table, step.cols, step.apply); err != nil {
+		var err error
+		if caughtUp[step.table], err = s.pullAll(ctx, step.table, step.cols, step.apply); err != nil {
+			return err
+		}
+	}
+	if caughtUp["folders"] {
+		if err := s.st.SettleFolderLoops(); err != nil {
 			return err
 		}
 	}
 	if err := s.pullShared(ctx); err != nil {
 		return err
+	}
+	if caughtUp["pages"] {
+		if err := s.st.SettlePageLoops(); err != nil {
+			return err
+		}
 	}
 	if err := s.pullOwnMembers(ctx); err != nil {
 		return err
@@ -154,32 +169,26 @@ func (s *Service) pull(ctx context.Context) error {
 }
 
 func (s *Service) pullTable(ctx context.Context, table, columns string, apply func(map[string]any) error) error {
+	_, err := s.pullAll(ctx, table, columns, apply)
+	return err
+}
+
+// pullAll pulls the table's changed rows, and reports whether it has them all now. Only then are the rows a whole:
+// a change of several rows comes a row at a time, and loops of parents are looked for once it is all in.
+func (s *Service) pullAll(ctx context.Context, table, columns string, apply func(map[string]any) error) (caughtUp bool, err error) {
 	have := func(r map[string]any) bool {
 		return s.st.HasRowAt(table, store.S(r, "id"), store.Time(r["updated_at"]))
 	}
-	return s.paged(table, func(bool) (bool, error) {
+	err = s.paged(table, func(bool) (bool, error) {
 		rows, full, err := s.changed(ctx, table, "id", columns, s.cursor(table), pullRows)
 		if err != nil {
 			return false, err
 		}
-		s.store(table, "id", rows, have, apply)
+		all := s.store(table, "id", rows, have, apply)
+		caughtUp = all && !full
 		return full, nil
 	})
-}
-
-func (s *Service) putServerPage(r map[string]any) error { return s.settleLoop(r, s.st.PutRemotePage) }
-
-func (s *Service) settleLoop(r map[string]any, put func(map[string]any) error) error {
-	loop := s.st.ParentLoop(store.S(r, "id"), store.S(r, "parent_id"))
-	if err := put(r); err != nil || len(loop) == 0 {
-		return err
-	}
-	for _, id := range loop {
-		if s.st.HasPending("pages", id) {
-			return s.st.DetachPage(id)
-		}
-	}
-	return s.st.DetachPage(slices.Min(loop))
+	return caughtUp && err == nil, err
 }
 
 func (s *Service) pullShared(ctx context.Context) error {
@@ -223,7 +232,7 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 			}
 			seen[id] = true
 			if !s.st.HasPending("pages", id) {
-				if err := s.putServerPage(r); err != nil {
+				if err := s.st.PutRemotePage(r); err != nil {
 					return err
 				}
 			}

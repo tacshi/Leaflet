@@ -280,6 +280,49 @@ func (s *Service) Hold(fn func()) {
 	fn()
 }
 
+// passFor is how long one pass may take, and pushFor how much of it the push may, so that a long outbox, as after the
+// first sign-in with a large library, leaves the pull its turn.
+var passFor, pushFor = 5 * time.Minute, 3 * time.Minute
+
+// stalledPasses is how many passes in a row may run out of time with nothing to show for it before the app is told.
+const stalledPasses = 3
+
+// ranOut reports whether err is ctx's own deadline passing, and nothing else that failed around then.
+func ranOut(ctx context.Context, err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+// errPushRanOut is the push using up its share of a pass that went on to pull.
+var errPushRanOut = errors.New("more changes wait to go up")
+
+// progress is what a pass moves when it gets anything done: the changes that wait to go up, and how far each pull
+// has come.
+func (s *Service) progress() (queued map[outboxKey]bool, cursors map[string]string) {
+	entries, _ := s.st.Queued()
+	queued = make(map[outboxKey]bool, len(entries))
+	for _, e := range entries {
+		queued[outboxKey{e.ID, e.Revision}] = true
+	}
+	cursors = map[string]string{}
+	for _, prefix := range []string{"sync.cursor.", "icloud.cursor."} {
+		for k, v := range s.st.ValuesWithPrefix(prefix) {
+			cursors[prefix+k] = v
+		}
+	}
+	return queued, cursors
+}
+
+// progressed reports whether a change that waited has gone up, or a pull has come further, since the pass began.
+func (s *Service) progressed(queued map[outboxKey]bool, cursors map[string]string) bool {
+	now, at := s.progress()
+	for k := range queued {
+		if !now[k] {
+			return true
+		}
+	}
+	return !maps.Equal(cursors, at)
+}
+
 func (s *Service) SyncNow() error { return s.syncNow(context.Background(), false, true) }
 
 func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
@@ -294,19 +337,27 @@ func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
 	if ofLoop && s.busy() {
 		return nil
 	}
+	// What the app is told may differ from what the caller is: see below.
+	shown, told := error(nil), false
 	if s.OnState != nil {
 		s.OnState(true, nil)
-		defer func() { s.OnState(false, err) }()
+		defer func() {
+			if !told {
+				shown = err
+			}
+			s.OnState(false, shown)
+		}()
 	}
 	defer guard.RecoverAs(&err)
 	base, done := s.startPass()
 	defer done()
-	ctx, cancel := context.WithTimeout(base, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(base, passFor)
 	defer cancel()
 	if err := s.retryMoves(ctx); err != nil {
 		log.Printf("sync: %v", err)
 	}
 	t := s.target()
+	queued, cursors := s.progress()
 	err = t.pass(ctx, pull)
 	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil
@@ -314,8 +365,25 @@ func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
 	if err != nil && base.Err() != nil {
 		err = nil
 	}
-	if err != nil && !errors.Is(err, remote.ErrSignedOut) {
-		log.Printf("sync: %v", err)
+	shown, told = err, true
+	// A pass that ran out of its time has more to do, which the next one takes up. The caller is told, as not all
+	// went up; the app is not, unless pass after pass ends so with nothing to show for it.
+	unfinished := errors.Is(err, errPushRanOut)
+	switch {
+	case !unfinished && !ranOut(ctx, err):
+		s.stalled = 0
+	case s.progressed(queued, cursors):
+		s.stalled, shown = 0, nil
+	default:
+		if s.stalled++; s.stalled < stalledPasses {
+			shown = nil
+		}
+	}
+	if shown != err && !unfinished {
+		s.Kick()
+	}
+	if shown != nil && !errors.Is(shown, remote.ErrSignedOut) {
+		log.Printf("sync: %v", shown)
 	}
 	return err
 }

@@ -1,7 +1,16 @@
 {
   "schemas": {
     "read_page": {
-      "properties": {},
+      "properties": {
+        "limit": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "required": [],
       "type": "object"
     },
@@ -998,6 +1007,14 @@
     },
     "read_other_page": {
       "properties": {
+        "limit": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "page_id": {
           "type": "string"
         }
@@ -1056,6 +1073,14 @@
     },
     "read_page": {
       "properties": {
+        "limit": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "page_id": {
           "type": "string"
         }

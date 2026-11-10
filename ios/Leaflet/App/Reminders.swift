@@ -18,12 +18,18 @@ struct Reminder: Codable, Hashable, Sendable {
         case pageID = "page_id"
         case blockID = "block_id"
     }
+
+    /// When it shows, or nil for one that is due.
+    var date: Date? { at > 0 ? Date(timeIntervalSince1970: TimeInterval(at) / 1000) : nil }
 }
 
 enum Reminders {
     static let limit = 60
 
-    static func request(_ r: Reminder, calendar: Calendar = .current) -> UNNotificationRequest {
+    /// A reminder whose time has come by now shows at once: a trigger in the past never fires.
+    static func request(_ r: Reminder, now: Date = .now, calendar: Calendar = .current)
+        -> UNNotificationRequest
+    {
         let content = UNMutableNotificationContent()
         content.title = r.title
         content.subtitle = r.subtitle
@@ -33,13 +39,53 @@ enum Reminders {
         content.interruptionLevel = .timeSensitive
         content.userInfo = ["page": r.pageID, "block": r.blockID]
         var trigger: UNCalendarNotificationTrigger?
-        if r.at > 0 {
-            let date = Date(timeIntervalSince1970: TimeInterval(r.at) / 1000)
-            let parts = calendar.dateComponents(
-                [.year, .month, .day, .hour, .minute, .second], from: date)
-            trigger = UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
+        if let date = r.date, date > now {
+            trigger = UNCalendarNotificationTrigger(
+                dateMatching: parts(of: date, calendar: calendar), repeats: false)
         }
         return UNNotificationRequest(identifier: r.id, content: content, trigger: trigger)
+    }
+
+    private static func parts(of date: Date, calendar: Calendar) -> DateComponents {
+        calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+    }
+
+    /// The pending requests, of these identifiers, that the list no longer holds.
+    static func stale(_ pending: [String], keeping list: [Reminder]) -> [String] {
+        let kept = Set(list.map(\.id))
+        return pending.filter { !kept.contains($0) }
+    }
+
+    /// Whether a reminder read as to come has shown by itself since: its time has passed, and a
+    /// request of its own was set for that very time.
+    static func shown(
+        _ r: Reminder, at times: [String: DateComponents], now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard let date = r.date, date <= now, let was = times[r.id] else { return false }
+        let at = parts(of: date, calendar: calendar)
+        return [Calendar.Component.year, .month, .day, .hour, .minute, .second].allSatisfy {
+            was.value(for: $0) == at.value(for: $0)
+        }
+    }
+
+    /// Whether the reminders delivered to this device belong to an account it has left.
+    static func left(_ before: String?, for user: String) -> Bool {
+        guard let before, !before.isEmpty else { return false }
+        return before != user
+    }
+
+    private static let userKey = "reminders.user"
+
+    /// Takes the reminders of an account off the device once another, or none, is signed in.
+    @MainActor
+    static func keep(to user: String, defaults: UserDefaults = .standard) {
+        let before = defaults.string(forKey: userKey)
+        if before != user { defaults.set(user, forKey: userKey) }
+        guard left(before, for: user) else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
     }
 
     @MainActor
@@ -80,10 +126,21 @@ enum Reminders {
             Logger.app.error("Could not read the reminders: \(error)")
             return
         }
-        center.removeAllPendingNotificationRequests()
+        let pending = await center.pendingNotificationRequests().map(\.identifier)
+        center.removePendingNotificationRequests(withIdentifiers: stale(pending, keeping: list))
         guard !list.isEmpty, await allowed(center, asking: asking) else { return }
+        var times: [String: DateComponents] = [:]
+        let delivered = await center.deliveredNotifications().map(\.request)
+        for request in await center.pendingNotificationRequests() + delivered {
+            guard let trigger = request.trigger as? UNCalendarNotificationTrigger else { continue }
+            times[request.identifier] = trigger.dateComponents
+        }
         var scheduled: [Reminder] = []
         for reminder in list {
+            if shown(reminder, at: times) {
+                scheduled.append(reminder)
+                continue
+            }
             do {
                 try await center.add(request(reminder))
                 scheduled.append(reminder)

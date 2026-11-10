@@ -115,7 +115,7 @@ func TestRealtimeTellsOfAChannelClosed(t *testing.T) {
 
 func TestRealtimeBeatsAndRenewsItsToken(t *testing.T) {
 	old := realtimeBeat
-	realtimeBeat = 20 * time.Millisecond
+	realtimeBeat = 200 * time.Millisecond
 	t.Cleanup(func() { realtimeBeat = old })
 	c, f, r := realtimeTest(t)
 	if err := r.Join(t.Context(), "page:p1"); err != nil {
@@ -149,7 +149,7 @@ func TestRealtimeBeatsAndRenewsItsToken(t *testing.T) {
 
 func TestRealtimeEnds(t *testing.T) {
 	old := realtimeBeat
-	realtimeBeat = 20 * time.Millisecond
+	realtimeBeat = 200 * time.Millisecond
 	t.Cleanup(func() { realtimeBeat = old })
 	_, f, r := realtimeTest(t)
 	f.mu.Lock()

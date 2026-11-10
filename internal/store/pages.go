@@ -195,8 +195,14 @@ func createPage(tx *sql.Tx, sess Session, o NewPageOptions) (Page, error) {
 		spaceID = sess.SpaceID
 	}
 	folderID := ""
-	if o.ParentID == "" {
-		folderID = o.FolderID
+	if o.ParentID == "" && o.FolderID != "" {
+		// As when a page is moved: a deleted folder leaves it at the top level, one with no row here is kept.
+		switch f, err := folderIn(tx, o.FolderID); {
+		case errors.Is(err, sql.ErrNoRows) || err == nil && f.DeletedAt.IsZero():
+			folderID = o.FolderID
+		case err != nil:
+			return Page{}, err
+		}
 	}
 	key, err := keyAfter(tx, o.ParentID, spaceID, folderID, o.AfterID, "")
 	if err != nil {

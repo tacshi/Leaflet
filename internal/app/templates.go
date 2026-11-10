@@ -354,11 +354,17 @@ func (a *App) searchHits(query string) []store.SearchHit {
 func (a *App) search(query string) {
 	d := &a.dialogs
 	d.searches++
+	d.submitted = false
 	n := d.searches
 	var hits []store.SearchHit
 	a.offMain(func() { hits, _ = a.st.Search(query, 30) }, func() {
-		if n == d.searches {
-			d.hits, d.hitIndex = a.withStarters(query, hits), 0
+		if n != d.searches {
+			return
+		}
+		d.hits, d.hitIndex, d.searched = a.withStarters(query, hits), 0, n
+		if d.submitted && d.searchOpen {
+			d.submitted = false
+			a.submitSearch()
 		}
 	})
 }

@@ -200,6 +200,11 @@ func fileUpload(dir string, f File) map[string]any {
 	return map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": relPath(dir, f.LocalPath), "content_type": ct, "file_id": f.ID}
 }
 
+// FileURL is the url of a block of a file the app keeps: the file_id finds
+// the file, and its place on this device stays out of the page, which
+// other devices and people read.
+func FileURL(id, name string) string { return "file://" + id + "/" + name }
+
 func fileName(name string) string {
 	name = filepath.Base(name)
 	if name == "." || name == ".." || name == string(filepath.Separator) {

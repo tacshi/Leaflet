@@ -1,10 +1,11 @@
 -- Checks what the migrations made of the rows seed/*.sql put in before
 -- them, each right after the migration it is named for: shares kept,
 -- invites moved, deleted comments emptied, history pruned and dated back,
--- pages placed, deleted pages read by who had them.
+-- pages placed, deleted pages read by who had them, folders out of their
+-- loops, and all of it gone with its owner's account.
 -- scripts/check-migrations.sh runs it, as postgres, after every
--- migration. It changes nothing: it rolls back at the end. A check that
--- fails raises, and psql stops there.
+-- migration. It changes nothing: it rolls back each of its two
+-- transactions. A check that fails raises, and psql stops there.
 
 \set ON_ERROR_STOP on
 \set VERBOSITY terse
@@ -244,6 +245,33 @@ end;
 $$;
 reset role;
 
+-- The folders left in loops are out of them: each loop is opened at its
+-- folder of the smallest id, which is at the top level and goes to the
+-- devices again; the others, the folders in no loop, and the ring that
+-- runs through a deleted folder, are where they were, and are not sent
+-- again.
+do $$
+declare
+  v_looped timestamptz := (select at from seed.marks where name = 'folders_looped');
+  v_are text;
+begin
+  select string_agg(right(f.id::text, 2) || '>' || coalesce(right(f.parent_folder_id::text, 2), '') ||
+           case when f.updated_at > v_looped then '!' else '' end, ' ' order by f.id)
+  into v_are
+  from public.folders f where f.id::text like '5eed0000-0000-0000-0000-0000000000f_';
+  if v_are is distinct from 'f1>! f2>f1 f3>f2 f4>! f5>f6 f6>f4 f7> f8>f7 fa>fb fb>fc fc>fa' then
+    raise exception 'the folders that were in loops are %', v_are;
+  end if;
+  if exists (
+    select 1 from public.folders f
+    where f.id in ('5eed0000-0000-0000-0000-0000000000f1', '5eed0000-0000-0000-0000-0000000000f4')
+      and f.changed_at <= v_looped
+  ) then
+    raise exception 'a folder taken out of a loop is not changed since, for the devices to take';
+  end if;
+end;
+$$;
+
 -- The address confirmed, the invite waiting for it goes to the account,
 -- under the same id.
 do $$
@@ -257,6 +285,43 @@ begin
       and role = 'editor' and accepted_at is null
   ) then
     raise exception 'confirming the address did not take the invite waiting for it';
+  end if;
+end;
+$$;
+
+rollback;
+
+-- An account deleted goes through every foreign key and trigger, on rows
+-- from before this transaction, as a project's are. The editor's: the
+-- recording they made on the owner's page stays, theirs no more, with its
+-- audio. The owner's: their space goes whole, its folders, some inside
+-- others, its pages, however deep, and what is on them.
+begin;
+
+delete from auth.users where id = '5eed0000-0000-0000-0000-000000000002';
+do $$
+begin
+  if (select audio_path from public.recordings
+      where id = '5eed0000-0000-0000-0000-0000000000b1' and created_by is null)
+     is distinct from '5eed0000-0000-0000-0000-000000000002/5eed0000-0000-0000-0000-0000000000b1.wav' then
+    raise exception 'an editor''s account did not leave the recording they made on the owner''s page';
+  end if;
+  if exists (select 1 from public.spaces where owner_id = '5eed0000-0000-0000-0000-000000000002') then
+    raise exception 'a deleted account left its space';
+  end if;
+end;
+$$;
+
+delete from auth.users where id = '5eed0000-0000-0000-0000-000000000001';
+do $$
+begin
+  if exists (select 1 from public.spaces where owner_id = '5eed0000-0000-0000-0000-000000000001')
+     or exists (select 1 from public.folders where id::text like '5eed0000-%')
+     or exists (select 1 from public.pages where id::text like '5eed0000-%' or title like 'Deep %')
+     or exists (select 1 from public.page_content where page_id::text like '5eed0000-%')
+     or exists (select 1 from public.comments where page_id::text like '5eed0000-%')
+     or exists (select 1 from public.recordings where id::text like '5eed0000-%') then
+    raise exception 'a deleted account left some of its space';
   end if;
 end;
 $$;

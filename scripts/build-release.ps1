@@ -20,8 +20,10 @@ MyGo's names, leaflet-setup-<version>-<arch>.exe, by which SHA256SUMS lists
 them and install.ps1 finds its installer. Installed copies see the update
 once the draft is published. A release that is published already is refused:
 its files are what installed copies took. So is a draft of another commit,
-which the draft records as it is made: a release tags one commit. It needs
-the version named, as mygo.json's is no release's.
+which the draft records as it is made: a release tags one commit. So is a
+working tree with changes, before the build and again once it is done: the
+build would not be that commit's. It needs the version named, as mygo.json's
+is no release's.
 
 Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 LEAFLET_UPDATE_KEY, by default
@@ -96,6 +98,13 @@ if ($Upload) {
 }
 
 try {
+	if ($Upload) {
+		# Held first: another build of this checkout has mygo.json changed until it ends.
+		Hold-Config
+		if (& git status --porcelain) {
+			Fail '-Upload needs a clean working tree, as the draft release records the commit as what was built; commit or stash the changes first'
+		}
+	}
 	Set-Config $Config
 	foreach ($a in $Arches) { Build-Cli (Get-ConfigValue name) $Version (Get-GoArch $a) }
 	Info "building Leaflet $Version for $($Platforms -join ' ')"
@@ -119,6 +128,7 @@ if ($Upload) {
 	try {
 		$notesFrom = if ($Changelog) { $Changelog } else { Join-Path $RootDir 'CHANGELOG.md' }
 		[IO.File]::WriteAllText($NotesFile, (Get-ChangelogNotes $notesFrom $Version), [Text.UTF8Encoding]::new($false))
+		Test-Unchanged $Commit
 		Send-Release $Version $Out $NotesFile $Commit @($Arches | ForEach-Object { "windows-$(Get-GoArch $_)" })
 	} finally {
 		Remove-Item -Force $NotesFile

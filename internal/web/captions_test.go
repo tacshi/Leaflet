@@ -1,9 +1,15 @@
 package web
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 )
@@ -67,6 +73,29 @@ and so do I ♪</p>
 	}
 }
 
+func TestCaptionTextKeepsWhatIsNoTag(t *testing.T) {
+	for in, want := range map[string]string{
+		"1 &lt; 2 and 3 &gt; 2":                            "1 < 2 and 3 > 2",
+		"<i>if</i> x &lt; 3 <b>and</b> y &gt; 4 ok":        "if x < 3 and y > 4 ok",
+		"press &lt;enter&gt; now":                          "press <enter> now",
+		"Tom &amp;amp; Jerry &amp;lt;3":                    "Tom & Jerry <3",
+		"&lt;i&gt;shout&lt;/i&gt; &lt;b&gt;loud&lt;/b&gt;": "shout loud",
+		"&lt;font color=&quot;#E5E5E5&quot;&gt;so&lt;/font&gt; &lt;c.yellow&gt;it&lt;/c&gt; &lt;v Ann&gt;goes&lt;/v&gt;":                                        "so it goes",
+		"&lt;00:00:01.500&gt;one &lt;01:02:03.000&gt;two &lt;ruby&gt;漢&lt;rt&gt;kan&lt;/rt&gt;&lt;/ruby&gt; &lt;lang en&gt;x&lt;/lang&gt; &lt;u&gt;y&lt;/u&gt;": "one two 漢kan x y",
+		"a &lt;br&gt; b &lt;body&gt; c &lt;video&gt;": "a <br> b <body> c <video>",
+	} {
+		if got := captionText(in); got != want {
+			t.Errorf("%q reads %q, want %q", in, got, want)
+		}
+	}
+	if got := YouTubeLines([]byte(`<p t="1000">if x &lt; 3 and y &gt; 4 ok</p>`)); !reflect.DeepEqual(got, []Caption{{1000, "if x < 3 and y > 4 ok"}}) {
+		t.Errorf("YouTube's line: %+v", got)
+	}
+	if got := VTTLines("WEBVTT\n\n00:01.000 --> 00:02.000\nif x &lt; 3 and y &gt; 4 ok\n"); !reflect.DeepEqual(got, []Caption{{1000, "if x < 3 and y > 4 ok"}}) {
+		t.Errorf("the cue: %+v", got)
+	}
+}
+
 func TestVimeoTrack(t *testing.T) {
 	config := func(tracks string) []byte { return []byte(`{"request":{"lang":"en","text_tracks":[` + tracks + `]}}`) }
 	const (
@@ -121,5 +150,39 @@ func TestHasCaptions(t *testing.T) {
 		if v, _ := doc.ParseVideoURL(link); HasCaptions(v) != want {
 			t.Errorf("%s: %v", link, !want)
 		}
+	}
+}
+
+func TestCaptionsWaitNoLongerThanFetch(t *testing.T) {
+	was, wait := do, fetchWait
+	fetchWait = 100 * time.Millisecond
+	t.Cleanup(func() { do, fetchWait = was, wait })
+	release := make(chan struct{})
+	var asked atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"request":`))
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	do = func(req *http.Request) (*http.Response, error) {
+		req.URL.Scheme, req.URL.Host = "http", strings.TrimPrefix(srv.URL, "http://")
+		return http.DefaultClient.Do(req)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ReadCaptions(context.Background(), doc.Video{Provider: "vimeo", ID: "900000001"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) || asked.Load() != 1 {
+			t.Errorf("captions from a site that stops answering: %v, after asking %d times", err, asked.Load())
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("ReadCaptions still waits on a site that stopped answering")
 	}
 }

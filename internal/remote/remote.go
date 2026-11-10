@@ -100,6 +100,7 @@ type Client struct {
 
 type refresh struct {
 	from  *session
+	cfg   Settings
 	done  chan struct{}
 	tok   string
 	err   error
@@ -263,14 +264,14 @@ func (c *Client) authRequest(ctx context.Context, path string, body any, withTok
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
-	tok := ""
+	tok, cfg := "", c.settings()
 	if withToken {
 		var err error
-		if tok, err = c.token(ctx); err != nil {
+		if tok, cfg, err = c.token(ctx); err != nil {
 			return nil, err
 		}
 	}
-	return c.authRequestTo(ctx, c.settings(), path, body, tok)
+	return c.authRequestTo(ctx, cfg, path, body, tok)
 }
 
 func (c *Client) authRequestTo(ctx context.Context, cfg Settings, path string, body any, tok string) (map[string]any, error) {
@@ -543,21 +544,23 @@ func (c *Client) signedOut() {
 
 const tokenLasts = time.Minute
 
-func (c *Client) token(ctx context.Context) (string, error) {
+// token is the session's access token, with the project it is for: the two are read together, as a sign-in to
+// another project changes both, and a token must only ever go to its own project.
+func (c *Client) token(ctx context.Context) (string, Settings, error) {
 	for {
 		c.mu.Lock()
-		s := c.sess
+		s, cfg := c.sess, c.cfg
 		if s == nil {
 			c.mu.Unlock()
-			return "", ErrSignedOut
+			return "", cfg, ErrSignedOut
 		}
 		if s.AccessToken != "" && s.AccessToken != c.refused && time.Now().Add(tokenLasts).Unix() < s.ExpiresAt {
 			c.mu.Unlock()
-			return s.AccessToken, nil
+			return s.AccessToken, cfg, nil
 		}
 		r := c.refreshing
 		if r == nil || r.from != s {
-			r = &refresh{from: s, done: make(chan struct{})}
+			r = &refresh{from: s, cfg: c.cfg, done: make(chan struct{})}
 			c.refreshing = r
 			go c.refresh(r)
 		}
@@ -565,10 +568,10 @@ func (c *Client) token(ctx context.Context) (string, error) {
 		select {
 		case <-r.done:
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", cfg, ctx.Err()
 		}
 		if !r.stale {
-			return r.tok, r.err
+			return r.tok, r.cfg, r.err
 		}
 	}
 }
@@ -583,7 +586,7 @@ func (c *Client) refresh(r *refresh) {
 		c.mu.Unlock()
 	}()
 	defer guard.RecoverAs(&r.err)
-	out, err := c.authRequest(context.Background(), "token?grant_type=refresh_token", map[string]any{"refresh_token": r.from.RefreshToken}, false)
+	out, err := c.authRequestTo(context.Background(), r.cfg, "token?grant_type=refresh_token", map[string]any{"refresh_token": r.from.RefreshToken}, "")
 	var s *session
 	if err == nil {
 		s, err = decodeSession(out)
@@ -652,9 +655,13 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 	}
 	again := body == nil || req.GetBody != nil
 	for {
-		tok, err := c.token(ctx)
+		tok, at, err := c.token(ctx)
 		if err != nil {
 			return nil, err
+		}
+		// The request was made for the project it began in: after a sign-in to another one, it has no session.
+		if at != cfg {
+			return nil, ErrSignedOut
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 		res, err := hc.Do(req)

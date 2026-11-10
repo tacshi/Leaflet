@@ -179,6 +179,9 @@ type App struct {
 	updateReady  string
 	updateFailed string
 	quitting     bool
+	recKeeping   bool
+	relaunching  bool
+	recKeptAt    time.Time
 	openView     store.OpenView
 	viewTimer    *time.Timer
 
@@ -412,32 +415,8 @@ func (a *App) start() error {
 	a.early = nil
 	a.winMu.Unlock()
 	a.startTray()
-	a.win.OnClose(func(e *mygo.CloseEvent) {
-		saved := a.flush()
-		if a.tray != nil && !a.quitting {
-			e.PreventDefault()
-			a.win.Hide()
-			return
-		}
-		if !saved {
-			e.PreventDefault()
-			a.quitting = false
-			return
-		}
-		a.rec.Stop()
-		a.stopPub()
-		a.endView()
-	})
-	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
-		if !a.flush() {
-			e.PreventDefault()
-			a.showWindow()
-			return
-		}
-		a.quitting = true
-		a.stopPub()
-		a.endView()
-	})
+	a.win.OnClose(a.closing)
+	mygo.App.OnBeforeQuit(a.beforeQuit)
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible {
 			a.update(a.showWindow)
@@ -448,9 +427,84 @@ func (a *App) start() error {
 	a.capture = &webCapture{win: a.win}
 	a.rec.Attach(a.capture, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
 	go a.findSpeech()
+	a.loadSpeechKeys()
 	a.core().Start()
 	return nil
 }
+
+func (a *App) closing(e *mygo.CloseEvent) {
+	saved := a.flush()
+	if a.tray != nil && !a.quitting {
+		e.PreventDefault()
+		a.win.Hide()
+		return
+	}
+	if !saved {
+		e.PreventDefault()
+		a.quitting = false
+		return
+	}
+	if a.keepRecording() {
+		e.PreventDefault()
+		return
+	}
+	a.rec.Stop()
+	a.stopPub()
+	a.endView()
+}
+
+func (a *App) beforeQuit(e *mygo.QuitEvent) {
+	if !a.flush() {
+		e.PreventDefault()
+		a.showWindow()
+		return
+	}
+	if a.keepRecording() {
+		e.PreventDefault()
+		return
+	}
+	a.quitting = true
+	a.stopPub()
+	a.endView()
+}
+
+// quitWait is the longest a quit waits for a recording to be saved and its
+// live transcript to end.
+var quitWait = 20 * time.Second
+
+var (
+	quitApp     = func() { mygo.App.Quit() }
+	relaunchApp = func() { mygo.App.Relaunch() }
+)
+
+// keepRecording reports whether a quit has to wait for a recording: it
+// stops the one under way, and quits again once the audio and the
+// transcript are stored or quitWait has passed. The quit that follows the
+// wait is let through whatever is left unsaved.
+func (a *App) keepRecording() bool {
+	if a.recKeeping {
+		return true
+	}
+	if time.Since(a.recKeptAt) < keptFor || !a.rec.Active() && a.rec.Saving() == 0 {
+		return false
+	}
+	a.rec.Stop()
+	a.recKeeping = true
+	a.showWindow()
+	a.toast(locales.AppSavingRecording())
+	a.offMain(func() { a.rec.Settle(quitWait) }, func() {
+		a.recKeeping, a.recKeptAt = false, time.Now()
+		if relaunch := a.relaunching; relaunch {
+			a.relaunching = false
+			relaunchApp()
+			return
+		}
+		quitApp()
+	})
+	return true
+}
+
+const keptFor = 5 * time.Second
 
 func (a *App) watched(id string) bool {
 	if a.publiclyServed(id) {
@@ -819,6 +873,10 @@ func (a *App) follow() {
 }
 
 func (a *App) openPage(id string) {
+	if !a.pageExists(id) {
+		a.toast(locales.EditorPageNotFound())
+		return
+	}
 	a.closePreview()
 	if a.route.Kind == "page" && a.route.ID == id {
 		a.settingsOpen = false
@@ -842,6 +900,20 @@ func (a *App) openPage(id string) {
 		return
 	}
 	a.navigate(Route{Kind: "page", ID: id})
+}
+
+// pageExists reports whether there is a page to open, reading the pages
+// again for one made since they were last read.
+func (a *App) pageExists(id string) bool {
+	if a.pageByID(id) != nil {
+		return true
+	}
+	if p, err := a.st.Page(id); err != nil || !p.DeletedAt.IsZero() {
+		return false
+	}
+	reread(&a.pages, a.st.Pages)
+	reread(&a.templates, a.st.Templates)
+	return a.pageByID(id) != nil
 }
 
 func (a *App) loadPage(id string) {
@@ -972,18 +1044,25 @@ func (a *App) saveTitle() bool {
 		return true
 	}
 	p := a.pageByID(ps.id)
-	if p == nil {
-		if q, err := a.st.Page(ps.id); err == nil {
-			p = &q
+	if p == nil || p.Title != ps.title {
+		// The pages listed may be a change behind the one stored.
+		q, err := a.st.Page(ps.id)
+		if err != nil {
+			return true
 		}
+		p = &q
 	}
-	if p != nil && p.Title != ps.title && a.st.CanEdit(*p) {
+	switch {
+	case p.Title == ps.title:
+		ps.savedTitle = ps.title
+	case ps.title == ps.savedTitle:
+		// Renamed elsewhere, not here: the stored title is the newer one.
+		ps.title, ps.savedTitle = p.Title, p.Title
+	case a.st.CanEdit(*p):
 		if err := a.st.RenamePage(ps.id, ps.title); err != nil {
 			a.toast(locales.AppErrorRename(err.Error()))
 			return false
 		}
-		ps.savedTitle = ps.title
-	} else if p != nil && p.Title == ps.title {
 		ps.savedTitle = ps.title
 	}
 	return true

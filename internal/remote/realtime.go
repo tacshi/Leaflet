@@ -17,6 +17,7 @@ import (
 
 type Realtime struct {
 	c      *Client
+	cfg    Settings
 	conn   *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -93,11 +94,11 @@ func (c *Client) DialRealtime(ctx context.Context) (*Realtime, error) {
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
-	tok, err := c.token(ctx)
+	tok, cfg, err := c.token(ctx)
 	if err != nil {
 		return nil, err
 	}
-	addr, err := realtimeURL(c.settings())
+	addr, err := realtimeURL(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (c *Client) DialRealtime(ctx context.Context) (*Realtime, error) {
 		return nil, err
 	}
 	conn.SetReadLimit(1 << 20)
-	r := &Realtime{c: c, conn: conn, events: make(chan RealtimeEvent, 64), done: make(chan struct{}),
+	r := &Realtime{c: c, cfg: cfg, conn: conn, events: make(chan RealtimeEvent, 64), done: make(chan struct{}),
 		replies: map[string]chan realtimeReply{}, joined: map[string]string{}, token: tok, every: realtimeBeat, beaten: realtimeBeaten}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	guard.Go(r.read)
@@ -135,7 +136,7 @@ func (r *Realtime) fail(err error) {
 }
 
 func (r *Realtime) Join(ctx context.Context, topic string) error {
-	tok, err := r.c.token(ctx)
+	tok, err := r.ownToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -310,10 +311,19 @@ func (r *Realtime) keep() {
 	}
 }
 
+// ownToken is the session's token while it is still of the project the socket is open to.
+func (r *Realtime) ownToken(ctx context.Context) (string, error) {
+	tok, cfg, err := r.c.token(ctx)
+	if err == nil && cfg != r.cfg {
+		return "", ErrSignedOut
+	}
+	return tok, err
+}
+
 func (r *Realtime) renew() {
 	ctx, cancel := context.WithTimeout(r.ctx, realtimeWrite)
 	defer cancel()
-	tok, err := r.c.token(ctx)
+	tok, err := r.ownToken(ctx)
 	if errors.Is(err, ErrSignedOut) {
 		r.fail(err)
 		return

@@ -15,15 +15,19 @@ BUILD_LOG="${ROOT_DIR}/ios/build/xcodebuild-testflight.log"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/publish_testflight.sh <version> <build>
+Usage: scripts/publish_testflight.sh <version> <build> [--allow-branch]
 
 Build Leaflet for iOS and publish it to its internal TestFlight group. The
 version looks like 1.2.3 and the build is a positive integer, one the
 version hasn't had.
 
-It needs a clean Git worktree, asc signed in to App Store Connect (asc auth
-login), Xcode 27, XcodeGen and Go, and an Apple Distribution identity of the
-team, or an Xcode account that can make one.
+The build is of a published commit: main must be checked out, with a clean
+Git worktree, at the commit origin/main is at. --allow-branch builds from
+another branch instead, which origin must have at the same commit.
+
+It needs asc signed in to App Store Connect (asc auth login), Xcode 27,
+XcodeGen and Go, and an Apple Distribution identity of the team, or an Xcode
+account that can make one.
 
 Environment:
   ASC_APP_ID        The App Store Connect app (default 6829665849, Leaflet)
@@ -78,9 +82,18 @@ if [[ $# -eq 1 && ("$1" == -h || "$1" == --help) ]]; then
   usage
   exit 0
 fi
-[[ $# -eq 2 ]] || die "Usage: $0 <version> <build> (use --help)"
-VERSION="$1"
-BUILD_NUMBER="$2"
+ALLOW_BRANCH=false
+ARGS=()
+for arg in "$@"; do
+  case "${arg}" in
+    --allow-branch) ALLOW_BRANCH=true ;;
+    -*) die "Unknown option: ${arg} (use --help)" ;;
+    *) ARGS+=("${arg}") ;;
+  esac
+done
+[[ ${#ARGS[@]} -eq 2 ]] || die "Usage: $0 <version> <build> [--allow-branch] (use --help)"
+VERSION="${ARGS[0]}"
+BUILD_NUMBER="${ARGS[1]}"
 [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   die "The version must look like 1.2.3, not ${VERSION}."
 [[ "${BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]] ||
@@ -94,6 +107,9 @@ cd "${ROOT_DIR}"
 
 [[ -z "$(git status --porcelain)" ]] ||
   die "The worktree isn't clean. Commit or stash the changes before publishing."
+check_published_commit "${ALLOW_BRANCH}"
+COMMIT="$(git rev-parse HEAD)"
+log "Leaflet ${VERSION} (${BUILD_NUMBER}) from $(git branch --show-current) at $(git rev-parse --short HEAD)."
 
 check_team
 
@@ -188,6 +204,9 @@ grep -qxF "${APP_DIR}PrivacyInfo.xcprivacy" "${WORK_DIR}/files" ||
   die "The IPA has no PrivacyInfo.xcprivacy (ios/Leaflet/Resources)."
 log "Built ${IPA#"${ROOT_DIR}"/}, with its icon."
 
+[[ "$(git rev-parse HEAD)" == "${COMMIT}" && -z "$(git status --porcelain --untracked-files=no)" ]] ||
+  die "The checkout changed while Leaflet ${VERSION} (${BUILD_NUMBER}) was built from ${COMMIT}, so the build isn't that commit's. Nothing was published."
+
 log "Publishing ${VERSION} (${BUILD_NUMBER}) to ${TESTFLIGHT_GROUP}..."
 asc publish testflight \
   --app "${APP_ID}" \
@@ -199,4 +218,4 @@ asc publish testflight \
   --timeout "${TIMEOUT}" \
   --output table
 
-log "Published ${VERSION} (${BUILD_NUMBER}) to TestFlight."
+log "Published ${VERSION} (${BUILD_NUMBER}), a build of ${COMMIT}, to TestFlight."

@@ -62,8 +62,10 @@ func (e *Editor) pasteClipboard(plain bool) {
 	own := text != "" && text == clip.text && (clip.blocks != nil || clip.delta != nil)
 	if !plain && !own && !e.ReadOnly && !e.inCode() {
 		if rich, ok := richOfData(data); ok && formatted(rich) {
-			e.pasteBlocks(blocksOf(rich))
-			return
+			if blocks := blocksOf(rich); len(blocks) > 0 {
+				e.pasteBlocks(blocks)
+				return
+			}
 		}
 	}
 	e.pasteAs(text, plain)
@@ -181,6 +183,13 @@ func blocksOf(t richtext.Text) []*doc.Node {
 	var out []*doc.Node
 	var lists []*doc.Node
 	var code *doc.Node
+	var lines []string
+	endCode := func() {
+		if len(lines) > 1 {
+			code.SetDelta(doc.Delta{{Text: strings.Join(lines, "\n")}})
+		}
+		code, lines = nil, nil
+	}
 	for _, p := range t.Paragraphs() {
 		var d doc.Delta
 		for _, r := range p.Runs {
@@ -191,16 +200,15 @@ func blocksOf(t richtext.Text) []*doc.Node {
 		d = d.Compact()
 		st := p.Style
 		if st.CodeBlock {
-			if code != nil {
-				code.SetDelta(doc.Delta{{Text: code.Delta().Plain() + "\n" + d.Plain()}})
-			} else {
+			if code == nil {
 				code = doc.CodeNode(d.Plain(), "")
 				lists = nil
 				out = append(out, code)
 			}
+			lines = append(lines, d.Plain())
 			continue
 		}
-		code = nil
+		endCode()
 		if d.Len() == 0 {
 			continue
 		}
@@ -235,5 +243,6 @@ func blocksOf(t richtext.Text) []*doc.Node {
 			parent.Children = append(parent.Children, n)
 		}
 	}
+	endCode()
 	return out
 }

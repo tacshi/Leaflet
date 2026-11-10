@@ -60,6 +60,10 @@
   "@appStartFailed": {
     "description": "Title of the error dialog when the app fails to start."
   },
+  "appSavingRecording": "Saving the recording before Leaflet quits…",
+  "@appSavingRecording": {
+    "description": "Toast when quitting waits for the recording under way to be saved."
+  },
   "appErrorSave": "Could not save: {error}",
   "@appErrorSave": {
     "description": "Toast when the open page could not be saved.",
@@ -468,9 +472,23 @@
       }
     }
   },
-  "hostAddedToSpace": "Added {name} to the space",
-  "@hostAddedToSpace": {
-    "description": "Toast when a file was uploaded while its page was no longer open.",
+  "hostAddedToPage": "Added {name} to {page}",
+  "@hostAddedToPage": {
+    "description": "Toast when a file finished uploading into a page that was no longer the one open.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      },
+      "page": {
+        "type": "String",
+        "example": "Roadmap"
+      }
+    }
+  },
+  "hostFileNotAdded": "{name} was not added: its page can no longer be changed.",
+  "@hostFileNotAdded": {
+    "description": "Toast when a file finished uploading for a page that is gone or can no longer be edited, so the file was removed.",
     "placeholders": {
       "name": {
         "type": "String",
@@ -481,6 +499,26 @@
   "hostDownloading": "Downloading {name}…",
   "@hostDownloading": {
     "description": "Toast when a file opened is still downloading.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      }
+    }
+  },
+  "hostNotOnDevice": "{name} is not on this device and cannot be downloaded now.",
+  "@hostNotOnDevice": {
+    "description": "Toast when a file opened is not on this device and no download can start (signed out, never uploaded).",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      }
+    }
+  },
+  "hostDownloadFailed": "Could not download {name}.",
+  "@hostDownloadFailed": {
+    "description": "Toast when the download of a file opened failed.",
     "placeholders": {
       "name": {
         "type": "String",
@@ -3740,6 +3778,10 @@
         "type": "String"
       }
     }
+  },
+  "recErrAnswerTooLarge": "The transcription service sent back more than Leaflet can read.",
+  "@recErrAnswerTooLarge": {
+    "description": "Error when a transcription endpoint's answer is larger than the app reads."
   },
   "recErrPasteKey": "Paste a key to test",
   "@recErrPasteKey": {

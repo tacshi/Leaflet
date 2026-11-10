@@ -630,7 +630,7 @@ func TestRecordingTranscriptsOfThePageAlone(t *testing.T) {
 	if _, _, err := st.SaveContent(other.ID, doc.FromBlocks([]*doc.Node{block("theirs")})); err != nil {
 		t.Fatal(err)
 	}
-	read := tc.ReadOtherPage(other.ID)["blocks"].([]map[string]any)
+	read := tc.ReadOtherPage(other.ID, 0, 0)["blocks"].([]map[string]any)
 	if rec := read[0]["recording"].(map[string]any); rec["transcript"] != "[0:00] Words of theirs." {
 		t.Errorf("the other page read as %v", rec)
 	}

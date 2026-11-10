@@ -190,15 +190,19 @@ func (a *App) playFile(n *doc.Node, at int) {
 	}
 	delete(a.downloadFails, file.ID)
 	a.lost(file.LocalPath)
-	path := a.localFile(file, func(ok bool) {
-		if ok && a.page != nil && a.page.editor.HasBlock(id) && a.videos[id] == nil {
+	path, fetching := a.localFile(file, func(ok bool) {
+		if !ok {
+			a.toast(locales.HostDownloadFailed(file.Name))
+			return
+		}
+		if a.page != nil && a.page.editor.HasBlock(id) && a.videos[id] == nil {
 			if n := a.page.editor.Content.Find(id); n != nil {
 				a.playFile(n, at)
 			}
 		}
 	})
 	if path == "" {
-		a.toast(locales.HostDownloading(file.Name))
+		a.notHere(file, fetching)
 		return
 	}
 	address, err := a.media.Register(mediaserver.Item{Path: path, Type: doc.FileMediaType(file.Name, file.MimeType),

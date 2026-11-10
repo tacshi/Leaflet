@@ -16,6 +16,8 @@ final class EditorClipboard {
         var blocks: [DocNode] = []
         var inline: NSAttributedString?
         var count: Int?
+        var out = UIPasteboard.general.changeCount
+        let id = UUID()
     }
 
     private static var clip: Clip?
@@ -32,10 +34,13 @@ final class EditorClipboard {
     }
 
     func copy(blocks: [DocNode]) {
-        Self.clip = Clip(blocks: blocks)
+        let clip = Clip(blocks: blocks)
+        Self.clip = clip
         guard let copyText = editor.copyText else { return }
         Task {
-            guard let text = await copyText(blocks), !text.isEmpty else { return }
+            guard let text = await copyText(blocks), !text.isEmpty, let now = Self.clip,
+                now.id == clip.id, now.out == UIPasteboard.general.changeCount
+            else { return }
             UIPasteboard.general.string = text
             Self.clip?.text = text
             Self.clip?.count = UIPasteboard.general.changeCount
@@ -43,6 +48,7 @@ final class EditorClipboard {
     }
 
     func copiedOut() {
+        Self.clip?.out = UIPasteboard.general.changeCount
         if Self.clip?.inline != nil { Self.clip?.count = UIPasteboard.general.changeCount }
     }
 
@@ -90,15 +96,88 @@ final class EditorClipboard {
     ) {
         let page = DocContent(
             document: DocNode(id: "root", type: "page", data: nil, children: blocks), meta: nil)
-        let made = NSMutableAttributedString(
-            attributedString: DocumentMapper.attributedString(page).text)
-        if !(BlockInfo.textTypes.contains(blocks[0].type)), range.location > para.location {
+        var flat = DocumentMapper.flatten(page).map {
+            (node: $0.node, depth: $0.depth + info.depth)
+        }
+        guard let first = flat.first?.node, let last = flat.last?.node else { return }
+        let joins = { (type: String) in BlockInfo.textTypes.contains(type) && type != "code" }
+        let (end, endInfo) = text.paragraph(at: NSMaxRange(range))
+        let tail = NSRange(
+            location: NSMaxRange(range), length: NSMaxRange(end) - NSMaxRange(range))
+        let atEnd = NSMaxRange(end) == storage.length
+        let head = range.location > para.location
+        let apart = tail.length > 0 && (!joins(last.type) || !endInfo.isText)
+        let kept = head || joins(first.type)
+        let many = flat.count > 1 || !joins(first.type)
+        if tail.length > 0, !apart, flat.count > 1 {
+            var data = info.data
+            data["due"] = nil
+            data["delta"] = last.data?["delta"]
+            flat[flat.count - 1].node.type = info.type
+            flat[flat.count - 1].node.data = data
+            if !kept, endInfo === info { flat[flat.count - 1].node.id = info.id }
+        }
+        if !head, joins(first.type) {
+            var node = flat[0].node
+            node.id = info.id
+            if first.type == "paragraph" {
+                var data = info.data
+                data["delta"] = first.data?["delta"]
+                node.type = info.type
+                node.data = data
+            }
+            if many, node.type == "heading", node.data?["collapsed"]?.bool == true {
+                node.data?["collapsed"] = .bool(false)
+            }
+            flat[0].node = node
+        }
+        let (built, infos, _) = DocumentMapper.attributedString(flat)
+        let made = NSMutableAttributedString(attributedString: built)
+        if !joins(first.type), head {
             made.insert(NSAttributedString(string: "\n", attributes: [.leafletBlock: info]), at: 0)
         }
-        edits.replace(range, with: made)
+        var after: BlockInfo?
+        var blank: BlockInfo?
+        if apart, let block = infos.last {
+            made.append(NSAttributedString(string: "\n", attributes: [.leafletBlock: block]))
+            if kept, endInfo === info {
+                after = info.setting("due", nil).with(id: BlockInfo.newID())
+            }
+        } else if tail.length > 0, flat.count > 1 {
+            after = infos.last
+        } else if tail.length == 0, !joins(last.type), let block = infos.last {
+            made.append(NSAttributedString(string: "\n", attributes: [.leafletBlock: block]))
+            blank =
+                !kept && para.length == 0
+                ? info : BlockInfo(id: BlockInfo.newID(), type: "paragraph", depth: info.depth)
+        }
+        let caret = range.location + made.length
+        var replaced = range
+        if let after {
+            let rest = NSMutableAttributedString(
+                attributedString: storage.attributedSubstring(from: tail))
+            rest.addAttribute(
+                .leafletBlock, value: after, range: NSRange(location: 0, length: rest.length))
+            made.append(rest)
+            replaced.length += tail.length
+        }
+        if let blank, !atEnd {
+            made.append(NSAttributedString(string: "\n", attributes: [.leafletBlock: blank]))
+            replaced.length += 1
+        }
+        edits.replace(replaced, with: made)
+        if let blank, atEnd {
+            text.trailing = blank
+            editor.layout.redrawEnd()
+        }
         let r = NSRange(location: range.location, length: made.length)
-        textView.selectedRange = NSRange(location: NSMaxRange(r), length: 0)
+        textView.selectedRange = NSRange(location: caret, length: 0)
         editor.edited(editor.paragraphs(around: r))
+        let start = text.paragraph(at: para.location).info
+        if head, many, start.type == "heading", start.isCollapsed {
+            edits.setBlock(start.setting("collapsed", .bool(false)), at: para.location)
+        }
+        editor.layout.keepShown(text.paragraph(at: caret).info.id)
     }
 
     func pasted(

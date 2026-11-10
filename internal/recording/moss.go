@@ -122,7 +122,10 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 		TaskID string `json:"task_id"`
 		ID     string `json:"id"`
 	}
-	if err := call(ctx, "POST", "/audio/transcriptions", create, &task); err != nil {
+	start, cancel := context.WithTimeout(ctx, jobWait)
+	err = call(start, "POST", "/audio/transcriptions", create, &task)
+	cancel()
+	if err != nil {
 		return nil, err
 	}
 	id := task.TaskID
@@ -259,5 +262,5 @@ func mossDo(req *http.Request, key string, out any) error {
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(out)
+	return json.NewDecoder(io.LimitReader(res.Body, maxAnswer)).Decode(out)
 }

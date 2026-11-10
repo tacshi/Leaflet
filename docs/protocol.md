@@ -73,13 +73,13 @@ metadata:
 | `callout` | `delta`, `tone` (`info`\|`tip`\|`warning`\|`danger`) | a tinted box; Markdown writes it as a GitHub alert |
 | `toggle_list` | `delta`, `collapsed` | any blocks nest in `children`, hidden while collapsed |
 | `divider` | — | |
-| `image` | `url`, `align`, `alt`, `width`, `height` | |
+| `image` | `url`, `align`, `alt`, `width`, `height`, `file_id?` | a picture kept with the page has `file_id`, and `url` is `file://<file_id>/<name>`, as a `file`'s is |
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
-| `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1" |
+| `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `url` is `file://<file_id>/<name>`, no path on a device, which other devices and people would read: `file_id` finds the file, and a Markdown export writes the file's name alone for a `file:` URL; `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1" |
 | `math_equation` | `formula` | TeX, drawn in display style by KaTeX |
 | `diagram` | `source` | Mermaid, drawn by Pele |
 | `recording` | `recording_id`, `title`, `duration_ms` | transcript lives in `recordings` |
@@ -165,7 +165,7 @@ says where whatever other keys the position has.
 
 | name | arguments | returns |
 | --- | --- | --- |
-| `read_page` | — | `{ page: {id, title}, blocks: [BlockView], subpages: [{id, title}], comments: [{block_id, resolved, thread: [{author, body}]}] }` |
+| `read_page` | `offset?`, `limit?` | `{ page: {id, title}, subpages: [{id, title}], more_subpages?, comments: [{block_id, resolved, thread: [{author, body}]}], more_comments?, total_blocks, next_offset?, blocks: [BlockView] }`: a long page comes in parts, the blocks from `offset` (the first when not given) that fit a result, `limit` at most; `total_blocks` is how many the page has, and `next_offset`, while there are more, the `offset` to read on from. `subpages` and `comments` come with the first part alone, as many as fit, `more_subpages` and `more_comments` how many more there are (below) |
 | `read_video_transcript` | `id` (a video block of the page) | `{ id, language, auto_generated, transcript, title? }`: what is said in the video, from its site's captions, as `[m:ss] text` lines of a passage each (YouTube's and Vimeo's videos only) |
 | `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `######` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |
@@ -175,8 +175,8 @@ says where whatever other keys the position has.
 | `create_subpage` | `title`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (inside this page, its subpage block inserted at the end of this page: an `insert` op, then `create_page`) |
 | `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is). Only on a page no one else writes or reads, as for reading other pages: a page of the user's own made from one someone else shares, comments on as a guest or reads by a public link could take what they wrote into the user's pages, where the workspace agent reads it as theirs. On one, the agent makes a subpage instead. After the run, or an earlier turn of its conversation, read such a page with `read_other_page`, it and `create_subpage` refuse (below) |
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on): at most 500, fewer where they would take more of the result than a model reads at once (60,000 UTF-16 units of its JSON) |
-| `read_other_page` | `page_id` | same shape as `read_page` |
-| `list_folders` | — | `{ folders: [{id, name}] }` (the user's own, only when cross-page reading is on). It spends the run's one free `read_web_page`, leaving the run as a first `read_web_page` does: from then on `read_web_page` goes only to the URLs the user gave and those found already, and the run counts as guarded. It closes no web, and is not reading the user's pages |
+| `read_other_page` | `page_id`, `offset?`, `limit?` | same shape as `read_page`, in parts as it gives its page |
+| `list_folders` | — | `{ folders: [{id, name, parent_folder_id?}] }` (the user's own, `parent_folder_id` the folder one is in, none at the top level; only when cross-page reading is on). It spends the run's one free `read_web_page`, leaving the run as a first `read_web_page` does: from then on `read_web_page` goes only to the URLs the user gave and those found already, and the run counts as guarded. It closes no web, and is not reading the user's pages |
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
 | `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
 
@@ -214,8 +214,11 @@ was on the current page as the run began or is in the instruction, in any
 block, in text and in a subpage's title: the app loads an `image`, `video` or
 `link_preview` by itself, a URL seen only on another page, which someone else
 may have put there, could carry what the run read, and one written in text
-would be on the page for a later run to load. A link to a page
-(`leaflet://page/…`) goes. URLs compare with their scheme in lower case, as
+would be on the page for a later run to load. An `image`, `video` or
+`link_preview` holds only a URL that one of those blocks of the page held
+as the run began, or that is in the instruction: among the URLs the page
+only names, as in its text, the one picked could carry what the run read.
+A link to a page (`leaflet://page/…`) goes. URLs compare with their scheme in lower case, as
 a link's is read in any case (`HTTPS://` is `https://`). A run whose
 conversation has earlier turns that read beyond their page keeps to the
 same URLs from its start: an earlier turn may hold what a run read. Where
@@ -233,7 +236,14 @@ whole conversation, a turn undone or failed left out. A run whose
 conversation has earlier turns whose URL guard was on (`guarded`: they read
 the web) keeps to the URLs it may write after reading the web, below, from
 its start, with none found yet. A tool's result reaches the model cut to 60,000 characters of
-its JSON.
+its JSON, written with its `blocks` last: a result cut loses blocks, never
+what says how to read on. A read of a page (`read_page`, `read_other_page`,
+the workspace's and `leaflet mcp`'s `read_page`, one reader) keeps under
+that: a part is the blocks that fit 58,000 bytes of the result's JSON, one
+at least, and in the first part (`offset` 0 or none) the subpages and the
+comments take at most a quarter of that each, before the blocks. `offset`
+and `limit` are whole numbers, 0 and 1 at least; an `offset` past the last
+block gives none.
 
 A public link can start on the page while a run that may read the user's
 other pages works on it, on its device or another. The run reads again
@@ -303,15 +313,16 @@ steer what it does to the user's other pages.
 
 | name | arguments | returns |
 | --- | --- | --- |
-| `list_pages` | — | `{ folders: [{id, name}], more_pages?, pages: [{id, title, tags?, parent_id?, folder_id?, shared?, shared_with_people?}] }`: at most 500 pages, fewer where they would take more of the result than a model reads at once, as on a page; `more_pages` how many more there are (only when reading is on) |
+| `list_pages` | — | `{ folders: [{id, name, parent_folder_id?}], more_pages?, pages: [{id, title, tags?, parent_id?, folder_id?, shared?, shared_with_people?}] }`: at most 500 pages, fewer where they would take more of the result than a model reads at once, as on a page; `more_pages` how many more there are (only when reading is on) |
 | `search_pages` | `query` | `{ results: [{page_id, title, snippet?}] }`, 20 at most: titles and tags that hold the words first, then text, each the most recently changed page first, a match in text with the 40 characters either side; words starting with `#` keep to the pages with each of those tags, in any case. A snippet is cut from the page's own text, without what its sites wrote of its blocks (link cards' titles and descriptions, videos' titles), which `read_page` leaves out too: a page whose match is only there is found with none. No `snippet` of a page shared with people, or of one the run does not know, as one made since it began (only when reading is on) |
-| `read_page` | `page_id` | `{ page: {id, title, tags?}, blocks: [BlockView], subpages: [{id, title}] }`, refused for a page shared with people (only when reading is on) |
-| `list_folders` | — | `{ folders: [{id, name}] }`, spending the run's one free `read_web_page`, as on a page |
+| `read_page` | `page_id`, `offset?`, `limit?` | `{ page: {id, title, tags?}, subpages: [{id, title}], more_subpages?, total_blocks, next_offset?, blocks: [BlockView] }`, in parts as on a page, refused for a page shared with people (only when reading is on) |
+| `list_folders` | — | `{ folders: [{id, name, parent_folder_id?}] }`, spending the run's one free `read_web_page`, as on a page |
 | `create_page` | `title`, `parent_id?` or `folder_id?`, `markdown?` or `blocks?` | `{ page_id }`, a page inside `parent_id` linked at its end |
 | `move_page` | `page_id`, `parent_id?` or `folder_id?` | `{ page_id }`: inside a page, linked at its end, into a folder, or with neither to the top level; where it is already, it stays as it is, and the call makes no op |
 | `rename_page` | `page_id`, `title` | `{ page_id }` |
 | `set_page_tags` | `page_id`, `tags: [string]` | `{ page_id, tags }`, the tags tidied as the app tidies them |
-| `create_folder` | `name` | `{ folder_id }` |
+| `create_folder` | `name`, `parent_folder_id?` | `{ folder_id }`: at the top level, or in a folder, last among the folders there |
+| `move_folder` | `folder_id`, `parent_folder_id?` | `{ folder_id }`: with what is in it, last into a folder, or with none to the top level; into itself or a folder inside it is refused; where it is already, it stays as it is, and the call makes no op |
 
 The web's tools come with them where the web is on. Reading the user's
 pages (`list_pages`, `search_pages`, `read_page`) counts as reading beyond
@@ -336,14 +347,18 @@ what "Undo run" inverts. They carry enough to be inverted by block ID.
 { "op": "move_page", "page_id": "…", "title": "…", "place": PagePlace, "previous": PagePlace }
 { "op": "rename_page", "page_id": "…", "title": "…", "previous": "old title" }
 { "op": "set_page_tags", "page_id": "…", "title": "…", "tags": ["…"], "previous": ["…"] }
-{ "op": "create_folder", "folder": { "id", "space_id", "name", "sort_key" } }
+{ "op": "create_folder", "folder": { "id", "space_id", "parent_folder_id"?, "name", "sort_key" } }
+{ "op": "move_folder", "folder_id": "…", "title": "…", "folder_place": FolderPlace, "previous": FolderPlace }
 ```
 
 `PagePlace` = `{ parent_id?, folder_id?, sort_key?, card?: Position }`:
 inside a page, or at the top level, in a folder or none; `card` is where
 the page's card was in the page it left, for Undo to put it back there,
-none for the end. A page op's `title` is the page's, after the op, `""` for
-an untitled one, which the app names in the user's language. A workspace
+none for the end. `FolderPlace` = `{ parent_folder_id?, sort_key? }`: the
+folder a folder is in, none at the top level, and where among the folders
+there. A page op's `title` is the page's, after the op, `""` for
+an untitled one, which the app names in the user's language; a
+`move_folder`'s is the folder's name. A workspace
 run's `create_page` has the page's `space_id` and `sort_key`, that of a run
 on a page none. The page ops (those above from
 `create_page`, and `delete_page` and `delete_folder`, which only Undo makes)
@@ -353,7 +368,8 @@ go and come back; one whose page, or folder, is not as the run left it,
 as the user renamed it since, is passed over, keeping their change. Each
 is taken as the ops before it in the same Undo or Redo leave the pages,
 so a page made and then tagged comes back tagged, and one moved twice
-goes back where it was. A folder the run made stays where the user has
+goes back where it was. A folder goes back only into a folder that is
+still there, and not inside it by now. A folder the run made stays where the user has
 filed a page, a file or a folder in it since; a page `rename_page` gave
 a title to had none when `previous` is `""`, though shown as "Untitled".
 A page or a folder the run made that the user deleted since stays
@@ -445,7 +461,8 @@ build deployed, for the devices still on that build: a newer build deploys
   `updated_at` is not for a row sent late); otherwise the device takes the
   server's row. A row the server refuses (403) while the page or folder it
   is in still waits to go up from the device waits for it, and goes after
-  it in the same push; any other refusal gives way to the server's row.
+  it in the same push (a row named as its own parent waits for none); any
+  other refusal gives way to the server's row.
   A page whose parent neither waits here nor is on the server, as one that
   came through iCloud Drive before its parent did, stays queued
   (`parent_not_found`, `P0002`, which PostgREST answers 500): an error a
@@ -494,8 +511,11 @@ build deployed, for the devices still on that build: a newer build deploys
   Drive (§8) there is neither: a change to the folder starts a pass.
 - Page content from the server that a device cannot read (a newer format)
   is neither merged nor stored, so it never stands in for an empty page:
-  that page's change here stays queued, and its content is asked for again
-  each pull, without stopping the pull of the others.
+  that page's change here stays queued, and its content is fetched once
+  for each revision the server has of it: a pull reads the revision alone
+  (`select=page_id,revision`), and the content again only when it moved,
+  or the app started again, as an updated one does. It does not stop the
+  pull of the others.
 - Page history goes up and is never pulled. A device keeps the snapshots
   of a page that its History shows, the newest 50 and every named
   (`manual`) one, and removes the others as it takes a new one, with any of
@@ -596,6 +616,21 @@ build deployed, for the devices still on that build: a newer build deploys
   it was revoked.
 - A page stays in the space it was made in (`space_immutable`): a device
   refuses to move one under a page, or into a folder, of another space.
+  One moved into, or made in, a folder that is deleted goes to the top
+  level; a folder the device does not have, as the owner's for a page shared
+  with it, is kept as given.
+- Two devices can each move one of two folders into the other, which
+  leaves both in a loop, in no list. A device looks for loops once a pull
+  has taken every folder row there is, from the server or from iCloud Drive
+  (§8), never row by row: a move takes several rows, and half of them can
+  read as a loop. It moves the folder of the smallest `id` in a loop to the
+  top level, a move that syncs as any other: every device lifts the same
+  one, as the server did in the loops it held (§7). A loop with a folder
+  whose change is still waiting to go up is left until it has. A deleted
+  folder ends the walk up, as the folders in one show at the top level.
+  Pages whose parents run in a loop are looked for at the same point: the
+  one with a change waiting, else the smallest `id`, goes to the top level
+  on the device alone.
 
 ## 7. Postgres tables
 
@@ -643,7 +678,13 @@ but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
 it was not shared with. Folders are the space owner's: only they change a
 page's `folder_id`, or insert a page with one (`forbidden_folder`
-otherwise; an upsert of a page already there is no insert). A move that
+otherwise; an upsert of a page already there is no insert). A folder goes
+only under a folder of its space, not itself
+(`parent_folder_in_other_space`), and under none that is inside it
+(`folder_cycle`, `23514`), each move of a
+folder in a space after the one before. A folder whose row is deleted
+leaves its folders at the top level, as it leaves its pages and files; the
+apps delete one by `deleted_at`. A move that
 brings a page under shares its old parent was not under moves
 `updated_at` on for the pages under it and for
 the content, comments, files and recordings of all of them, so the pulls
@@ -651,7 +692,13 @@ of the people it now reaches bring them. A recording stays on its page: an
 update that changes `recordings.page_id` is refused, and its audio is
 written only by its recorder while they can edit its page. Its recorder,
 `recordings.created_by`, is kept as it was inserted: a client's value is
-ignored on update, and only deleting the recorder's account clears it. A
+ignored on update, and only deleting the recorder's account clears it. Its
+`audio_path` is its audio's, `{created_by}/{id}.{ext}`, or null: any other
+a client sends is dropped, not refused, and so is none sent over one, so a
+device sends a recording whole without it, as one that pulled the row
+before its audio was up does; only the recorder clears it, once the object
+is gone from the bucket. No client deletes a recording's row: it goes with
+its page. A
 `files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and

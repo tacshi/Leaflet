@@ -63,7 +63,7 @@ final class TextEdits {
         textView.selectedRange = NSRange(location: end + 1 + (s as NSString).length, length: 0)
     }
 
-    func setBlock(_ info: BlockInfo, at location: Int, undoable: Bool = true) {
+    func setBlock(_ info: BlockInfo, at location: Int, undoable: Bool = true, fit: Bool = true) {
         let (range, old) = text.paragraph(at: location)
         var whole = range
         if NSMaxRange(range) < storage.length { whole.length += 1 }
@@ -75,7 +75,23 @@ final class TextEdits {
         if text.trailing !== before { editor.layout.redrawEnd() }
         if undoable, old !== info { registerBlockUndo(textView.undoManager, now: info, was: old) }
         text.emptied = nil
-        editor.edited(whole.length > 0 ? whole : NSRange(location: range.location, length: 0))
+        editor.edited(
+            whole.length > 0 ? whole : NSRange(location: range.location, length: 0), fit: fit)
+    }
+
+    // Puts back the depths an edit took from the blocks after it. It runs before the undo of that
+    // edit, so it leaves the depths as they were without fitting them to the block before.
+    func registerFitUndo(_ undo: UndoManager?, _ fitted: [BlockText.Fit]) {
+        guard !fitted.isEmpty else { return }
+        undo?.registerUndo(withTarget: self) { [weak undo] e in
+            var back: [BlockText.Fit] = []
+            for f in fitted {
+                guard let at = e.text.location(of: f.now) else { continue }
+                e.setBlock(f.was, at: at, undoable: false, fit: false)
+                back.append((f.now, f.was))
+            }
+            e.registerFitUndo(undo, back)
+        }
     }
 
     private func registerBlockUndo(_ undo: UndoManager?, now: BlockInfo, was: BlockInfo) {

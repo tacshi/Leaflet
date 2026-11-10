@@ -41,9 +41,11 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 		}
 		b.WriteString("\n")
 	}
-	link := func(text, to string) string {
-		return "[" + escapeLinkText(text) + "](" + commonMarkDestination(href(to)) + ")"
+	linkTo := func(text, to string) string {
+		return "[" + escapeLinkText(text) + "](" + commonMarkDestination(to) + ")"
 	}
+	link := func(text, to string) string { return linkTo(text, href(to)) }
+	kept := func(n *Node) string { return keptFile(n, href(n.Str("url"))) }
 	var visit func(nodes []*Node, indent string)
 	visit = func(nodes []*Node, indent string) {
 		number := 0
@@ -102,7 +104,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "divider":
 				block(indent, "---")
 			case "image":
-				block(indent, "!"+link(n.Str("alt"), n.Str("url")))
+				block(indent, "!"+linkTo(n.Str("alt"), kept(n)))
 			case "table":
 				block(indent, tableMarkdown(ReadableTableRows(n)))
 			case "chart":
@@ -148,7 +150,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "link_preview":
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "file":
-				block(indent, link(cardTitle(n), n.Str("url")))
+				block(indent, linkTo(fileTitle(n), kept(n)))
 				to := href(n.Str("url"))
 				block(indent, notesMarkdown(ShownNotes(n), func(at int) string {
 					if to == "" || strings.HasPrefix(to, "file:") {
@@ -216,6 +218,33 @@ func notesMarkdown(notes string, to func(at int) string) string {
 		lines = append(lines, "- "+text)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// keptFile is where Markdown says the picture or file of a block is, given
+// where its link leads. A file the app keeps is on this device at a
+// path that means nothing anywhere else, and that pages made before held in
+// full: only the file's name is written.
+func keptFile(n *Node, to string) string {
+	rest, ok := strings.CutPrefix(to, "file:")
+	if !ok {
+		return to
+	}
+	if i := strings.LastIndexAny(rest, `/\`); i >= 0 {
+		rest = rest[i+1:]
+	}
+	for _, name := range []string{rest, n.Str("name"), n.Str("alt")} {
+		if name = strings.TrimSpace(name); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func fileTitle(n *Node) string {
+	if n.Str("title") == "" && n.Str("name") == "" {
+		return keptFile(n, n.Str("url"))
+	}
+	return cardTitle(n)
 }
 
 func withLinks(c *Content, link func(string) string) *Content {

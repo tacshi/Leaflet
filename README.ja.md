@@ -236,7 +236,9 @@ make ios-test     # iPhone と iPad のシミュレータでアプリのテス�
 `scripts/publish_testflight.sh <バージョン> <ビルド>` は App Store 用にアプリ
 をビルドし、TestFlight の内部グループに公開します。App Store Connect に
 サインインした [asc](https://asccli.sh) が必要です。
-必要なものは `--help` で説明しています。
+必要なものは `--help` で説明しています。ビルドするのは `origin` と同じコミット
+にある `main` で、`--allow-branch` を付けるとプッシュ済みの別のブランチから
+ビルドできます。
 
 ### データ
 

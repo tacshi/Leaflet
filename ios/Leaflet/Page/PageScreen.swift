@@ -112,9 +112,11 @@ struct PageScreen: View {
                         c.onHeading = { [weak scene] in scene?.heading = $0 }
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
-                            open: { [weak scene] id in scene?.open(id) },
-                            openAt: { [weak scene] id, block, at in
-                                scene?.open(id, at: block, moment: at)
+                            open: { [weak scene, app] id in
+                                if app.opens(id) { scene?.open(id) }
+                            },
+                            openAt: { [weak scene, app] id, block, at in
+                                if app.opens(id) { scene?.open(id, at: block, moment: at) }
                             })
                         c.plainCopy = { [app] nodes in try? await app.client?.plainCopy(nodes) }
                         c.copyText = { [app] nodes in try? await app.client?.copyText(nodes) }

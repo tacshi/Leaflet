@@ -147,6 +147,7 @@ enum DocumentMapper {
 
     static func content(
         _ s: NSAttributedString, blocks: [(info: BlockInfo, range: NSRange)], meta: JSONValue?,
+        beside: (String) -> String = { _ in BlockInfo.newID() },
         made: (BlockInfo, NSRange) -> DocNode
     ) -> DocContent {
         var roots: [Built] = []
@@ -164,12 +165,16 @@ enum DocumentMapper {
             seen.insert(info.id)
             let built = Built(node)
             while let top = chain.last, top.depth >= info.depth { chain.removeLast() }
+            var text = info.isText ? nil : Self.beside(s.attributedSubstring(from: p.range))
+            text?.id = beside(info.id)
             let depth: Int
             if let parent = chain.last {
                 parent.built.children.append(built)
+                if let text { parent.built.children.append(Built(text)) }
                 depth = parent.depth + 1
             } else {
                 roots.append(built)
+                if let text { roots.append(Built(text)) }
                 depth = 0
             }
             if BlockInfo.nestable.contains(node.type) { chain.append((depth, built)) }
@@ -191,6 +196,15 @@ enum DocumentMapper {
             n.children = children.map(\.node)
             return n
         }
+    }
+
+    // A card's node holds none of the text that shares its paragraph.
+    private static func beside(_ text: NSAttributedString) -> DocNode? {
+        guard text.length > 1,
+            text.attribute(.attachment, at: 0, effectiveRange: nil) is BlockAttachment,
+            case .array(let ops) = delta(text), !ops.isEmpty
+        else { return nil }
+        return DocNode(id: "", type: "paragraph", data: ["delta": .array(ops)], children: nil)
     }
 
     static func node(for info: BlockInfo, text: NSAttributedString) -> DocNode {

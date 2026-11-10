@@ -39,6 +39,13 @@
 # out, unchanged, once the build is done, and is marked the latest: its
 # version must come after every v* tag's, here and on origin.
 #
+# A run that stops after the build, at the tag, its push or the publishing,
+# is finished by running it again from the same commit: with the tag made,
+# here or on origin too, at that commit, and the draft still holding every
+# build of it, it builds nothing and takes the steps left, with the notes
+# that run gave the draft. A tag at another commit, a release published
+# already or a draft short of a build is refused, as it was.
+#
 # Signing, notarization, NSIS and the update signing key are as in
 # scripts/build-release.sh. Without LEAFLET_WINDOWS_CERTIFICATE the Windows
 # builds would be unsigned, which a release refuses unless --allow-unsigned,
@@ -170,9 +177,41 @@ if [[ "$BRANCH" != "main" ]] && ! $ALLOW_BRANCH; then
 	problem "releases are cut from main, and this is ${BRANCH:-a detached HEAD} (--allow-branch to override)"
 fi
 [[ -z "$(git status --porcelain)" ]] || problem "the working tree has changes; commit or stash them first"
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+LOCAL_TAG="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)"
+REMOTE_TAG=""
+RESUME=false
+if $NO_UPLOAD && [[ -n "$LOCAL_TAG" ]]; then
 	problem "the tag $TAG already exists"
 fi
+
+check_resume() {
+	local where="here" draft target assets missing
+	if [[ -z "$LOCAL_TAG" ]]; then
+		where="on origin"
+	elif [[ -n "$REMOTE_TAG" ]]; then
+		where="here and on origin"
+	fi
+	[[ -z "$LOCAL_TAG" || "$LOCAL_TAG" == "$COMMIT" ]] ||
+		die "the tag $TAG already exists, at $(git rev-parse --short "$LOCAL_TAG"), not at $SHORT, which this would publish"
+	[[ -z "$REMOTE_TAG" || "$REMOTE_TAG" == "$COMMIT" ]] ||
+		die "the tag $TAG already exists on origin, at ${REMOTE_TAG:0:7}, not at $SHORT, which this would publish"
+	find_release "$VERSION" --json isDraft,targetCommitish,assets --jq '.isDraft, .targetCommitish, .assets[].name' ||
+		die "the tag $TAG already exists $where, at $SHORT, and $REPO has no draft release $TAG to publish; delete the tag and run again"
+	{
+		read -r draft
+		read -r target
+		assets="$(cat)"
+	} <<<"$RELEASE"
+	[[ "$draft" == true ]] || die "the tag $TAG already exists $where, and the release $TAG of $REPO is already published"
+	[[ "$target" == "$COMMIT" ]] ||
+		die "the tag $TAG already exists $where, at $SHORT, and the draft release $TAG holds a build of $target; delete the tag and the draft and run again"
+	missing="$(
+		grep -qx SHA256SUMS <<<"$assets" || echo SHA256SUMS
+		$ALLOW_PARTIAL || missing_manifests "$assets"
+	)"
+	[[ -z "$missing" ]] ||
+		die "the tag $TAG already exists $where, at $SHORT, and the draft release $TAG has no $(paste -sd ' ' - <<<"$missing" | sed 's/ /, /g'), so there is no finished build to publish; delete the tag and run again"
+}
 if ! $NO_UPLOAD; then
 	if ! ORIGIN="$(git remote get-url origin 2>/dev/null)"; then
 		problem "there is no git remote origin to push $TAG to; add github.com/$REPO as origin"
@@ -188,13 +227,17 @@ if ! $NO_UPLOAD; then
 		else
 			[[ "$(awk -v ref="refs/heads/$BRANCH" '$2 == ref { print $1 }' <<<"$REMOTE_REFS")" == "$COMMIT" ]] ||
 				problem "HEAD is not what origin/$BRANCH is; push or pull first, so the tag names a published commit"
-			if awk -v ref="refs/tags/$TAG" '$2 == ref { found = 1 } END { exit !found }' <<<"$REMOTE_REFS"; then
-				problem "the tag $TAG already exists on origin"
+			REMOTE_TAG="$(awk -v ref="refs/tags/$TAG" '$2 == ref || $2 == ref "^{}" { commit = $1 } END { print commit }' <<<"$REMOTE_REFS")"
+			if [[ -n "$LOCAL_TAG$REMOTE_TAG" ]]; then
+				BEFORE=$PROBLEMS
+				check check_resume
+				if ((PROBLEMS == BEFORE)); then RESUME=true; fi
 			fi
 		fi
 	fi
 	LATEST=""
 	while read -r tag; do
+		if $RESUME && [[ "$tag" == "$TAG" ]]; then continue; fi
 		if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && { [[ -z "$LATEST" ]] || version_after "${tag#v}" "${LATEST#v}"; }; then
 			LATEST="$tag"
 		fi
@@ -210,7 +253,7 @@ if ! $NO_UPLOAD; then
 fi
 
 NOTES_FILE="$WORK_DIR/notes.md"
-$DRY_RUN || rm -rf "$STAGE_DIR"
+$DRY_RUN || $RESUME || rm -rf "$STAGE_DIR"
 mkdir -p "$WORK_DIR"
 
 has_notes() { grep -qE '[^[:space:]]' "$NOTES_FILE"; }
@@ -221,12 +264,23 @@ show_notes() {
 	printf -- '---\n'
 }
 
-changelog_notes "$ROOT_DIR/CHANGELOG.md" "$VERSION" >"$NOTES_FILE"
-if has_notes; then
+KEPT_NOTES=false
+if $RESUME; then
+	info "resuming: $TAG is tagged at $SHORT and its draft release has its builds, so nothing is built"
+	KEPT_NOTES=true
+	(find_release "$VERSION" --json body --jq .body && printf '%s\n' "$RELEASE") >"$NOTES_FILE" ||
+		problem "could not read the notes of the draft release $TAG, which a resumed run publishes"
+	has_notes || problem "the draft release $TAG has no notes, which a resumed run publishes; write them on the draft and run again"
+fi
+$KEPT_NOTES || changelog_notes "$ROOT_DIR/CHANGELOG.md" "$VERSION" >"$NOTES_FILE"
+if $KEPT_NOTES; then
+	info "notes:    those of the draft release $TAG, which the run this resumes gave it"
+	if $DRY_RUN; then show_notes; fi
+elif has_notes; then
 	info "notes:    the $VERSION section of CHANGELOG.md"
 	if $DRY_RUN; then show_notes; fi
 else
-	PREV_TAG="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+	PREV_TAG="$(git describe --tags --abbrev=0 --match 'v*' --exclude "$TAG" 2>/dev/null || true)"
 	if [[ -n "$PREV_TAG" ]]; then
 		LOG_ARGS=("$PREV_TAG..HEAD")
 		info "notes:    drafted from $PREV_TAG..HEAD (CHANGELOG.md has no $VERSION section)"
@@ -259,18 +313,20 @@ $KEEP_DRAFT" ;;
 		done
 	fi
 fi
-has_notes || problem "the notes for $VERSION are empty; write them in CHANGELOG.md under \"## $VERSION\""
+$KEPT_NOTES || has_notes || problem "the notes for $VERSION are empty; write them in CHANGELOG.md under \"## $VERSION\""
 
 printf '## %s\n\n%s\n' "$VERSION" "$(cat "$NOTES_FILE")" >"$WORK_DIR/CHANGELOG.md"
 BUILD_ARGS=("$VERSION" "${PLATFORM_ARGS[@]}" -o "$STAGE_DIR/out" --changelog "$STAGE_DIR/CHANGELOG.md")
 $NO_UPLOAD || BUILD_ARGS+=(--upload)
 if $ALLOW_UNSIGNED; then BUILD_ARGS+=(--allow-unsigned); fi
 
-$DRY_RUN || info "building Leaflet $VERSION at $SHORT"
-run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"
+if ! $RESUME; then
+	$DRY_RUN || info "building Leaflet $VERSION at $SHORT"
+	run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"
+fi
 
 if ! $NO_UPLOAD; then
-	if ! $DRY_RUN && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
+	if ! $DRY_RUN && ! $RESUME && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
 		die "the checkout changed while Leaflet $VERSION was built from $SHORT, so which commit the draft release $TAG holds a build of is not known; delete the draft and run again"
 	fi
 	if $DRY_RUN; then
@@ -282,8 +338,8 @@ if ! $NO_UPLOAD; then
 		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
 	fi
 	check_manifests "$ASSETS"
-	run git tag -a "$TAG" -F "$STAGE_DIR/notes.md" "$COMMIT"
-	run git push origin "$TAG"
+	if ! $RESUME; then run git tag -a "$TAG" -F "$STAGE_DIR/notes.md" "$COMMIT"; fi
+	if ! $RESUME || [[ -z "$REMOTE_TAG" ]]; then run git push origin "$TAG"; fi
 	run gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Leaflet $VERSION" --notes-file "$STAGE_DIR/notes.md"
 fi
 

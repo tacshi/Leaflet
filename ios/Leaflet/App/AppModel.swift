@@ -53,6 +53,8 @@ final class AppModel {
     @ObservationIgnored var saving: Task<Void, Never>?
     @ObservationIgnored var lifecycle: Task<Void, Never>?
     @ObservationIgnored var leavings = Leavings()
+    /// The pages, and the workspace, whose agents did something since the app opened.
+    @ObservationIgnored private(set) var agentPages = Set<String>()
     @ObservationIgnored private var clockChanges: [any NSObjectProtocol] = []
 
     init() {
@@ -167,6 +169,8 @@ final class AppModel {
             Recorder.shared.update(state)
         case .recordingLevels(let levels):
             Recorder.shared.update(levels: levels)
+        case .agentsChanged(let pageID):
+            if !pageID.isEmpty { agentPages.insert(pageID) }
         default:
             break
         }
@@ -252,6 +256,7 @@ final class AppModel {
     func refreshStatus() async {
         guard let client else { return }
         status = await read("status", client.status)
+        if let status { Reminders.keep(to: status.userID) }
     }
 
     func syncNow() async {

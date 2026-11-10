@@ -94,6 +94,8 @@ func ReadCaptions(ctx context.Context, v doc.Video) (Captions, error) {
 }
 
 func ask(ctx context.Context, method, link string, body []byte, cookie string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchWait)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, link, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -106,7 +108,7 @@ func ask(ctx context.Context, method, link string, body []byte, cookie string) (
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
-	res, err := publicClient.Do(req)
+	res, err := do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -252,16 +254,17 @@ var (
 )
 
 func captionText(s string) string {
-	for range 2 {
-		s = unescapeCaption(tagRe.ReplaceAllString(s, ""))
-	}
+	s = unescapeCaption(tagRe.ReplaceAllString(s, ""))
+	// YouTube's older format escapes its text twice: what shows now as a tag is one only if captions have it.
+	s = unescapeCaption(captionTagRe.ReplaceAllString(s, ""))
 	return strings.Join(strings.FieldsFunc(s, unicode.IsSpace), " ")
 }
 
 var (
-	tagRe    = regexp.MustCompile(`<[^>]*>`)
-	entityRe = regexp.MustCompile(`&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z]+);`)
-	entities = map[string]string{"amp": "&", "lt": "<", "gt": ">", "quot": `"`, "apos": "'", "nbsp": "\u00a0"}
+	tagRe        = regexp.MustCompile(`<[^>]*>`)
+	captionTagRe = regexp.MustCompile(`(?i)</?(?:b|i|u|c|v|font|ruby|rt|lang)(?:[\s.][^>]*)?>|<(?:\d+:)?\d{2}:\d{2}\.\d{3}>`)
+	entityRe     = regexp.MustCompile(`&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z]+);`)
+	entities     = map[string]string{"amp": "&", "lt": "<", "gt": ">", "quot": `"`, "apos": "'", "nbsp": "\u00a0"}
 )
 
 func unescapeCaption(s string) string {

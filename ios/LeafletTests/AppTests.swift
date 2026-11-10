@@ -138,6 +138,33 @@ struct AppTests {
         #expect(leavings.isLatest(second))
     }
 
+    @Test func agentsAtWorkAreWaitedForThenStoppedAsTimeRunsOut() {
+        #expect(AgentHold.next(atWork: false, remaining: 30, stopping: false) == .end)
+        #expect(AgentHold.next(atWork: true, remaining: 30, stopping: false) == .wait)
+        #expect(
+            AgentHold.next(atWork: true, remaining: .greatestFiniteMagnitude, stopping: false)
+                == .wait)
+        #expect(AgentHold.next(atWork: true, remaining: 3, stopping: false) == .stop)
+        #expect(AgentHold.next(atWork: true, remaining: 3, stopping: true) == .wait)
+        #expect(AgentHold.next(atWork: false, remaining: 3, stopping: true) == .end)
+    }
+
+    @Test func anAgentIsAtWorkWhileARunOfItsRuns() {
+        var state = AgentState.empty
+        #expect(!state.atWork)
+        state.runs = [
+            AgentState.Run(
+                id: "r", surface: "chat", agentName: "A", instruction: "Tidy", status: "done",
+                undone: false, edits: [], summary: "", stoppable: false)
+        ]
+        #expect(!state.atWork)
+        state.runs[0].status = "running"
+        #expect(state.atWork)
+        state.runs = []
+        state.running = true
+        #expect(state.atWork)
+    }
+
     @Test func aPassOutOfTimeLeavesAWindowItsSync() async {
         var stops = 0
         await BackgroundSync.outOfTime(inFront: { true }, stop: { stops += 1 })

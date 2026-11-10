@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -276,10 +277,22 @@ func (e *Editor) box(id string) (ui.Rect, bool) {
 func (e *Editor) FocusBlock() string { return e.focus.ID }
 
 func (e *Editor) Select(anchor, focus Pos) {
-	if anchor, focus = e.clamp(anchor), e.clamp(focus); anchor != e.anchor || focus != e.focus {
+	if anchor, focus = e.clampRange(anchor, focus); anchor != e.anchor || focus != e.focus {
 		e.BreakUndo()
 	}
 	e.setSelection(anchor, focus)
+}
+
+// clampRange collapses a selection one of whose blocks is gone onto the end
+// that is left, so it never grows over blocks that were not selected.
+func (e *Editor) clampRange(anchor, focus Pos) (Pos, Pos) {
+	switch held, kept := e.node(anchor.ID) != nil, e.node(focus.ID) != nil; {
+	case held && !kept:
+		focus = anchor
+	case kept && !held:
+		anchor = focus
+	}
+	return e.clamp(anchor), e.clamp(focus)
 }
 
 func (e *Editor) setSelection(anchor, focus Pos) {
@@ -287,7 +300,7 @@ func (e *Editor) setSelection(anchor, focus Pos) {
 		e.marked, e.markStep = false, false
 		e.changed()
 	}
-	e.anchor, e.focus = e.clamp(anchor), e.clamp(focus)
+	e.anchor, e.focus = e.clampRange(anchor, focus)
 	e.affinity = ui.TextDownstream
 	e.hasTyping = false
 	e.hasDesired = false
@@ -363,19 +376,14 @@ func (e *Editor) folding(id string) *doc.Node {
 }
 
 func (e *Editor) SelectedText() (first, text string) {
-	e.indexed(func() {
-		a, _ := e.ordered()
-		var lines []string
-		for _, n := range e.selectedNodes() {
-			if !n.IsText() {
-				continue
-			}
-			from, to, _ := e.inSelection(n)
-			lines = append(lines, n.Delta().Slice(from, to).Plain())
+	a, _ := e.ordered()
+	var lines []string
+	for _, s := range e.selectedParts() {
+		if s.n.IsText() {
+			lines = append(lines, s.n.Delta().Slice(s.from, s.to).Plain())
 		}
-		first, text = a.ID, strings.Join(lines, "\n")
-	})
-	return first, text
+	}
+	return a.ID, strings.Join(lines, "\n")
 }
 
 func (e *Editor) SelectedBlocks() []string {
@@ -383,11 +391,67 @@ func (e *Editor) SelectedBlocks() []string {
 		return []string{e.focus.ID}
 	}
 	var out []string
-	e.indexed(func() {
-		for _, n := range e.selectedNodes() {
-			out = append(out, n.ID)
+	for _, s := range e.selectedParts() {
+		out = append(out, s.n.ID)
+	}
+	return out
+}
+
+type span struct {
+	n        *doc.Node
+	from, to int
+}
+
+// selectedSpans lists what the selection covers, with the blocks a folded
+// heading or a collapsed toggle hides inside it, as copying and deleting take
+// them.
+func (e *Editor) selectedSpans() []span {
+	a, b := e.ordered()
+	if a.ID == b.ID {
+		if n := e.node(a.ID); n != nil {
+			return []span{{n, a.Off, b.Off}}
 		}
-	})
+		return nil
+	}
+	us := e.selectedUnits(a)
+	ia, ib := indexIn(us, a.ID), e.selectedEnd(us, b)
+	if ia < 0 || ib < ia {
+		return nil
+	}
+	var out []span
+	var whole func(nodes []*doc.Node)
+	whole = func(nodes []*doc.Node) {
+		for _, n := range nodes {
+			out = append(out, span{n, 0, textLen(n)})
+			if n.Type != "table" {
+				whole(n.Children)
+			}
+		}
+	}
+	for i, n := range us[ia : ib+1] {
+		s := span{n, 0, textLen(n)}
+		if n.ID == a.ID {
+			s.from = a.Off
+		}
+		if n.ID == b.ID {
+			s.to = b.Off
+		}
+		out = append(out, s)
+		if collapsed(n) && i > 0 && ia+i < ib {
+			whole(n.Children)
+		}
+	}
+	return out
+}
+
+// selectedParts is selectedSpans without a last block the selection only
+// reaches the start of.
+func (e *Editor) selectedParts() []span {
+	out := e.selectedSpans()
+	_, b := e.ordered()
+	if k := len(out) - 1; k > 0 && out[k].n.ID == b.ID && b.Off == 0 && out[k].n.IsText() {
+		out = out[:k]
+	}
 	return out
 }
 
@@ -541,13 +605,14 @@ func (e *Editor) Composition() (id uint64, out bool) {
 func (e *Editor) Replace(c *doc.Content) {
 	l := e.liftComposition(e.markOut)
 	e.markOutside()
+	was := e.units()
 	e.Content.Children = e.adopt(c.Children, true)
 	e.Content.Blocks, e.Content.Deleted = c.Blocks, c.Deleted
 	e.order = nil
 	e.gen++
 	e.coalescing = false
 	refill(e.Content)
-	e.keepSelection()
+	e.keepSelection(was)
 	e.putBack(l)
 	e.services.Invalidate()
 }
@@ -556,6 +621,7 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 	l := e.liftComposition(false)
 	e.pushUndo(false)
 	e.coalescing = false
+	was := e.units()
 	var first error
 	for _, o := range ops {
 		if err := e.Content.Apply(o); err != nil && first == nil {
@@ -563,16 +629,39 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 		}
 	}
 	refill(e.Content)
-	e.keepSelection()
+	e.keepSelection(was)
 	e.putBack(l)
 	e.changed()
 	return first
 }
 
-func (e *Editor) keepSelection() {
+func (e *Editor) keepSelection(was []*doc.Node) {
 	reveal := e.reveal
-	e.Select(e.anchor, e.focus)
+	e.Select(e.surviving(was))
 	e.reveal = reveal
+}
+
+// surviving is the selection after a change that may have removed its blocks,
+// was being the blocks in order before the change: with both ends gone the
+// caret goes next to where the focus was.
+func (e *Editor) surviving(was []*doc.Node) (anchor, focus Pos) {
+	i := indexIn(was, e.focus.ID)
+	if i < 0 || e.node(e.anchor.ID) != nil || e.node(e.focus.ID) != nil {
+		return e.anchor, e.focus
+	}
+	for _, n := range slices.Backward(was[:i]) {
+		if e.node(n.ID) != nil {
+			p := Pos{n.ID, textLen(n)}
+			return p, p
+		}
+	}
+	for _, n := range was[i+1:] {
+		if e.node(n.ID) != nil {
+			p := Pos{n.ID, 0}
+			return p, p
+		}
+	}
+	return e.anchor, e.focus
 }
 
 func (e *Editor) ApplyOp(o doc.Op, newStep bool) error { return e.ApplyOpFrom(o, newStep, 0) }
@@ -583,24 +672,51 @@ func (e *Editor) ApplyOpFrom(o doc.Op, newStep bool, read uint64) error {
 		e.pushUndo(false)
 		e.coalescing = false
 		e.runStep = e.undo[len(e.undo)-1].content
-	} else if n := len(e.undo); n == 0 || e.undo[n-1].content != e.runStep {
+	} else if !e.inRun() {
 		e.markOutside()
 		e.coalescing = false
 	}
+	was := e.units()
 	err := e.Content.Apply(o)
 	refill(e.Content)
-	e.keepSelection()
+	e.keepSelection(was)
 	e.putBack(l)
 	e.changed()
 	return err
 }
 
+// inRun reports whether the run's step is still the one an op belongs to. A
+// change from outside that landed on top of it is folded into the step, as an
+// undo would, so the rest of the run is undone with its start.
+func (e *Editor) inRun() bool {
+	n := len(e.undo)
+	if e.runStep == nil || n == 0 {
+		return false
+	}
+	if e.undo[n-1].content == e.runStep {
+		return true
+	}
+	if n < 2 || e.undo[n-1].after == nil || e.undo[n-2].content != e.runStep {
+		return false
+	}
+	outside, step := e.undo[n-1], e.undo[n-2]
+	step.content = doc.Rebase(e.runStep, outside.after, e.Content).Copy()
+	e.undo = e.undo[:n-2]
+	mark(&e.undo, e.runStep, outside.size)
+	e.undo = append(e.undo, step)
+	e.runStep = step.content
+	return true
+}
+
 func (e *Editor) Edit(fn func(c *doc.Content)) {
+	l := e.liftComposition(false)
 	e.pushUndo(false)
 	e.coalescing = false
+	was := e.units()
 	fn(e.Content)
 	refill(e.Content)
-	e.Select(e.anchor, e.focus)
+	e.Select(e.surviving(was))
+	e.putBack(l)
 	e.changed()
 }
 
@@ -609,8 +725,12 @@ func (e *Editor) SetData(id, key string, v any) {
 	if n == nil || e.ReadOnly {
 		return
 	}
+	l := e.liftComposition(e.markOut)
+	e.markOutside()
+	e.coalescing = false
 	n.Set(key, v)
 	e.invalidate(id)
+	e.putBack(l)
 	e.changed()
 }
 

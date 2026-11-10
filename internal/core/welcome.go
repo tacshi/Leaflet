@@ -150,7 +150,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	heading(m.WelcomeMediaHeading())
 	text("paragraph", m.WelcomeMediaImages())
 	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-		"url": "file://" + image.LocalPath, "align": "center", "alt": m.WelcomeImageAlt(), "file_id": image.ID,
+		"url": store.FileURL(image.ID, image.Name), "align": "center", "alt": m.WelcomeImageAlt(), "file_id": image.ID,
 	}})
 	add(map[string]any{"type": "video", "video": map[string]any{"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "title": "Big Buck Bunny · Blender Foundation"}})
 	text("paragraph", m.WelcomeMediaCharts())

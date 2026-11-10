@@ -230,26 +230,87 @@ func (c *Content) Apply(o Op) error {
 		}
 		n := o.Node.Clone()
 		DropCells(n)
+		var lifted []*Node
 		if keptChildren(o) && canHoldChildren(n, cur) {
 			n.Children = nil
 			if len(cur.Children) > 0 {
 				n.Children = cur.Children
 			}
+		} else {
+			known, at := map[string]bool{}, map[string]*Node{}
+			o.PrevNode.each(func(k *Node) { known[k.ID] = true })
+			n.each(func(k *Node) { known[k.ID], at[k.ID] = true, k })
+			at[cur.ID] = n
+			unseen(cur, known, func(from, k *Node) {
+				if to := at[from.ID]; to != nil && NestableTypes[to.Type] {
+					to.Children = append(to.Children, k)
+				} else {
+					lifted = append(lifted, k)
+				}
+			})
 		}
-		return c.Replace(o.ID, n)
+		// A block the node holds that has since moved out of this one stays where it went.
+		under, away := map[string]bool{}, map[string]bool{}
+		cur.each(func(k *Node) { under[k.ID] = true })
+		n.each(func(k *Node) { away[k.ID] = k != n && !under[k.ID] && c.Find(k.ID) != nil })
+		var kids []*Node
+		for _, k := range n.Children {
+			if k := withoutPresent(k, away); k != nil {
+				kids = append(kids, k)
+			}
+		}
+		n.Children = kids
+		if err := c.Replace(o.ID, n); err != nil || len(lifted) == 0 {
+			return err
+		}
+		return c.Insert(Position{After: o.ID}, lifted...)
 	case "move":
 		if o.Position == nil {
 			return fmt.Errorf("move without a position")
 		}
 		return c.Move(o.ID, *o.Position)
 	case "delete":
+		known := map[string]bool{}
+		for _, r := range o.Removed {
+			r.Node.each(func(k *Node) { known[k.ID] = true })
+		}
 		for _, id := range o.IDs {
-			if c.Addressable(id) != nil {
-				c.Remove(id)
+			cur := c.Addressable(id)
+			if cur == nil {
+				continue
 			}
+			if known[id] {
+				var lifted []*Node
+				unseen(cur, known, func(_, k *Node) { lifted = append(lifted, k) })
+				if len(lifted) > 0 {
+					_ = c.Insert(Position{Before: id}, lifted...)
+				}
+			}
+			c.Remove(id)
 		}
 	}
 	return nil
+}
+
+// unseen calls fn for each block under cur that the author of an op on cur never saw: one not known, held by the
+// known block from. Such a block keeps what it holds, but for the known blocks moved into it, which give way to the
+// unseen ones they hold. What a table holds is the table's.
+func unseen(cur *Node, known map[string]bool, fn func(from, k *Node)) {
+	if cur.Type == "table" {
+		return
+	}
+	for _, k := range cur.Children {
+		if known[k.ID] {
+			unseen(k, known, fn)
+			continue
+		}
+		if k.Type != "table" {
+			var kept []*Node
+			unseen(k, known, func(_, g *Node) { kept = append(kept, g) })
+			k.Children = kept
+		}
+		fn(cur, k)
+	}
 }
 
 func (c *Content) Addressable(id string) *Node {

@@ -775,7 +775,7 @@ func TestLongPageComesInParts(t *testing.T) {
 		if out["error"] != nil || parts > len(blocks) {
 			t.Fatal(out)
 		}
-		if size := len(jsonText(out)); size > maxRead+2_000 {
+		if size := len(jsonText(out)); size > 60_000 {
 			t.Errorf("part %d is %d bytes", parts, size)
 		}
 		if out["total_blocks"] != len(blocks) {
@@ -899,13 +899,13 @@ func TestReadPartReadsItsOwnBlocks(t *testing.T) {
 			return strings.Repeat("words ", 2000)
 		}}
 	p := store.Page{ID: "p", Title: "Talks"}
-	out := readPart(tc, p, c, 0, 0)
+	out := tc.ReadPart(p.ID, map[string]any{"id": p.ID}, c, 0, 0)
 	part := out["blocks"].([]map[string]any)
 	if len(part) == 0 || len(part) > 10 || len(asked) > len(part)+1 || out["next_offset"] != len(part) {
 		t.Fatalf("a part of %d blocks read %d transcripts, next %v", len(part), len(asked), out["next_offset"])
 	}
 	asked = nil
-	last := readPart(tc, p, c, len(blocks)-1, 0)
+	last := tc.ReadPart(p.ID, map[string]any{"id": p.ID}, c, len(blocks)-1, 0)
 	if len(asked) != 0 || last["comments"] != nil {
 		t.Errorf("the last part read %d transcripts, comments %v", len(asked), last["comments"])
 	}

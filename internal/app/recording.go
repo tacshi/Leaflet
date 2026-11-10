@@ -568,6 +568,7 @@ type speechState struct {
 	key, keyURL         string
 	kept                recording.KeptKey
 	keyLoaded, keyTyped bool
+	keysRead            bool
 	keyTimer            *time.Timer
 	soniox              string
 	sonioxSaved         bool
@@ -604,13 +605,20 @@ func (a *App) loadSpeechKeys() {
 	var soniox, moss bool
 	a.offMain(func() {
 		kept, soniox, moss = recording.LoadEndpointKey(), recording.LocalSonioxKey() != "", recording.MossKey() != ""
-	}, func() {
-		if !s.keyTyped {
-			s.kept, s.keyURL = kept, a.settings.Stt.BaseURL
-			s.key = kept.For(s.keyURL)
-		}
-		s.sonioxSaved, s.mossSaved = soniox, moss
-	})
+	}, func() { a.speechKeysRead(kept, soniox, moss) })
+}
+
+func (a *App) speechKeysRead(kept recording.KeptKey, soniox, moss bool) {
+	s := &a.speech
+	if s.keysRead {
+		return
+	}
+	s.keysRead = true
+	if !s.keyTyped {
+		s.kept, s.keyURL = kept, a.settings.Stt.BaseURL
+		s.key = kept.For(s.keyURL)
+	}
+	s.sonioxSaved, s.mossSaved = soniox, moss
 }
 
 func (a *App) speechSettings(c *ui.Context) {
@@ -888,7 +896,14 @@ func (a *App) speechKeys() recording.Keys {
 	return recording.KeysOf(s.sonioxSaved, s.mossSaved, a.rec.Engine != nil)
 }
 
+// sttFor is the engine a recording or transcription starts with. Which
+// providers are set up has to be known by then, so the keys are read here
+// when loadSpeechKeys has not brought them yet.
 func (a *App) sttFor(pageID, provider string) store.SttSettings {
+	if s := &a.speech; !s.keysRead {
+		s.keyLoaded = true
+		a.speechKeysRead(recording.LoadEndpointKey(), recording.LocalSonioxKey() != "", recording.MossKey() != "")
+	}
 	stt, last := a.rec.For(pageID, provider, a.settings.Stt, a.speechKeys())
 	if last {
 		a.settings.Stt.Provider = provider

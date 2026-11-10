@@ -38,6 +38,13 @@ type lineParser struct {
 	text              *textBlock
 	summary, awaiting *textBlock
 
+	// deep counts the toggles left unopened where a page nests no deeper, each still to meet its </details>.
+	deep int
+
+	// cur is the line being read, which every part of it still to read ends, and spans its code spans.
+	cur   string
+	spans codeSpans[byte]
+
 	table   [][]string
 	tableIn *[]*Node
 	ruled   bool
@@ -65,6 +72,15 @@ type textBlock struct {
 }
 
 func (p *lineParser) line(line string) {
+	p.cur, p.spans = line, codeSpans[byte]{}
+	for more := true; more; {
+		line, more = p.part(line)
+	}
+}
+
+// part reads a line up to where a block begins in the middle of it, after a <details> or a </summary>, and returns
+// the rest of it, still to read.
+func (p *lineParser) part(line string) (next string, more bool) {
 	trimmed := strings.TrimLeft(line, " \t")
 	if p.code != nil {
 		if p.fence == "$$" && strings.TrimSpace(trimmed) == "$$" || p.fence != "$$" && strings.HasPrefix(trimmed, p.fence) && strings.Trim(trimmed, "` ") == "" {
@@ -75,8 +91,7 @@ func (p *lineParser) line(line string) {
 		return
 	}
 	if p.summary != nil {
-		p.summaryLine(trimmed)
-		return
+		return p.summaryLine(trimmed)
 	}
 	if strings.TrimSpace(line) == "" {
 		p.flushTable()
@@ -90,8 +105,7 @@ func (p *lineParser) line(line string) {
 		p.awaiting = nil
 		if rest, ok := cutFold(trimmed, "<summary>"); ok {
 			p.summary = t
-			p.summaryLine(rest)
-			return
+			return p.summaryLine(rest)
 		}
 	}
 	if p.continues(trimmed, indent) {
@@ -134,17 +148,23 @@ func (p *lineParser) line(line string) {
 		n := textNode("toggle_list", nil)
 		n.Set("collapsed", !open)
 		p.add(n, indent)
-		p.open = append(p.open, openBlock{n: n, toggle: true, min: indent})
+		if !p.opens(openBlock{n: n, toggle: true, min: indent}) {
+			p.deep++
+		}
+		p.cur = strings.TrimRightFunc(p.cur, unicode.IsSpace)
 		t := p.newText(n, false, false, 0)
 		if summary, ok := cutFold(rest, "<summary>"); ok {
 			p.summary = t
-			p.summaryLine(summary)
-		} else if p.awaiting = t; rest != "" {
-			p.line(rest)
+			return p.summaryLine(summary)
 		}
-		return
+		p.awaiting = t
+		return rest, rest != ""
 	}
 	if strings.EqualFold(strings.TrimSpace(trimmed), "</details>") {
+		if p.deep > 0 {
+			p.deep--
+			return
+		}
 		if i := p.lastToggle(); i >= 0 {
 			p.open = p.open[:i]
 			return
@@ -166,7 +186,7 @@ func (p *lineParser) line(line string) {
 			p.numbers[n] = itemNumber(trimmed)
 		}
 		p.add(n, indent)
-		p.open = append(p.open, openBlock{n: n, min: indent + 2})
+		p.opens(openBlock{n: n, min: indent + 2})
 		p.text = p.newText(n, false, true, indent+2)
 		p.text.addLine(rest)
 		return
@@ -193,6 +213,7 @@ func (p *lineParser) line(line string) {
 	p.add(n, indent)
 	p.text = p.newText(n, false, false, 0)
 	p.text.addLine(trimmed)
+	return
 }
 
 func (p *lineParser) continues(trimmed string, indent int) bool {
@@ -230,7 +251,7 @@ func (p *lineParser) add(n *Node, indent int) {
 }
 
 func (p *lineParser) container(indent int) *[]*Node {
-	for len(p.open) > 0 {
+	for len(p.open) > 0 && p.deep == 0 {
 		top := p.open[len(p.open)-1]
 		if top.toggle || indent >= top.min {
 			break
@@ -238,6 +259,16 @@ func (p *lineParser) container(indent int) *[]*Node {
 		p.open = p.open[:len(p.open)-1]
 	}
 	return p.kids()
+}
+
+// opens lets the blocks that follow nest in b's, unless they would be deeper than a page nests: there, and in a
+// toggle left unopened for it, they follow the block.
+func (p *lineParser) opens(b openBlock) bool {
+	if p.deep > 0 || len(p.open)+2 > maxDepth {
+		return false
+	}
+	p.open = append(p.open, b)
+	return true
 }
 
 func (p *lineParser) kids() *[]*Node {
@@ -269,18 +300,17 @@ func (p *lineParser) newText(n *Node, quoted, item bool, min int) *textBlock {
 	return t
 }
 
-func (p *lineParser) summaryLine(s string) {
+func (p *lineParser) summaryLine(s string) (next string, more bool) {
 	t := p.summary
-	i := summaryEnd(s)
+	i := p.summaryEnd(s)
 	if i < 0 {
 		t.md = append(t.md, s)
 		return
 	}
 	t.md = append(t.md, s[:i])
 	p.summary = nil
-	if rest := s[i+len("</summary>"):]; strings.TrimSpace(rest) != "" {
-		p.line(rest)
-	}
+	next = s[i+len("</summary>"):]
+	return next, strings.TrimSpace(next) != ""
 }
 
 func (p *lineParser) flushTable() {
@@ -391,19 +421,25 @@ func detailsOpen(s string) (open bool, rest string, ok bool) {
 	return false, "", false
 }
 
-func summaryEnd(s string) int {
-	r := []rune(s)
-	for i := 0; i < len(r); i++ {
-		switch r[i] {
+// summaryEnd finds the </summary> in s, the rest of the line being read, that is not in code.
+func (p *lineParser) summaryEnd(s string) int {
+	at := len(p.cur) - len(s)
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
 		case '\\':
 			i++
 		case '`':
-			if _, n := codeSpanAt(r[i:]); n > 0 {
-				i += n - 1
+			if p.spans.s == nil {
+				p.spans.s = []byte(p.cur)
 			}
+			n := p.spans.span(at + i)
+			if n == 0 {
+				n = ticks(p.spans.s[at+i:])
+			}
+			i += n - 1
 		case '<':
-			if _, ok := cutFold(tagText(r, i), "</summary>"); ok {
-				return len(string(r[:i]))
+			if _, ok := cutFold(s[i:], "</summary>"); ok {
+				return i
 			}
 		}
 	}
@@ -420,6 +456,7 @@ func cutFold(s, prefix string) (string, bool) {
 func tableRow(line string) (cells []string, rule bool) {
 	s := []rune(strings.TrimPrefix(strings.TrimSpace(line), "|"))
 	var cell strings.Builder
+	spans := codeSpans[rune]{s: s}
 	code := 0
 	for i := 0; i < len(s); i++ {
 		switch {
@@ -433,8 +470,10 @@ func tableRow(line string) (cells []string, rule bool) {
 			cells = append(cells, cell.String())
 			cell.Reset()
 		case s[i] == '`' && i >= code:
-			if _, n := codeSpanAt(s[i:]); n > 0 {
+			if n := spans.span(i); n > 0 {
 				code = i + n
+			} else {
+				code = i + ticks(s[i:])
 			}
 			cell.WriteRune(s[i])
 		default:
@@ -457,8 +496,12 @@ func tableRow(line string) (cells []string, rule bool) {
 
 var brTags = []string{"<br>", "<br/>", "<br />"}
 
-func cellBreaks(md string) string {
-	if !strings.Contains(strings.ToLower(md), "<br") {
+// cellBreaks reads the <br> of a cell as line breaks, but for those in code and in a link's address.
+func cellBreaks(md string) string { return breaksIn(md, 0) }
+
+// breaksIn is cellBreaks for text depth links deep, which reads into links as deep as parseInline does.
+func breaksIn(md string, depth int) string {
+	if depth > maxInlineDepth || !strings.Contains(strings.ToLower(md), "<br") {
 		return md
 	}
 	s := []rune(md)
@@ -472,22 +515,17 @@ func cellBreaks(md string) string {
 			continue
 		case '[':
 			if text, _, n, ok := links.link(i); ok {
-				b.WriteString("[" + cellBreaks(string(text)) + string(s[i+1+len(text):i+n]))
+				b.WriteString("[" + breaksIn(string(text), depth+1) + string(s[i+1+len(text):i+n]))
 				i += n
 				continue
 			}
 		case '`':
-			if _, n := codeSpanAt(s[i:]); n > 0 {
-				b.WriteString(string(s[i : i+n]))
-				i += n
-				continue
+			_, n := links.codeAt(i)
+			if n == 0 {
+				n = ticks(s[i:])
 			}
-			j := i
-			for j < len(s) && s[j] == '`' {
-				j++
-			}
-			b.WriteString(string(s[i:j]))
-			i = j
+			b.WriteString(string(s[i : i+n]))
+			i += n
 			continue
 		case '<':
 			if tag := brTagAt(tagText(s, i)); tag != "" {

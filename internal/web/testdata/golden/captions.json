@@ -71,6 +71,23 @@
   ],
   "youtube_lines": [
     {
+      "xml": "<?xml version=\"1.0\" encoding=\"utf-8\" ?><timedtext format=\"3\"><body>\n<p t=\"1000\">if x &lt; 3 and y &gt; 4 ok</p>\n<p t=\"2000\">1 &lt; 2 and 3 &gt; 2</p>\n<p t=\"3000\">press &lt;enter&gt;, &lt;c.yellow&gt;then&lt;/c&gt; &lt;00:00:03.500&gt;wait &lt;font color=&quot;#fff&quot;&gt;here&lt;/font&gt;</p>\n</body></timedtext>",
+      "lines": [
+        {
+          "start_ms": 1000,
+          "text": "if x < 3 and y > 4 ok"
+        },
+        {
+          "start_ms": 2000,
+          "text": "1 < 2 and 3 > 2"
+        },
+        {
+          "start_ms": 3000,
+          "text": "press <enter>, then wait here"
+        }
+      ]
+    },
+    {
       "xml": "<?xml version=\"1.0\" encoding=\"utf-8\" ?><timedtext format=\"3\"><head><ws id=\"0\"/></head><body>\n<w t=\"0\" id=\"1\" wp=\"1\" ws=\"1\"/>\n<p t=\"320\" d=\"14260\" w=\"1\">[Music]</p>\n<p t=\"18790\" w=\"1\" a=\"1\">\n</p>\n<p t=\"18800\" d=\"7160\" w=\"1\"><s ac=\"0\">We&#39;re</s><s t=\"239\" ac=\"0\"> no</s><s t=\"559\" ac=\"0\"> strangers</s></p>\n<p t=\"22640\" d=\"4320\">♪ You know the rules\nand so do I ♪</p>\n<p t=\"27040\">Tom &amp; Jerry &lt;i&gt;shout&lt;/i&gt; &#x1F600; &nbsp;&nbsp; &copy; &#0; &#xD800;</p>\n<p d=\"5\" t=\"31000\">a&amp;amp;b</p>\n<p t=\"1.5\">half</p>\n</body></timedtext>",
       "lines": [
         {
@@ -180,6 +197,19 @@
     }
   ],
   "vtt_lines": [
+    {
+      "vtt": "WEBVTT\n\n00:01.000 --> 00:02.000\nif x &lt; 3 and y &gt; 4 ok\n\n00:02.000 --> 00:03.000\n<v Ann>a &lt;b&gt; tag</v> <00:02.500><c.loud>and &lt;div&gt;</c>\n",
+      "lines": [
+        {
+          "start_ms": 1000,
+          "text": "if x < 3 and y > 4 ok"
+        },
+        {
+          "start_ms": 2000,
+          "text": "a tag and <div>"
+        }
+      ]
+    },
     {
       "vtt": "WEBVTT\r\nKind: captions\r\n\r\nNOTE made by hand\r\n\r\nSTYLE\r\n::cue { color: red }\r\n\r\n1\r\n00:00:05.237 --> 00:00:08.043 align:start\r\n<i>Here at Vimeo, there's always</i>\r\n<i>one thing on our minds:</i>\r\n\r\n01:02.5 --> 01:04.000\n<v Roger>Fish &amp; chips</v>\n\n2\n1:00:00.000 --> 1:00:02.000\n\n\nbad --> 00:00:01.000\nnot a cue\n\n00:01:00 --> 00:01:02\nno fraction\n\n00:+1:00.000 --> x\nsigned\n\n00:01:00.12a --> x\nletters\n",
       "lines": [

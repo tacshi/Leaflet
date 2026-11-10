@@ -62,7 +62,7 @@ func TestTokenRefreshesOnceForAll(t *testing.T) {
 	toks := make([]string, 8)
 	for i := range toks {
 		wg.Go(func() {
-			tok, err := c.token(context.Background())
+			tok, _, err := c.token(context.Background())
 			if err != nil {
 				t.Error(err)
 			}
@@ -89,7 +89,7 @@ func TestRefreshThatPanicsFails(t *testing.T) {
 	c := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
 	c.st = signedInStore(t)
 	c.st.Subscribe(func(store.Change) { panic("boom") })
-	if _, err := c.token(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
+	if _, _, err := c.token(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("token after a panic: %v", err)
 	}
 }
@@ -99,7 +99,7 @@ func TestSignOutDuringRefreshStays(t *testing.T) {
 	c := expiredClient(t, rs)
 	errc := make(chan error)
 	go func() {
-		_, err := c.token(context.Background())
+		_, _, err := c.token(context.Background())
 		errc <- err
 	}()
 	<-rs.started
@@ -118,7 +118,7 @@ func TestSignInDuringRefreshStays(t *testing.T) {
 	c := expiredClient(t, rs)
 	tokc := make(chan string)
 	go func() {
-		tok, _ := c.token(context.Background())
+		tok, _, _ := c.token(context.Background())
 		tokc <- tok
 	}()
 	<-rs.started
@@ -147,7 +147,7 @@ func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 	for _, cs := range cases {
 		c := expiredClient(t, &refreshServer{status: cs.status, body: cs.body})
 		c.st = signedInStore(t)
-		_, err := c.token(context.Background())
+		_, _, err := c.token(context.Background())
 		told := !c.st.Session().SignedIn
 		if signedOut := errors.Is(err, ErrSignedOut); signedOut != cs.signOut || c.SignedIn() == cs.signOut || told != cs.signOut {
 			t.Errorf("%d: err %v, signed in %v, store signed out %v; want signed out %v", cs.status, err, c.SignedIn(), told, cs.signOut)
@@ -669,7 +669,7 @@ func TestDownloadComesAsItIsRead(t *testing.T) {
 func TestSessionsCount(t *testing.T) {
 	c := expiredClient(t, &refreshServer{status: 200, body: newSession})
 	n := c.Sessions()
-	if _, err := c.token(context.Background()); err != nil {
+	if _, _, err := c.token(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if c.Sessions() != n {
@@ -681,10 +681,113 @@ func TestSessionsCount(t *testing.T) {
 	}
 	refused := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
 	m := refused.Sessions()
-	if _, err := refused.token(context.Background()); !errors.Is(err, ErrSignedOut) {
+	if _, _, err := refused.token(context.Background()); !errors.Is(err, ErrSignedOut) {
 		t.Fatalf("token: %v", err)
 	}
 	if refused.Sessions() != m+1 {
 		t.Errorf("a session ended: %d, was %d", refused.Sessions(), m)
+	}
+}
+
+type projectServer struct {
+	mu      sync.Mutex
+	seen    []string
+	started chan struct{}
+	release chan struct{}
+}
+
+func (ps *projectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	ps.mu.Lock()
+	ps.seen = append(ps.seen, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization")+" "+string(body))
+	ps.mu.Unlock()
+	if r.URL.Path != "/auth/v1/token" {
+		_, _ = io.WriteString(w, "[]")
+		return
+	}
+	if ps.started != nil {
+		ps.started <- struct{}{}
+		<-ps.release
+	}
+	_, _ = io.WriteString(w, strings.ReplaceAll(newSession, "%d", "-refreshed"))
+}
+
+func (ps *projectServer) saw(part string) []string {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	var out []string
+	for _, r := range ps.seen {
+		if strings.Contains(r, part) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func twoProjects(t *testing.T, a, b *projectServer) (c *Client, other *Pending) {
+	t.Helper()
+	ha, hb := httptest.NewServer(a), httptest.NewServer(b)
+	t.Cleanup(ha.Close)
+	t.Cleanup(hb.Close)
+	c = New(Settings{}, nil)
+	c.noKeychain = true
+	c.cfg = Settings{URL: ha.URL, PublishableKey: "key-a"}
+	c.sess = &session{AccessToken: "token-a", RefreshToken: "refresh-a", ExpiresAt: time.Now().Unix(), User: &authUser{ID: "u1"}}
+	return c, &Pending{project: Settings{URL: hb.URL, PublishableKey: "key-b"},
+		s: &session{AccessToken: "token-b", RefreshToken: "refresh-b", ExpiresAt: time.Now().Add(time.Hour).Unix(), User: &authUser{ID: "u2"}}}
+}
+
+func TestSwitchingProjectsDuringARefreshSendsNoTokenAcross(t *testing.T) {
+	a, b := &projectServer{started: make(chan struct{}), release: make(chan struct{})}, &projectServer{}
+	c, other := twoProjects(t, a, b)
+	errc := make(chan error)
+	go func() {
+		_, err := c.Select(context.Background(), "pages", Query{})
+		errc <- err
+	}()
+	<-a.started
+	if _, err := c.Adopt(other); err != nil {
+		t.Fatal(err)
+	}
+	close(a.release)
+	if err := <-errc; !errors.Is(err, ErrSignedOut) {
+		t.Errorf("the request begun in the project left behind ended with %v, want signed out", err)
+	}
+	if got := a.saw("token-b"); len(got) != 0 {
+		t.Errorf("the project left behind was sent the new project's token: %q", got)
+	}
+	if got := b.saw("-a"); len(got) != 0 {
+		t.Errorf("the new project was sent what belongs to the one left behind: %q", got)
+	}
+	if got := b.saw("/rest/v1/pages"); len(got) != 0 {
+		t.Errorf("the new project got the request meant for the one left behind: %q", got)
+	}
+	if _, err := c.Select(context.Background(), "pages", Query{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.saw("GET /rest/v1/pages Bearer token-b"); len(got) != 1 {
+		t.Errorf("a request begun after the switch: %q", b.saw(""))
+	}
+}
+
+func TestARefreshGoesToTheProjectOfItsSession(t *testing.T) {
+	a, b := &projectServer{}, &projectServer{}
+	c, other := twoProjects(t, a, b)
+	c.mu.Lock()
+	r := &refresh{from: c.sess, cfg: c.cfg, done: make(chan struct{})}
+	c.refreshing = r
+	c.mu.Unlock()
+	if _, err := c.Adopt(other); err != nil {
+		t.Fatal(err)
+	}
+	c.refresh(r)
+	if got := b.saw("refresh-a"); len(got) != 0 {
+		t.Errorf("the new project was sent the refresh token of the one left behind: %q", got)
+	}
+	if got := a.saw("POST /auth/v1/token"); len(got) != 1 {
+		t.Errorf("the refresh went to its own project %d times, want 1", len(got))
+	}
+	if !r.stale || c.UserID() != "u2" {
+		t.Errorf("the refresh of the session left behind replaced the new one: stale %v, user %q", r.stale, c.UserID())
 	}
 }

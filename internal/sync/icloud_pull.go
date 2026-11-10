@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,19 +31,29 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 	if err != nil {
 		return err
 	}
+	caughtUp := true
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.pullDevice(peer, waiting); err != nil {
+		all, err := s.pullDevice(peer, waiting)
+		if err != nil {
 			if errors.Is(err, icloud.ErrNewerFormat) {
 				return err
 			}
 			log.Printf("icloud: pull %s: %v", peer, err)
 		}
+		caughtUp = caughtUp && all && err == nil
 	}
 	if err := s.setWaiting(waiting); err != nil {
 		return err
+	}
+	// Loops of parents are looked for only with every device's changes in: a change of several rows, or one that
+	// builds on another device's, passes through loops while part of it has yet to come.
+	if caughtUp {
+		if err := errors.Join(s.st.SettleFolderLoops(), s.st.SettlePageLoops()); err != nil {
+			return err
+		}
 	}
 	return s.refreshWaiting(ctx)
 }
@@ -87,10 +96,11 @@ func (s *Service) forgetDamaged(peer string, upTo int64) {
 	}
 }
 
-func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
+// pullDevice applies the batches of peer that are here, and reports whether that was all of them.
+func (s *Service) pullDevice(peer string, waiting map[string]bool) (caughtUp bool, err error) {
 	seqs, _, err := s.folder().Batches(peer)
 	if err != nil {
-		return err
+		return false, err
 	}
 	key := "icloud.cursor." + peer
 	cursor := s.intValue(key)
@@ -113,11 +123,11 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 				continue
 			}
 			if seq != cursor+1 || !s.passDamaged(peer, seq, i+1 < len(seqs), err) {
-				return nil
+				return false, nil
 			}
 			cursor = seq
 			if err := s.setInt(key, cursor); err != nil {
-				return err
+				return false, err
 			}
 			continue
 		}
@@ -128,14 +138,14 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 						s.folder().Download(rel)
 					}
 				}
-				return nil
+				return false, nil
 			}
-			return err
+			return false, err
 		}
 		if seq != cursor+1 && !b.Snapshot {
 			j := s.snapshotAfter(peer, seqs, i+1)
 			if j < 0 {
-				return nil
+				return false, nil
 			}
 			i = j - 1
 			continue
@@ -143,21 +153,21 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 		named := false
 		for _, e := range b.Entries {
 			if err := s.applyEntry(peer, e, waiting, changed); err != nil {
-				return fmt.Errorf("batch %d: %w", seq, err)
+				return false, fmt.Errorf("batch %d: %w", seq, err)
 			}
 			named = named || e.Kind == "content"
 		}
 		if named {
 			if err := s.setWaiting(waiting); err != nil {
-				return err
+				return false, err
 			}
 		}
 		cursor = seq
 		if err := s.setInt(key, cursor); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (s *Service) readBatch(peer string, seq int64) (icloud.Batch, error) {
@@ -198,23 +208,6 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 		return nil
 	}
 	return s.applyRow(e, changed)
-}
-
-func (s *Service) putCloudPage(r map[string]any) error {
-	id := store.S(r, "id")
-	loop := s.st.ParentLoop(id, store.S(r, "parent_id"))
-	if len(loop) == 0 {
-		return s.st.PutRemotePage(r)
-	}
-	least := slices.Min(loop)
-	if least == id {
-		r["parent_id"] = nil
-		return s.st.PutRemotePage(r)
-	}
-	if err := s.st.PutRemotePage(r); err != nil {
-		return err
-	}
-	return s.st.DetachPage(least)
 }
 
 func (s *Service) refreshWaiting(ctx context.Context) error {

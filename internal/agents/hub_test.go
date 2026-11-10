@@ -1654,7 +1654,7 @@ func TestRunOnAPageLinkedElsewhere(t *testing.T) {
 func TestRunReadsItsPagesLinkOncePerCall(t *testing.T) {
 	x := executor(page())
 	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{} }
-	x.Ctx.ReadOtherPage = func(id string) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
 	x.Ctx.ListFolders = func() []map[string]any { return []map[string]any{} }
 	checks, linked := 0, false
 	x.Ctx.LinkedNow = func() bool {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -52,7 +53,7 @@ type contentJSON struct {
 func (c *Content) MarshalJSON() ([]byte, error) {
 	var j contentJSON
 	j.Document.Type, j.Document.ID = "page", "root"
-	j.Document.Children = c.Children
+	j.Document.Children = shallow(c.Children)
 	if j.Document.Children == nil {
 		j.Document.Children = []*Node{}
 	}
@@ -64,7 +65,84 @@ func (c *Content) MarshalJSON() ([]byte, error) {
 	if j.Meta.Deleted == nil {
 		j.Meta.Deleted = map[string]int64{}
 	}
-	return json.Marshal(j)
+	raw, err := json.Marshal(j)
+	if err != nil {
+		j.Document.Children = writable(j.Document.Children)
+		raw, err = json.Marshal(j)
+	}
+	return raw, err
+}
+
+// shallow is nodes with no block more than maxDepth deep, which JSON would not hold at some depth: a deeper block
+// follows the one that held it. It copies the nodes when it moves any.
+func shallow(nodes []*Node) []*Node {
+	var deeper func(nodes []*Node, room int) bool
+	deeper = func(nodes []*Node, room int) bool {
+		return slices.ContainsFunc(nodes, func(n *Node) bool {
+			return len(n.Children) > 0 && !inTable(n) && (room <= 1 || deeper(n.Children, room-1))
+		})
+	}
+	if !deeper(nodes, maxDepth) {
+		return nodes
+	}
+	var lift func(nodes []*Node, room int, out []*Node) []*Node
+	lift = func(nodes []*Node, room int, out []*Node) []*Node {
+		for _, n := range nodes {
+			out = append(out, n)
+			switch kids := n.Children; {
+			case len(kids) == 0 || inTable(n):
+			case room > 1:
+				n.Children = lift(kids, room-1, nil)
+			default:
+				n.Children = nil
+				out = lift(kids, room, out)
+			}
+		}
+		return out
+	}
+	out := make([]*Node, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Clone()
+	}
+	return lift(out, maxDepth, nil)
+}
+
+// writable is nodes without the data JSON does not hold: a value no encoder takes, or one nested too deep.
+func writable(nodes []*Node) []*Node {
+	var nests func(v any, room int) bool
+	nests = func(v any, room int) bool {
+		switch x := v.(type) {
+		case map[string]any:
+			for _, e := range x {
+				if room == 0 || nests(e, room-1) {
+					return true
+				}
+			}
+		case []any:
+			for _, e := range x {
+				if room == 0 || nests(e, room-1) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	out := make([]*Node, len(nodes))
+	for i, n := range nodes {
+		out[i] = &Node{ID: n.ID, Type: n.Type}
+		if len(n.Children) > 0 {
+			out[i].Children = writable(n.Children)
+		}
+		for k, v := range n.Data {
+			if nests(v, maxDepth) {
+				continue
+			}
+			if _, err := json.Marshal(v); err == nil {
+				out[i].Set(k, v)
+			}
+		}
+	}
+	return out
 }
 
 var ErrNotContent = errors.New("not a page's content")
@@ -573,5 +651,8 @@ func (c *Content) Stamped(previous *Content, now int64) *Content {
 	}
 	return &Content{Children: c.Children, Blocks: blocks, Deleted: deleted}
 }
+
+// maxDepth is how many blocks deep a page nests: what is written of a page holds no block deeper.
+const maxDepth = 100
 
 const TombstoneLife = 180 * 24 * 60 * 60 * 1000

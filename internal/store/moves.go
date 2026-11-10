@@ -30,29 +30,44 @@ func isDescendant(q querier, candidate, of string) (bool, error) {
 	return false, nil
 }
 
-func (s *Store) ParentLoop(id, parentID string) []string {
-	loop := []string{id}
-	seen := map[string]bool{id: true}
-	for cursor := parentID; cursor != ""; {
-		if cursor == id {
-			return loop
-		}
-		if seen[cursor] {
-			return nil
-		}
-		seen[cursor] = true
-		loop = append(loop, cursor)
-		p, err := s.Page(cursor)
+// SettlePageLoops puts one page of every loop of pages at the top level, on this device only: a page of the loop whose
+// change has yet to sync, else the smallest id, so every device picks the same. Call it once all the rows of a pull
+// are in: between two rows of one change the pages can pass through a loop.
+func (s *Store) SettlePageLoops() error {
+	settled := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT id, parent_id FROM pages WHERE parent_id IS NOT NULL`)
+		up := map[string]string{}
+		err = each(rows, err, func(sc scanner) (bool, error) {
+			var id, parent string
+			err := sc.Scan(&id, &parent)
+			up[id] = parent
+			return true, err
+		})
 		if err != nil {
-			return nil
+			return err
 		}
-		cursor = p.ParentID
+		for _, loop := range loopsOf(up) {
+			slices.Sort(loop)
+			detach := loop[0]
+			for _, id := range loop {
+				if waits, err := pending(tx, "pages", id); err != nil {
+					return err
+				} else if waits {
+					detach = id
+					break
+				}
+			}
+			if _, err := tx.Exec(`UPDATE pages SET parent_id = NULL, folder_id = NULL WHERE id = ?`, detach); err != nil {
+				return err
+			}
+			settled = true
+		}
+		return nil
+	})
+	if err == nil && settled {
+		s.Notify("pages", "")
 	}
-	return nil
-}
-
-func (s *Store) DetachPage(id string) error {
-	_, err := s.db.Exec(`UPDATE pages SET parent_id = NULL, folder_id = NULL WHERE id = ?`, id)
 	return err
 }
 
@@ -63,19 +78,19 @@ var ErrMoveAcrossSpaces = errors.New("a page cannot move into another space")
 var ErrMoveIntoDeleted = errors.New("a page cannot move inside a deleted page")
 
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
-	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID, folderID string) (string, error) {
 		return keyAfter(q, parentID, spaceID, folderID, afterID, id)
 	})
 }
 
 func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
-	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID, folderID string) (string, error) {
 		return keyBefore(q, parentID, spaceID, folderID, beforeID, id)
 	})
 }
 
 func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
-	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID, folderID string) (string, error) {
 		if sortKey != "" {
 			return sortKey, nil
 		}
@@ -83,7 +98,10 @@ func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
 	})
 }
 
-func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spaceID string) (string, error)) error {
+// movePage puts the page under parentID, or else in folderID, at the sort key that key gives for the folder it ends
+// in. A deleted folder leaves the page at the top level, where it would be shown anyway. A folder with no row here is
+// kept: it may have yet to be pulled, and the folders of a page shared with this account never are.
+func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spaceID, folderID string) (string, error)) error {
 	return s.changePage(id, "moved", func(tx *sql.Tx, p *Page) (bool, error) {
 		folder := folderID
 		if parentID != "" {
@@ -102,13 +120,16 @@ func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spac
 		}
 		if folder != "" {
 			switch f, err := folderIn(tx, folder); {
-			case err == nil && f.SpaceID != p.SpaceID:
-				return false, ErrMoveAcrossSpaces
-			case err != nil && !errors.Is(err, sql.ErrNoRows):
+			case errors.Is(err, sql.ErrNoRows):
+			case err != nil:
 				return false, err
+			case f.SpaceID != p.SpaceID:
+				return false, ErrMoveAcrossSpaces
+			case !f.DeletedAt.IsZero():
+				folder = ""
 			}
 		}
-		k, err := key(tx, p.SpaceID)
+		k, err := key(tx, p.SpaceID, folder)
 		if err != nil {
 			return false, err
 		}

@@ -150,7 +150,6 @@ final class EditingRules {
         case "selectThis":
             textView.selectedRange = para
         default:
-            guard next.location > NSMaxRange(para) + 1 || info.isCollapsed else { return true }
             joinPast(next, into: para)
         }
         return false
@@ -365,15 +364,16 @@ final class EditingRules {
             edits.setBlock(info.with(type: "paragraph", data: [:]), at: para.location)
             editor.layout.keepShown(info.id)
         case "remove":
-            if let prev { edits.delete(NSRange(location: NSMaxRange(prev.range), length: 1)) }
+            if let prev {
+                remove(para)
+                textView.selectedRange = NSRange(location: NSMaxRange(prev.range), length: 0)
+            }
         case "selectBefore":
             if let prev { textView.selectedRange = prev.range }
         case "nothing":
             break
         default:
-            guard let prev,
-                NSMaxRange(prev.range) + 1 < para.location || prev.info.isCollapsed
-            else { return true }
+            guard let prev else { return true }
             joinPast(para, into: prev.range)
         }
         return false
@@ -399,6 +399,16 @@ final class EditingRules {
         return all[(i + 1)...].first { !folded.contains($0.info.id) }.map { ($0.range, $0.info) }
     }
 
+    private func remove(_ para: NSRange) {
+        let all = text.paragraphs()
+        let i = BlockText.index(all, at: para.location)
+        if i + 1 < all.count {
+            edits.rewrite(all, i, i, [])
+        } else if i > 0 {
+            edits.rewrite(all, i - 1, i, [(all[i - 1].info, all[i - 1].text)])
+        }
+    }
+
     private func joinPast(_ para: NSRange, into prev: NSRange) {
         let all = text.paragraphs()
         let p = BlockText.index(all, at: prev.location)
@@ -409,10 +419,13 @@ final class EditingRules {
         let shown = all[(i + 1)...].first { !folded.contains($0.info.id) }?.info.id
         let joined = NSMutableAttributedString(attributedString: all[p].text)
         joined.append(all[i].text)
-        var blocks: [(info: BlockInfo, text: NSAttributedString)] = [(all[p].info, joined)]
+        let taken = p + 1 == i && all[p].text.length == 0 && !all[p].info.isCollapsed
+        var blocks: [(info: BlockInfo, text: NSAttributedString)] = [
+            (all[taken ? i : p].info, joined)
+        ]
         blocks += all[(p + 1)..<i].map { ($0.info, $0.text) }
         blocks += all[(i + 1)..<(last + 1)].map {
-            ($0.info.with(depth: max($0.info.depth - 1, 0)), $0.text)
+            (taken ? $0.info : $0.info.with(depth: max($0.info.depth - 1, 0)), $0.text)
         }
         edits.rewrite(all, p, last, blocks)
         if let shown { editor.layout.keepShown(shown) }

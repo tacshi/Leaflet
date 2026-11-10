@@ -177,14 +177,14 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 		}
 		return s.takeServer(ctx, e, row)
 	}
-	if s.parentStuck(payload) {
+	if s.parentStuck(e, payload) {
 		return false, nil
 	}
 	done, err := s.pushChanged(ctx, e.Entity, payload)
 	switch {
 	case err == nil || remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil:
 		return done, err
-	case s.waitsForParent(payload):
+	case s.waitsForParent(e, payload):
 		return false, nil
 	case remote.IsForbidden(err) || remote.IsInvalid(err):
 		return s.giveWay(ctx, e, err)
@@ -194,22 +194,36 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 
 var parentCols = map[string]string{"parent_id": "pages", "folder_id": "folders", "parent_folder_id": "folders"}
 
-func (s *Service) waitsForParent(payload map[string]any) bool {
-	for col, table := range parentCols {
-		if id, _ := payload[col].(string); id != "" && s.st.HasPending(table, id) {
+func (s *Service) waitsForParent(e store.OutboxEntry, payload map[string]any) bool {
+	for _, p := range parentsOf(e, payload) {
+		if s.st.HasPending(p.table, p.id) {
 			return true
 		}
 	}
 	return false
 }
 
-func (s *Service) parentStuck(payload map[string]any) bool {
-	for col, table := range parentCols {
-		if id, _ := payload[col].(string); id != "" && s.st.PendingFailed(table, id) {
+func (s *Service) parentStuck(e store.OutboxEntry, payload map[string]any) bool {
+	for _, p := range parentsOf(e, payload) {
+		if s.st.PendingFailed(p.table, p.id) {
 			return true
 		}
 	}
 	return false
+}
+
+type rowRef struct{ table, id string }
+
+// parentsOf is the rows the payload hangs under. A row named as its own parent is left out: its own entry in the
+// outbox is not a parent that has yet to go up.
+func parentsOf(e store.OutboxEntry, payload map[string]any) []rowRef {
+	var out []rowRef
+	for col, table := range parentCols {
+		if id, _ := payload[col].(string); id != "" && (table != e.Entity || id != e.EntityID) {
+			out = append(out, rowRef{table, id})
+		}
+	}
+	return out
 }
 
 func (s *Service) newerThere(ctx context.Context, e store.OutboxEntry, payload map[string]any) (row map[string]any, newer bool, err error) {
@@ -276,14 +290,7 @@ func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[s
 		}
 		row["author_name"] = names[store.S(row, "author_id")]
 	}
-	take := func(r map[string]any) error { return s.st.TakeRemote(e, r) }
-	var err error
-	if e.Entity == "pages" {
-		err = s.settleLoop(row, take)
-	} else {
-		err = take(row)
-	}
-	if err != nil {
+	if err := s.st.TakeRemote(e, row); err != nil {
 		return false, err
 	}
 	s.st.Notify(e.Entity, e.PageID)

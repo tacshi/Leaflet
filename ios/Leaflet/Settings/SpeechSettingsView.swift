@@ -78,7 +78,12 @@ struct SpeechSettingsView: View {
     }
 
     private func save(_ stt: SttSettings) async {
-        try? await app.client?.saveSpeechSettings(stt)
+        do {
+            try await app.client?.saveSpeechSettings(stt)
+        } catch {
+            app.show(Toast(message: error.localizedDescription))
+            self.stt = loaded?.stt
+        }
         await refresh()
     }
 
@@ -378,7 +383,14 @@ struct SpeechSettingsView: View {
                     get: { keepAudio ?? s.keepAudio },
                     set: { keep in
                         keepAudio = keep
-                        Task { try? await app.client?.setKeepAudio(keep) }
+                        Task {
+                            do {
+                                try await app.client?.setKeepAudio(keep)
+                            } catch {
+                                app.show(Toast(message: error.localizedDescription))
+                                keepAudio = nil
+                            }
+                        }
                     })
             ) {
                 Text(L.settingsKeepAudioUntilUploaded).tag("until_uploaded")

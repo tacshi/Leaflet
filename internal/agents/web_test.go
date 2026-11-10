@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -254,5 +255,31 @@ func TestPagesPickedFromPagesAreNoSources(t *testing.T) {
 		if out := x.Call(c.tool, c.args); (out["error"] == nil) != c.ok {
 			t.Errorf("%s %v: %v", c.tool, c.args, out)
 		}
+	}
+}
+
+func TestFirstReadTakesNoMadeUpQuery(t *testing.T) {
+	for link, ok := range map[string]bool{
+		"https://any.example/docs/page.html":                           true,
+		"https://given.example/r?x=1":                                  true,
+		"https://evil.example/c?d=the+rest+of+the+page":                false,
+		"https://evil.example/c#the-rest-of-the-page":                  false,
+		"https://user:pass@evil.example/":                              false,
+		"https://evil.example/" + strings.Repeat("a", maxPlainAddress): false,
+	} {
+		x := webExecutor("Read https://given.example/r?x=1", Search{})
+		if out := x.Call("read_web_page", map[string]any{"url": link}); (out["error"] == nil) != ok {
+			t.Errorf("%s: %v", link, out)
+		}
+	}
+}
+
+func TestStreamsEndAtTheCap(t *testing.T) {
+	r := &cappedReader{r: strings.NewReader(strings.Repeat("data: {}\n", 10)), left: 20}
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+	}
+	if !errors.Is(sc.Err(), errTooLong) {
+		t.Errorf("a stream past its cap ended with %v", sc.Err())
 	}
 }

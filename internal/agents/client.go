@@ -171,6 +171,29 @@ func readAll(r io.Reader, limit int64) ([]byte, error) {
 	return data, err
 }
 
+const maxStreamBytes = 4 * maxAnswerBytes
+
+type cappedReader struct {
+	r    io.Reader
+	left int64
+}
+
+func capStream(r io.Reader) io.Reader {
+	return &cappedReader{r: r, left: maxStreamBytes}
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, errTooLong
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
+}
+
 func noRedirect(*http.Request, []*http.Request) error {
 	return errors.New("redirected")
 }
@@ -410,7 +433,7 @@ func (tc chatToolCall) call(i int) ToolCall {
 }
 
 func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
-	sc := bufio.NewScanner(r)
+	sc := bufio.NewScanner(capStream(r))
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
 	var out ChatResult
 	var text, reasoning strings.Builder

@@ -775,7 +775,11 @@ of pages not deleted), `accept_page_invite(p_page_id)`,
 paths of the audio that stays as the account goes, as one `text[]`, which
 no `max_rows` cuts),
 `sign_out_device(p_device_id)` (one of the caller's devices: revoked, and
-its session ended; `device_not_found` otherwise).
+its session ended; `device_not_found` otherwise),
+`claim_starter_pages(p_space_id, p_device)` (called once as a device first
+signs in to a space of the caller's: true for the one device whose
+starter pages the space keeps, false for each after it, which drops its
+own).
 
 ## 8. iCloud Drive folder
 

@@ -372,6 +372,34 @@ func TestSettingsModal(t *testing.T) {
 	}
 }
 
+func TestBackPassesADeletedPage(t *testing.T) {
+	a := templatesApp(t)
+	one, _ := a.st.CreatePage(store.NewPageOptions{Title: "One"})
+	two, _ := a.st.CreatePage(store.NewPageOptions{Title: "Two"})
+	three, _ := a.st.CreatePage(store.NewPageOptions{Title: "Three"})
+	a.reloadAll()
+	a.route = Route{Kind: "home"}
+	a.router = ui.NewRouter("/")
+	a.routerAt = a.router.Path()
+	for _, p := range []store.Page{one, two, three} {
+		a.navigate(Route{Kind: "page", ID: p.ID})
+	}
+	if _, err := a.st.DeletePage(two.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.back()
+	a.follow()
+	if a.route.ID != one.ID {
+		t.Fatalf("Back went to %+v", a.route)
+	}
+	a.forward()
+	a.follow()
+	if a.route.ID != three.ID {
+		t.Fatalf("Forward went to %+v", a.route)
+	}
+}
+
 func TestRouterHistory(t *testing.T) {
 	a := templatesApp(t)
 	one, _ := a.st.CreatePage(store.NewPageOptions{Title: "One"})

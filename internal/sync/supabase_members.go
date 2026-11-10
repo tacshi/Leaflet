@@ -105,6 +105,57 @@ func (s *Service) pullMembers(ctx context.Context) {
 			continue
 		}
 		s.reloadMembersUnder(ctx, p.ID, pages)
+		s.dropMovedOut(ctx, p.ID, pages)
+	}
+}
+
+const visibleRows = 100
+
+// dropMovedOut removes the pages under a shared one that its owner has
+// moved out of the share since: the server shows them to this account no
+// more, so no pull tells of the move. A page with a change still to send
+// is left, as one made here that the server has not seen yet.
+func (s *Service) dropMovedOut(ctx context.Context, topID string, pages []store.Page) {
+	tree, err := s.st.TreeOf(pages)
+	if err != nil {
+		return
+	}
+	queued, err := s.st.Pending()
+	if err != nil {
+		return
+	}
+	unsent := map[string]bool{}
+	for _, e := range queued {
+		if e.Entity == "pages" {
+			unsent[e.EntityID] = true
+		}
+	}
+	var under []string
+	for _, p := range pages {
+		if p.ID != topID && !unsent[p.ID] && tree.IsDescendant(p.ID, topID) {
+			under = append(under, p.ID)
+		}
+	}
+	for chunk := range slices.Chunk(under, visibleRows) {
+		rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.In("id", chunk)}, Limit: visibleRows})
+		if err != nil {
+			log.Printf("pages under %s: %v", topID, err)
+			return
+		}
+		seen := map[string]bool{}
+		for _, r := range rows {
+			seen[store.S(r, "id")] = true
+		}
+		for _, id := range chunk {
+			if seen[id] {
+				continue
+			}
+			if removed, err := s.st.RemoveSharedPages(id); err != nil {
+				log.Printf("pages under %s: %v", topID, err)
+			} else if len(removed) > 0 {
+				log.Printf("%s moved out of the share of %s: removed %d pages", id, topID, len(removed))
+			}
+		}
 	}
 }
 

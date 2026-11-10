@@ -102,6 +102,7 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 		return
 	}
 	if text == "\t" {
+		e.marked = wasMarked
 		return
 	}
 	if ok {
@@ -169,6 +170,9 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 	if e.hasTyping {
 		attrs = e.typing
 	}
+	if n.Type == "code" {
+		attrs = doc.Attrs{}
+	}
 	n.SetDelta(n.Delta().Delete(from, to).Insert(from, text, attrs))
 	e.invalidate(n.ID)
 	runes := len([]rune(text))
@@ -195,6 +199,11 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 	e.focus = Pos{n.ID, from + toRune(selected.End)}
 	e.blink = time.Now()
 	e.services.Invalidate()
+	if runes == 0 {
+		// A composition that ends with nothing is an edit like one that
+		// ends with text: what it replaced is gone.
+		e.changed()
+	}
 }
 
 func (e *Editor) UnmarkText() {

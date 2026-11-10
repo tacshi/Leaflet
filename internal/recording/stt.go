@@ -204,7 +204,7 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 			Status       string `json:"status"`
 			ErrorMessage string `json:"error_message"`
 		}
-		if err := call(wait, "GET", "/transcriptions/"+job.ID, nil, &info); err != nil {
+		if err := polled(wait, sonioxPoll, func() error { return call(wait, "GET", "/transcriptions/"+job.ID, nil, &info) }); err != nil {
 			return nil, err
 		}
 		if info.Status == "completed" {
@@ -228,16 +228,45 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	return TokensToSegments(transcript.Tokens), nil
 }
 
+// A transientError is one a poll asks again after: the network dropped, or
+// the service was busy or failing for a moment.
+type transientError struct{ error }
+
+func (e transientError) Unwrap() error { return e.error }
+
+func busy(status int) bool { return status == http.StatusTooManyRequests || status >= 500 }
+
+const pollRetries = 5
+
+// polled asks get again, a pause apart, while it fails in passing, so that
+// one dropped request does not end a transcription that takes hours.
+func polled(ctx context.Context, pause time.Duration, get func() error) error {
+	for tries := 0; ; tries++ {
+		err := get()
+		var passing transientError
+		if err == nil || !errors.As(err, &passing) || tries >= pollRetries {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(pause):
+		}
+	}
+}
+
 func sonioxDo(req *http.Request, key string, out any) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return transientError{err}
 	}
 	defer func() { _ = res.Body.Close() }()
 	switch {
 	case res.StatusCode == 401 || res.StatusCode == 403:
 		return errors.New(locales.RecErrSonioxRejected())
+	case busy(res.StatusCode):
+		return transientError{errors.New(locales.RecErrSonioxStatus(res.Status))}
 	case res.StatusCode >= 400:
 		return errors.New(locales.RecErrSonioxStatus(res.Status))
 	case out == nil:
@@ -348,6 +377,7 @@ type Soniox struct {
 	done    chan struct{}
 	sent    atomic.Int64
 	ending  atomic.Bool
+	closed  atomic.Bool
 	wmu     sync.Mutex
 	queue   chan []byte
 	qmu     sync.Mutex
@@ -459,7 +489,7 @@ func (s *Soniox) keepAlive(after time.Duration) {
 }
 
 func (s *Soniox) lose(err error) {
-	if s.ending.Load() {
+	if s.closed.Load() {
 		return
 	}
 	s.mu.Lock()
@@ -545,6 +575,7 @@ func (s *Soniox) Send(pcm []byte) {
 }
 
 func (s *Soniox) Close() {
+	s.closed.Store(true)
 	s.ending.Store(true)
 	s.endQueue()
 	_ = s.conn.CloseNow()

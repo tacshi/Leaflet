@@ -239,7 +239,7 @@ struct DataSection: View {
         note = nil
         defer { exporting = false }
         let dir = FileManager.default.temporaryDirectory.appending(
-            path: "Export-" + UUID().uuidString, directoryHint: .isDirectory)
+            path: SharedFile.exportPrefix + UUID().uuidString, directoryHint: .isDirectory)
         clear()
         folder = dir
         let exported: ExportedAll

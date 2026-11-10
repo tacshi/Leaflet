@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/export"
 	"leaflet/internal/guard"
 	"leaflet/internal/icloud"
 	"leaflet/internal/keychain"
@@ -104,6 +105,7 @@ func Open(cfg Config) (*Core, error) {
 	c.startICloud(cfg.ICloudRoot)
 	c.Rec.RecoverInterrupted()
 	guard.Go(c.Rec.SweepAudio)
+	guard.Go(func() { export.Sweep(st.Dir) })
 	if cfg.OnChange != nil {
 		st.Subscribe(cfg.OnChange)
 	}

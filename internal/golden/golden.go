@@ -173,7 +173,11 @@ func (f *File) close() {
 			f.t.Errorf("%s: two updates of one value", f.path)
 			return
 		}
-		value, err := f.write(p)
+		// Keys added at one place are written last to first, so in an
+		// object that was empty the one written first ends it and each
+		// other is followed by a comma.
+		after := i > 0 && f.puts[i-1].start == p.start
+		value, err := f.write(p, after)
 		if err != nil {
 			f.t.Error(err)
 			return
@@ -187,7 +191,7 @@ func (f *File) close() {
 	f.t.Logf("%s: updated %d values", f.path, len(f.puts))
 }
 
-func (f *File) write(p put) ([]byte, error) {
+func (f *File) write(p put, after bool) ([]byte, error) {
 	unit := f.indent()
 	lead := func(at int) string {
 		line := f.raw[bytes.LastIndexByte(f.raw[:at], '\n')+1 : at]
@@ -214,7 +218,11 @@ func (f *File) write(p put) ([]byte, error) {
 		out = append(out, ',')
 	}
 	if unit == "" {
-		return slices.Concat(out, key, []byte(":"), p.value), nil
+		out = slices.Concat(out, key, []byte(":"), p.value)
+		if first && after {
+			out = append(out, ',')
+		}
+		return out, nil
 	}
 	brace := p.start + bytes.IndexByte(f.raw[p.start:], '}')
 	outer := lead(brace)
@@ -226,7 +234,10 @@ func (f *File) write(p put) ([]byte, error) {
 		return nil, err
 	}
 	out = slices.Concat(out, []byte("\n"+outer+unit), key, []byte(": "), value)
-	if first {
+	switch {
+	case first && after:
+		out = append(out, ',')
+	case first:
 		out = append(out, "\n"+outer...)
 	}
 	return out, nil

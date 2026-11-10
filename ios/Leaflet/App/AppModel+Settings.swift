@@ -52,7 +52,12 @@ extension AppModel {
         let json = String(decoding: data, as: UTF8.self)
         saving = Task { [previous = saving] in
             await previous?.value
-            try? await client.saveSettings(json)
+            do {
+                try await client.saveSettings(json)
+            } catch {
+                show(Toast(message: error.localizedDescription))
+                await loadSettings()
+            }
         }
     }
 }

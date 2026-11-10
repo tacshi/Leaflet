@@ -58,6 +58,19 @@ type Report struct {
 	Stale   int
 }
 
+const stagingPrefix = "export-"
+
+// Sweep removes what an export that never ended left in the data folder:
+// the audio it had gathered to pack.
+func Sweep(dir string) {
+	left, _ := filepath.Glob(filepath.Join(dir, stagingPrefix+"*"))
+	for _, d := range left {
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			_ = os.RemoveAll(d)
+		}
+	}
+}
+
 func All(file string, src Source, allFolders []store.Folder, allFiles []store.File) (Report, error) {
 	var report Report
 	st := src.Store
@@ -70,7 +83,10 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 		return report, err
 	}
 	const templatesFolder = "\x00templates"
-	folders := append(slices.Clip(allFolders), store.Folder{ID: templatesFolder, Name: locales.ExportTemplatesFolder()})
+	folders := slices.Clip(allFolders)
+	if len(templates) > 0 {
+		folders = append(folders, store.Folder{ID: templatesFolder, Name: locales.ExportTemplatesFolder()})
+	}
 	for _, t := range templates {
 		if t.ParentID == "" {
 			t.FolderID = templatesFolder
@@ -102,7 +118,7 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 		}
 	}
 	localPath, open := OwnFiles(allFiles)
-	audio, err := os.MkdirTemp(st.Dir, "export-")
+	audio, err := os.MkdirTemp(st.Dir, stagingPrefix)
 	if err != nil {
 		return Report{}, err
 	}

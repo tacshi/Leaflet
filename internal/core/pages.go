@@ -61,6 +61,17 @@ func (p Pages) notify(message string) {
 }
 
 func (p Pages) EditPage(id string, edit func(c *doc.Content) bool) error {
+	return p.editPage(id, false, edit)
+}
+
+// EditKeptPage edits a page only if its content is on this device: an edit
+// of the empty document standing in for content that is not would be saved
+// as the page.
+func (p Pages) EditKeptPage(id string, edit func(c *doc.Content) bool) error {
+	return p.editPage(id, true, edit)
+}
+
+func (p Pages) editPage(id string, onlyKept bool, edit func(c *doc.Content) bool) error {
 	if !p.canEdit(id) {
 		return nil
 	}
@@ -72,8 +83,8 @@ func (p Pages) EditPage(id string, edit func(c *doc.Content) bool) error {
 		return nil
 	}
 	changed := false
-	err := p.Store.UpdateContent(id, func(c *doc.Content, _ bool) (bool, error) {
-		changed = edit(c)
+	err := p.Store.UpdateContent(id, func(c *doc.Content, kept bool) (bool, error) {
+		changed = (kept || !onlyKept) && edit(c)
 		return changed, nil
 	})
 	if err == nil && changed && p.Sync != nil {

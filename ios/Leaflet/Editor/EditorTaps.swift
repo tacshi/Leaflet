@@ -187,12 +187,8 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
             edits.setBlock(
                 info.setting("collapsed", .bool(!(info.data["collapsed"]?.bool ?? false))),
                 at: location, undoable: false)
-            let caret = textView.selectedRange.location
-            if caret < storage.length,
-                let inside = storage.attribute(.leafletBlock, at: caret, effectiveRange: nil)
-                    as? BlockInfo,
-                editor.layout.folded.contains(inside.id)
-            {
+            let inside = text.paragraph(at: textView.selectedRange.location).info
+            if editor.layout.folded.contains(inside.id) {
                 let (line, _) = text.paragraph(at: location)
                 textView.selectedRange = NSRange(location: NSMaxRange(line), length: 0)
             }

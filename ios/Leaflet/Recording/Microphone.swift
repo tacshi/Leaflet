@@ -128,7 +128,10 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     }
 
     private func wake(_ session: Int) {
-        guard let rec = recordings[session], !rec.stopped, !rec.paused else { return }
+        guard let rec = recordings[session], !rec.stopped else { return }
+        // An interruption may end without a word that it has: a recording it
+        // paused is tried again when the app is back in front.
+        guard !rec.paused else { return rec.sink.recovered() }
         guard let engine = rec.engine else { return rebuild(session) }
         guard tapped(session, rec, engine) else {
             rec.sink.stalled(LI.microphoneTaken)

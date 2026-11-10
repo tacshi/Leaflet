@@ -140,7 +140,7 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 	defer cancel()
 	for {
 		var res mossTask
-		if err := call(wait, "GET", "/audio/tasks/"+id, nil, &res); err != nil {
+		if err := polled(wait, mossPoll, func() error { res = mossTask{}; return call(wait, "GET", "/audio/tasks/"+id, nil, &res) }); err != nil {
 			return nil, err
 		}
 		switch strings.ToLower(res.Status) {
@@ -236,7 +236,7 @@ func mossDo(req *http.Request, key string, out any) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return transientError{err}
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= 400 {
@@ -257,7 +257,11 @@ func mossDo(req *http.Request, key string, out any) error {
 		case 413:
 			return errors.New(locales.RecErrMossTooLarge())
 		}
-		return errors.New(locales.RecErrMossStatus(res.Status, why))
+		if err := errors.New(locales.RecErrMossStatus(res.Status, why)); busy(res.StatusCode) {
+			return transientError{err}
+		} else {
+			return err
+		}
 	}
 	if out == nil {
 		return nil

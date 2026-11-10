@@ -322,10 +322,13 @@ private struct LiveTail: View {
     let color: Color
 
     var body: some View {
-        Text(text).lineLimit(2).hidden()
+        // Two lines show, so the end of a long transcript is all there is to
+        // lay out as it grows.
+        let tail = String(text.suffix(400))
+        Text(tail).lineLimit(2).hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottomLeading) {
-                Text(text).foregroundStyle(color)
+                Text(tail).foregroundStyle(color)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .clipped()

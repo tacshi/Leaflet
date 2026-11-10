@@ -692,6 +692,7 @@ func runCLI(cli string, env agentEnv, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204
+	hideConsole(cmd)
 	cmd.Env = append(os.Environ(), "PATH="+strings.Join([]string{filepath.Dir(cli), env.path}, string(filepath.ListSeparator)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {

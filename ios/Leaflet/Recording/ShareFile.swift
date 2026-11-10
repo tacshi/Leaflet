@@ -36,8 +36,18 @@ struct SharedFile: Identifiable {
     }
 
     static func sweep() {
-        try? FileManager.default.removeItem(at: folder)
+        let files = FileManager.default
+        try? files.removeItem(at: folder)
+        let tmp = files.temporaryDirectory
+        for name in (try? files.contentsOfDirectory(atPath: tmp.path)) ?? []
+        where name.hasPrefix(exportPrefix) {
+            try? files.removeItem(at: tmp.appending(path: name))
+        }
     }
+
+    /// The start of the name of a folder an export of everything is made in,
+    /// which is swept with the rest when one was left behind.
+    static let exportPrefix = "Export-"
 }
 
 struct ShareSheet: UIViewControllerRepresentable {

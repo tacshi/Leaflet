@@ -8,8 +8,7 @@
 --   applied before its functions are deployed, and until the deploy is
 --   done, which a failure leaves for the next start, the agent, providers
 --   and stt functions it has could read no key. The one-argument form is
---   back, as it was, for them; Setup drops it once it has deployed the
---   functions that call the three-argument one (provision.retired).
+--   back, as it was, for them.
 
 -- ---------------------------------------------------------------------------
 -- files: a file stays in its space

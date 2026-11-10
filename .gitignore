@@ -20,6 +20,9 @@ mygo_windows_*.syso
 supabase/.branches/
 supabase/.temp/
 
+# The asc command line's release checkpoints
+/.asc/
+
 # Wrangler local state
 worker/.wrangler/
 

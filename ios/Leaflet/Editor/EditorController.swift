@@ -3,6 +3,14 @@ import UIKit
 
 @MainActor
 final class EditorController: NSObject, UITextViewDelegate {
+    /// Names this editor's players. One thing sounds at a time in the whole
+    /// app, but a video or a file playing belongs to the window it was
+    /// started in: the same page open in another window has players of its
+    /// own, and closing either leaves the other's as they are.
+    let players = UUID().uuidString
+
+    func player(_ block: String) -> String { players + "/" + block }
+
     let textView: EditorTextView
     let text: BlockText
     var style: EditorStyle {
@@ -151,16 +159,17 @@ final class EditorController: NSObject, UITextViewDelegate {
         caretMenu.close()
         due.stop()
         VideoPlayback.shared.stop(
-            Set(text.blocks().filter { $0.info.type == "video" }.map { $0.info.id }))
+            Set(text.blocks().filter { $0.info.type == "video" }.map { player($0.info.id) }))
         FilePlayback.shared.stop(
-            Set(text.blocks().filter { $0.info.type == "file" }.map { $0.info.id }))
+            Set(text.blocks().filter { $0.info.type == "file" }.map { $0.info.id }),
+            in: players)
         textView.blocks.reset()
     }
 
     func stopPlaying(_ gone: [BlockInfo]) {
         let ids = Set(gone.map(\.id))
-        VideoPlayback.shared.stop(ids)
-        FilePlayback.shared.stop(ids)
+        VideoPlayback.shared.stop(Set(ids.map(player)))
+        FilePlayback.shared.stop(ids, in: players)
         let recordings = gone.filter { $0.type == "recording" }
             .compactMap { $0.data["recording_id"]?.string }
         let recorder = Recorder.shared
@@ -395,14 +404,16 @@ final class EditorController: NSObject, UITextViewDelegate {
         else { return }
         switch info.type {
         case "video":
-            VideoPlayback.shared.seek(blockID, link: info.data["url"]?.string ?? "", at: at)
+            VideoPlayback.shared.seek(
+                player(blockID), link: info.data["url"]?.string ?? "", at: at)
         case "recording":
             if let id = info.data["recording_id"]?.string {
                 Recorder.shared.play(id, from: TimeInterval(at))
             }
         case "file":
             if let file = info.data["file_id"]?.string {
-                FilePlayback.shared.play(block: blockID, file: file, at: at, client: client)
+                FilePlayback.shared.play(
+                    block: blockID, in: players, file: file, at: at, client: client)
             }
         default:
             break

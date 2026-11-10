@@ -43,9 +43,22 @@ func TestRecoverInterrupted(t *testing.T) {
 	if _, err := st.UpdateRecording(empty.ID, func(r *store.Recording) { r.Status = "transcribing" }); err != nil {
 		t.Fatal(err)
 	}
+	elsewhere, _ := st.CreateRecording("p", "b4", "soniox", "", "", "auto")
+	if _, err := st.UpdateRecording(elsewhere.ID, func(r *store.Recording) { r.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
 
-	NewController(st, nil).RecoverInterrupted()
+	c := NewController(st, nil)
+	c.mark(live.ID)
+	c.mark(empty.ID)
+	c.RecoverInterrupted()
 
+	if r, _ := st.Recording(elsewhere.ID); r.Status != "transcribing" {
+		t.Errorf("a transcription another device runs: %s", r.Status)
+	}
+	if _, marked := st.Value(transcribingKey(empty.ID)); marked {
+		t.Error("a settled recording kept its mark")
+	}
 	if r, _ := st.Recording(cut.ID); r.Status != "ready" || r.DurationMs != 1000 {
 		t.Errorf("cut off: %s, %d ms", r.Status, r.DurationMs)
 	}
@@ -186,7 +199,9 @@ func TestRecoverInterruptedGivesWayToAFinishedTranscription(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	NewController(st, nil).RecoverInterrupted()
+	c := NewController(st, nil)
+	c.mark(server.ID)
+	c.RecoverInterrupted()
 
 	if r, _ := st.Recording(server.ID); r.Status != "failed" {
 		t.Errorf("still %s here", r.Status)

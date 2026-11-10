@@ -158,7 +158,9 @@ func findCloudflared() (path, version string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, path, "--version").Output() // #nosec G204
+	probe := exec.CommandContext(ctx, path, "--version") // #nosec G204
+	hideConsole(probe)
+	out, _ := probe.Output()
 	return path, cloudflaredVersion(string(out))
 }
 
@@ -273,6 +275,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 		args = append(args, "--allowed-mail", strings.Join(emails, ","))
 	}
 	cmd := exec.Command(a.cloudflared.path, args...) // #nosec G204
+	hideConsole(cmd)
 	logs, err := cmd.StderrPipe()
 	if err != nil {
 		fail(err)

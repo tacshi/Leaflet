@@ -317,6 +317,11 @@ func (p *lineParser) flushTable() {
 	if len(p.table) > 0 {
 		if t, err := TableNode(p.table, ""); err == nil {
 			*p.tableIn = append(*p.tableIn, t)
+		} else {
+			// Too large for a table: its rows stay, as lines of text.
+			for _, row := range p.table {
+				*p.tableIn = append(*p.tableIn, textNode("paragraph", FromMarkdown(strings.Join(row, " | "))))
+			}
 		}
 	}
 	p.table, p.tableIn, p.ruled = nil, nil, false

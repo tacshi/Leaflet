@@ -88,7 +88,7 @@ func isJSON(res *http.Response) bool {
 	return t == "application/json" || strings.HasPrefix(t, "application/") && strings.HasSuffix(t, "+json")
 }
 
-var signInHTTP = &http.Client{Timeout: 30 * time.Second}
+var signInHTTP = &http.Client{Timeout: 30 * time.Second, CheckRedirect: noRedirect}
 
 func getSignInJSON(ctx context.Context, u string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -539,7 +539,7 @@ func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[s
 		return ChatResult{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	sc := bufio.NewScanner(res.Body)
+	sc := bufio.NewScanner(capStream(res.Body))
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
 	var items []any
 	var deltas strings.Builder

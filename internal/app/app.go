@@ -441,7 +441,7 @@ func (a *App) closing(e *mygo.CloseEvent) {
 	}
 	if !saved {
 		e.PreventDefault()
-		a.quitting = false
+		a.quitting, a.relaunching = false, false
 		return
 	}
 	if a.keepRecording() {
@@ -456,6 +456,7 @@ func (a *App) closing(e *mygo.CloseEvent) {
 func (a *App) beforeQuit(e *mygo.QuitEvent) {
 	if !a.flush() {
 		e.PreventDefault()
+		a.relaunching = false
 		a.showWindow()
 		return
 	}
@@ -808,14 +809,24 @@ func (a *App) openSettings(section string) {
 
 func (a *App) toggleSettings() {
 	if a.settingsOpen {
-		a.settingsOpen = false
+		a.closeSettings()
 		return
 	}
 	a.openSettings("account")
 }
 
-func (a *App) navigate(r Route) {
+// closeSettings also ends what Settings had open, so a dialog half filled
+// in, as the one that deletes the account, is not there waiting the next
+// time.
+func (a *App) closeSettings() {
 	a.settingsOpen = false
+	a.account.deleteOpen, a.account.confirm = false, ""
+	a.form.cancelSignIn()
+	a.form = providerForm{}
+}
+
+func (a *App) navigate(r Route) {
+	a.closeSettings()
 	if r == a.route {
 		return
 	}
@@ -835,19 +846,30 @@ func (a *App) show(r Route) bool {
 	return true
 }
 
-func (a *App) back() {
-	if a.router != nil {
-		a.router.Back()
-		a.follow()
+func (a *App) back() { a.step(-1) }
+
+func (a *App) forward() { a.step(1) }
+
+// step goes back or forward past the pages that are gone, so a deleted
+// page in the history does not stand between the user and the one before.
+func (a *App) step(by int) {
+	if a.router == nil {
+		return
 	}
+	further := a.router.CanGoBack
+	if by > 0 {
+		further = a.router.CanGoForward
+	}
+	for further() {
+		a.router.Go(by)
+		if !a.gone(routeAt(a.router.Path())) {
+			break
+		}
+	}
+	a.follow()
 }
 
-func (a *App) forward() {
-	if a.router != nil {
-		a.router.Forward()
-		a.follow()
-	}
-}
+func (a *App) gone(r Route) bool { return r.Kind == "page" && a.pageByID(r.ID) == nil }
 
 func (a *App) follow() {
 	if a.router == nil {
@@ -857,8 +879,10 @@ func (a *App) follow() {
 	if at != a.routerAt {
 		a.routerAt = at
 		r := routeAt(at)
-		if r.Kind == "page" && a.pageByID(r.ID) == nil {
+		if a.gone(r) {
 			r = Route{Kind: "home"}
+			a.router.Replace(r.path())
+			a.routerAt = a.router.Path()
 		}
 		if r != a.route && !a.show(r) {
 			a.router.Push(a.route.path())
@@ -879,7 +903,7 @@ func (a *App) openPage(id string) {
 	}
 	a.closePreview()
 	if a.route.Kind == "page" && a.route.ID == id {
-		a.settingsOpen = false
+		a.closeSettings()
 		return
 	}
 	for _, p := range a.ancestors(id) {

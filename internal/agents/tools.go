@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
@@ -663,6 +664,13 @@ func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
 	return map[string]any{"query": q, "answer": s.Answer, "results": results}, nil
 }
 
+const maxPlainAddress = 120
+
+func plainAddress(link string) bool {
+	u, err := url.Parse(link)
+	return err == nil && len(link) <= maxPlainAddress && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.User == nil
+}
+
 func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	if x.Ctx.ReadWeb == nil {
 		return nil, terr("Reading the web is off.")
@@ -678,6 +686,9 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	bare, _, _ := strings.Cut(link, "#")
 	if x.found != nil && !x.given(link) && !x.given(bare) {
 		return nil, terr("After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which %s is not.", link)
+	}
+	if x.found == nil && !x.given(link) && !x.given(bare) && !plainAddress(link) {
+		return nil, terr("Read a page the user gave, one on this page, or one a search found: %s is none of them, and an address you write yourself has to be a short one without a query.", link)
 	}
 	source := x.found == nil || x.mayLoad(link) || x.mayLoad(bare)
 	if !source {

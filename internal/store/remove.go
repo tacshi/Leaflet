@@ -164,9 +164,6 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202
-		return nil, err
-	}
 	for _, id := range ids {
 		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?, ?)`, "chat."+id, "chat.past."+id, "chat.running."+id); err != nil {
 			return nil, err

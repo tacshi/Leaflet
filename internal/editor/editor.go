@@ -736,8 +736,6 @@ func (e *Editor) SetData(id, key string, v any) {
 
 func (e *Editor) Trigger() *Trigger { return e.trigger }
 
-func (e *Editor) CloseMenu() { e.trigger = nil }
-
 func (e *Editor) RemoveTrigger(t Trigger) {
 	n := e.node(t.ID)
 	if n == nil {

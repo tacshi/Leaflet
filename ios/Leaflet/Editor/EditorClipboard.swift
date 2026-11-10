@@ -71,13 +71,20 @@ final class EditorClipboard {
         _ s: String, replacing range: NSRange, _ para: NSRange, _ info: BlockInfo
     ) -> Bool {
         let lines = { (s: String) in DocumentMapper.lines(s) }
-        guard let clip = Self.clip, let copied = clip.text, lines(copied) == lines(s),
+        guard let clip = Self.clip, let copied = clip.text,
             clip.count == UIPasteboard.general.changeCount
         else {
             return false
         }
         if let inline = clip.inline {
+            // The system puts spaces around a word it pastes beside others,
+            // and line ends around a paragraph that was copied whole: the
+            // spaces are kept, and the copy goes in where the caret is.
+            guard let around = Self.padding(of: lines(copied), in: lines(s)) else { return false }
             let made = NSMutableAttributedString(attributedString: inline)
+            let plain = editor.format.typing
+            made.insert(NSAttributedString(string: around.before, attributes: plain), at: 0)
+            made.append(NSAttributedString(string: around.after, attributes: plain))
             made.addAttribute(
                 .leafletBlock, value: info, range: NSRange(location: 0, length: made.length))
             edits.replace(range, with: made)
@@ -86,9 +93,21 @@ final class EditorClipboard {
             editor.edited(editor.paragraphs(around: r))
             return true
         }
-        guard !clip.blocks.isEmpty else { return false }
+        guard !clip.blocks.isEmpty, lines(copied) == lines(s) else { return false }
         pasteBlocks(clip.blocks.map(Self.renewed), replacing: range, para, info)
         return true
+    }
+
+    /// The spaces the system put before and after `copied` to make `pasted`,
+    /// or nil if `pasted` is anything but `copied` with space or line ends
+    /// around it.
+    static func padding(of copied: String, in pasted: String) -> (before: String, after: String)? {
+        guard !copied.isEmpty, let at = pasted.range(of: copied) else { return nil }
+        let (before, after) = (pasted[..<at.lowerBound], pasted[at.upperBound...])
+        guard before.allSatisfy(\.isWhitespace), after.allSatisfy(\.isWhitespace) else {
+            return nil
+        }
+        return (String(before.filter { !$0.isNewline }), String(after.filter { !$0.isNewline }))
     }
 
     private func pasteBlocks(

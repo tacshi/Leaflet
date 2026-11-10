@@ -212,7 +212,7 @@ func TestWithdrawnShareLeavesTheDevice(t *testing.T) {
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": "42501", "message": "forbidden"})
 			case strings.HasSuffix(r.URL.Path, "/pages") && shown:
-				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": root}})
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": root}, {"id": child}})
 			default:
 				_ = json.NewEncoder(w).Encode([]map[string]any{})
 			}
@@ -351,5 +351,56 @@ func TestPullKeepsOwnPagesMembers(t *testing.T) {
 	}
 	if got := others(); len(got) != 0 {
 		t.Errorf("the share went, members %v stayed", got)
+	}
+}
+
+func TestPageMovedOutOfAShareLeavesTheDevice(t *testing.T) {
+	const other = "00000000-0000-0000-0000-0000000000f1"
+	const root = "00000000-0000-0000-0000-0000000000e1"
+	const moved = "00000000-0000-0000-0000-0000000000e2"
+	const under = "00000000-0000-0000-0000-0000000000e3"
+	const kept = "00000000-0000-0000-0000-0000000000e4"
+	const unsent = "00000000-0000-0000-0000-0000000000e5"
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	old := "2026-01-01T00:00:00Z"
+	for id, parent := range map[string]string{root: "", moved: root, under: moved, kept: root, unsent: root} {
+		r := map[string]any{"id": id, "space_id": other, "title": id, "sort_key": "V", "created_at": old, "updated_at": old}
+		if parent != "" {
+			r["parent_id"] = parent
+		}
+		if err := st.PutRemotePage(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetMembers(root, []store.Member{{UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("pages", unsent, map[string]any{"id": unsent}, "page", unsent); err != nil {
+		t.Fatal(err)
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/rpc/page_members"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"user_id": "u1", "role": "editor", "accepted": true}})
+		case strings.HasSuffix(r.URL.Path, "/pages"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": root}, {"id": kept}})
+		default:
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		}
+	}))
+	defer hs.Close()
+	New(st, remote.SignedInForTest(hs.URL, st, "u1")).pullMembers(context.Background())
+
+	for id, stays := range map[string]bool{root: true, kept: true, unsent: true, moved: false, under: false} {
+		if _, err := st.Page(id); (err == nil) != stays {
+			t.Errorf("%s: stays %v, %v", id, stays, err)
+		}
 	}
 }

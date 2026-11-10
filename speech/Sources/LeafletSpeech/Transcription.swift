@@ -22,7 +22,12 @@ public enum Transcription {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (buffers, analyze) = AsyncStream.makeStream(of: AnalyzerInput.self)
         let heard = Task { try await collect(transcriber, text: text, beat: beat) }
-        try await analyzer.start(inputSequence: buffers)
+        do {
+            try await analyzer.start(inputSequence: buffers)
+        } catch {
+            heard.cancel()
+            throw error
+        }
         for await pcm in audio {
             if let buffer = buffer(pcm, from: from, with: converter, to: format) {
                 analyze.yield(AnalyzerInput(buffer: buffer))
@@ -44,8 +49,19 @@ public enum Transcription {
         let audio = try AVAudioFile(forReading: URL(fileURLWithPath: path))
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let heard = Task { try await collect(transcriber, text: nil, beat: beat) }
-        try await analyzer.start(inputAudioFile: audio, finishAfterFile: true)
-        return try await heard.value
+        return try await withTaskCancellationHandler {
+            do {
+                try await analyzer.start(inputAudioFile: audio, finishAfterFile: true)
+                return try await heard.value
+            } catch {
+                heard.cancel()
+                await analyzer.cancelAndFinishNow()
+                throw error
+            }
+        } onCancel: {
+            heard.cancel()
+            Task { await analyzer.cancelAndFinishNow() }
+        }
     }
 
     static func transcriber(for language: String, beat: @escaping @Sendable () -> Void)

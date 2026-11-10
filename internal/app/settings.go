@@ -63,7 +63,7 @@ func (a *App) settingsDialog(c *ui.Context) {
 					ui.Text(c, locales.SettingsTitle()).FontSize(15).FontWeight(650).TextColor(pal.Text).Grow(1)
 					tools(c, func() {
 						if iconButton(c, "close", "x", locales.CommonClose()).Clicked() {
-							a.settingsOpen = false
+							a.closeSettings()
 						}
 					})
 				})

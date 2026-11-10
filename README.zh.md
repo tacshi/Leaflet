@@ -40,6 +40,24 @@ Mac 和 Windows 应用用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写�
 MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。iPhone 和 iPad 应用
 用 SwiftUI 和 UIKit 编写，使用同一个 Go 核心。
 
+<p align="center">
+  <img src="docs/screenshots/mac-page-dark.png" width="900" alt="Mac 上深色模式的 Leaflet：一份旅行计划，有标题、列表、流程图和预算表格">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/mac-blocks-light.png" width="100%" alt="浅色模式的页面，有表格、饼图、待办和提示框"></td>
+    <td width="50%"><img src="docs/screenshots/mac-todos-dark.png" width="100%" alt="待办标签页，旁边是带折线图和代码块的发布计划"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="74%"><img src="docs/screenshots/ipad-agent.png" width="100%" alt="iPad 上的 Leaflet，侧栏里智能体正在回答"></td>
+    <td width="26%"><img src="docs/screenshots/iphone-agent.png" width="100%" alt="iPhone 上的 Leaflet，页面上方打开了智能体面板"></td>
+  </tr>
+</table>
+
 ## 目录
 
 - [功能](#功能)

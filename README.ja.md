@@ -42,6 +42,24 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
 自体には Web ビューを使いません。iPhone と iPad のアプリは SwiftUI と UIKit
 で書かれ、同じ Go のコアを使います。
 
+<p align="center">
+  <img src="docs/screenshots/mac-page-dark.png" width="900" alt="Mac のダークモードの Leaflet：見出し、リスト、図、予算の表がある旅行プラン">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/mac-blocks-light.png" width="100%" alt="ライトモードのページ：表、円グラフ、To-do、コールアウト"></td>
+    <td width="50%"><img src="docs/screenshots/mac-todos-dark.png" width="100%" alt="To-do タブと、折れ線グラフとコードブロックのあるローンチ計画"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="74%"><img src="docs/screenshots/ipad-agent.png" width="100%" alt="iPad の Leaflet：サイドパネルでエージェントが答えている"></td>
+    <td width="26%"><img src="docs/screenshots/iphone-agent.png" width="100%" alt="iPhone の Leaflet：ページの上にエージェントのシートを開いたところ"></td>
+  </tr>
+</table>
+
 ## 目次
 
 - [機能](#機能)

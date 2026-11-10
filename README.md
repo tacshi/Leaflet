@@ -42,6 +42,24 @@ The Mac and Windows app is written in Go with
 natively on the GPU, with no web view for the app itself. The iPhone and
 iPad app is SwiftUI and UIKit, on the same Go core.
 
+<p align="center">
+  <img src="docs/screenshots/mac-page-dark.png" width="900" alt="Leaflet on a Mac in dark mode: a travel plan with headings, lists and a diagram, and the Budget table">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/mac-blocks-light.png" width="100%" alt="A page in light mode with a table, a pie chart, to-dos and a callout"></td>
+    <td width="50%"><img src="docs/screenshots/mac-todos-dark.png" width="100%" alt="The To-dos tab beside a launch plan with a line chart and a code block"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="74%"><img src="docs/screenshots/ipad-agent.png" width="100%" alt="Leaflet on iPad, with an agent answering in the side panel"></td>
+    <td width="26%"><img src="docs/screenshots/iphone-agent.png" width="100%" alt="Leaflet on iPhone, with the agent sheet open over a page"></td>
+  </tr>
+</table>
+
 ## Contents
 
 - [Features](#features)

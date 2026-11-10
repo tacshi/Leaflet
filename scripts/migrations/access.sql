@@ -58,7 +58,7 @@ begin
       ('page_permissions', 'authenticated', 'DELETE,SELECT'),
       ('pages', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('profiles', 'authenticated', 'INSERT,SELECT,UPDATE'),
-      ('recordings', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
+      ('recordings', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('spaces', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('stt_settings', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE')
     union all
@@ -640,6 +640,11 @@ begin
   if (select audio_path from public.recordings where id = v_rec) is distinct from v_path then
     raise exception 'the page''s owner pointed the recording at other audio';
   end if;
+
+  -- No one deletes its row, its recorder and the page's owner neither.
+  perform pg_temp.refused(format('delete from public.recordings where id = %L', v_rec));
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform pg_temp.refused(format('delete from public.recordings where id = %L', v_rec));
 
   perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
   if pg_temp.seen(v_audio) <> 1 then
@@ -1819,6 +1824,151 @@ begin
   if (select folder_id from public.pages where id = v_filed) is not null
      or (select changed_at from public.pages where id = v_filed) is distinct from v_then then
     raise exception 'a foreign key''s set null moved changed_at';
+  end if;
+end;
+$$;
+
+-- Folders: one goes under none that is inside it, moved or sent whole, at
+-- any depth, nor under itself; a move that makes no loop goes through. One
+-- whose row is deleted leaves its folders at the top level, which the
+-- devices pull, changed no later than they were.
+do $$
+declare
+  v_space uuid;
+  v_a constant uuid := 'fa000000-0000-0000-0000-0000000000f1';
+  v_b constant uuid := 'fa000000-0000-0000-0000-0000000000f2';
+  v_c constant uuid := 'fa000000-0000-0000-0000-0000000000f3';
+  v_d constant uuid := 'fa000000-0000-0000-0000-0000000000f4';
+  v_then constant timestamptz := now() - interval '1 day';
+  v_before timestamptz;
+  v_under uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.folders (id, space_id, parent_folder_id, name, changed_at) values
+    (v_a, v_space, null, 'A', v_then);
+  insert into public.folders (id, space_id, parent_folder_id, name, changed_at) values
+    (v_b, v_space, v_a, 'B', v_then);
+  insert into public.folders (id, space_id, parent_folder_id, name, changed_at) values
+    (v_c, v_space, v_b, 'C', v_then), (v_d, v_space, v_b, 'D', v_then);
+
+  foreach v_under in array array[v_b, v_c] loop
+    begin
+      update public.folders set parent_folder_id = v_under where id = v_a;
+      raise exception 'a folder went under one inside it';
+    exception when check_violation then
+      if sqlerrm <> 'folder_cycle' then
+        raise;
+      end if;
+    end;
+  end loop;
+  begin
+    insert into public.folders (id, space_id, parent_folder_id, name) values (v_a, v_space, v_c, 'A')
+    on conflict (id) do update set parent_folder_id = excluded.parent_folder_id, name = excluded.name;
+    raise exception 'a folder sent whole went under one inside it';
+  exception when check_violation then
+    if sqlerrm <> 'folder_cycle' then
+      raise;
+    end if;
+  end;
+  begin
+    update public.folders set parent_folder_id = v_a where id = v_a;
+    raise exception 'a folder went under itself';
+  exception when check_violation then
+    if sqlerrm <> 'parent_folder_in_other_space' then
+      raise;
+    end if;
+  end;
+  update public.folders set parent_folder_id = v_a where id = v_d;
+  update public.folders set parent_folder_id = v_c where id = v_d;
+  if (select parent_folder_id from public.folders where id = v_d) is distinct from v_c then
+    raise exception 'a folder could not move under one it is not above';
+  end if;
+
+  v_before := clock_timestamp();
+  delete from public.folders where id = v_b;
+  if (select count(*) from public.folders where id in (v_a, v_c, v_d)) <> 3 then
+    raise exception 'a folder that went took the folders inside it';
+  end if;
+  if (select parent_folder_id from public.folders where id = v_c) is not null
+     or (select updated_at from public.folders where id = v_c) <= v_before
+     or (select changed_at from public.folders where id = v_c) is distinct from v_then
+     or (select parent_folder_id from public.folders where id = v_d) is distinct from v_c then
+    raise exception 'the folder inside one that went is not at the top level, for the devices to pull, with what is in it';
+  end if;
+end;
+$$;
+
+-- A folder in a deleted one is at the top level, as the apps show it, so
+-- the folder above the deleted one goes under it; a folder still goes under
+-- none that is inside it past no deleted folder. The deleted folder,
+-- restored where it was, under what it came to hold, comes back at the top
+-- level with its folders; restored and moved there at once, it is refused,
+-- and so is one moved there while it is deleted.
+do $$
+declare
+  v_space uuid;
+  v_p constant uuid := 'fa000000-0000-0000-0000-0000000000f5';
+  v_x constant uuid := 'fa000000-0000-0000-0000-0000000000f6';
+  v_d constant uuid := 'fa000000-0000-0000-0000-0000000000f7';
+  v_how text;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.folders (id, space_id, parent_folder_id, name) values (v_p, v_space, null, 'P');
+  insert into public.folders (id, space_id, parent_folder_id, name) values (v_x, v_space, v_p, 'X');
+  insert into public.folders (id, space_id, parent_folder_id, name) values (v_d, v_space, v_x, 'D');
+
+  update public.folders set deleted_at = now() where id = v_x;
+  update public.folders set parent_folder_id = v_d where id = v_p;
+  if (select parent_folder_id from public.folders where id = v_p) is distinct from v_d then
+    raise exception 'a folder could not go under one whose parent is deleted';
+  end if;
+  begin
+    update public.folders set parent_folder_id = v_p where id = v_d;
+    raise exception 'a folder went under one inside it, beside a deleted folder';
+  exception when check_violation then
+    if sqlerrm <> 'folder_cycle' then
+      raise;
+    end if;
+  end;
+  begin
+    update public.folders set parent_folder_id = v_d where id = v_x;
+    raise exception 'a deleted folder went under one inside it';
+  exception when check_violation then
+    if sqlerrm <> 'folder_cycle' then
+      raise;
+    end if;
+  end;
+
+  -- Restored as a device sends it whole, with the parent it had.
+  insert into public.folders (id, space_id, parent_folder_id, name, deleted_at) values (v_x, v_space, v_p, 'X', null)
+  on conflict (id) do update set parent_folder_id = excluded.parent_folder_id, name = excluded.name,
+    deleted_at = excluded.deleted_at;
+  select string_agg(f.name || '>' || coalesce(u.name, '') || case when f.deleted_at is null then '' else '!' end, ' ' order by f.name)
+  into v_how
+  from public.folders f left join public.folders u on u.id = f.parent_folder_id
+  where f.id in (v_p, v_x, v_d);
+  if v_how is distinct from 'D>X P>D X>' then
+    raise exception 'a folder restored under what it came to hold left them %', v_how;
+  end if;
+
+  update public.folders set deleted_at = now() where id = v_x;
+  begin
+    update public.folders set deleted_at = null, parent_folder_id = v_p where id = v_x;
+    raise exception 'a folder was restored and moved under one inside it';
+  exception when check_violation then
+    if sqlerrm <> 'folder_cycle' then
+      raise;
+    end if;
+  end;
+  -- Restored where no loop closes, it keeps its parent.
+  update public.folders set parent_folder_id = null where id = v_p;
+  update public.folders set parent_folder_id = v_p where id = v_x;
+  update public.folders set deleted_at = now() where id = v_x;
+  update public.folders set deleted_at = null where id = v_x;
+  if (select parent_folder_id from public.folders where id = v_x) is distinct from v_p then
+    raise exception 'a folder restored where it closes no loop lost its parent';
   end if;
 end;
 $$;

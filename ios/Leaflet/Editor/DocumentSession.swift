@@ -15,6 +15,7 @@ final class DocumentSession {
     private static let maxWait = Duration.seconds(2)
     private var held: (content: DocContent, tinted: Set<String>)?
     private var shown: [String: Shown] = [:]
+    private var beside: [String: String] = [:]
 
     private struct Shown {
         let info: BlockInfo
@@ -42,6 +43,12 @@ final class DocumentSession {
         return node(info, range) == n
     }
 
+    private func besideID(_ card: String) -> String {
+        let id = beside[card] ?? BlockInfo.newID()
+        beside[card] = id
+        return id
+    }
+
     private func forgetTouched() {
         for id in text.takeTouched() { shown[id] = nil }
     }
@@ -59,6 +66,7 @@ final class DocumentSession {
         _ = text.fitDepths(from: NSRange(location: 0, length: storage.length))
         editor.restyleAll()
         shown = [:]
+        beside = [:]
         for (info, block) in zip(infos, blocks) {
             shown[info.id] = Shown(info: info, came: block.node)
         }
@@ -286,7 +294,8 @@ final class DocumentSession {
         forgetTouched()
         var next: [String: Shown] = [:]
         let content = DocumentMapper.content(
-            storage, blocks: DocumentMapper.blocks(storage, trailing: text.trailing), meta: meta
+            storage, blocks: DocumentMapper.blocks(storage, trailing: text.trailing), meta: meta,
+            beside: besideID
         ) { info, range in
             let n = node(info, range)
             next[info.id] = Shown(info: info, came: kept(info)?.came, node: n)

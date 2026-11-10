@@ -95,8 +95,9 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 		if _, busy := h.a.downloads[f.ID]; busy {
 			done = nil
 		}
-		if path = h.a.localFile(f, done); path == "" {
-			return nil, nil, h.a.downloadFailed(f.ID)
+		fetching := false
+		if path, fetching = h.a.localFile(f, done); path == "" {
+			return nil, nil, !fetching
 		}
 		url = "file://" + path
 	}
@@ -342,22 +343,7 @@ func (a *App) uploadImage(blockID string) {
 		if len(paths) == 0 || !doc.ImageExts[strings.ToLower(filepath.Ext(paths[0]))] {
 			return
 		}
-		a.addFiles(paths[:1], "", pageID, func(f store.File) {
-			if a.page == nil || a.page.id != pageID {
-				return
-			}
-			if blockID == "" {
-				a.page.editor.InsertBlocks(uploadedImage(f))
-				return
-			}
-			a.page.editor.Edit(func(content *doc.Content) {
-				if n := content.Find(blockID); n != nil && n.Type == "image" {
-					n.Set("url", "file://"+f.LocalPath)
-					n.Set("file_id", f.ID)
-					n.Set("alt", f.Name)
-				}
-			})
-		})
+		a.addFiles(paths[:1], "", pageID, func(f store.File) { a.placeUpload(pageID, blockID, f) })
 	}()
 }
 
@@ -376,8 +362,59 @@ func (a *App) addFiles(paths []string, folderID, pageID string, added func(f sto
 
 func uploadedImage(f store.File) *doc.Node {
 	return &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-		"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
+		"url": store.FileURL(f.ID, f.Name), "align": "center", "alt": f.Name, "file_id": f.ID,
 	}}
+}
+
+func uploadedFile(f store.File) *doc.Node {
+	if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
+		return uploadedImage(f)
+	}
+	return &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
+		"url": store.FileURL(f.ID, f.Name), "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
+	}}
+}
+
+// placeUpload puts a file added for a page into it: over the picture of the
+// block replaced when there is one, as a new block otherwise. The user may
+// have left the page while the file was copied, and it then goes to the end
+// of the page as stored; a file with no page left to hold it is removed.
+func (a *App) placeUpload(pageID, replaced string, f store.File) {
+	swap := func(c *doc.Content) bool {
+		n := c.Find(replaced)
+		if replaced == "" || n == nil || n.Type != "image" {
+			return false
+		}
+		n.Set("url", store.FileURL(f.ID, f.Name))
+		n.Set("file_id", f.ID)
+		n.Set("alt", f.Name)
+		return true
+	}
+	if ed := a.openEditor(pageID); ed != nil && !ed.ReadOnly {
+		if n := ed.Content.Find(replaced); replaced != "" && n != nil && n.Type == "image" {
+			ed.Edit(func(c *doc.Content) { swap(c) })
+		} else {
+			ed.InsertBlocks(uploadedFile(f))
+		}
+		return
+	}
+	placed := false
+	err := a.pageCore().EditPage(pageID, func(c *doc.Content) bool {
+		placed = swap(c) || c.Insert(doc.Position{At: "end"}, uploadedFile(f)) == nil
+		return placed
+	})
+	if err == nil && placed {
+		title := locales.CommonUntitled()
+		if p, err := a.st.Page(pageID); err == nil {
+			title = p.DisplayTitle()
+		}
+		a.toast(locales.HostAddedToPage(f.Name, title))
+		return
+	}
+	if err := a.st.DeleteFile(f); err != nil {
+		log.Printf("file %s: %v", f.Name, err)
+	}
+	a.toast(locales.HostFileNotAdded(f.Name))
 }
 
 func (a *App) uploadIntoPage() {
@@ -388,19 +425,7 @@ func (a *App) uploadIntoPage() {
 	pageID := ps.id
 	go func() {
 		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
-		a.addFiles(paths, "", pageID, func(f store.File) {
-			if a.page == nil || a.page.id != pageID {
-				a.toast(locales.HostAddedToSpace(f.Name))
-				return
-			}
-			n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
-				"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
-			}}
-			if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
-				n = uploadedImage(f)
-			}
-			a.page.editor.InsertBlocks(n)
-		})
+		a.addFiles(paths, "", pageID, func(f store.File) { a.placeUpload(pageID, "", f) })
 	}()
 }
 
@@ -418,16 +443,28 @@ func (a *App) uploadFile(folderID string) {
 func (a *App) openFile(f store.File) {
 	delete(a.downloadFails, f.ID)
 	a.lost(f.LocalPath)
-	path := a.localFile(f, func(ok bool) {
-		if f, found := a.fileByID(f.ID); ok && found && f.LocalPath != "" {
-			openSafely(f.LocalPath)
+	path, fetching := a.localFile(f, func(ok bool) {
+		if here, found := a.fileByID(f.ID); ok && found && here.LocalPath != "" {
+			openSafely(here.LocalPath)
+		} else {
+			a.toast(locales.HostDownloadFailed(f.Name))
 		}
 	})
 	if path == "" {
-		a.toast(locales.HostDownloading(f.Name))
+		a.notHere(f, fetching)
 		return
 	}
 	openSafely(path)
+}
+
+// notHere says why a file asked for is not shown: it is on its way, or it
+// cannot be had now.
+func (a *App) notHere(f store.File, fetching bool) {
+	if fetching {
+		a.toast(locales.HostDownloading(f.Name))
+		return
+	}
+	a.toast(locales.HostNotOnDevice(f.Name))
 }
 
 func openSafely(path string) {
@@ -502,18 +539,21 @@ func (a *App) onDevice(path string) bool {
 
 func (a *App) lost(path string) { delete(a.present, path) }
 
-func (a *App) localFile(f store.File, done func(ok bool)) string {
+// localFile is where a file is on this device. When it is not here, it is
+// downloaded if it can be: fetching reports that a download is under way,
+// and done is told how it ended.
+func (a *App) localFile(f store.File, done func(ok bool)) (path string, fetching bool) {
 	if f.LocalPath != "" && a.onDevice(f.LocalPath) {
-		return f.LocalPath
+		return f.LocalPath, false
 	}
 	if waiting, ok := a.downloads[f.ID]; ok {
 		if done != nil {
 			a.downloads[f.ID] = append(waiting, done)
 		}
-		return ""
+		return "", true
 	}
 	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloadFailed(f.ID) {
-		return ""
+		return "", false
 	}
 	if a.downloads == nil {
 		a.downloads = map[string][]func(bool){}
@@ -549,7 +589,7 @@ func (a *App) localFile(f store.File, done func(ok bool)) string {
 			}
 		}
 	})
-	return ""
+	return "", true
 }
 
 func (a *App) downloadFailed(id string) bool {

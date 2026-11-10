@@ -115,7 +115,7 @@ func TestToolCalls(t *testing.T) {
 		}}
 		if tc.Cross {
 			x.Ctx.ListPages = func() []map[string]any { return []map[string]any{} }
-			x.Ctx.ReadOtherPage = func(id string) map[string]any {
+			x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any {
 				return map[string]any{"id": id, "title": "Other", "blocks": []any{}}
 			}
 			x.Ctx.ListFolders = func() []map[string]any { return []map[string]any{} }
@@ -251,7 +251,7 @@ func goldenWorkspace(reading bool, made *[][]*doc.Node) *Workspace {
 		Reading: reading,
 		Pages:   func() ([]WorkspacePage, error) { return goldenWorld, nil },
 		Page:    page,
-		ReadPage: func(id string) (map[string]any, error) {
+		ReadPage: func(id string, _, _ int) (map[string]any, error) {
 			p, _ := page(id)
 			return map[string]any{"page": map[string]any{"id": id, "title": p.Title}, "blocks": []any{}, "subpages": []any{}}, nil
 		},

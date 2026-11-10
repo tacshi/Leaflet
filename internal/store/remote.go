@@ -28,7 +28,7 @@ func PageToRemote(p Page) map[string]any {
 
 func FolderToRemote(f Folder) map[string]any {
 	return map[string]any{
-		"id": f.ID, "space_id": f.SpaceID, "parent_folder_id": ns(f.ParentFolderID), "name": f.Name,
+		"id": f.ID, "space_id": f.SpaceID, "parent_folder_id": ns(f.ParentFolderID), "name": ClampTitle(f.Name),
 		"sort_key": f.SortKey, "created_at": iso(f.CreatedAt), "deleted_at": iso(f.DeletedAt),
 		"default_template_id": ns(f.DefaultTemplateID), "changed_at": iso(f.UpdatedAt),
 	}

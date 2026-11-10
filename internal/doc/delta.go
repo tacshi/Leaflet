@@ -264,10 +264,19 @@ func (d Delta) Format(start, end int, fn func(*Attrs)) Delta {
 func (d Delta) AttrsAt(at int) Attrs {
 	pos := 0
 	var last Attrs
-	for _, r := range d {
+	inLink := false
+	for i, r := range d {
 		n := utf8.RuneCountInString(r.Text)
 		if at <= pos+n && at > pos {
 			last = r.Attrs
+			next := r.Attrs
+			if at == pos+n {
+				next = Attrs{}
+				if i+1 < len(d) {
+					next = d[i+1].Attrs
+				}
+			}
+			inLink = last.Mention == nil && next.Mention == nil && next.Href == last.Href
 			break
 		}
 		if at == 0 {
@@ -277,7 +286,9 @@ func (d Delta) AttrsAt(at int) Attrs {
 		pos += n
 	}
 	last.Mention = nil
-	last.Href = ""
+	if !inLink {
+		last.Href = ""
+	}
 	return last
 }
 

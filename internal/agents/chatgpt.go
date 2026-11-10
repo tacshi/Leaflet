@@ -104,7 +104,11 @@ func getSignInJSON(ctx context.Context, u string, v any) error {
 	if res.StatusCode != http.StatusOK || !isJSON(res) {
 		return errSignInUnreachable(res.Status)
 	}
-	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+	data, err := readAll(res.Body, maxReplyBytes)
+	if err == nil {
+		err = json.Unmarshal(data, v)
+	}
+	if err != nil {
 		return fmt.Errorf("ChatGPT sign-in failed: %w", err)
 	}
 	return nil
@@ -135,7 +139,10 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	}
 	defer func() { _ = res.Body.Close() }()
 	var t chatgptTokens
-	data, _ := io.ReadAll(res.Body)
+	data, err := readAll(res.Body, maxReplyBytes)
+	if errors.Is(err, errTooLong) {
+		return nil, fmt.Errorf("ChatGPT sign-in failed: %w", err)
+	}
 	if err := json.Unmarshal(data, &t); err != nil && res.StatusCode < 400 {
 		if !isJSON(res) {
 			return nil, errSignInUnreachable(res.Status)
@@ -432,7 +439,7 @@ func (g *ChatGPT) doOnce(ctx context.Context, method, path string, body any, acc
 	}
 	if res.StatusCode >= 400 {
 		defer func() { _ = res.Body.Close() }()
-		data, _ := io.ReadAll(res.Body)
+		data, _ := readAll(res.Body, maxReplyBytes)
 		msg := res.Status
 		var m map[string]any
 		if json.Unmarshal(data, &m) == nil {
@@ -462,7 +469,11 @@ func (g *ChatGPT) ListModels(ctx context.Context) ([]string, error) {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+	data, err := readAll(res.Body, maxReplyBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
 		return nil, err
 	}
 	var out []string

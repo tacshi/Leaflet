@@ -171,7 +171,7 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 			}
 			fc := plan.files[k]
 			n.Set("file_id", fc.to)
-			n.Set("url", "file://"+filepath.Join(s.Dir, "files", fc.to, fileName(fc.Name)))
+			n.Set("url", FileURL(fc.to, fileName(fc.Name)))
 		})
 	}
 	return plan, nil

@@ -2293,6 +2293,359 @@ struct EditorTests {
         #expect(view.contentInset.bottom == 0)
     }
 
+    @Test func aCardPastedInTextLeavesTheTextAfterItABlock() {
+        for (at, texts) in [(3, ["foox", "", "bar"]), (0, ["x", "", "foobar"])] {
+            let c = editor([block("p", "paragraph", "foobar")])
+            c.textView.selectedRange = NSRange(location: at, length: 0)
+            c.paste("x\n---")
+            let b = blocks(c)
+            #expect(b.map(\.type) == ["paragraph", "divider", "paragraph"])
+            #expect(b.map(\.text) == texts)
+            #expect(b.first?.id == "p")
+            #expect(Set(b.map(\.id)).count == 3)
+            let caret = c.textView.selectedRange.location
+            #expect(c.paragraph(at: caret).info.id == b.last?.id)
+            #expect(c.paragraph(at: caret).range.location == caret)
+        }
+
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        let (card, info) = DocumentMapper.paragraph(image, depth: 0)
+        let held = NSMutableAttributedString(attributedString: card)
+        held.append(NSAttributedString(string: "bar", attributes: [.leafletBlock: info]))
+        let saved = DocumentMapper.content(held, meta: nil).blocks
+        #expect(saved.map(\.type) == ["image", "paragraph"])
+        #expect(saved.map(\.text) == ["", "bar"])
+        #expect(saved.first?.id == "i")
+    }
+
+    @Test func linesPastedInAFoldedHeadingShow() {
+        for (at, texts) in [
+            (2, ["Plx", "mid", "yan", "Body"]), (0, ["x", "mid", "yPlan", "Body"]),
+        ] {
+            let c = editor([
+                block("h", "heading", "Plan", data: ["level": .int(2), "collapsed": .bool(true)]),
+                block("body", "paragraph", "Body"),
+            ])
+            #expect(c.layout.folded == ["body"])
+            c.textView.selectedRange = NSRange(location: at, length: 0)
+            c.paste("x\nmid\ny")
+            let b = blocks(c)
+            #expect(b.map(\.text) == texts)
+            #expect(b.map(\.type) == ["heading", "paragraph", "heading", "paragraph"])
+            #expect(b.first?.id == "h")
+            #expect(b.first?.data?["collapsed"]?.bool != true)
+            #expect(b.dropFirst(2).first?.data?["collapsed"]?.bool == true)
+            #expect(c.layout.folded == ["body"])
+        }
+    }
+
+    @Test func aBlockPastedIntoAtItsStartKeepsItsID() {
+        let h = editor([block("h", "heading", "Title", data: ["level": .int(2)])])
+        h.textView.selectedRange = NSRange(location: 0, length: 0)
+        h.paste("x\ny")
+        var b = blocks(h)
+        #expect(b.map(\.text) == ["x", "yTitle"])
+        #expect(b.map(\.type) == ["heading", "heading"])
+        #expect(b.first?.id == "h")
+        #expect(b.first?.data?["level"]?.int == 2)
+
+        let p = editor([block("p", "paragraph", "Text")])
+        p.textView.selectedRange = NSRange(location: 0, length: 0)
+        p.paste("- a\n- b")
+        b = blocks(p)
+        #expect(b.map(\.text) == ["a", "bText"])
+        #expect(b.map(\.type) == ["bulleted_list", "paragraph"])
+        #expect(b.first?.id == "p")
+
+        let e = editor([block("e", "paragraph", "")])
+        e.paste("- one\n- two")
+        b = blocks(e)
+        #expect(b.map(\.type) == ["bulleted_list", "bulleted_list"])
+        #expect(b.first?.id == "e")
+        #expect(Set(b.map(\.id)).count == 2)
+    }
+
+    @Test func aCardPastedAtATextsEndHasAnEmptyLineAfterIt() {
+        for after in [[], [block("n", "paragraph", "Next")]] {
+            let c = editor([block("p", "paragraph", "foo")] + after)
+            c.textView.selectedRange = NSRange(location: 3, length: 0)
+            c.paste("x\n---")
+            let b = blocks(c)
+            #expect(b.map(\.type) == ["paragraph", "divider", "paragraph"] + after.map(\.type))
+            #expect(b.map(\.text) == ["foox", "", ""] + after.map(\.text))
+            #expect(b.first?.id == "p")
+            #expect(Set(b.map(\.id)).count == b.count)
+            #expect(c.textView.selectedRange == NSRange(location: 7, length: 0))
+            #expect(c.paragraph(at: 7).info.id == b.dropFirst(2).first?.id)
+            #expect(blocks(c).map(\.id) == b.map(\.id))
+        }
+    }
+
+    @Test func undoBringsBackAnEmptyLineTakenFromAfterACard() async throws {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        for after in [[], [block("n", "paragraph", "Next")]] {
+            let c = editor([image, block("e", "paragraph", "")] + after)
+            let (_, done) = try show(c)
+            try await settle(c)
+            let undo = try #require(c.textView.undoManager)
+            c.textView.selectedRange = NSRange(location: 2, length: 0)
+            c.backspace()
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(blocks(c).map(\.id) == ["i"] + after.map(\.id))
+            #expect(c.textView.selectedRange == NSRange(location: 1, length: 0))
+            undo.undo()
+            let b = blocks(c)
+            #expect(b.map(\.id) == ["i", "e"] + after.map(\.id))
+            #expect(b.map(\.type) == ["image", "paragraph"] + after.map(\.type))
+            undo.redo()
+            #expect(blocks(c).map(\.id) == ["i"] + after.map(\.id))
+            done()
+        }
+    }
+
+    @Test func aJoinIntoAnEmptyBlockKeepsTheBlockJoined() async throws {
+        let c = editor([
+            block("e", "paragraph", ""),
+            block("t", "todo_list", "Call", data: ["checked": .bool(true)]),
+            block("a", "bulleted_list", ""), block("b", "paragraph", "Text"),
+        ])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.forwardDelete()
+        try await Task.sleep(for: .milliseconds(20))
+        var b = blocks(c)
+        #expect(b.map(\.id) == ["t", "a", "b"])
+        #expect(b.first?.type == "todo_list")
+        #expect(b.first?.data?["checked"]?.bool == true)
+        #expect(c.textView.selectedRange == NSRange(location: 0, length: 0))
+
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.backspace()
+        try await Task.sleep(for: .milliseconds(20))
+        b = blocks(c)
+        #expect(b.map(\.id) == ["t", "b"])
+        #expect(b.map(\.type) == ["todo_list", "paragraph"])
+        #expect(b.map(\.text) == ["Call", "Text"])
+
+        undo.undo()
+        undo.undo()
+        b = blocks(c)
+        #expect(b.map(\.id) == ["e", "t", "a", "b"])
+        #expect(b.map(\.type) == ["paragraph", "todo_list", "bulleted_list", "paragraph"])
+        #expect(b.dropFirst().first?.data?["checked"]?.bool == true)
+        undo.redo()
+        undo.redo()
+        #expect(blocks(c).map(\.id) == ["t", "b"])
+    }
+
+    @Test func whatFollowsAPasteGoesByItsLastBlock() {
+        for (text, at, texts) in [
+            ("abc", 3, ["abc", "", "foo"]), ("abcdef", 3, ["abc", "", "foodef"]),
+            ("def", 0, ["", "foodef"]), ("", 0, ["", "foo"]),
+        ] {
+            let c = editor([block("p", "paragraph", text)])
+            c.textView.selectedRange = NSRange(location: at, length: 0)
+            c.paste("---\nfoo")
+            let b = blocks(c)
+            #expect(b.map(\.text) == texts, "\(text)")
+            #expect(b.last?.type == "paragraph", "\(text)")
+            #expect(text.isEmpty || b.contains { $0.id == "p" }, "\(text)")
+            #expect(Set(b.map(\.id)).count == b.count, "\(text)")
+            let caret = c.textView.selectedRange.location
+            let (range, info) = c.paragraph(at: caret)
+            #expect(info.id == b.last?.id, "\(text)")
+            #expect(caret - range.location == 3, "\(text)")
+        }
+    }
+
+    @Test func aCardPastedOverAWholeBlockLeavesAPlainLineAfterIt() {
+        let c = editor([block("t", "todo_list", "Call", data: ["checked": .bool(true)])])
+        c.textView.selectedRange = NSRange(location: 0, length: 4)
+        c.paste("---\n***")
+        var b = blocks(c)
+        #expect(b.map(\.type) == ["divider", "divider", "paragraph"])
+        #expect(b.last?.id != "t")
+        #expect(b.last?.data?["checked"] == nil)
+
+        let e = editor([block("e", "todo_list", "", data: ["checked": .bool(false)])])
+        e.paste("---\n***")
+        b = blocks(e)
+        #expect(b.map(\.type) == ["divider", "divider", "todo_list"])
+        #expect(b.last?.id == "e")
+    }
+
+    @Test func textLeftByACardIsSavedUnderOneID() {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        let c = editor([image, block("p", "paragraph", "After")])
+        let info = c.paragraph(at: 0).info
+        c.textView.textStorage.insert(
+            NSAttributedString(string: "bar", attributes: [.leafletBlock: info]), at: 1)
+        let first = blocks(c)
+        #expect(first.map(\.type) == ["image", "paragraph", "paragraph"])
+        #expect(first.map(\.text) == ["", "bar", "After"])
+        #expect(Set(first.map(\.id)).count == 3)
+        #expect(blocks(c).map(\.id) == first.map(\.id))
+    }
+
+    @Test func aSlowCopyLeavesWhatWasCopiedSince() async throws {
+        let c = editor([block("a", "paragraph", "One"), block("b", "paragraph", "Two")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        c.copyText = { _ in
+            try? await Task.sleep(for: .milliseconds(200))
+            return "- One\n- Two"
+        }
+        c.textView.selectedRange = NSRange(location: 0, length: 7)
+        c.textView.copy(nil)
+        UIPasteboard.general.string = "Elsewhere"
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(UIPasteboard.general.string == "Elsewhere")
+    }
+
+    @Test func linesPastedInANestedItemStayNested() {
+        let c = editor([
+            block(
+                "a", "bulleted_list", "A",
+                children: [
+                    block("b", "bulleted_list", "foobar"), block("c", "bulleted_list", "C"),
+                    block("d", "bulleted_list", "D"),
+                ])
+        ])
+        c.textView.selectedRange = NSRange(location: 5, length: 0)
+        c.paste("x\ny")
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.map(\.id) == ["a"])
+        let inside = sent?.blocks.first?.children ?? []
+        #expect(inside.map(\.text) == ["foox", "ybar", "C", "D"])
+        #expect(inside.map(\.type) == Array(repeating: "bulleted_list", count: 4))
+        #expect(inside.first?.id == "b")
+        #expect(inside.allSatisfy { $0.children == nil })
+    }
+
+    @Test func undoBringsAJoinedBlockBackAsItWas() async throws {
+        let c = editor([
+            block("a", "bulleted_list", "Milk"), block("b", "paragraph", "Notes"),
+            block("t", "todo_list", "Call", data: ["checked": .bool(true)]),
+        ])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        func back() {
+            undo.undo()
+            let b = blocks(c)
+            #expect(b.map(\.id) == ["a", "b", "t"])
+            #expect(b.map(\.type) == ["bulleted_list", "paragraph", "todo_list"])
+            #expect(b.map(\.text) == ["Milk", "Notes", "Call"])
+            #expect(b.last?.data?["checked"]?.bool == true)
+        }
+        c.textView.selectedRange = NSRange(location: 5, length: 0)
+        c.backspace()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(blocks(c).map(\.text) == ["MilkNotes", "Call"])
+        #expect(c.textView.selectedRange == NSRange(location: 4, length: 0))
+        back()
+
+        c.textView.selectedRange = NSRange(location: 10, length: 0)
+        c.forwardDelete()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(blocks(c).map(\.text) == ["Milk", "NotesCall"])
+        #expect(blocks(c).map(\.id) == ["a", "b"])
+        back()
+        undo.redo()
+        #expect(blocks(c).map(\.text) == ["Milk", "NotesCall"])
+    }
+
+    @Test func undoNestsAgainWhatAChangeOfBlockUnnested() async throws {
+        let c = editor([
+            block("p", "paragraph", "Intro"),
+            block(
+                "a", "bulleted_list", "A",
+                children: [
+                    block(
+                        "b", "todo_list", "B", data: ["checked": .bool(false)],
+                        children: [block("k", "bulleted_list", "K")])
+                ]),
+        ])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        func tree() -> [[String]] {
+            var sent: DocContent?
+            c.onEdit = { sent = $0 }
+            c.send()
+            let top = sent?.blocks ?? []
+            let a = top.first { $0.id == "a" }?.children ?? []
+            return [top.map(\.id), a.map(\.id), a.first?.children?.map(\.id) ?? []]
+        }
+        let nested = [["p", "a"], ["b"], ["k"]]
+        let flat = [["p", "a", "b"], [], []]
+        c.setBlock(c.paragraph(at: 8).info.setting("checked", .bool(true)), at: 8)
+        try await Task.sleep(for: .milliseconds(20))
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.backspace()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(tree() == flat)
+        #expect(c.paragraph(at: 6).info.type == "paragraph")
+        #expect(c.paragraph(at: 10).info.depth == 1)
+
+        undo.undo()
+        #expect(tree() == nested)
+        #expect(c.paragraph(at: 6).info.type == "bulleted_list")
+        #expect(c.paragraph(at: 8).info.checked)
+        undo.undo()
+        #expect(tree() == nested)
+        #expect(!c.paragraph(at: 8).info.checked)
+
+        undo.redo()
+        undo.redo()
+        #expect(tree() == flat)
+        #expect(c.paragraph(at: 8).info.checked)
+        undo.undo()
+        #expect(tree() == nested)
+        #expect(blocks(c).map(\.id) == ["p", "a", "b", "k"])
+    }
+
+    @Test func aSlowCopyLeavesALaterOneAlone() async throws {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        let c = editor([block("a", "paragraph", "One"), block("b", "paragraph", "Two"), image])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let picture = "![](https://example.com/a.png)"
+        c.copyText = { nodes in
+            guard nodes.count > 1 else { return picture }
+            try? await Task.sleep(for: .milliseconds(200))
+            return "One\nTwo"
+        }
+        c.textView.selectedRange = NSRange(location: 0, length: 7)
+        c.textView.copy(nil)
+        c.copyBlock("i")
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(UIPasteboard.general.string == picture)
+        c.textView.selectedRange = NSRange(location: 5, length: 0)
+        c.paste(UIPasteboard.general.string ?? "")
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["paragraph", "paragraph", "image", "paragraph", "image"])
+        #expect(b.map(\.text) == ["One", "T", "", "wo", ""])
+        #expect(b.dropFirst().first?.id == "b")
+    }
+
     private func settle(_ c: EditorController) async throws {
         var last = c.textView.adjustedContentInset
         var still = 0

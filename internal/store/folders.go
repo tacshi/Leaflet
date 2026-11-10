@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"database/sql"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 
@@ -67,7 +68,7 @@ func (s *Store) CreateFolder(name string) (Folder, error) { return s.CreateFolde
 
 func (s *Store) CreateFolderIn(name, parentID string) (Folder, error) {
 	now := time.Now()
-	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, ParentFolderID: parentID, Name: name, CreatedAt: now, UpdatedAt: now}
+	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, ParentFolderID: parentID, Name: ClampTitle(name), CreatedAt: now, UpdatedAt: now}
 	err := s.inTx(func(tx *sql.Tx) error {
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
 			return ErrNoSpace
@@ -104,15 +105,15 @@ func saveFolder(tx *sql.Tx, f Folder, label string) error {
 	return queueChange(tx, "folders", f.ID, old, FolderToRemote(f), label, "")
 }
 
-func (s *Store) changeFolder(id, label string, fn func(*Folder) bool) error {
+func (s *Store) changeFolder(id, label string, fn func(tx *sql.Tx, f *Folder) (bool, error)) error {
 	changed := false
 	err := s.inTx(func(tx *sql.Tx) error {
 		f, err := folderIn(tx, id)
 		if err != nil {
 			return err
 		}
-		if changed = fn(&f); !changed {
-			return nil
+		if changed, err = fn(tx, &f); err != nil || !changed {
+			return err
 		}
 		f.UpdatedAt = time.Now()
 		return saveFolder(tx, f, label)
@@ -126,29 +127,36 @@ func (s *Store) changeFolder(id, label string, fn func(*Folder) bool) error {
 }
 
 func (s *Store) RestoreFolder(id string) error {
-	return s.changeFolder(id, "restored folder", func(f *Folder) bool {
+	return s.changeFolder(id, "restored folder", func(tx *sql.Tx, f *Folder) (bool, error) {
 		if f.DeletedAt.IsZero() {
-			return false
+			return false, nil
+		}
+		// A folder that came to hold its own parent while it was deleted comes back at the top level.
+		if under, err := folderUnder(tx, f.ParentFolderID, f.ID); err != nil {
+			return false, err
+		} else if under {
+			f.ParentFolderID = ""
 		}
 		f.DeletedAt = time.Time{}
-		return true
+		return true, nil
 	})
 }
 
 func (s *Store) RenameFolder(f Folder, name string) error {
-	return s.changeFolder(f.ID, "renamed folder", func(f *Folder) bool {
+	name = ClampTitle(name)
+	return s.changeFolder(f.ID, "renamed folder", func(_ *sql.Tx, f *Folder) (bool, error) {
 		f.Name = name
-		return true
+		return true, nil
 	})
 }
 
 func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
-	return s.changeFolder(f.ID, "set default template", func(f *Folder) bool {
+	return s.changeFolder(f.ID, "set default template", func(_ *sql.Tx, f *Folder) (bool, error) {
 		if f.DefaultTemplateID == templateID {
-			return false
+			return false, nil
 		}
 		f.DefaultTemplateID = templateID
-		return true
+		return true, nil
 	})
 }
 
@@ -164,6 +172,12 @@ func (s *Store) DeleteFolder(f Folder) error {
 			if parent, err := folderIn(tx, up); err != nil || !parent.DeletedAt.IsZero() || parent.SpaceID != f.SpaceID {
 				up = ""
 			}
+		}
+		// In a loop of folders the parent is also inside f, and what f held must not go back under f.
+		if under, err := folderUnder(tx, up, f.ID); err != nil {
+			return err
+		} else if under {
+			up = ""
 		}
 		pages, err := pagesIn(tx, `folder_id = ?`, f.ID)
 		if err != nil {
@@ -319,6 +333,8 @@ func (s *Store) FolderUnder(candidate, of string) bool {
 	return under || err != nil
 }
 
+// folderUnder reports whether candidate is the folder of or inside it, as the folders are shown: a folder in a deleted
+// one is at the top level, so the walk up ends there.
 func folderUnder(q querier, candidate, of string) (bool, error) {
 	seen := map[string]bool{}
 	for cursor := candidate; cursor != "" && !seen[cursor]; {
@@ -327,7 +343,7 @@ func folderUnder(q querier, candidate, of string) (bool, error) {
 		}
 		seen[cursor] = true
 		f, err := folderIn(q, cursor)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || err == nil && !f.DeletedAt.IsZero() {
 			return false, nil
 		} else if err != nil {
 			return false, err
@@ -335,6 +351,82 @@ func folderUnder(q querier, candidate, of string) (bool, error) {
 		cursor = f.ParentFolderID
 	}
 	return false, nil
+}
+
+// SettleFolderLoops lifts one folder of every loop of folders to the top level: the smallest id of the loop, so every
+// device lifts the same one, and the lift syncs like any other move. Moves on two devices can make such a loop. A loop
+// with a folder whose change has yet to sync is left as it is, until that change has gone up or given way. Call it
+// once all the rows of a pull are in: between two rows of one change the folders can pass through a loop.
+func (s *Store) SettleFolderLoops() error {
+	settled := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		folders, err := foldersIn(tx, `deleted_at IS NULL`)
+		if err != nil {
+			return err
+		}
+		up := make(map[string]string, len(folders))
+		byID := make(map[string]Folder, len(folders))
+		for _, f := range folders {
+			up[f.ID], byID[f.ID] = f.ParentFolderID, f
+		}
+		now := time.Now()
+		for _, loop := range loopsOf(up) {
+			if waits, err := anyPending(tx, "folders", loop); err != nil || waits {
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			f := byID[slices.Min(loop)]
+			f.ParentFolderID, f.UpdatedAt = "", now
+			if err := saveFolder(tx, f, "moved folder"); err != nil {
+				return err
+			}
+			settled = true
+		}
+		return nil
+	})
+	if err != nil || !settled {
+		return err
+	}
+	s.Notify("outbox", "")
+	s.Notify("folders", "")
+	return nil
+}
+
+func anyPending(q querier, entity string, ids []string) (bool, error) {
+	for _, id := range ids {
+		if waits, err := pending(q, entity, id); err != nil || waits {
+			return waits, err
+		}
+	}
+	return false, nil
+}
+
+// loopsOf is the loops in up, which maps each row to its parent: a parent that is not a key ends the walk, as a row
+// whose parent is deleted or not here is shown at the top level.
+func loopsOf(up map[string]string) [][]string {
+	var loops [][]string
+	done := make(map[string]bool, len(up))
+	for _, start := range slices.Sorted(maps.Keys(up)) {
+		var path []string
+		at := map[string]int{}
+		for cursor := start; !done[cursor]; cursor = up[cursor] {
+			if _, here := up[cursor]; !here {
+				break
+			}
+			if i, again := at[cursor]; again {
+				loops = append(loops, path[i:])
+				break
+			}
+			at[cursor] = len(path)
+			path = append(path, cursor)
+		}
+		for _, id := range path {
+			done[id] = true
+		}
+	}
+	return loops
 }
 
 func foldersIn(q querier, where string, args ...any) ([]Folder, error) {

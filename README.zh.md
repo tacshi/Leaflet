@@ -209,7 +209,8 @@ make ios-test     # 在 iPhone 和 iPad 模拟器上运行应用的测试
 
 `scripts/publish_testflight.sh <版本> <构建号>` 为 App Store 构建应用，并发布
 到 TestFlight 的内部群组，需要已登录 App Store Connect 的
-[asc](https://asccli.sh)；`--help` 说明了它需要的一切。
+[asc](https://asccli.sh)；`--help` 说明了它需要的一切。它构建的是 `main`
+上与 `origin` 一致的提交，加上 `--allow-branch` 则可从其他已推送的分支构建。
 
 ### 数据
 

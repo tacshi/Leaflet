@@ -3,10 +3,12 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -313,19 +315,19 @@ func TestURLInATableCellIsTheUsers(t *testing.T) {
 	}
 	c.Children = append(c.Children, table)
 	x := executor(c)
-	x.Ctx.ReadOtherPage = func(id string) map[string]any {
+	x.Ctx.ReadOtherPage = func(id string, _, _ int) map[string]any {
 		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{}}
 	}
 	if out := x.Call("read_other_page", map[string]any{"page_id": "other"}); out["error"] != nil {
 		t.Fatal(out)
 	}
-	image := func(u string) map[string]any {
-		return map[string]any{"position": "end", "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": u}}}}
+	link := func(u string) map[string]any {
+		return map[string]any{"position": "end", "blocks": []any{map[string]any{"type": "paragraph", "text": "[the chart](" + u + ")"}}}
 	}
-	if out := x.Call("insert_blocks", image("https://example.com/cell.png")); out["error"] != nil {
+	if out := x.Call("insert_blocks", link("https://example.com/cell.png")); out["error"] != nil {
 		t.Errorf("the cell's URL: %v", out)
 	}
-	if out := x.Call("insert_blocks", image("https://example.com/other.png")); out["error"] == nil {
+	if out := x.Call("insert_blocks", link("https://example.com/other.png")); out["error"] == nil {
 		t.Error("a URL not on the page went in")
 	}
 }
@@ -341,12 +343,10 @@ func TestToolResultsCutAsOnTheServer(t *testing.T) {
 		t.Errorf("cut to %d runes", len([]rune(got)))
 	}
 	c := page()
-	for i := range 40 {
-		n := &doc.Node{ID: fmt.Sprint("long", i), Type: "paragraph"}
-		n.SetDelta(doc.FromMarkdown(strings.Repeat("word ", 400)))
-		c.Children = append(c.Children, n)
-	}
-	f := &fakeModel{replies: []map[string]any{{"content": "", "tool_calls": []any{call("read_page", map[string]any{})}}, {"content": "Read it."}}}
+	n := &doc.Node{ID: "long", Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown(strings.Repeat("word ", 16_000)))
+	c.Children = append(c.Children, n)
+	f := &fakeModel{replies: []map[string]any{{"content": "", "tool_calls": []any{call("read_page", map[string]any{"offset": 3})}}, {"content": "Read it."}}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	if _, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{}); err != nil {
@@ -421,5 +421,80 @@ func TestJobRequestKeepsUnderTheServersMost(t *testing.T) {
 	}
 	if turn := userMessage(Request{Instruction: "Sum it up", SelectionText: huge}, nil, nil); strings.Count(turn, "é") > maxRequestText/3+1 {
 		t.Errorf("the run's turn holds the whole selection: %d characters", utf8.RuneCountInString(turn))
+	}
+}
+
+func endless(status int, written *atomic.Int64) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		chunk := []byte(`{"data":[` + strings.Repeat(" ", 1<<16))
+		for r.Context().Err() == nil {
+			n, err := w.Write(chunk)
+			written.Add(int64(n))
+			if err != nil {
+				return
+			}
+			chunk = chunk[len(chunk)-1<<16:]
+		}
+	}
+}
+
+func TestAnswersWithoutEndAreNotReadWhole(t *testing.T) {
+	for name, c := range map[string]struct {
+		status int
+		most   int64
+		ask    func(ctx context.Context, base string) error
+	}{
+		"models": {http.StatusOK, maxReplyBytes, func(ctx context.Context, base string) error {
+			_, err := NewClient(base, "").ListModels(ctx)
+			return err
+		}},
+		"answer": {http.StatusOK, maxAnswerBytes, func(ctx context.Context, base string) error {
+			_, err := NewClient(base, "").Chat(ctx, "m", []map[string]any{{"role": "user", "content": "hi"}}, nil, 0)
+			return err
+		}},
+		"error": {http.StatusBadGateway, maxReplyBytes, func(ctx context.Context, base string) error {
+			_, err := NewClient(base, "").Chat(ctx, "m", []map[string]any{{"role": "user", "content": "hi"}}, nil, 0)
+			if api, ok := errors.AsType[*APIError](err); !ok || api.Status != http.StatusBadGateway || api.Message != "502 Bad Gateway" {
+				t.Errorf("a gateway's error without end: %v", err)
+			}
+			return err
+		}},
+		"sign-in": {http.StatusOK, maxReplyBytes, func(ctx context.Context, base string) error {
+			_, err := postToken(ctx, base, url.Values{})
+			return err
+		}},
+		"sign-in's addresses": {http.StatusOK, maxReplyBytes, func(ctx context.Context, base string) error {
+			return getSignInJSON(ctx, base, &struct{}{})
+		}},
+		"ChatGPT's error": {http.StatusBadGateway, maxReplyBytes, func(ctx context.Context, base string) error {
+			g := &ChatGPT{access: "tok", expires: time.Now().Add(time.Hour), base: base}
+			_, err := g.ListModels(ctx)
+			if api, ok := errors.AsType[*APIError](err); !ok || api.Status != http.StatusBadGateway {
+				t.Errorf("ChatGPT's error without end: %v", err)
+			}
+			return err
+		}},
+		"ChatGPT's models": {http.StatusOK, maxReplyBytes, func(ctx context.Context, base string) error {
+			g := &ChatGPT{access: "tok", expires: time.Now().Add(time.Hour), base: base}
+			_, err := g.ListModels(ctx)
+			return err
+		}},
+	} {
+		var written atomic.Int64
+		srv := httptest.NewServer(endless(c.status, &written))
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		start := time.Now()
+		err := c.ask(ctx, srv.URL)
+		took := time.Since(start)
+		cancel()
+		srv.Close()
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || took > 10*time.Second {
+			t.Errorf("%s: %v after %v", name, err, took)
+		}
+		if n := written.Load(); n > c.most+16<<20 {
+			t.Errorf("%s: %d bytes were taken, the most read is %d", name, n, c.most)
+		}
 	}
 }

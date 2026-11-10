@@ -1,12 +1,15 @@
 package editor
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/richtext"
 
 	"leaflet/internal/doc"
 )
@@ -273,5 +276,415 @@ func TestPasteAndMatchStyleOwnCopy(t *testing.T) {
 	tt.Command("paste")
 	if d := e.node(n.ID).Delta(); !d[len(d)-1].Attrs.Bold {
 		t.Errorf("a plain paste lost its bold: %+v", d)
+	}
+}
+
+func mentionLine(t *testing.T) (*Editor, *ui.Tester) {
+	t.Helper()
+	e, tt, _ := setup(t)
+	tt.Type("hi @")
+	e.InsertMention(*e.Trigger(), doc.Mention{Kind: "user", ID: "u", Name: "Ann Lee"})
+	return e, tt
+}
+
+func TestReplacingAWordThatReachesIntoAMentionTakesTheMention(t *testing.T) {
+	e, tt := mentionLine(t)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Type("s")
+	e.ReplaceText(&ui.TextInputRange{Start: 8, End: 12}, "Less")
+	n := e.Content.Children[0]
+	if got := n.Delta().Plain(); got != "hi Less" {
+		t.Fatalf("replaced as %q", got)
+	}
+	if want := (Pos{n.ID, 7}); e.focus != want || e.anchor != want {
+		t.Fatalf("caret at %+v..%+v, want %+v", e.anchor, e.focus, want)
+	}
+	tt.Type(" ")
+	tt.Type("/")
+	if got := n.Delta().Plain(); got != "hi Less /" {
+		t.Errorf("typed on as %q", got)
+	}
+}
+
+func TestComposingOverPartOfAMentionReplacesIt(t *testing.T) {
+	e, tt := mentionLine(t)
+	n := e.Content.Children[0]
+	e.SetMarkedText(&ui.TextInputRange{Start: 8, End: 11}, "り", ui.TextInputRange{Start: 1, End: 1})
+	if got := n.Delta().Plain(); got != "hi り " {
+		t.Fatalf("marked as %q", got)
+	}
+	if r, ok := e.MarkedRange(); !ok || r != (ui.TextInputRange{Start: 3, End: 4}) {
+		t.Fatalf("marked range %+v, %v", r, ok)
+	}
+	tt.Frame()
+	e.ReplaceText(nil, "李")
+	if got := n.Delta().Plain(); got != "hi 李 " {
+		t.Fatalf("committed as %q", got)
+	}
+	tt.Type("@")
+	if got := n.Delta().Plain(); got != "hi 李@ " {
+		t.Errorf("typed on as %q", got)
+	}
+}
+
+func TestACaretTheSystemPutsInsideAMentionLeavesIt(t *testing.T) {
+	e, _ := mentionLine(t)
+	n := e.Content.Children[0]
+	e.ReplaceText(&ui.TextInputRange{Start: 9, End: 9}, "x")
+	if got := n.Delta().Plain(); got != "hi @Ann Leex " {
+		t.Fatalf("typed as %q", got)
+	}
+	if want := (Pos{n.ID, 12}); e.focus != want {
+		t.Errorf("caret at %+v, want %+v", e.focus, want)
+	}
+}
+
+func TestSelectionKeepsItsSurvivingEndWhenABlockGoes(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		anchor, focus Pos
+		gone          []string
+		want          Pos
+	}{
+		{"start", Pos{"A", 1}, Pos{"B", 2}, []string{"A"}, Pos{"B", 2}},
+		{"end", Pos{"A", 1}, Pos{"B", 2}, []string{"B"}, Pos{"A", 1}},
+		{"backwards", Pos{"C", 3}, Pos{"B", 2}, []string{"B"}, Pos{"C", 3}},
+		{"both", Pos{"B", 1}, Pos{"C", 2}, []string{"B", "C"}, Pos{"A", 5}},
+		{"first block", Pos{"A", 1}, Pos{"A", 1}, []string{"A"}, Pos{"B", 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, tt, _ := setup(t)
+			e.Edit(func(c *doc.Content) {
+				c.Children = []*doc.Node{para("A", "alpha"), para("B", "bravo"), para("C", "charlie"), para("D", "delta"), para("E", "echo")}
+			})
+			tt.Frame()
+			e.Select(tc.anchor, tc.focus)
+			if err := e.ApplyOp(doc.Op{Op: "delete", IDs: tc.gone}, true); err != nil {
+				t.Fatal(err)
+			}
+			if e.anchor != tc.want || e.focus != tc.want {
+				t.Fatalf("selection %+v..%+v, want a caret at %+v", e.anchor, e.focus, tc.want)
+			}
+			before := len(e.units())
+			tt.Type("x")
+			if got := len(e.units()); got != before {
+				t.Errorf("typing left %d blocks of %d", got, before)
+			}
+		})
+	}
+}
+
+func TestSelectionKeepsItsSurvivingEndWhenAnotherDeviceDropsABlock(t *testing.T) {
+	e, tt, _ := setup(t)
+	e.Edit(func(c *doc.Content) {
+		c.Children = []*doc.Node{para("A", "alpha"), para("B", "bravo"), para("C", "charlie")}
+	})
+	tt.Frame()
+	e.Select(Pos{"A", 1}, Pos{"B", 2})
+	c := e.Content.Copy()
+	c.Children = c.Children[1:]
+	e.Replace(c)
+	if want := (Pos{"B", 2}); e.anchor != want || e.focus != want {
+		t.Errorf("selection %+v..%+v, want a caret at %+v", e.anchor, e.focus, want)
+	}
+}
+
+func linked(t *testing.T) (*Editor, *ui.Tester, *doc.Node) {
+	t.Helper()
+	e, tt, _ := setup(t)
+	n := e.Content.Children[0]
+	n.SetDelta(doc.Delta{{Text: "see "}, {Text: "exmple", Attrs: doc.Attrs{Href: "https://example.com"}}, {Text: " now"}})
+	tt.Frame()
+	return e, tt, n
+}
+
+func linkText(n *doc.Node) string {
+	var b strings.Builder
+	for _, r := range n.Delta() {
+		if r.Attrs.Href != "" {
+			b.WriteString("[" + r.Text + "]")
+		} else {
+			b.WriteString(r.Text)
+		}
+	}
+	return b.String()
+}
+
+func TestTypingInsideALinkKeepsItWhole(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		at   int
+		do   func(e *Editor, tt *ui.Tester)
+		want string
+	}{
+		{"typed", 6, func(e *Editor, tt *ui.Tester) { tt.Type("a") }, "see [example] now"},
+		{"composed", 6, func(e *Editor, tt *ui.Tester) {
+			tt.Compose("a", 1)
+			tt.Type("a")
+		}, "see [example] now"},
+		{"pasted", 6, func(e *Editor, tt *ui.Tester) { e.paste("a") }, "see [example] now"},
+		{"line break", 6, func(e *Editor, tt *ui.Tester) { e.SoftBreak() }, "see [ex\nmple] now"},
+		{"before", 4, func(e *Editor, tt *ui.Tester) { tt.Type("a") }, "see a[exmple] now"},
+		{"after", 10, func(e *Editor, tt *ui.Tester) { tt.Type("a") }, "see [exmple]a now"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, tt, n := linked(t)
+			e.PlaceCaret(n.ID, tc.at)
+			tc.do(e, tt)
+			if got := linkText(n); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestALinkPastedInsideALinkKeepsItsOwnAddress(t *testing.T) {
+	e, _, n := linked(t)
+	e.PlaceCaret(n.ID, 6)
+	e.insertInline("x.dev", "https://x.dev")
+	var hrefs []string
+	for _, r := range n.Delta() {
+		hrefs = append(hrefs, r.Text+"="+r.Attrs.Href)
+	}
+	want := []string{"see =", "ex=https://example.com", "x.dev=https://x.dev", "mple=https://example.com", " now="}
+	if !slices.Equal(hrefs, want) {
+		t.Errorf("runs %v, want %v", hrefs, want)
+	}
+}
+
+func TestARunSplitByAnotherDevicesChangeIsStillOneStep(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("Hello")
+	e.BreakUndo()
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("A", "agent A")), true)
+	c := e.Content.Copy()
+	c.Children = append(c.Children, para("R", "remote"))
+	e.Replace(c)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("B", "agent B")), false)
+	c = e.Content.Copy()
+	c.Children = append(c.Children, para("S", "second"))
+	e.Replace(c)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("C", "agent C")), false)
+	all := texts(e)
+	e.Undo()
+	if got, want := texts(e), []string{"paragraph:Hello", "paragraph:remote", "paragraph:second"}; !slices.Equal(got, want) {
+		t.Fatalf("after undo %v, want %v", got, want)
+	}
+	e.Redo()
+	if got := texts(e); !slices.Equal(got, all) {
+		t.Fatalf("after redo %v, want %v", got, all)
+	}
+	e.Undo()
+	e.Undo()
+	if got, want := texts(e), []string{"paragraph:", "paragraph:remote", "paragraph:second"}; !slices.Equal(got, want) {
+		t.Errorf("after undoing the typing %v, want %v", got, want)
+	}
+}
+
+func TestAHostEditKeepsACompositionGoing(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("a")
+	tt.Compose("k", 1)
+	tt.Compose("ka", 2)
+	e.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{At: "end"}, para("X", "card")) })
+	if !e.marked {
+		t.Fatal("the composition ended")
+	}
+	tt.Compose("kan", 3)
+	tt.Type("かん")
+	if got, want := texts(e), []string{"paragraph:aかん", "paragraph:card"}; !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	e.Undo()
+	if got, want := texts(e), []string{"paragraph:a", "paragraph:card"}; !slices.Equal(got, want) {
+		t.Errorf("after undo %v, want %v", got, want)
+	}
+}
+
+func hiddenPage(t *testing.T) (*Editor, *ui.Tester) {
+	t.Helper()
+	e, tt, _ := setup(t)
+	heading := func(id, text string, folded bool) *doc.Node {
+		n := &doc.Node{ID: id, Type: "heading"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		n.Set("level", 1)
+		if folded {
+			n.Set("collapsed", true)
+		}
+		return n
+	}
+	e.Edit(func(c *doc.Content) {
+		c.Children = []*doc.Node{heading("H", "Head", true), para("S", "in section"), heading("N", "Next", false),
+			para("P", "plain"), foldedToggle("T", "Toggle", "kid"), para("Z", "end")}
+	})
+	tt.Frame()
+	e.Select(Pos{"H", 0}, Pos{"Z", 3})
+	return e, tt
+}
+
+func TestFormattingReachesWhatASelectionHides(t *testing.T) {
+	e, _ := hiddenPage(t)
+	bold := func(a doc.Attrs) bool { return a.Bold }
+	if e.Has(bold) {
+		t.Fatal("bold before any formatting")
+	}
+	e.ToggleBold()
+	e.Content.Walk(func(n, _ *doc.Node) {
+		if !n.Delta().All(0, textLen(n), bold) {
+			t.Errorf("%s %q is not bold", n.ID, n.Delta().Plain())
+		}
+	})
+	if !e.Has(bold) {
+		t.Error("the selection does not read as bold")
+	}
+	e.node("S").SetDelta(doc.Delta{{Text: "in section"}})
+	if !e.Has(bold) {
+		t.Error("a plain hidden block makes text that shows as bold read as plain")
+	}
+	e.ToggleBold()
+	e.Content.Walk(func(n, _ *doc.Node) {
+		for _, run := range n.Delta() {
+			if run.Attrs.Bold {
+				t.Errorf("%s %q is still bold", n.ID, n.Delta().Plain())
+			}
+		}
+	})
+}
+
+func TestFetchedDataLeavesACompositionItsStep(t *testing.T) {
+	e, tt, _ := setup(t)
+	video := &doc.Node{ID: "V", Type: "video", Data: map[string]any{"video": map[string]any{"url": "https://example.com/v"}}}
+	if err := e.Content.Insert(doc.Position{At: "end"}, video); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("a")
+	e.BreakUndo()
+	steps := len(e.undo)
+	tt.Compose("k", 1)
+	e.SetData("V", "title", "Fetched")
+	tt.Compose("", 0)
+	if got := len(e.undo); got != steps+1 {
+		t.Fatalf("%d steps after a composition given up, want %d and the fetched data's", got, steps)
+	}
+	e.Undo()
+	if got := e.node("V").Str("title"); got != "Fetched" {
+		t.Errorf("title %q after undoing past the composition", got)
+	}
+}
+
+func TestSelectedTextAndBlocksTakeWhatCopyTakes(t *testing.T) {
+	e, _ := hiddenPage(t)
+	if _, got := e.SelectedText(); got != "Head\nin section\nNext\nplain\nToggle\nkid\nend" {
+		t.Errorf("text %q", got)
+	}
+	if got, want := e.SelectedBlocks(), []string{"H", "S", "N", "P", "T", "TK", "Z"}; !slices.Equal(got, want) {
+		t.Errorf("blocks %v, want %v", got, want)
+	}
+	e.Select(Pos{"H", 2}, Pos{"P", 0})
+	if _, got := e.SelectedText(); got != "ad\nNext" {
+		t.Errorf("text from inside a folded heading %q", got)
+	}
+	if got, want := e.SelectedBlocks(), []string{"H", "N"}; !slices.Equal(got, want) {
+		t.Errorf("blocks from inside a folded heading %v, want %v", got, want)
+	}
+}
+
+func TestSetTypeReachesWhatASelectionHides(t *testing.T) {
+	e, _ := hiddenPage(t)
+	e.SetType("quote", 0)
+	e.Content.Walk(func(n, _ *doc.Node) {
+		if n.Type != "quote" {
+			t.Errorf("%s is a %s", n.ID, n.Type)
+		}
+	})
+	if got := count(e.Content, "in section") + count(e.Content, "kid"); got != 2 {
+		t.Errorf("%d of the two hidden blocks are left", got)
+	}
+}
+
+func TestRichPasteWithNoTextOfItsOwnFallsBackToTheText(t *testing.T) {
+	for _, html := range []string{
+		`<h2><img src="https://example.com/a.png" alt="Logo"></h2>`,
+		`<ul><li><img src="https://example.com/a.png"></li></ul>`,
+		`<b><img src="https://example.com/a.png"></b>`,
+	} {
+		e, tt, _ := setup(t)
+		tt.Type("before ")
+		tt.SetClipboardData(transfer.New(transfer.NewItem(
+			transfer.Bytes(transfer.HTML, []byte(html)),
+			transfer.Bytes(transfer.Text, []byte("the text")))))
+		tt.Command("paste")
+		if got, want := texts(e), []string{"paragraph:before the text"}; !slices.Equal(got, want) {
+			t.Errorf("%s pasted as %v, want %v", html, got, want)
+		}
+	}
+}
+
+func TestFetchedDataOutlivesTheUndoOfAnEarlierStep(t *testing.T) {
+	e, tt, _ := setup(t)
+	v, err := doc.VideoNode("https://youtu.be/dQw4w9WgXcQ", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.InsertBlocks(v)
+	tt.Frame()
+	tt.Type("note")
+	e.SetData(v.ID, "title", "Fetched title")
+	tt.Type("s")
+	typed := texts(e)
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if got := e.node(v.ID).Str("title"); got != "Fetched title" {
+		t.Errorf("title %q after undoing what was typed since", got)
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if got := e.node(v.ID).Str("title"); got != "Fetched title" {
+		t.Errorf("title %q after undoing the typing", got)
+	}
+	if got := texts(e); strings.Contains(strings.Join(got, "\n"), "note") {
+		t.Errorf("the typing was not undone: %v", got)
+	}
+	e.Redo()
+	e.Redo()
+	if got := texts(e); !slices.Equal(got, typed) {
+		t.Errorf("after redo %v, want %v", got, typed)
+	}
+	if got := e.node(v.ID).Str("title"); got != "Fetched title" {
+		t.Errorf("title %q after redo", got)
+	}
+}
+
+func TestALongCodeBlockPastesInLinearTime(t *testing.T) {
+	const lines = 4000
+	paras := make([]richtext.Paragraph, lines)
+	for i := range paras {
+		paras[i] = richtext.Paragraph{Style: richtext.ParagraphStyle{CodeBlock: true}, Runs: []richtext.Run{{Text: "    a line of some source code here;"}}}
+	}
+	text := richtext.TextOf(paras...)
+	var blocks []*doc.Node
+	perLine := testing.AllocsPerRun(1, func() { blocks = blocksOf(text) }) / lines
+	if len(blocks) != 1 || blocks[0].Type != "code" || strings.Count(blocks[0].Delta().Plain(), "\n") != lines-1 {
+		t.Fatalf("pasted as %d blocks", len(blocks))
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	before := m.TotalAlloc
+	blocksOf(text)
+	runtime.ReadMemStats(&m)
+	if perLine > 20 || m.TotalAlloc-before > lines*4096 {
+		t.Errorf("%.0f allocations and %d bytes a line", perLine, (m.TotalAlloc-before)/lines)
+	}
+}
+
+func TestCodeLinesBetweenOtherBlocksStayTheirOwnBlocks(t *testing.T) {
+	codeLine := func(s string) richtext.Paragraph {
+		return richtext.Paragraph{Style: richtext.ParagraphStyle{CodeBlock: true}, Runs: []richtext.Run{{Text: s}}}
+	}
+	plain := richtext.Paragraph{Runs: []richtext.Run{{Text: "between"}}}
+	var got []string
+	for _, n := range blocksOf(richtext.TextOf(codeLine("a"), codeLine(""), codeLine("b"), plain, codeLine("c"))) {
+		got = append(got, n.Type+":"+n.Delta().Plain())
+	}
+	if want := []string{"code:a\n\nb", "paragraph:between", "code:c"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

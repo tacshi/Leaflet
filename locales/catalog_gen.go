@@ -253,6 +253,20 @@ func (msgs Messages) AppStartFailed() string {
 	return Catalog.Format(msgs.locale, "appStartFailed", nil)
 }
 
+// AppSavingRecording says "Saving the recording before Leaflet quits…"
+// in the language the app shows.
+//
+// Toast when quitting waits for the recording under way to be saved.
+func AppSavingRecording() string { return In(i18n.Locale()).AppSavingRecording() }
+
+// AppSavingRecording says "Saving the recording before Leaflet quits…"
+// in the language of msgs.
+//
+// Toast when quitting waits for the recording under way to be saved.
+func (msgs Messages) AppSavingRecording() string {
+	return Catalog.Format(msgs.locale, "appSavingRecording", nil)
+}
+
 // AppErrorSave says "Could not save: {error}"
 // in the language the app shows.
 //
@@ -1447,18 +1461,38 @@ func (msgs Messages) HostErrorAddFile(error string) string {
 	return Catalog.Format(msgs.locale, "hostErrorAddFile", map[string]any{"error": error})
 }
 
-// HostAddedToSpace says "Added {name} to the space"
+// HostAddedToPage says "Added {name} to {page}"
 // in the language the app shows.
 //
-// Toast when a file was uploaded while its page was no longer open.
-func HostAddedToSpace(name string) string { return In(i18n.Locale()).HostAddedToSpace(name) }
+// Toast when a file finished uploading into a page that was no longer the
+// one open.
+func HostAddedToPage(name string, page string) string {
+	return In(i18n.Locale()).HostAddedToPage(name, page)
+}
 
-// HostAddedToSpace says "Added {name} to the space"
+// HostAddedToPage says "Added {name} to {page}"
 // in the language of msgs.
 //
-// Toast when a file was uploaded while its page was no longer open.
-func (msgs Messages) HostAddedToSpace(name string) string {
-	return Catalog.Format(msgs.locale, "hostAddedToSpace", map[string]any{"name": name})
+// Toast when a file finished uploading into a page that was no longer the
+// one open.
+func (msgs Messages) HostAddedToPage(name string, page string) string {
+	return Catalog.Format(msgs.locale, "hostAddedToPage", map[string]any{"name": name, "page": page})
+}
+
+// HostFileNotAdded says "{name} was not added: its page can no longer be changed."
+// in the language the app shows.
+//
+// Toast when a file finished uploading for a page that is gone or can no
+// longer be edited, so the file was removed.
+func HostFileNotAdded(name string) string { return In(i18n.Locale()).HostFileNotAdded(name) }
+
+// HostFileNotAdded says "{name} was not added: its page can no longer be changed."
+// in the language of msgs.
+//
+// Toast when a file finished uploading for a page that is gone or can no
+// longer be edited, so the file was removed.
+func (msgs Messages) HostFileNotAdded(name string) string {
+	return Catalog.Format(msgs.locale, "hostFileNotAdded", map[string]any{"name": name})
 }
 
 // HostDownloading says "Downloading {name}…"
@@ -1473,6 +1507,36 @@ func HostDownloading(name string) string { return In(i18n.Locale()).HostDownload
 // Toast when a file opened is still downloading.
 func (msgs Messages) HostDownloading(name string) string {
 	return Catalog.Format(msgs.locale, "hostDownloading", map[string]any{"name": name})
+}
+
+// HostNotOnDevice says "{name} is not on this device and cannot be downloaded now."
+// in the language the app shows.
+//
+// Toast when a file opened is not on this device and no download can start
+// (signed out, never uploaded).
+func HostNotOnDevice(name string) string { return In(i18n.Locale()).HostNotOnDevice(name) }
+
+// HostNotOnDevice says "{name} is not on this device and cannot be downloaded now."
+// in the language of msgs.
+//
+// Toast when a file opened is not on this device and no download can start
+// (signed out, never uploaded).
+func (msgs Messages) HostNotOnDevice(name string) string {
+	return Catalog.Format(msgs.locale, "hostNotOnDevice", map[string]any{"name": name})
+}
+
+// HostDownloadFailed says "Could not download {name}."
+// in the language the app shows.
+//
+// Toast when the download of a file opened failed.
+func HostDownloadFailed(name string) string { return In(i18n.Locale()).HostDownloadFailed(name) }
+
+// HostDownloadFailed says "Could not download {name}."
+// in the language of msgs.
+//
+// Toast when the download of a file opened failed.
+func (msgs Messages) HostDownloadFailed(name string) string {
+	return Catalog.Format(msgs.locale, "hostDownloadFailed", map[string]any{"name": name})
 }
 
 // HostExportTitle says "Export as Markdown"
@@ -10411,6 +10475,22 @@ func RecErrEndpoint(status string, details string) string {
 // (may be empty).
 func (msgs Messages) RecErrEndpoint(status string, details string) string {
 	return Catalog.Format(msgs.locale, "recErrEndpoint", map[string]any{"status": status, "details": details})
+}
+
+// RecErrAnswerTooLarge says "The transcription service sent back more than Leaflet can read."
+// in the language the app shows.
+//
+// Error when a transcription endpoint's answer is larger than the app
+// reads.
+func RecErrAnswerTooLarge() string { return In(i18n.Locale()).RecErrAnswerTooLarge() }
+
+// RecErrAnswerTooLarge says "The transcription service sent back more than Leaflet can read."
+// in the language of msgs.
+//
+// Error when a transcription endpoint's answer is larger than the app
+// reads.
+func (msgs Messages) RecErrAnswerTooLarge() string {
+	return Catalog.Format(msgs.locale, "recErrAnswerTooLarge", nil)
 }
 
 // RecErrPasteKey says "Paste a key to test"

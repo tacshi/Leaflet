@@ -60,6 +60,28 @@ struct LibraryTests {
         #expect(!lib.folder("h", isIn: "w"))
     }
 
+    @Test func theSidebarTakesOnlyItsOwnRowsDragged() {
+        let lib = LibrarySnapshot(
+            spaceID: "me", pages: [page("a")],
+            folders: [FolderRow(id: "f", name: "F", sortKey: "a")], tags: [])
+        #expect(SidebarDrops.takes("a", in: lib))
+        #expect(SidebarDrops.takes(FolderRow.dragPrefix + "f", in: lib))
+        #expect(!SidebarDrops.takes("Some text of a page", in: lib))
+        #expect(!SidebarDrops.takes("f", in: lib))
+        #expect(!SidebarDrops.takes(FolderRow.dragPrefix + "a", in: lib))
+        #expect(!SidebarDrops.takes("", in: lib))
+    }
+
+    @Test func aDropBelowTheRowsLandsOnlyWhereThereAreRows() {
+        let rows = [
+            CGRect(x: 16, y: 100, width: 300, height: 44),
+            CGRect(x: 32, y: 144, width: 284, height: 44),
+        ]
+        #expect(SidebarDrops.below(rows, y: 300) == .line(y: 204, minX: 16))
+        #expect(SidebarDrops.below(rows, y: 150) == nil)
+        #expect(SidebarDrops.below([], y: 300) == nil)
+    }
+
     @Test func foldersWithoutTheirArrangementStayFlat() throws {
         let lib = LibrarySnapshot(
             spaceID: "me", pages: [],

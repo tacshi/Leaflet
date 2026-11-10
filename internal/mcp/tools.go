@@ -5,10 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"maps"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -77,9 +75,7 @@ func toolList() []map[string]any {
 		required := append([]string{"page_id"}, params["required"].([]string)...)
 		desc := fn["description"].(string)
 		if name == "read_page" {
-			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads. A long page comes in parts: total_blocks says how many blocks it has, and next_offset, while there are more, is the offset to read on from. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole."
-			props["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "The block to start from, as next_offset gives it; the first when not given."}
-			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "description": "The most blocks to read; as many as fit when not given."}
+			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads. A long page comes in parts: total_blocks says how many blocks it has, and next_offset, while there are more, is the offset to read on from; more_subpages and more_comments count the subpages and comment threads a very long list leaves out. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole."
 		}
 		add(name, desc, object(props, required...))
 	}
@@ -415,7 +411,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		return nil, err
 	}
 	args = maps.Clone(args)
-	offset, limit, err := partOf(args)
+	offset, limit, err := agents.PartArgs(args)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +428,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		tc := agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)
 		tc.SiteInfo = true
 		if name == "read_page" {
-			out = readPart(tc, p, content, offset, limit)
+			out = tc.ReadPart(p.ID, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}, content, offset, limit)
 			t.keep(p.ID, content)
 			return false, nil
 		}
@@ -473,57 +469,6 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		}
 	}
 	return out, nil
-}
-
-const maxRead = 60_000
-
-func partOf(args map[string]any) (offset, limit int, err error) {
-	count := func(key string, least int) (int, error) {
-		v, ok := args[key]
-		if !ok || v == nil {
-			return 0, nil
-		}
-		f, ok := v.(float64)
-		if !ok || f != math.Trunc(f) || f < float64(least) || f > math.MaxInt32 {
-			return 0, toolErr(fmt.Sprintf("%s must be a whole number, %d or more.", key, least))
-		}
-		return int(f), nil
-	}
-	if offset, err = count("offset", 0); err != nil {
-		return 0, 0, err
-	}
-	limit, err = count("limit", 1)
-	return offset, limit, err
-}
-
-func readPart(tc agents.ToolContext, p store.Page, c *doc.Content, offset, limit int) map[string]any {
-	out := map[string]any{"page": map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}}
-	size := 0
-	if offset == 0 {
-		out["subpages"], out["comments"] = tc.Subpages(), tc.Comments()
-		for _, k := range []string{"page", "subpages", "comments"} {
-			raw, _ := json.Marshal(out[k])
-			size += len(raw)
-		}
-	}
-	blocks := doc.BlockViews(c)
-	start := min(offset, len(blocks))
-	end := start
-	for end < len(blocks) && (limit == 0 || end-start < limit) {
-		tc.Finish(p.ID, blocks[end])
-		raw, _ := json.Marshal(blocks[end])
-		if end > start && size+len(raw) > maxRead {
-			break
-		}
-		size += len(raw)
-		end++
-	}
-	out["blocks"] = blocks[start:end]
-	out["total_blocks"] = len(blocks)
-	if end < len(blocks) {
-		out["next_offset"] = end
-	}
-	return out
 }
 
 func conflictSince(read, now *doc.Content, ops []doc.Op) bool {

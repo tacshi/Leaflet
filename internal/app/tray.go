@@ -168,5 +168,8 @@ func (a *App) findUpdate(asked bool) {
 
 func (a *App) restartToUpdate() {
 	a.flush()
-	mygo.App.Relaunch()
+	// A quit that waits for a recording comes back as a plain quit, so the
+	// wait is told to start the app again.
+	a.relaunching = a.rec.Active() || a.rec.Saving() > 0
+	relaunchApp()
 }

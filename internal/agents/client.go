@@ -31,12 +31,16 @@ type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments string
+	// Extra is the call's extra_content as its provider gave it, which holds Gemini's thought signature.
+	Extra json.RawMessage
 }
 
 type ChatResult struct {
 	Content      string
 	ToolCalls    []ToolCall
 	FinishReason string
+	// Reasoning is the answer's reasoning_content, which DeepSeek wants back with its calls.
+	Reasoning string
 }
 
 func (r ChatResult) AssistantMessage() map[string]any {
@@ -44,9 +48,16 @@ func (r ChatResult) AssistantMessage() map[string]any {
 	if len(r.ToolCalls) > 0 {
 		var calls []any
 		for _, c := range r.ToolCalls {
-			calls = append(calls, map[string]any{"id": c.ID, "type": "function", "function": map[string]any{"name": c.Name, "arguments": sentArguments(c.Arguments)}})
+			call := map[string]any{"id": c.ID, "type": "function", "function": map[string]any{"name": c.Name, "arguments": sentArguments(c.Arguments)}}
+			if len(c.Extra) > 0 {
+				call["extra_content"] = c.Extra
+			}
+			calls = append(calls, call)
 		}
 		m["tool_calls"] = calls
+		if r.Reasoning != "" {
+			m["reasoning_content"] = r.Reasoning
+		}
 	}
 	return m
 }
@@ -145,6 +156,21 @@ func (b *idleBody) Close() error {
 	return err
 }
 
+const (
+	maxReplyBytes  = 4 << 20
+	maxAnswerBytes = 32 << 20
+)
+
+var errTooLong = errors.New("the answer is too long to read")
+
+func readAll(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err == nil && int64(len(data)) > limit {
+		return nil, errTooLong
+	}
+	return data, err
+}
+
 func noRedirect(*http.Request, []*http.Request) error {
 	return errors.New("redirected")
 }
@@ -155,7 +181,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 		return nil, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	return io.ReadAll(res.Body)
+	return readAll(res.Body, maxReplyBytes)
 }
 
 func (c *Client) send(ctx context.Context, hc *http.Client, method, path string, body any) (*http.Response, error) {
@@ -187,8 +213,8 @@ func (c *Client) send(ctx context.Context, hc *http.Client, method, path string,
 		return res, nil
 	}
 	defer func() { _ = res.Body.Close() }()
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
+	data, err := readAll(res.Body, maxReplyBytes)
+	if err != nil && !errors.Is(err, errTooLong) {
 		return nil, err
 	}
 	return nil, &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data), RetryAfter: retryAfter(res.Header)}
@@ -304,7 +330,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 	if on != nil && strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
 		return readStream(res.Body, on)
 	}
-	data, err := io.ReadAll(res.Body)
+	data, err := readAll(res.Body, maxAnswerBytes)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -321,7 +347,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 		return ChatResult{}, &APIError{Message: locales.AgentModelNoChoices()}
 	}
 	ch := resp.Choices[0]
-	out := ChatResult{Content: textOf(ch.Message.Content), FinishReason: ch.FinishReason}
+	out := ChatResult{Content: textOf(ch.Message.Content), FinishReason: ch.FinishReason, Reasoning: ch.Message.reasoning()}
 	for i, tc := range ch.Message.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, tc.call(i))
 	}
@@ -333,7 +359,13 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 
 type chatMessage struct {
 	Content   any            `json:"content"`
+	Reasoning any            `json:"reasoning_content"`
 	ToolCalls []chatToolCall `json:"tool_calls"`
+}
+
+func (m chatMessage) reasoning() string {
+	s, _ := m.Reasoning.(string)
+	return s
 }
 
 type chatToolCall struct {
@@ -343,6 +375,14 @@ type chatToolCall struct {
 		Name      string `json:"name"`
 		Arguments any    `json:"arguments"`
 	} `json:"function"`
+	Extra json.RawMessage `json:"extra_content"`
+}
+
+func (tc chatToolCall) extra() json.RawMessage {
+	if string(tc.Extra) == "null" {
+		return nil
+	}
+	return tc.Extra
 }
 
 func (tc chatToolCall) arguments() string {
@@ -366,14 +406,14 @@ func (tc chatToolCall) call(i int) ToolCall {
 	if id == "" {
 		id = fmt.Sprintf("call_%d", i)
 	}
-	return ToolCall{ID: id, Name: tc.Function.Name, Arguments: args}
+	return ToolCall{ID: id, Name: tc.Function.Name, Arguments: args, Extra: tc.extra()}
 }
 
 func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
 	var out ChatResult
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	var calls []*chatToolCall
 	var args []*strings.Builder
 	slot := map[int]int{}
@@ -409,6 +449,7 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 			text.WriteString(s)
 			on.text(text.String())
 		}
+		reasoning.WriteString(ch.Delta.reasoning())
 		for _, tc := range ch.Delta.ToolCalls {
 			i := -1
 			if tc.Index != nil {
@@ -436,6 +477,9 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 			if tc.Function.Name != "" {
 				calls[i].Function.Name = tc.Function.Name
 			}
+			if extra := tc.extra(); len(extra) > 0 {
+				calls[i].Extra = extra
+			}
 			args[i].WriteString(tc.arguments())
 			on.call(i, calls[i].Function.Name, args[i].String())
 		}
@@ -449,7 +493,7 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 	if !done && out.FinishReason == "" {
 		return ChatResult{}, &APIError{Message: locales.AgentModelCutOff()}
 	}
-	out.Content = text.String()
+	out.Content, out.Reasoning = text.String(), reasoning.String()
 	for i, c := range calls {
 		c.Function.Arguments = args[i].String()
 		out.ToolCalls = append(out.ToolCalls, c.call(i))

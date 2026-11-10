@@ -28,6 +28,7 @@ func (e *Editor) deleteSelection() {
 	if a.ID == b.ID {
 		n := e.node(a.ID)
 		if n.IsText() {
+			a.Off, b.Off = n.Delta().Widen(a.Off, b.Off)
 			n.SetDelta(n.Delta().Delete(a.Off, b.Off))
 			e.invalidate(n.ID)
 		}
@@ -649,12 +650,9 @@ func (e *Editor) SetType(typ string, level int) {
 		return
 	}
 	e.pushUndo(false)
-	a, b := e.ordered()
-	us := e.units()
 	var last *doc.Node
-	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
-	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
-		n := us[i]
+	for _, s := range e.selectedSpans() {
+		n := s.n
 		if !n.IsText() {
 			continue
 		}
@@ -859,8 +857,7 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 		return
 	}
 	e.pushUndo(false)
-	all := true
-	e.eachSelected(func(n *doc.Node, from, to int) { all = all && n.Delta().All(from, to, has) })
+	_, all := e.shownHave(has)
 	e.eachSelected(func(n *doc.Node, from, to int) {
 		n.SetDelta(n.Delta().Format(from, to, func(at *doc.Attrs) { set(at, !all) }))
 		e.invalidate(n.ID)
@@ -869,37 +866,34 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 }
 
 func (e *Editor) eachSelected(fn func(n *doc.Node, from, to int)) {
-	a, b := e.ordered()
-	us := e.units()
-	ia, ib := e.index(a.ID), e.index(b.ID)
-	if ia < 0 || ib < 0 {
-		return
-	}
-	for i := ia; i <= ib; i++ {
-		n := us[i]
-		if !n.IsText() || n.Type == "code" {
-			continue
-		}
-		from, to := 0, textLen(n)
-		if i == ia {
-			from = a.Off
-		}
-		if i == ib {
-			to = b.Off
-		}
-		if from < to {
-			fn(n, from, to)
+	for _, s := range e.selectedSpans() {
+		if s.n.IsText() && s.n.Type != "code" && s.from < s.to {
+			fn(s.n, s.from, s.to)
 		}
 	}
 }
 
-func (e *Editor) Has(has func(doc.Attrs) bool) bool {
-	if a, b := e.ordered(); a.ID != b.ID {
-		all, some := true, false
-		e.eachSelected(func(n *doc.Node, from, to int) {
+// shownHave reports whether the selection has text in view, and whether all
+// of it has the mark: what a selection hides takes the mark with the rest,
+// and has no say in which way it goes.
+func (e *Editor) shownHave(has func(doc.Attrs) bool) (some, all bool) {
+	shown := map[string]bool{}
+	for _, n := range e.units() {
+		shown[n.ID] = true
+	}
+	all = true
+	e.eachSelected(func(n *doc.Node, from, to int) {
+		if shown[n.ID] {
 			some = true
 			all = all && n.Delta().All(from, to, has)
-		})
+		}
+	})
+	return some, all
+}
+
+func (e *Editor) Has(has func(doc.Attrs) bool) bool {
+	if a, b := e.ordered(); a.ID != b.ID {
+		some, all := e.shownHave(has)
 		return some && all
 	}
 	n := e.node(e.focus.ID)

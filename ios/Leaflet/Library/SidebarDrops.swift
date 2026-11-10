@@ -15,7 +15,11 @@ final class SidebarDrops {
     private(set) var mark: Mark?
     @ObservationIgnored fileprivate var frames: [String: CGRect] = [:]
     /// What is dragged, a page's ID or a folder's after FolderRow.dragPrefix, once it is read.
-    @ObservationIgnored fileprivate var dragged: String?
+    @ObservationIgnored fileprivate var dragged: String? {
+        didSet { if dragged != nil, let hover { _ = over(hover) } }
+    }
+    /// Where the drag is, in the window, while it is over the list.
+    @ObservationIgnored private var hover: CGPoint?
     @ObservationIgnored weak var app: AppModel?
 
     static func folderKey(_ id: String) -> String { "folder:" + id }
@@ -39,19 +43,31 @@ final class SidebarDrops {
         CGRect(x: frame.minX, y: frame.midY - 22, width: frame.width, height: 44)
     }
 
+    /// Whether a string dragged within the app is a row of the sidebar: any other, as text
+    /// dragged out of a page, is not the sidebar's to take.
+    static func takes(_ dragged: String, in lib: LibrarySnapshot) -> Bool {
+        if dragged.hasPrefix(FolderRow.dragPrefix) {
+            return lib.folder(String(dragged.dropFirst(FolderRow.dragPrefix.count))) != nil
+        }
+        return lib.page(dragged) != nil
+    }
+
+    /// The line under the last of the rows, for a point below them all. With no rows, as on
+    /// the tabs that list none, there is nowhere to land.
+    static func below(_ rows: [CGRect], y: CGFloat) -> Mark? {
+        guard let bottom = rows.map(\.maxY).max(), y > bottom else { return nil }
+        return .line(y: bottom + 16, minX: rows.map(\.minX).min() ?? 0)
+    }
+
     /// Where dragged would land at point, in the window, and what marks it.
     private func landing(of dragged: String?, at point: CGPoint) -> (Landing, Mark)? {
-        guard let lib = app?.library else { return nil }
-        let folder = dragged.flatMap {
-            $0.hasPrefix(FolderRow.dragPrefix)
-                ? String($0.dropFirst(FolderRow.dragPrefix.count)) : nil
-        }
+        guard let lib = app?.library, let dragged, Self.takes(dragged, in: lib) else { return nil }
+        let folder =
+            dragged.hasPrefix(FolderRow.dragPrefix)
+            ? String(dragged.dropFirst(FolderRow.dragPrefix.count)) : nil
         let nearest = frames.min { abs($0.value.midY - point.y) < abs($1.value.midY - point.y) }
         guard let (key, frame) = nearest, abs(frame.midY - point.y) <= Self.half else {
-            let bottom = frames.values.map(\.maxY).max() ?? 0
-            guard point.y > bottom, dragged != nil else { return nil }
-            let minX = frames.values.map(\.minX).min() ?? 0
-            return (.level(""), .line(y: bottom + 16, minX: minX))
+            return Self.below(Array(frames.values), y: point.y).map { (Landing.level(""), $0) }
         }
         let off = point.y - frame.midY
         if key.hasPrefix("folder:") {
@@ -77,6 +93,7 @@ final class SidebarDrops {
     }
 
     fileprivate func over(_ point: CGPoint?) -> Bool {
+        hover = point
         let next = point.flatMap { landing(of: dragged, at: $0)?.1 }
         if next != mark { mark = next }
         return next != nil

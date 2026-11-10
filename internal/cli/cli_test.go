@@ -198,6 +198,8 @@ func TestRefusals(t *testing.T) {
 		{[]string{"tag", "Notes", ""}, "", "no tag given"},
 		{[]string{"tag", "Notes", "#"}, "", "no tag given"},
 		{[]string{"folder", "nwe", "X"}, "", `unknown command "nwe" for "leaflet folder"`},
+		{[]string{"folder", "new", "X", "--in", ""}, "", "--in names no folder"},
+		{[]string{"folder", "mv", "X", "--in", " "}, "", "--in names no folder"},
 	} {
 		_, errOut, code := run(t, dir, c.in, c.args...)
 		if code != 1 || !strings.Contains(errOut, c.want) || !strings.HasPrefix(errOut, "leaflet: ") {
@@ -271,6 +273,18 @@ func TestPipedEncodings(t *testing.T) {
 		if md := ok(t, dir, "", "cat", "Café 日本語 🍃"); md != "# Café 日本語 🍃\n\nAll well.\n" {
 			t.Errorf("%s: cat %q", name, md)
 		}
+	}
+}
+
+func TestTagsControlCharactersStayOffTheTerminal(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "Plan")
+	ok(t, dir, "", "tag", "Plan", "red\x1b[31m", "bell\x07", "plain")
+	if tags := ok(t, dir, "", "tag", "Plan"); tags != "red [31m\nbell \nplain\n" {
+		t.Errorf("tags %q", tags)
+	}
+	if tags := ok(t, dir, "", "tag", "Plan", "--json"); !strings.Contains(tags, `red\u001b[31m`) {
+		t.Errorf("tag --json changed the tag: %s", tags)
 	}
 }
 
@@ -760,6 +774,14 @@ func TestNestedFolders(t *testing.T) {
 	}
 	if _, errOut, code := run(t, dir, "", "folder", "mv", work[:8], "--in", home[:8]); code == 0 || !strings.Contains(errOut, "inside it") {
 		t.Errorf("mv into a folder inside it: exit %d, %q", code, errOut)
+	}
+	for _, args := range [][]string{{"folder", "mv", plans[:8], "--in", ""}, {"folder", "new", "Drafts", "--in", ""}} {
+		if _, errOut, code := run(t, dir, "", args...); code != 1 || !strings.Contains(errOut, "--in names no folder") {
+			t.Errorf("%v: exit %d, %q", args, code, errOut)
+		}
+	}
+	if ls := ok(t, dir, "", "ls"); !strings.Contains(ls, plans[:8]+"    Plans/\n") || strings.Contains(ls, "Drafts") {
+		t.Errorf("ls after --in with no folder named:\n%s", ls)
 	}
 	ok(t, dir, "", "folder", "mv", home[:8], "--top")
 	if ls := ok(t, dir, "", "ls"); !strings.Contains(ls, home[:8]+"  Home/\n") {

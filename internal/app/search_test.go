@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -116,5 +117,58 @@ func TestMatchSpansFoldCase(t *testing.T) {
 		if whole != tc.text || marked != tc.want {
 			t.Errorf("%q in %q: shows %q, marks %q, want %q", tc.query, tc.text, whole, marked, tc.want)
 		}
+	}
+}
+
+func TestEnterWaitsForTheSearch(t *testing.T) {
+	a := templatesApp(t)
+	wanted, _ := a.st.CreatePage(store.NewPageOptions{Title: "Quarterly plan"})
+	time.Sleep(5 * time.Millisecond)
+	recent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Recent"})
+	a.reloadAll()
+	a.openSearch()
+	if len(a.dialogs.hits) == 0 || a.dialogs.hits[0].PageID != recent.ID {
+		t.Fatalf("recent pages %+v", a.dialogs.hits)
+	}
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	tt := ui.NewTester(func(c *ui.Context) { a.searchDialog(c) }, 900, 700)
+	tt.Frame()
+	tt.Type("quarterly")
+	tt.Key(0, ui.KeyEnter)
+	if a.route.Kind == "page" || !a.dialogs.searchOpen {
+		t.Fatalf("Enter opened %+v before the results were in", a.route)
+	}
+	(<-posted)()
+	if a.dialogs.searchOpen || a.route.ID != wanted.ID {
+		t.Errorf("opened %+v, search open %v", a.route, a.dialogs.searchOpen)
+	}
+}
+
+func TestLinkLookupOfAClosedDialog(t *testing.T) {
+	a := templatesApp(t)
+	release := make(chan struct{})
+	follow := followVideoLink
+	followVideoLink = func(string) string { <-release; return "https://www.bilibili.com/video/BV1GJ411x7h7" }
+	defer func() { followVideoLink = follow }()
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	d := &a.dialogs
+	d.openLinkDialog("video")
+	d.linkURL = "https://b23.tv/abc123"
+	a.submitLink()
+	if !d.linkFollowing {
+		t.Fatal("the short link is not looked up")
+	}
+	d.linkOpen = false
+	d.openLinkDialog("video")
+	if d.linkFollowing {
+		t.Error("a new dialog waits for the lookup of the one closed")
+	}
+	d.linkURL = "https://b23.tv/abc123"
+	close(release)
+	(<-posted)()
+	if !d.linkOpen || d.linkFollowing {
+		t.Errorf("the lookup of the dialog closed acted on the new one: open %v, following %v", d.linkOpen, d.linkFollowing)
 	}
 }

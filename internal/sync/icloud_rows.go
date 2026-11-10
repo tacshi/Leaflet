@@ -119,7 +119,7 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	}
 	r["id"] = e.ID
 	r[store.PeerKey] = true
-	if err := s.putRow(e.Table, r, s.putCloudPage); err != nil {
+	if err := s.putRow(e.Table, r, s.st.PutRemotePage); err != nil {
 		return err
 	}
 	if s.st.HasPending(e.Table, e.ID) {

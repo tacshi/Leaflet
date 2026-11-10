@@ -69,6 +69,16 @@ func (n *Node) Clone() *Node {
 	return out
 }
 
+func (n *Node) each(fn func(*Node)) {
+	if n == nil {
+		return
+	}
+	fn(n)
+	for _, k := range n.Children {
+		k.each(fn)
+	}
+}
+
 func (n *Node) Delta() Delta {
 	if n == nil || n.Data == nil {
 		return nil

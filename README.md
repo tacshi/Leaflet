@@ -237,7 +237,8 @@ Then open `ios/Leaflet.xcodeproj`. To run on a device, set your team in
 `scripts/publish_testflight.sh <version> <build>` builds the app for the
 App Store and publishes it to its internal TestFlight group, with
 [asc](https://asccli.sh) signed in to App Store Connect; `--help` explains
-what it needs.
+what it needs. It builds `main` at the commit `origin` has, or another
+pushed branch with `--allow-branch`.
 
 ### Data
 

@@ -213,10 +213,11 @@ hosted project can't be checked here, and are worth checking once on one
   Auth owns the table, and the image's default privileges grant `postgres`
   what Auth makes, as `scripts/migrations/services.sql` has it, and as
   `supabase start` does: `select has_table_privilege('auth.sessions', 'delete')`;
-- that `postgres` may make policies on `storage.objects`, and update its
-  `owner` (and `owner_id`), as `release_kept_recordings` does: the image
-  has `scripts/migrations/services.sql` make `postgres` own the Storage
-  tables, which Supabase's Storage service owns in a project:
+- that `postgres` may make policies on `storage.objects`, read it, as
+  `keep_recording_audio_path` does to see a recording's audio is gone, and
+  update its `owner` (and `owner_id`), as `release_kept_recordings` does:
+  the image has `scripts/migrations/services.sql` make `postgres` own the
+  Storage tables, which Supabase's Storage service owns in a project:
   `select has_table_privilege('storage.objects', 'update')`;
 - that the Management API's query endpoint runs what it is sent as one
   transaction, so a migration that fails part way leaves nothing behind
@@ -269,6 +270,15 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
   parents that the same shares reach (`forbidden_move` otherwise), and only
   the owner puts a page in a folder, as it is made or moved
   (`forbidden_folder`).
+- **Folders**: a folder goes under none that is inside it (`folder_cycle`,
+  a check violation, as `page_cycle` is), inside it as the apps show
+  folders: one in a deleted folder (`deleted_at`) is at the top level, so
+  the walk up from the new parent ends at a deleted folder. A folder
+  restored under one that came to be inside it meanwhile comes back at the
+  top level: the server clears its `parent_folder_id`, as the apps do
+  before they send it. A folder whose row is removed outright leaves its
+  folders at the top level, as it leaves its pages and files; the apps
+  delete one by `deleted_at`.
 - **Storage**: viewers of a shared page can read its recordings, the files
   on it and the images on it; only the space owner writes `files/` (a file
   on a page only while they can edit that page) and `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the
@@ -278,6 +288,9 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
   made that `recordings` row, while they can edit its page, so upsert the
   row before uploading its audio. The row's `created_by` stays theirs: an
   update cannot change it, and only deleting their account clears it. Its
-  `audio_path` is that path or null: any other a client sends is dropped.
+  `audio_path` is that path or null: any other a client sends is dropped,
+  and so is none sent over one, so a device may send a recording whole
+  without the path; only the recorder clears it, once the object is gone.
+  No client deletes a recording's row: it goes with its page.
   A deleted file (`deleted_at`) is read only by its space's owner and its
   page's owner, who may remove its object.

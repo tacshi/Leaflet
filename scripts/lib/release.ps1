@@ -211,19 +211,44 @@ function Test-Gh {
 	}
 }
 
+# Asks gh for the release v$Version, with $Options, into $script:Release. No
+# such release is $false; any other failure fails, as none of the guards that
+# ask may pass for want of an answer.
+function Find-Release([string]$Version, [string[]]$Options) {
+	$repo = Get-ConfigValue updates.github
+	$err = [IO.Path]::GetTempFileName()
+	try {
+		$script:Release = & gh release view "v$Version" --repo $repo @Options 2>$err
+		$status = $LASTEXITCODE
+		$why = "$(Get-Content -Raw $err)".Trim()
+	} finally {
+		Remove-Item -Force $err
+	}
+	if ($status -eq 0) { return $true }
+	if ($why -match 'release not found') { return $false }
+	if (-not $why) { $why = 'gh release view failed' }
+	Fail "could not ask GitHub for the release v$Version of ${repo}: $why"
+}
+
 function Test-Draft([string]$Version) {
 	$repo = Get-ConfigValue updates.github
-	$draft = & gh release view "v$Version" --repo $repo --json isDraft --jq .isDraft 2>$null
-	if ($LASTEXITCODE -eq 0 -and "$draft".Trim() -ne 'true') {
+	if ((Find-Release $Version @('--json', 'isDraft', '--jq', '.isDraft')) -and "$script:Release".Trim() -ne 'true') {
 		Fail "the release v$Version of $repo is already published; a new build needs a new version"
 	}
 }
 
 function Test-DraftCommit([string]$Version, [string]$Commit) {
 	$repo = Get-ConfigValue updates.github
-	$target = & gh release view "v$Version" --repo $repo --json targetCommitish --jq .targetCommitish 2>$null
-	if ($LASTEXITCODE -eq 0 -and "$target".Trim() -ne $Commit) {
-		Fail "the draft release v$Version of $repo holds a build of $("$target".Trim()), not of $Commit; delete the draft and run again"
+	if ((Find-Release $Version @('--json', 'targetCommitish', '--jq', '.targetCommitish')) -and "$script:Release".Trim() -ne $Commit) {
+		Fail "the draft release v$Version of $repo holds a build of $("$script:Release".Trim()), not of $Commit; delete the draft and run again"
+	}
+}
+
+function Test-Unchanged([string]$Commit) {
+	$head = & git rev-parse HEAD
+	$changed = & git status --porcelain --untracked-files=no
+	if ($LASTEXITCODE -ne 0 -or "$head".Trim() -ne $Commit -or $changed) {
+		Fail "the checkout changed while $Commit was built, so the build is not of the commit its draft release would record; nothing was uploaded"
 	}
 }
 
@@ -310,9 +335,8 @@ function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$C
 	if ($files.Count + $manifests.Count -eq 0) { Fail "nothing to upload in $Out" }
 	Test-Draft $Version
 	Test-DraftCommit $Version $Commit
-	$assets = & gh release view $tag --repo $repo --json assets --jq '.assets[].name' 2>$null
-	if ($LASTEXITCODE -eq 0) {
-		if (@($assets) -contains 'SHA256SUMS') {
+	if (Find-Release $Version @('--json', 'assets', '--jq', '.assets[].name')) {
+		if (@($script:Release) -contains 'SHA256SUMS') {
 			$earlier = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
 			New-Item -ItemType Directory $earlier | Out-Null
 			try {

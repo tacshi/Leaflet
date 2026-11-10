@@ -335,10 +335,13 @@ final class BlockText: NSObject {
         return trailing !== before
     }
 
-    func fitDepths(from range: NSRange) -> (changed: [NSRange], trailing: Bool) {
+    typealias Fit = (was: BlockInfo, now: BlockInfo)
+
+    func fitDepths(from range: NSRange) -> (changed: [NSRange], trailing: Bool, fitted: [Fit]) {
         let ns = storage.string as NSString
         let before = trailing
         var changed: [NSRange] = []
+        var fits: [Fit] = []
         var at =
             ns.paragraphRange(for: NSRange(location: min(range.location, ns.length), length: 0))
             .location
@@ -351,14 +354,17 @@ final class BlockText: NSObject {
         }
         while at < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: at, length: 0))
-            guard let info = blockAt(para.location) else { return (changed, trailing !== before) }
+            guard let info = blockAt(para.location) else {
+                return (changed, trailing !== before, fits)
+            }
             var fitted = info
             if info.depth > room {
                 fitted = info.with(depth: room)
                 storage.addAttribute(.leafletBlock, value: fitted, range: para)
                 changed.append(para)
+                fits.append((info, fitted))
             } else if para.location > NSMaxRange(range) {
-                return (changed, trailing !== before)
+                return (changed, trailing !== before, fits)
             }
             room = fitted.depth + (fitted.isList ? 1 : 0)
             at = NSMaxRange(para)
@@ -366,9 +372,11 @@ final class BlockText: NSObject {
         if ns.length == 0 || ns.character(at: ns.length - 1) == 0x0A, let t = trailing,
             t.depth > room
         {
-            trailing = t.with(depth: room)
+            let fitted = t.with(depth: room)
+            trailing = fitted
+            fits.append((t, fitted))
         }
-        return (changed, trailing !== before)
+        return (changed, trailing !== before, fits)
     }
 
     func uniqueIDs() -> Bool {

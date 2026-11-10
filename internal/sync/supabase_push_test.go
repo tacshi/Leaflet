@@ -1164,7 +1164,10 @@ func TestMovesUnderEachOtherSettleOnTheServers(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 
-	if err := svc.putServerPage(row(b, a.ID)); err != nil {
+	if err := st.PutRemotePage(row(b, a.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettlePageLoops(); err != nil {
 		t.Fatal(err)
 	}
 	gotA, _ := st.Page(a.ID)

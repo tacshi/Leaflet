@@ -42,6 +42,8 @@ jobs:
         run: |
           go tool mygo generate
           git diff --exit-code -- locales/catalog_gen.go
+      - name: Build the Mac's speech helper
+        run: scripts/build-speech.sh arm64 x64
 
   check:
     name: Check
@@ -67,7 +69,6 @@ jobs:
   windows:
     name: Windows
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - name: Keep line endings
         run: git config --global core.autocrlf false

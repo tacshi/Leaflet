@@ -13,9 +13,11 @@ struct RootView: View {
     @State private var folderName = ""
 
     private func openReminder() {
-        guard app.activeScene === scene, let target = ReminderInbox.shared.target else { return }
+        guard app.activeScene === scene, app.libraryLoaded,
+            let target = ReminderInbox.shared.target
+        else { return }
         ReminderInbox.shared.target = nil
-        scene.open(target.pageID, at: target.blockID)
+        if app.opens(target.pageID) { scene.open(target.pageID, at: target.blockID) }
     }
 
     private func openVoiceNote() {
@@ -138,6 +140,7 @@ struct RootView: View {
         }
         .onChange(of: scene.selection) { savedPage = scene.selection }
         .onChange(of: ReminderInbox.shared.target) { openReminder() }
+        .onChange(of: app.libraryLoaded) { openReminder() }
         .onChange(of: app.voiceNote) { openVoiceNote() }
         .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }

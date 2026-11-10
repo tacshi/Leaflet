@@ -787,7 +787,7 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 			if ids[i] == orig || err != nil || f.PageID != pageID {
 				t.Fatalf("%s: block %d has file %q (%v) on page %q, the original is %s", how, i, ids[i], err, f.PageID, orig)
 			}
-			if f.StoragePath != f.SpaceID+"/"+f.ID+"/"+f.Name || n.Str("url") != "file://"+filepath.Join(s.Dir, "files", f.ID, f.Name) {
+			if f.StoragePath != f.SpaceID+"/"+f.ID+"/"+f.Name || n.Str("url") != FileURL(f.ID, f.Name) {
 				t.Errorf("%s: block %d: stored at %q, url %q", how, i, f.StoragePath, n.Str("url"))
 			}
 			if !s.HasPending("files", f.ID) {
@@ -901,7 +901,7 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(s.Dir, "files", c.ID)
-	if c.LocalPath != filepath.Join(dir, "escaped.png") || n.Str("url") != "file://"+c.LocalPath || strings.Contains(c.StoragePath, "..") {
+	if c.LocalPath != filepath.Join(dir, "escaped.png") || n.Str("url") != FileURL(c.ID, c.Name) || strings.Contains(c.StoragePath, "..") {
 		t.Errorf("copy at %q, url %q, stored at %q", c.LocalPath, n.Str("url"), c.StoragePath)
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, "..", "escaped.png")); err == nil {
@@ -2339,7 +2339,7 @@ func TestPutRemoteKeepsAWaitingChange(t *testing.T) {
 	}
 }
 
-func TestParentLoop(t *testing.T) {
+func TestSettlePageLoops(t *testing.T) {
 	s := open(t)
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	put := func(id, parent string) {
@@ -2361,20 +2361,29 @@ func TestParentLoop(t *testing.T) {
 	if !s.IsDescendant("a", "b") {
 		t.Error("a is not under b")
 	}
-	if loop := s.ParentLoop("c", "a"); loop != nil {
-		t.Errorf("c under a closes %v", loop)
-	}
-	if loop := s.ParentLoop("a", "b"); !slices.Equal(loop, []string{"a", "b"}) {
-		t.Errorf("a under b closes %v", loop)
-	}
-	if err := s.DetachPage("a"); err != nil {
+	put("d", "c")
+	if err := s.SettlePageLoops(); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := s.Page("a"); p.ParentID != "" || !s.IsDescendant("b", "a") {
-		t.Errorf("after detaching a: parent %q", p.ParentID)
+		t.Errorf("after settling, a is under %q, want the top level with b in it", p.ParentID)
+	}
+	if p, _ := s.Page("d"); p.ParentID != "c" {
+		t.Errorf("d, in no loop, went under %q", p.ParentID)
 	}
 	if n := s.PendingCount(); n != 0 {
-		t.Errorf("detaching queued %d changes", n)
+		t.Errorf("settling queued %d changes", n)
+	}
+
+	put("a", "b")
+	if err := s.Queue("pages", "b", map[string]any{"id": "b"}, "moved", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettlePageLoops(); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.Page("b"); p.ParentID != "" || !s.IsDescendant("a", "b") {
+		t.Errorf("b, whose move has yet to sync, is under %q, want the top level with a in it", p.ParentID)
 	}
 }
 

@@ -53,9 +53,12 @@ func TestWelcomePage(t *testing.T) {
 	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Comments, history and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
-	path := strings.TrimPrefix(image.Str("url"), "file://")
-	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) { // #nosec G304
-		t.Errorf("image file %s: %v", path, err)
+	kept, err := st.File(image.Str("file_id"))
+	if err != nil || image.Str("url") != store.FileURL(kept.ID, kept.Name) {
+		t.Errorf("image url %q of file %+v: %v", image.Str("url"), kept, err)
+	}
+	if data, err := os.ReadFile(kept.LocalPath); err != nil || len(data) != len(welcomeImage) { // #nosec G304
+		t.Errorf("image file %s: %v", kept.LocalPath, err)
 	}
 	if p, err := st.Page(sub); err != nil || p.ParentID != welcome {
 		t.Errorf("subpage %q: parent %q, %v", sub, p.ParentID, err)

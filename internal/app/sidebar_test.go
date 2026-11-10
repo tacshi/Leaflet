@@ -556,7 +556,7 @@ func TestFolderNotMadeSaysSo(t *testing.T) {
 	}
 }
 
-func TestOpenFileNotHereDownloadsIt(t *testing.T) {
+func TestOpenFileNotHereSaysSo(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
 	f, err := a.st.CreateFolder("Docs")
@@ -579,7 +579,7 @@ func TestOpenFileNotHereDownloadsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if len(a.toasts) != 1 || a.toasts[0].text != locales.HostDownloading("budget.txt") {
+	if len(a.toasts) != 1 || a.toasts[0].text != locales.HostNotOnDevice("budget.txt") {
 		t.Errorf("toasts %+v", a.toasts)
 	}
 }

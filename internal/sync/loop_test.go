@@ -1,8 +1,11 @@
 package sync
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -342,5 +345,156 @@ func TestTheLoopChecksTheOpenPages(t *testing.T) {
 	}
 	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "from another device" {
 		t.Errorf("stored %v", c)
+	}
+}
+
+func slowWrites(t *testing.T, st *store.Store, each time.Duration) (svc *Service, asked func(request string) bool) {
+	t.Helper()
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var requests []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if r.Method != "GET" && r.URL.Path != "/rest/v1/devices" {
+			_, _ = io.Copy(io.Discard, r.Body)
+			select {
+			case <-time.After(each):
+			case <-r.Context().Done():
+			}
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	return New(st, remote.SignedInForTest(hs.URL, st, "u1")), func(request string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Contains(requests, request)
+	}
+}
+
+func passTimes(t *testing.T, pass, push time.Duration) {
+	t.Helper()
+	wasPass, wasPush := passFor, pushFor
+	passFor, pushFor = pass, push
+	t.Cleanup(func() { passFor, pushFor = wasPass, wasPush })
+}
+
+func passEnds(svc *Service) *[]error {
+	var ends []error
+	svc.OnState = func(running bool, err error) {
+		if !running {
+			ends = append(ends, err)
+		}
+	}
+	return &ends
+}
+
+func TestALongOutboxLeavesThePullItsTurn(t *testing.T) {
+	st := openStore(t)
+	for i := range 40 {
+		if _, err := st.CreatePage(store.NewPageOptions{Title: fmt.Sprint("Page ", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queued := st.PendingCount()
+	svc, asked := slowWrites(t, st, 50*time.Millisecond)
+	passTimes(t, 2*time.Second, 150*time.Millisecond)
+	ends := passEnds(svc)
+	if err := svc.SyncNow(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the pass left changes unpushed, and said %v", err)
+	}
+	if len(*ends) != 1 || (*ends)[0] != nil {
+		t.Errorf("the app was told the pass, which got some of it done, ended with %v", *ends)
+	}
+	if !asked("GET /rest/v1/folders") {
+		t.Error("nothing was pulled while the outbox was long")
+	}
+	if n := st.PendingCount(); n == 0 || n == queued {
+		t.Errorf("%d of %d changes still wait, want some pushed and some left", n, queued)
+	}
+	select {
+	case <-svc.kick:
+	default:
+		t.Error("no pass was asked for to push the rest")
+	}
+}
+
+func TestAPassThatRunsOutOfTimeIsNotAFailure(t *testing.T) {
+	st := openStore(t)
+	for i := range 10 {
+		if _, err := st.CreatePage(store.NewPageOptions{Title: fmt.Sprint("Page ", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc, _ := slowWrites(t, st, 50*time.Millisecond)
+	passTimes(t, 150*time.Millisecond, time.Minute)
+	ends := passEnds(svc)
+	svc.stalled = stalledPasses - 1
+	if err := svc.SyncNow(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the pass ran out of time, and said %v", err)
+	}
+	if len(*ends) != 1 || (*ends)[0] != nil {
+		t.Errorf("the app was told the pass, which got some of it done, ended with %v", *ends)
+	}
+	select {
+	case <-svc.kick:
+	default:
+		t.Error("no pass was asked for to go on")
+	}
+	if !svc.wantPull.Load() {
+		t.Error("the next pass would not pull, though this one never got to")
+	}
+	if svc.stalled != 0 {
+		t.Error("a pass that got some of it done still counts as stuck")
+	}
+}
+
+func TestPassesThatRunOutOfTimeAndGetNowhereAreAFailure(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.CreatePage(store.NewPageOptions{Title: "Page"}); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := slowWrites(t, st, time.Minute)
+	passTimes(t, 60*time.Millisecond, 30*time.Millisecond)
+	ends := passEnds(svc)
+	for range stalledPasses {
+		if err := svc.SyncNow(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("the pass ran out of time, and said %v", err)
+		}
+	}
+	for i, err := range *ends {
+		if last := i == stalledPasses-1; last != errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("pass %d of %d that got nowhere: the app was told %v", i+1, stalledPasses, err)
+		}
+	}
+
+}
+
+func TestOnlyItsOwnDeadlineIsAPassRunningOut(t *testing.T) {
+	expired, cancel := context.WithTimeout(t.Context(), 0)
+	defer cancel()
+	<-expired.Done()
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	late := fmt.Errorf("request: %w", context.DeadlineExceeded)
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"its deadline", expired, late, true},
+		{"another failure once the deadline passed", expired, remote.ErrSignedOut, false},
+		{"a request's own timeout", t.Context(), late, false},
+		{"stopped", stopped, context.Canceled, false},
+		{"no failure", expired, nil, false},
+	} {
+		if got := ranOut(c.ctx, c.err); got != c.want {
+			t.Errorf("%s: ran out %v, want %v", c.name, got, c.want)
+		}
 	}
 }

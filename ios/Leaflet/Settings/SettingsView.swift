@@ -234,6 +234,7 @@ private struct ConflictsSection: View {
                             Button(L.settingsKeepNewer) { resolve(cf, .keep) }
                         }
                         Button(L.settingsOpenPage) {
+                            guard app.opens(cf.pageID) else { return }
                             scene.open(cf.pageID)
                             dismiss()
                         }

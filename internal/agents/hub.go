@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -586,7 +587,12 @@ func ReplyBlocks(reply string, run *Run) []*doc.Node {
 			if n.Type == "image" {
 				link := n.Str("url")
 				p := &doc.Node{ID: n.ID, Type: "paragraph", Children: n.Children}
-				p.SetDelta(doc.Delta{{Text: cmp.Or(strings.TrimSpace(n.Str("alt")), link), Attrs: doc.Attrs{Href: link}}})
+				text := cmp.Or(strings.TrimSpace(n.Str("alt")), link)
+				if strings.HasPrefix(link, "file:") {
+					// A file's address may be a place on a device, which no reader can follow.
+					text, link = cmp.Or(strings.TrimSpace(n.Str("alt")), path.Base(link)), ""
+				}
+				p.SetDelta(doc.Delta{{Text: text, Attrs: doc.Attrs{Href: link}}})
 				nodes[i] = p
 			}
 			unload(nodes[i].Children)

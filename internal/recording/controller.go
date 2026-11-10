@@ -54,6 +54,7 @@ type Controller struct {
 	ending       map[string]ending
 	late         sync.Mutex
 	saving       map[string]int
+	settled      chan struct{}
 	withText     bool
 	test         func(text string, err error)
 	testFor      time.Duration
@@ -185,6 +186,9 @@ func (r *Controller) hold(id string) {
 	if r.saving == nil {
 		r.saving = map[string]int{}
 	}
+	if len(r.saving) == 0 {
+		r.settled = make(chan struct{})
+	}
 	r.saving[id]++
 	r.mu.Unlock()
 }
@@ -196,7 +200,28 @@ func (r *Controller) release(id string) {
 	} else {
 		delete(r.saving, id)
 	}
+	if len(r.saving) == 0 && r.settled != nil {
+		close(r.settled)
+		r.settled = nil
+	}
 	r.mu.Unlock()
+}
+
+// Settle waits until no recording is being saved or transcribed, for at
+// most d, and reports whether none is.
+func (r *Controller) Settle(d time.Duration) bool {
+	r.mu.Lock()
+	settled := r.settled
+	r.mu.Unlock()
+	if settled == nil {
+		return true
+	}
+	select {
+	case <-settled:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 func (r *Controller) RecoverInterrupted() {
@@ -708,9 +733,16 @@ func (r *Controller) Stop() {
 	r.ending[session] = ending{wav: wav, stream: stream, paused: r.paused}
 	r.mic, r.wav, r.stream, r.test, r.testFor = nil, nil, nil, nil, 0
 	r.connecting, r.early, r.earlyLen = false, nil, 0
+	var soFar int
+	if wav != nil {
+		soFar = wav.DurationMs()
+	}
 	r.mu.Unlock()
 	st := r.State
 	r.State = State{}
+	if test == nil && st.ID != "" {
+		r.keep(st, soFar, withText)
+	}
 	transcribes := test == nil && withText && st.ID != ""
 	if transcribes {
 		r.Transcribing[st.ID] = true
@@ -754,6 +786,7 @@ func (r *Controller) Stop() {
 				rec.Status, rec.DurationMs, rec.SttProvider, rec.SttModel = "ready", int(duration.Milliseconds()), "", ""
 			}); err != nil {
 				log.Printf("recording: %v", err)
+				gone(path, err)
 			}
 			return
 		}
@@ -765,6 +798,10 @@ func (r *Controller) Stop() {
 		})
 		if err != nil {
 			log.Printf("recording: %v", err)
+			gone(path, err)
+			if stream != nil {
+				stream.Close()
+			}
 			r.update(func() {
 				delete(r.Transcribing, st.ID)
 				delete(r.Finishing, st.ID)
@@ -773,6 +810,28 @@ func (r *Controller) Stop() {
 		}
 		r.finish(rec, path, stream, stt)
 	})
+}
+
+// gone removes the audio of a recording whose row went while it was
+// recorded, with its page or its account: nothing would find it again.
+func gone(path string, err error) {
+	if path != "" && store.IsNotFound(err) {
+		_ = os.Remove(path)
+	}
+}
+
+// keep stores what a recording has when it stops, so that it is not lost
+// should the app end before the microphone has let go and the audio is
+// closed.
+func (r *Controller) keep(st State, durationMs int, withText bool) {
+	if _, err := r.st.UpdateRecording(st.ID, func(rec *store.Recording) {
+		rec.DurationMs = durationMs
+		if t := strings.TrimSpace(st.LiveText); withText && t != "" {
+			rec.Transcript = []store.Segment{{EndMs: durationMs, Text: t}}
+		}
+	}); err != nil {
+		log.Printf("recording: %v", err)
+	}
 }
 
 func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSettings, why error, liveErr string) (string, error) {
@@ -857,31 +916,38 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 			r.Finishing[rec.ID] = true
 		}
 	})
-	defer r.update(func() {
-		delete(r.Transcribing, rec.ID)
-		delete(r.Finishing, rec.ID)
-	})
 	segs, err := r.transcribe(rec, path, stream, stt)
 	var lost error
 	if stream != nil {
 		lost = stream.Lost()
 	}
-	if _, err := r.st.FinishRecording(rec.ID, r.uploads(), func(x *store.Recording) {
-		if err != nil {
-			x.Status, x.Error = "failed", err.Error()
-			return
-		}
-		if lost != nil {
-			x.Status, x.Error, x.Transcript = "failed", locales.RecErrLiveStopped(lostReason(lost)), segs
-			if len(segs) > 0 {
-				x.Status = "ready"
+	// The row and the marks change in one turn of the app, so a recording
+	// that reads as done can be transcribed again at once.
+	done := make(chan struct{})
+	r.update(func() {
+		defer close(done)
+		defer func() {
+			delete(r.Transcribing, rec.ID)
+			delete(r.Finishing, rec.ID)
+		}()
+		if _, err := r.st.FinishRecording(rec.ID, r.uploads(), func(x *store.Recording) {
+			if err != nil {
+				x.Status, x.Error = "failed", err.Error()
+				return
 			}
-			return
+			if lost != nil {
+				x.Status, x.Error, x.Transcript = "failed", locales.RecErrLiveStopped(lostReason(lost)), segs
+				if len(segs) > 0 {
+					x.Status = "ready"
+				}
+				return
+			}
+			x.Status, x.Error, x.Transcript = "ready", "", segs
+		}); err != nil && !store.IsNotFound(err) {
+			log.Printf("recording: %v", err)
 		}
-		x.Status, x.Error, x.Transcript = "ready", "", segs
-	}); err != nil && !store.IsNotFound(err) {
-		log.Printf("recording: %v", err)
-	}
+	})
+	<-done
 	if done, err := r.st.Recording(rec.ID); err == nil {
 		r.sweepAudio(done, time.Now())
 	}

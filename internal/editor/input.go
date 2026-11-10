@@ -64,9 +64,16 @@ func (e *Editor) target(r *ui.TextInputRange) (int, int, bool) {
 	}
 	switch {
 	case r != nil:
-		return runeOff(n, r.Start), runeOff(n, r.End), true
+		from, to := runeOff(n, r.Start), runeOff(n, r.End)
+		if from >= to {
+			at := e.clamp(Pos{n.ID, from}).Off
+			return at, at, true
+		}
+		from, to = n.Delta().Widen(from, to)
+		return from, to, true
 	case e.marked:
-		return e.markStart, e.markEnd, true
+		end := textLen(n)
+		return min(e.markStart, end), min(e.markEnd, end), true
 	}
 	return 0, 0, false
 }

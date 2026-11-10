@@ -1126,3 +1126,69 @@ func TestSweepAudioFollowsKeepTheAudio(t *testing.T) {
 		t.Errorf("until uploaded: uploaded %v back %v waiting %v not up %v", here(uploaded), here(back), here(waiting), here(notUp))
 	}
 }
+
+type closedStream struct {
+	lostStream
+	closed chan struct{}
+}
+
+func (s closedStream) Close() { close(s.closed) }
+
+func TestStreamClosesWhenTheRecordingIsGone(t *testing.T) {
+	r, st, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{Provider: "soniox"}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	mic := c.mics[0]
+	mic.sink.Started()
+	s := closedStream{closed: make(chan struct{})}
+	r.mu.Lock()
+	r.stream, r.withText = s, true
+	r.mu.Unlock()
+	if err := st.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	r.Stop()
+	close(mic.letGo)
+	select {
+	case <-s.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the live stream was left open")
+	}
+	if !r.Settle(5 * time.Second) {
+		t.Error("still saving")
+	}
+	if left, _ := filepath.Glob(filepath.Join(st.Dir, "recordings", "*")); len(left) > 0 {
+		t.Errorf("the audio of a recording whose account went is left: %v", left)
+	}
+}
+
+func TestStopKeepsTheLiveTextAtOnce(t *testing.T) {
+	r, st, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{Provider: "soniox"}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.State.ID
+	mic := c.mics[0]
+	mic.sink.Started()
+	mic.sink.Chunk(make([]byte, 2*SampleRate))
+	r.mu.Lock()
+	r.stream, r.withText = lostStream{}, true
+	r.mu.Unlock()
+	r.State.LiveText = "Hello there"
+	r.Stop()
+	rec, err := st.Recording(id)
+	if err != nil || rec.DurationMs != 1000 || len(rec.Transcript) != 1 || rec.Transcript[0].Text != "Hello there" {
+		t.Errorf("kept %+v, %v", rec, err)
+	}
+	if r.Settle(10 * time.Millisecond) {
+		t.Error("settled while the microphone has not let go")
+	}
+	close(mic.letGo)
+	if !r.Settle(10 * time.Second) {
+		t.Fatal("never settled")
+	}
+	if rec, _ := st.Recording(id); rec.Status != "ready" || rec.Transcript[0].Text != "Hello" {
+		t.Errorf("after settling: %+v", rec)
+	}
+}

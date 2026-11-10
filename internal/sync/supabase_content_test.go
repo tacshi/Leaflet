@@ -1087,3 +1087,68 @@ func TestContentSizeGrowsOncePerPullThatFetched(t *testing.T) {
 		t.Errorf("a pull left %d at a time", svc.contentsAt)
 	}
 }
+
+func TestContentItCannotReadIsFetchedOncePerRevision(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	var mu gosync.Mutex
+	content, revision, downloads := newerKind, int64(2), 0
+	at := time.Now().UTC()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		row := map[string]any{"page_id": p.ID, "updated_at": at.Add(time.Duration(revision) * time.Second).Format(time.RFC3339Nano)}
+		sel := r.URL.Query().Get("select")
+		if strings.Contains(sel, "revision") {
+			row["revision"] = revision
+		}
+		if strings.Contains(sel, "content") {
+			downloads++
+			row["content"] = json.RawMessage(content)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{row})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc.open[p.ID] = true
+	ctx := t.Context()
+	passes := func(want int, when string) {
+		t.Helper()
+		for range 2 {
+			if err := svc.pullContents(ctx); err != nil {
+				t.Fatal(err)
+			}
+			svc.watchOpen(ctx)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if downloads != want {
+			t.Errorf("%s: the content came down %d times in all, want %d", when, downloads, want)
+		}
+	}
+	passes(1, "a revision it cannot read")
+	if !waitingOn(t, svc)[p.ID] {
+		t.Error("the page no longer waits for content it can read")
+	}
+
+	mu.Lock()
+	revision = 3
+	mu.Unlock()
+	passes(2, "the next revision, still not readable")
+
+	theirs := &doc.Content{Children: []*doc.Node{para("a", "readable again")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	mu.Lock()
+	content, revision = theirs.Encode(), 4
+	mu.Unlock()
+	passes(3, "a revision it can read")
+	if c := st.Content(p.ID); c == nil || c.Find("a") == nil || textOf(c, "a") != "readable again" {
+		t.Errorf("stored %v", c)
+	}
+	if waitingOn(t, svc)[p.ID] {
+		t.Error("the page still waits for content it has")
+	}
+}

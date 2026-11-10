@@ -1090,10 +1090,14 @@ func TestFrameWithSelectionIsLinear(t *testing.T) {
 		}
 		return best
 	}
-	small, large := frame(1000), frame(8000)
-	if large > 24*small {
-		t.Errorf("a frame of 1000 blocks takes %v, of 8000 %v", small, large)
+	// A busy machine can slow one of the two: a frame that is linear shows it in one of a few tries.
+	var small, large time.Duration
+	for range 3 {
+		if small, large = frame(1000), frame(8000); large <= 24*small {
+			return
+		}
 	}
+	t.Errorf("a frame of 1000 blocks takes %v, of 8000 %v", small, large)
 }
 
 func TestMenusAndShortcutsInCJK(t *testing.T) {

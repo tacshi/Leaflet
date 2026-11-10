@@ -187,12 +187,15 @@ final class EditorController: NSObject, UITextViewDelegate {
         DispatchQueue.main.async { [weak self] in self?.onBlank?(blank) }
     }
 
-    func edited(_ range: NSRange) {
+    func edited(_ range: NSRange, fit: Bool = true) {
         var changed = NSUnionRange(range, text.normalize(around: range))
         if text.keepTrailing() { layout.redrawEnd() }
-        let fitted = text.fitDepths(from: changed)
-        for r in fitted.changed { changed = NSUnionRange(changed, r) }
-        if fitted.trailing { layout.redrawEnd() }
+        if fit {
+            let fitted = text.fitDepths(from: changed)
+            for r in fitted.changed { changed = NSUnionRange(changed, r) }
+            if fitted.trailing { layout.redrawEnd() }
+            edits.registerFitUndo(textView.undoManager, fitted.fitted)
+        }
         if text.keepTrailing() { layout.redrawEnd() }
         style.apply(to: storage, in: changed)
         restyleNumbersAfter(changed)

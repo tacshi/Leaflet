@@ -28,8 +28,9 @@
 # copies see the update once the draft is published. A release that is
 # published already is refused: its files are what installed copies took.
 # So is a draft of another commit, which the draft records as it is made: a
-# release tags one commit. It needs the version named, as mygo.json's is no
-# release's.
+# release tags one commit. So is a working tree with changes, before the
+# build and again once it is done: the build would not be that commit's. It
+# needs the version named, as mygo.json's is no release's.
 #
 # Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 # LEAFLET_UPDATE_KEY, by default
@@ -194,6 +195,11 @@ UPDATE_KEY="$(update_key)"
 if $UPLOAD; then
 	check_gh
 	check_draft "$VERSION"
+	command -v git >/dev/null 2>&1 || die "needs git"
+	# Held first: another build of this checkout has mygo.json changed until it ends.
+	hold_config
+	[[ -z "$(git status --porcelain)" ]] ||
+		die "--upload needs a clean working tree, as the draft release records the commit as what was built; commit or stash the changes first"
 	COMMIT="$(git rev-parse HEAD)"
 	check_pushed "$COMMIT"
 	check_draft_commit "$VERSION" "$COMMIT"
@@ -257,6 +263,7 @@ fi
 if $UPLOAD; then
 	NOTES="$(mktemp)"
 	changelog_notes "${CHANGELOG:-$ROOT_DIR/CHANGELOG.md}" "$VERSION" >"$NOTES"
+	check_unchanged "$COMMIT"
 	upload_release "$VERSION" "$OUT_DIR" "$NOTES" "$COMMIT" "${DIRS[@]}"
 	rm -f "$NOTES"
 	info "uploaded to the draft release v$VERSION of $(config_value updates.github); publish it once every platform is there"

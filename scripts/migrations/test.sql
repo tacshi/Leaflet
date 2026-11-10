@@ -121,6 +121,84 @@ insert into storage.objects (bucket_id, name, owner) values (
   'b0000000-0000-0000-0000-000000000002'
 );
 
+-- The devices send a recording whole, an upsert, whose insert comes first
+-- as its sender's own: the audio stays where it is when the page's owner
+-- sends the row as they pulled it, when a device that has no path for it
+-- yet sends none, and when anyone clears it while the audio is there.
+select pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+insert into public.recordings (id, page_id, audio_path, status) values (
+  'c0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-00000000000a',
+  'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav', 'transcribing'
+) on conflict (id) do update set audio_path = excluded.audio_path, status = excluded.status;
+do $$
+begin
+  if (select audio_path || ' ' || status from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c1')
+     is distinct from 'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav transcribing' then
+    raise exception 'the owner''s upsert of an editor''s recording lost its audio, or did not go through';
+  end if;
+end;
+$$;
+insert into public.recordings (id, page_id, audio_path) values (
+  'c0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-00000000000a',
+  'a0000000-0000-0000-0000-000000000001/c0000000-0000-0000-0000-0000000000c1.wav'
+) on conflict (id) do update set audio_path = excluded.audio_path;
+update public.recordings set audio_path = null where id = 'c0000000-0000-0000-0000-0000000000c1';
+select pg_temp.act_as('b0000000-0000-0000-0000-000000000002');
+insert into public.recordings (id, page_id, audio_path, status) values (
+  'c0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-00000000000a', null, 'ready'
+) on conflict (id) do update set audio_path = excluded.audio_path, status = excluded.status;
+update public.recordings set audio_path = null where id = 'c0000000-0000-0000-0000-0000000000c1';
+do $$
+begin
+  if (select audio_path || ' ' || status from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c1')
+     is distinct from 'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav ready' then
+    raise exception 'a recording lost its audio to a path of someone else''s, or to none, or an upsert did not go through';
+  end if;
+end;
+$$;
+
+-- A recording made with no audio yet takes its path from its recorder's
+-- upsert. With no audio there, as after its recorder removed it, the page's
+-- owner still can't clear the path; its recorder can.
+insert into public.recordings (id, page_id) values (
+  'c0000000-0000-0000-0000-0000000000c2', 'f0000000-0000-0000-0000-00000000000a'
+);
+insert into public.recordings (id, page_id, audio_path) values (
+  'c0000000-0000-0000-0000-0000000000c2', 'f0000000-0000-0000-0000-00000000000a',
+  'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c2.wav'
+) on conflict (id) do update set audio_path = excluded.audio_path;
+select pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+insert into public.recordings (id, page_id, audio_path) values (
+  'c0000000-0000-0000-0000-0000000000c2', 'f0000000-0000-0000-0000-00000000000a', null
+) on conflict (id) do update set audio_path = excluded.audio_path;
+update public.recordings set audio_path = null where id = 'c0000000-0000-0000-0000-0000000000c2';
+do $$
+begin
+  if (select audio_path from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c2')
+     is distinct from 'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c2.wav' then
+    raise exception 'a recording did not take its path from its recorder''s upsert, or the page''s owner cleared it';
+  end if;
+end;
+$$;
+select pg_temp.act_as('b0000000-0000-0000-0000-000000000002');
+insert into public.recordings (id, page_id, audio_path) values (
+  'c0000000-0000-0000-0000-0000000000c2', 'f0000000-0000-0000-0000-00000000000a', null
+) on conflict (id) do update set audio_path = excluded.audio_path;
+do $$
+begin
+  if (select audio_path from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c2') is not null then
+    raise exception 'a recorder could not clear the path of audio that is gone';
+  end if;
+  update public.recordings
+  set audio_path = 'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c2.wav'
+  where id = 'c0000000-0000-0000-0000-0000000000c2';
+  update public.recordings set audio_path = null where id = 'c0000000-0000-0000-0000-0000000000c2';
+  if (select audio_path from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c2') is not null then
+    raise exception 'a recorder''s update could not clear the path of audio that is gone';
+  end if;
+end;
+$$;
+
 -- Their account going, the service role gives up its ownership of the
 -- audio that stays with the owner's page.
 do $$
@@ -156,9 +234,26 @@ reset role;
 select set_config('request.jwt.claim.sub', '', true);
 update public.recordings set created_by = null where id = 'c0000000-0000-0000-0000-0000000000c1';
 
--- The page's owner still hears it, and can't point it at other audio.
+-- The page's owner still hears it, sends its row whole as they pulled it,
+-- or as a device that never had its path has it, and can't point it at
+-- other audio.
 set local role authenticated;
 select pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+insert into public.recordings (id, page_id, audio_path, status) values (
+  'c0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-00000000000a',
+  'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav', 'failed'
+) on conflict (id) do update set audio_path = excluded.audio_path, status = excluded.status;
+insert into public.recordings (id, page_id, audio_path, error) values (
+  'c0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-00000000000a', null, 'No speech'
+) on conflict (id) do update set audio_path = excluded.audio_path, error = excluded.error;
+do $$
+begin
+  if (select audio_path || ' ' || status || ' ' || error from public.recordings where id = 'c0000000-0000-0000-0000-0000000000c1')
+     is distinct from 'b0000000-0000-0000-0000-000000000002/c0000000-0000-0000-0000-0000000000c1.wav failed No speech' then
+    raise exception 'an upsert of a recording whose recorder is gone lost its audio, or did not go through';
+  end if;
+end;
+$$;
 do $$
 begin
   if not exists (

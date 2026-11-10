@@ -128,6 +128,11 @@ func (s *Store) removeLocalCopy(path string) bool {
 	return false
 }
 
-func (s *Store) removeCopies() error {
-	return errors.Join(os.RemoveAll(filepath.Join(s.Dir, "files")), os.RemoveAll(filepath.Join(s.Dir, "recordings")))
+// removeCopies removes the copies of files and recordings once their rows
+// are gone. A copy that cannot go yet, as the audio a recording still has
+// open on Windows, is removed by what holds it: failing here would leave
+// the rows gone and the call half done.
+func (s *Store) removeCopies() {
+	_ = os.RemoveAll(filepath.Join(s.Dir, "files"))
+	_ = os.RemoveAll(filepath.Join(s.Dir, "recordings"))
 }

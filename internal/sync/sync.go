@@ -43,6 +43,7 @@ type Service struct {
 	contentsAt                  int
 	contentsAsked, contentsSlow bool
 	ownLogChecked               bool
+	stalled                     int
 	membersAt                   map[string]time.Time
 	retryAt                     map[outboxKey]time.Time
 	busyUntil                   time.Time
@@ -54,6 +55,7 @@ type Service struct {
 	beat                        every
 	waitingAfter                string
 	pageFiles                   map[string]mergedFile
+	unread                      map[string]int64
 }
 
 type mergedFile struct {
@@ -64,7 +66,8 @@ type mergedFile struct {
 func New(st *store.Store, be *remote.Client) *Service {
 	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{},
 		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}, pageFiles: map[string]mergedFile{},
-		live: map[string]*remote.Realtime{}, heard: map[string]bool{}, hear: make(chan struct{}, 1)}
+		unread: map[string]int64{},
+		live:   map[string]*remote.Realtime{}, heard: map[string]bool{}, hear: make(chan struct{}, 1)}
 }
 
 func (s *Service) folder() icloud.Folder {

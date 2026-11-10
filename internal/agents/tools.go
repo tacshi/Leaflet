@@ -134,7 +134,7 @@ func tool(name, desc string, props any, required ...string) map[string]any {
 
 func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	out := []map[string]any{
-		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole.", map[string]any{}),
+		tool("read_page", "Read the page: every block with its ID, subpage titles, and comment threads. "+partsNote+" An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole.", ordered(partSchema)),
 		tool("read_video_transcript", "Read what is said in a video block of this page, from its site's captions: lines of [m:ss] text, each the time it starts. Only YouTube's and Vimeo's videos have them, and not every one. Read it to summarize a video, write its notes, or cite a moment of it.",
 			map[string]any{"id": map[string]any{"type": "string", "description": "The video block's ID."}}, "id"),
 	}
@@ -144,7 +144,7 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	if crossPage {
 		out = append(out,
 			tool("list_pages", "List the user's other pages (titles and IDs).", map[string]any{}),
-			tool("read_other_page", "Read another of the user's pages. Read-only.", map[string]any{"page_id": map[string]any{"type": "string"}}, "page_id"),
+			tool("read_other_page", "Read another of the user's pages, in parts as read_page gives this one. Read-only.", append(ordered{{"page_id", map[string]any{"type": "string"}}}, partSchema...), "page_id"),
 			tool("list_folders", "List the user's folders (names and IDs), to make a page in one with create_page.", map[string]any{}))
 	}
 	return out
@@ -192,7 +192,7 @@ type ToolContext struct {
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
 	CreatePage    func(title string, nodes []*doc.Node, folderID string) (string, error)
 	ListPages     func() []map[string]any
-	ReadOtherPage func(id string) map[string]any
+	ReadOtherPage func(id string, offset, limit int) map[string]any
 	ListFolders   func() []map[string]any
 	Alone         func(pageID string) bool
 	LinkedNow     func() bool
@@ -215,14 +215,7 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			}
 			return TranscriptText(rec.Transcript)
 		},
-		Subpages: func() []map[string]any {
-			kids, _ := st.Children(pageID, "")
-			out := []map[string]any{}
-			for _, k := range kids {
-				out = append(out, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
-			}
-			return out
-		},
+		Subpages: func() []map[string]any { return subpagesOf(st, pageID) },
 		Comments: func() []map[string]any {
 			threads, _ := st.Threads(pageID)
 			out := []map[string]any{}
@@ -284,24 +277,29 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 				return jsonCost(out[i])
 			})]
 		}
-		tc.ReadOtherPage = func(id string) map[string]any {
+		tc.ReadOtherPage = func(id string, offset, limit int) map[string]any {
 			p, err := st.Page(id)
 			c := st.Content(id)
 			if err != nil || c == nil || !p.DeletedAt.IsZero() || p.SpaceID != here.SpaceID {
 				return nil
 			}
-			subpages := []map[string]any{}
-			if kids, err := st.Children(id, ""); err == nil {
-				for _, k := range kids {
-					subpages = append(subpages, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
-				}
-			}
-			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.viewsOf(id, c),
-				"subpages": subpages, "comments": []map[string]any{}}
+			other := tc
+			other.Subpages = func() []map[string]any { return subpagesOf(st, id) }
+			other.Comments = func() []map[string]any { return nil }
+			return other.ReadPart(id, map[string]any{"id": id, "title": p.DisplayTitle()}, c, offset, limit)
 		}
 		tc.ListFolders = func() []map[string]any { return spaceFolders(st) }
 	}
 	return tc
+}
+
+func subpagesOf(st *store.Store, pageID string) []map[string]any {
+	kids, _ := st.Children(pageID, "")
+	out := []map[string]any{}
+	for _, k := range kids {
+		out = append(out, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
+	}
+	return out
 }
 
 const maxListedPages = 500
@@ -471,7 +469,7 @@ type Executor struct {
 	Ops              []doc.Op
 	Edits            []Edit
 	draft            *draft
-	allowed          map[string]bool
+	allowed, loaded  map[string]bool
 	armed, readPages bool
 	readOthers       bool
 	linked, ended    bool
@@ -575,7 +573,12 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	default:
 		return terr("After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which %s is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.", bad)
 	}
-	if bad = first(loaded, x.mayLoad); bad != "" {
+	bad = first(loaded, x.mayLoad)
+	switch {
+	case bad == "":
+	case x.armed:
+		return terr("After reading another page, a picture, a video or a link card may only hold a URL that one of this page held before you began, or that is in the user's request, which %s is not: among the URLs this page only names, the one picked could carry what you read, as the app loads it by itself. Link to it in text instead.", bad)
+	default:
 		return terr("After reading the web, a picture, a video or a link card may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
 	}
 	return nil
@@ -590,7 +593,10 @@ func (x *Executor) given(u string) bool {
 
 func (x *Executor) mayLoad(u string) bool {
 	u = canonURL(u)
-	return x.allowed[u] || !x.armed && x.sources[u]
+	if x.armed {
+		return x.loaded[u]
+	}
+	return x.allowed[u] || x.sources[u]
 }
 
 func (x *Executor) find(u string, source bool) {
@@ -825,13 +831,19 @@ func reason(err error) string {
 func (x *Executor) begin() {
 	c := x.Ctx
 	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
-		x.allowed = map[string]bool{}
+		x.allowed, x.loaded = map[string]bool{}, map[string]bool{}
 		views := doc.BlockViews(c.Content)
 		for _, v := range views {
 			withoutSiteInfo(v)
 		}
 		see(x.allowed, views)
 		see(x.allowed, c.Request)
+		c.Content.Walk(func(n, _ *doc.Node) {
+			if loads[n.Type] {
+				see(x.loaded, n.Data["url"])
+			}
+		})
+		see(x.loaded, c.Request)
 	}
 }
 
@@ -852,7 +864,7 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	}
 	switch name {
 	case "read_page":
-		return x.readPage(), nil
+		return x.readPage(args)
 	case "write_markdown":
 		return x.write(args)
 	case "insert_blocks":
@@ -896,7 +908,11 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if err != nil {
 			return nil, err
 		}
-		p := x.Ctx.ReadOtherPage(id)
+		offset, limit, err := PartArgs(args)
+		if err != nil {
+			return nil, err
+		}
+		p := x.Ctx.ReadOtherPage(id, offset, limit)
 		if p == nil {
 			return nil, terr("No page %s.", id)
 		}
@@ -915,20 +931,20 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	return nil, terr("Unknown tool %q.", name)
 }
 
-func (x *Executor) readPage() map[string]any {
-	out := map[string]any{
-		"page":     map[string]any{"id": x.Ctx.PageID, "title": x.Ctx.PageTitle},
-		"blocks":   x.Ctx.Views(x.Ctx.Content),
-		"subpages": []map[string]any{},
-		"comments": []map[string]any{},
+func (x *Executor) readPage(args map[string]any) (map[string]any, error) {
+	offset, limit, err := PartArgs(args)
+	if err != nil {
+		return nil, err
 	}
-	if x.Ctx.Subpages != nil {
-		out["subpages"] = x.Ctx.Subpages()
+	tc := x.Ctx
+	none := func() []map[string]any { return nil }
+	if tc.Subpages == nil {
+		tc.Subpages = none
 	}
-	if x.Ctx.Comments != nil {
-		out["comments"] = x.Ctx.Comments()
+	if tc.Comments == nil {
+		tc.Comments = none
 	}
-	return out
+	return tc.ReadPart(tc.PageID, map[string]any{"id": tc.PageID, "title": tc.PageTitle}, tc.Content, offset, limit), nil
 }
 
 func (x *Executor) block(id string) *doc.Node { return x.Ctx.Content.Addressable(id) }

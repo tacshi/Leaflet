@@ -222,20 +222,51 @@ check_gh() {
 	gh auth status >/dev/null 2>&1 || [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] || die "uploads need gh auth login, or GH_TOKEN"
 }
 
-check_draft() {
-	local repo draft
+# Asks gh for the release v$1, with the options after it, into RELEASE. No
+# such release returns 1; any other failure dies, as none of the guards that
+# ask may pass for want of an answer.
+find_release() {
+	local tag="v$1" repo err why status=0
+	shift
 	repo="$(config_value updates.github)"
-	if draft="$(gh release view "v$1" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null)" && [[ "$draft" != true ]]; then
+	err="$(mktemp)"
+	RELEASE="$(gh release view "$tag" --repo "$repo" "$@" 2>"$err")" || status=$?
+	why="$(cat "$err")"
+	rm -f "$err"
+	((status != 0)) || return 0
+	if grep -qi 'release not found' <<<"$why"; then return 1; fi
+	die "could not ask GitHub for the release $tag of $repo: ${why:-gh release view failed}"
+}
+
+check_draft() {
+	local repo
+	repo="$(config_value updates.github)"
+	if find_release "$1" --json isDraft --jq .isDraft && [[ "$RELEASE" != true ]]; then
 		die "the release v$1 of $repo is already published; a new build needs a new version"
 	fi
 }
 
 check_draft_commit() {
-	local repo target
+	local repo
 	repo="$(config_value updates.github)"
-	if target="$(gh release view "v$1" --repo "$repo" --json targetCommitish --jq .targetCommitish 2>/dev/null)" && [[ "$target" != "$2" ]]; then
-		die "the draft release v$1 of $repo holds a build of $target, not of $2; delete the draft and run again"
+	if find_release "$1" --json targetCommitish --jq .targetCommitish && [[ "$RELEASE" != "$2" ]]; then
+		die "the draft release v$1 of $repo holds a build of $RELEASE, not of $2; delete the draft and run again"
 	fi
+}
+
+# Dies unless the checkout is still the commit $1 with no tracked file
+# changed. A build has mygo.json changed for its run, so while it does, the
+# copy it kept is the one compared.
+check_unchanged() {
+	local changed
+	if $CONFIG_HELD; then
+		changed="$(git status --porcelain --untracked-files=no -- . ':(exclude)mygo.json')"
+		[[ "$(git hash-object "$CONFIG_KEPT")" == "$(git rev-parse HEAD:mygo.json)" ]] || changed+=" mygo.json"
+	else
+		changed="$(git status --porcelain --untracked-files=no)"
+	fi
+	[[ "$(git rev-parse HEAD)" == "$1" && -z "$changed" ]] ||
+		die "the checkout changed while $1 was built, so the build is not of the commit its draft release would record; nothing was uploaded"
 }
 
 check_pushed() {
@@ -324,8 +355,8 @@ upload_release() {
 	((${#files[@]} + ${#manifests[@]} > 0)) || die "nothing to upload in $out"
 	check_draft "$version"
 	check_draft_commit "$version" "$commit"
-	if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-		assets="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')"
+	if find_release "$version" --json assets --jq '.assets[].name'; then
+		assets="$RELEASE"
 		if grep -qx SHA256SUMS <<<"$assets"; then
 			earlier="$(mktemp -d)"
 			gh release download "$tag" --repo "$repo" --pattern SHA256SUMS --dir "$earlier"

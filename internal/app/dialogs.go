@@ -15,7 +15,6 @@ import (
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/guard"
 	"leaflet/internal/menu"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -54,6 +53,8 @@ type dialogs struct {
 	hitIndex   int
 	hitList    ui.ListState
 	searches   int
+	searched   int
+	submitted  bool
 
 	folderOpen   bool
 	folder       *store.Folder
@@ -129,6 +130,7 @@ type dialogs struct {
 	linkURL       string
 	linkError     string
 	linkFollowing bool
+	linkOpens     int
 
 	sourceOpen bool
 	sourceID   string
@@ -193,6 +195,21 @@ func (a *App) openSearch() {
 	a.dialogs.query = ""
 	a.dialogs.hitIndex = 0
 	a.dialogs.hits = a.searchHits("")
+	a.dialogs.searches++
+	a.dialogs.searched, a.dialogs.submitted = a.dialogs.searches, false
+}
+
+// submitSearch opens the chosen hit of the query typed: once its results
+// are in, when the search is still under way.
+func (a *App) submitSearch() {
+	d := &a.dialogs
+	if d.searched != d.searches {
+		d.submitted = true
+		return
+	}
+	if d.hitIndex < len(d.hits) {
+		a.openHit(d.hits[d.hitIndex])
+	}
 }
 
 func (a *App) searchDialog(c *ui.Context) {
@@ -214,8 +231,8 @@ func (a *App) searchDialog(c *ui.Context) {
 				d.hitIndex = (d.hitIndex - 1 + len(d.hits)) % len(d.hits)
 				d.hitList.ScrollIntoView(d.hitIndex)
 			}
-			if in.Submitted() && d.hitIndex < len(d.hits) {
-				a.openHit(d.hits[d.hitIndex])
+			if in.Submitted() {
+				a.submitSearch()
 			}
 			ui.Text(c, locales.DialogSearchEscKey()).FontSize(11).TextColor(pal.TextMuted).Padding(2, 6).Radius(4).Border(1, pal.Divider)
 		})
@@ -1042,10 +1059,14 @@ func (a *App) embedDialog(c *ui.Context) {
 }
 
 func (d *dialogs) openLinkDialog(kind string) {
+	d.linkOpens++
+	d.linkFollowing = false
 	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, kind, "", "", ""
 }
 
 func (d *dialogs) editLink(n *doc.Node) {
+	d.linkOpens++
+	d.linkFollowing = false
 	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, n.Type, n.ID, n.Str("url"), ""
 }
 
@@ -1066,29 +1087,8 @@ func (a *App) linkDialog(c *ui.Context) {
 			if d.linkError != "" {
 				ui.Text(c, d.linkError).FontSize(12.5).TextColor(pal.DangerText)
 			}
-			insert := func() {
-				link := strings.TrimSpace(d.linkURL)
-				if d.linkFollowing {
-					return
-				}
-				if d.linkKind != "video" || !doc.ShortVideoLink(link) {
-					a.insertLink(link)
-					return
-				}
-				d.linkFollowing, d.linkError = true, ""
-				go func() {
-					defer guard.Recover()
-					to := web.VideoLink(link)
-					a.update(func() {
-						d.linkFollowing = false
-						if d.linkOpen && strings.TrimSpace(d.linkURL) == link {
-							a.insertLink(to)
-						}
-					})
-				}()
-			}
 			if in.Submitted() {
-				insert()
+				a.submitLink()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 				if d.linkKind == "image" {
@@ -1106,10 +1106,36 @@ func (a *App) linkDialog(c *ui.Context) {
 					label = locales.CommonSave()
 				}
 				if primary(c, "insert", "", label).Disabled(d.linkFollowing).Clicked() {
-					insert()
+					a.submitLink()
 				}
 			})
 		})
+	})
+}
+
+var followVideoLink = web.VideoLink
+
+func (a *App) submitLink() {
+	d := &a.dialogs
+	link := strings.TrimSpace(d.linkURL)
+	if d.linkFollowing {
+		return
+	}
+	if d.linkKind != "video" || !doc.ShortVideoLink(link) {
+		a.insertLink(link)
+		return
+	}
+	d.linkFollowing, d.linkError = true, ""
+	n := d.linkOpens
+	var to string
+	a.offMain(func() { to = followVideoLink(link) }, func() {
+		if n != d.linkOpens {
+			return
+		}
+		d.linkFollowing = false
+		if d.linkOpen && strings.TrimSpace(d.linkURL) == link {
+			a.insertLink(to)
+		}
 	})
 }
 

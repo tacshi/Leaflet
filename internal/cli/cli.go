@@ -245,6 +245,13 @@ given. --clear takes them all off.`,
 	_ = mvFolder.RegisterFlagCompletionFunc("in", r.completeFolder)
 	mvFolder.MarkFlagsOneRequired("in", "top")
 	mvFolder.MarkFlagsMutuallyExclusive("in", "top")
+	inFolder := func(cmd *cobra.Command, _ []string) error {
+		if cmd.Flags().Changed("in") && strings.TrimSpace(folderIn) == "" {
+			return errors.New("--in names no folder")
+		}
+		return nil
+	}
+	newFolder.PreRunE, mvFolder.PreRunE = inFolder, inFolder
 	folders.AddCommand(newFolder, mvFolder, &cobra.Command{
 		Use:   "rename FOLDER NAME",
 		Short: "Change a folder's name",
@@ -921,7 +928,7 @@ func (r *runner) tag(args []string, clear bool) error {
 		}
 		var b strings.Builder
 		for _, t := range p.Tags {
-			b.WriteString(t + "\n")
+			b.WriteString(shown(t) + "\n")
 		}
 		return r.print(b.String())
 	}

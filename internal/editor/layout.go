@@ -524,7 +524,9 @@ func (e *Editor) insertInline(text, href string) {
 	attrs := doc.Attrs{}
 	if n.Type != "code" {
 		attrs = n.Delta().AttrsAt(e.focus.Off)
-		attrs.Href = href
+		if href != "" {
+			attrs.Href = href
+		}
 	}
 	n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
 	e.invalidate(n.ID)

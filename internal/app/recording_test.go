@@ -438,3 +438,20 @@ func TestLiveTextKeepsTwoLines(t *testing.T) {
 		t.Errorf("the text below is at %v with a line heard, %v with two and %v with many", one, two, many)
 	}
 }
+
+func TestFirstRecordingUsesTheKeysKeptHere(t *testing.T) {
+	keychain.Use(keys{"stt.soniox.key": []byte("sk")})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	a.settings.Stt = store.SttSettings{Provider: "soniox", BaseURL: "http://localhost:8000/v1"}
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	a.loadSpeechKeys()
+	if stt := a.sttFor("p1", ""); stt.Provider != "soniox" {
+		t.Errorf("recording with %q while the keys were still being read", stt.Provider)
+	}
+	(<-posted)()
+	if stt := a.sttFor("p1", ""); stt.Provider != "soniox" || !a.speech.sonioxSaved {
+		t.Errorf("recording with %q once they were read, Soniox set up %v", stt.Provider, a.speech.sonioxSaved)
+	}
+}

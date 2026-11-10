@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -382,6 +383,23 @@ func TestDeltaEdits(t *testing.T) {
 	d = d.Delete(0, 6)
 	if d.Plain() != " world" || len(d) != 1 {
 		t.Errorf("delete %+v", d)
+	}
+}
+
+func TestAttrsAtKeepALinkOnlyInsideIt(t *testing.T) {
+	d := Delta{{Text: "a "}, {Text: "li", Attrs: Attrs{Href: "https://x.dev"}},
+		{Text: "nk", Attrs: Attrs{Href: "https://x.dev", Bold: true}}, {Text: "ed", Attrs: Attrs{Href: "https://y.dev"}}, {Text: " b"}}
+	for at, want := range map[int]string{0: "", 2: "", 3: "https://x.dev", 4: "https://x.dev", 5: "https://x.dev", 6: "", 7: "https://y.dev", 8: "", 10: ""} {
+		if got := d.AttrsAt(at).Href; got != want {
+			t.Errorf("at %d the link is %q, want %q", at, got, want)
+		}
+	}
+	if !d.AttrsAt(6).Bold {
+		t.Error("the format before the caret is lost at a link's edge")
+	}
+	whole := Delta{{Text: "link", Attrs: Attrs{Href: "https://x.dev"}}}
+	if got := whole.AttrsAt(4).Href; got != "" {
+		t.Errorf("after a link that ends the text the link is %q", got)
 	}
 }
 
@@ -809,7 +827,7 @@ func TestTagsInTextReadInLinearTime(t *testing.T) {
 			cellMarkdown(md)
 			cellBreaks(md)
 			summaryMarkdown(md)
-			summaryEnd(md)
+			(&lineParser{cur: md}).summaryEnd(md)
 		}
 	}
 	small, large := bestInTurns(read(2000), read(32000))
@@ -965,7 +983,9 @@ func trimSpansByChar(d Delta) Delta {
 		func(a *Attrs) *bool { return &a.Italic },
 		func(a *Attrs) *bool { return &a.Strike },
 	}
-	space := func(i int) bool { return (!cs[i].a.Code || cs[i].r == '\n') && unicode.IsSpace(cs[i].r) }
+	space := func(i int) bool {
+		return !writtenByName(cs[i].a.Mention) && (!cs[i].a.Code || cs[i].r == '\n') && unicode.IsSpace(cs[i].r)
+	}
 	for _, mark := range marks {
 		for i := 0; i < len(cs); {
 			if !*mark(&cs[i].a) {
@@ -1751,5 +1771,247 @@ func TestColorSpansInLines(t *testing.T) {
 		if d := n.Delta(); d[0].Attrs.Color != "#ef4444" {
 			t.Errorf("%s: %+v", n.Type, d)
 		}
+	}
+}
+
+func bullet(id, text string, kids ...*Node) *Node {
+	n := &Node{ID: id, Type: "bulleted_list", Children: kids}
+	n.SetDelta(Delta{{Text: text}})
+	return n
+}
+
+func TestReplaceKeepsBlocksNestedSince(t *testing.T) {
+	heading := func(id, text string) *Node {
+		n := para(id, text)
+		n.Type = "heading"
+		n.Set("level", 2)
+		return n
+	}
+	apply := func(c *Content, ops ...Op) {
+		t.Helper()
+		for _, o := range ops {
+			if err := c.Apply(o); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	c := FromBlocks([]*Node{para("P", "Shopping"), bullet("K", "milk")})
+	run := c.ReplaceOp("P", bullet("P", "Shopping"))
+	apply(c, run)
+	if err := c.Move("K", Position{Parent: "P"}); err != nil {
+		t.Fatal(err)
+	}
+	apply(c, InvertRun([]Op{run})...)
+	if got, want := tree(c), []string{`P paragraph "Shopping"`, `K bulleted_list "milk"`}; !slices.Equal(got, want) {
+		t.Errorf("undone under a nested block: %q, want %q", got, want)
+	}
+
+	c = FromBlocks([]*Node{bullet("L", "list"), para("z", "z")})
+	toHeading := c.ReplaceOp("L", heading("L", "list"))
+	_ = c.Insert(Position{Parent: "L"}, bullet("K", "milk", para("G", "whole")))
+	apply(c, toHeading)
+	if got, want := tree(c), []string{`L heading "list"`, `K bulleted_list "milk"`, `  G paragraph "whole"`, `z paragraph "z"`}; !slices.Equal(got, want) {
+		t.Errorf("a list made a heading: %q, want %q", got, want)
+	}
+
+	c = FromBlocks([]*Node{bullet("L", "list", bullet("a", "a"), para("b", "b"))})
+	rewrite := c.ReplaceOp("L", bullet("L", "new", bullet("a", "a2"), para("n", "n")))
+	_ = c.Insert(Position{Parent: "L"}, para("K", "milk"))
+	_ = c.Insert(Position{Parent: "a"}, para("G", "under a"))
+	_ = c.Insert(Position{Parent: "b"}, para("H", "under b"))
+	apply(c, rewrite)
+	want := []string{`L bulleted_list "new"`, `  a bulleted_list "a2"`, `    G paragraph "under a"`, `  n paragraph "n"`, `  K paragraph "milk"`, `H paragraph "under b"`}
+	if got := tree(c); !slices.Equal(got, want) {
+		t.Errorf("children rewritten: %q, want %q", got, want)
+	}
+
+	c = FromBlocks([]*Node{bullet("L", "list", para("a", "a"))})
+	original := c.Copy().Encode()
+	toHeading = c.ReplaceOp("L", heading("L", "list"))
+	apply(c, toHeading)
+	if c.Find("a") != nil {
+		t.Errorf("the child the op took out is back: %q", tree(c))
+	}
+	apply(c, toHeading.Invert()...)
+	if got := c.Encode(); got != original {
+		t.Errorf("undo gave\n%s\nwant\n%s", got, original)
+	}
+}
+
+func TestDeleteKeepsBlocksNestedSince(t *testing.T) {
+	c := FromBlocks([]*Node{para("a", "a"), para("z", "z")})
+	run := InsertOp(Position{After: "a"}, bullet("X", "made", para("x1", "made too")))
+	if err := c.Apply(run); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Insert(Position{Parent: "X"}, bullet("K", "mine", para("G", "mine too")))
+	_ = c.Insert(Position{Parent: "x1"}, para("H", "under theirs"))
+	_ = c.Move("x1", Position{Parent: "K"})
+	for _, o := range InvertRun([]Op{run}) {
+		if err := c.Apply(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{`a paragraph "a"`, `K bulleted_list "mine"`, `  G paragraph "mine too"`, `  H paragraph "under theirs"`, `z paragraph "z"`}
+	if got := tree(c); !slices.Equal(got, want) {
+		t.Errorf("an insert undone: %q, want %q", got, want)
+	}
+
+	c = FromBlocks([]*Node{para("a", "a"), bullet("X", "list", bullet("K", "item", para("G", "deep")))})
+	if err := c.Apply(c.DeleteOp([]string{"X"})); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tree(c), []string{`a paragraph "a"`}; !slices.Equal(got, want) {
+		t.Errorf("a block deleted with what it holds: %q, want %q", got, want)
+	}
+	if err := c.Apply(Op{Op: "delete", IDs: []string{"a"}}); err != nil || len(c.Children) != 0 {
+		t.Errorf("a delete that names no blocks read: %q, %v", tree(c), err)
+	}
+}
+
+func TestDeepPagesEncode(t *testing.T) {
+	deep := func(n int) *Node {
+		root := bullet("b0", "0")
+		at := root
+		for i := 1; i < n; i++ {
+			k := bullet(fmt.Sprintf("b%d", i), strconv.Itoa(i))
+			at.Children = []*Node{k, para(fmt.Sprintf("p%d", i), "beside")}
+			at = k
+		}
+		return root
+	}
+	depth := func(c *Content) int {
+		var of func([]*Node) int
+		of = func(nodes []*Node) int {
+			most := 0
+			for _, n := range nodes {
+				if n.Type != "table" {
+					most = max(most, of(n.Children))
+				}
+			}
+			return most + 1
+		}
+		return of(c.Children) - 1
+	}
+	const n = 6000
+	c := FromBlocks([]*Node{deep(n)})
+	table, _ := TableNode([][]string{{"a", "b"}}, "t")
+	c.Find(fmt.Sprintf("b%d", n-1)).Children = []*Node{table}
+	back, err := Decode(c.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := depth(back); got != maxDepth {
+		t.Errorf("written %d deep, want %d", got, maxDepth)
+	}
+	var want, got []string
+	c.Walk(func(n, _ *Node) { want = append(want, n.ID) })
+	back.Walk(func(n, _ *Node) { got = append(got, n.ID) })
+	if !slices.Equal(got, want) {
+		t.Errorf("%d blocks written of %d, or out of order", len(got), len(want))
+	}
+	if cells := back.Find("t"); cells == nil || len(cells.Children) != 2 || len(cells.Children[0].Children) != 1 {
+		t.Errorf("the table came apart")
+	}
+	if depth(c) <= maxDepth {
+		t.Error("the page itself changed")
+	}
+	shallow := FromBlocks([]*Node{deep(maxDepth)})
+	if back, _ := Decode(shallow.Encode()); depth(back) != maxDepth || !slices.Equal(tree(back), tree(shallow)) {
+		t.Errorf("a page %d deep changed", maxDepth)
+	}
+
+	var nested any = "x"
+	for range 12000 {
+		nested = []any{nested}
+	}
+	c = FromBlocks([]*Node{para("a", "kept")})
+	c.Children[0].Data["odd"] = nested
+	c.Children[0].Data["worse"] = math.NaN()
+	if back, err := Decode(c.Encode()); err != nil || back.Find("a").Delta().Plain() != "kept" {
+		t.Errorf("a block with data too deep to write: %v", err)
+	}
+}
+
+func TestBackticksReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	lengths := func(n int) string {
+		var b strings.Builder
+		for i := 1; i <= n; i++ {
+			b.WriteString(strings.Repeat("`", i) + "x")
+		}
+		return b.String()
+	}
+	for name, md := range map[string]func(n int) string{
+		"one run":      func(n int) string { return "x" + strings.Repeat("`", n*n/2) },
+		"runs":         lengths,
+		"in a row":     func(n int) string { return "| " + lengths(n) + " |\n| a |" },
+		"in a break":   func(n int) string { return "| <br>" + lengths(n) + " |\n| a |" },
+		"in a summary": func(n int) string { return "<details><summary>" + lengths(n) + "</summary>\n\nx\n\n</details>" },
+	} {
+		read := func(n int) func() {
+			text := md(n)
+			return func() { ParseLines(text) }
+		}
+		small, large := bestInTurns(read(50), read(400))
+		if large > 64*4*small {
+			t.Errorf("%s: 50 read in %v, 400 in %v", name, small, large)
+		}
+	}
+	for md, want := range map[string]Delta{
+		"``a`":        {{Text: "``a`"}},
+		"`a``b`":      {{Text: "a``b", Attrs: Attrs{Code: true}}},
+		"```a``b`c``": {{Text: "```a"}, {Text: "b`c", Attrs: Attrs{Code: true}}},
+		"\\``a`":      {{Text: "`"}, {Text: "a", Attrs: Attrs{Code: true}}},
+		"*a ``` b*":   {{Text: "a ``` b", Attrs: Attrs{Italic: true}}},
+		"[a ``](u) `": {{Text: "a ``", Attrs: Attrs{Href: "u"}}, {Text: " `"}},
+	} {
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q read as %+v, want %+v", md, got, want)
+		}
+	}
+}
+
+func TestMentionsWrittenOnce(t *testing.T) {
+	ann := &Mention{Kind: "user", ID: "u1", Name: "Ann "}
+	for _, a := range []Attrs{{Bold: true}, {Italic: true}, {Strike: true}, {Bold: true, Italic: true}} {
+		a.Mention = ann
+		d := Delta{{Text: "ask "}, {Text: "@Ann ", Attrs: a}, {Text: "today"}}
+		md := d.ToMarkdown()
+		if n := strings.Count(md, "mention:user:u1"); n != 1 {
+			t.Errorf("%q names the mention %d times", md, n)
+		}
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, d) {
+			t.Errorf("%q read back as %+v, want %+v", md, got, d)
+		}
+	}
+	bold := PageMention("p1", "Plan ")
+	bold.Bold = true
+	for _, d := range []Delta{
+		{{Text: "Plan", Attrs: PageMention("p1", "Plan")}, {Text: "Plan", Attrs: PageMention("p1", "Plan")}},
+		{{Text: "see "}, {Text: "Plan ", Attrs: bold}, {Text: "Plan ", Attrs: bold}, {Text: "Plan", Attrs: PageMention("p1", "Plan")}},
+		{{Text: "a", Attrs: Attrs{Href: PageLink("p1") + "#b1"}}, {Text: "Plan", Attrs: PageMention("p1", "Plan")}},
+	} {
+		md := d.ToMarkdown()
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, d) {
+			t.Errorf("%q read back as %+v, want %+v", md, got, d)
+		}
+	}
+}
+
+func TestReplaceLeavesABlockMovedOutWhereItWent(t *testing.T) {
+	c := FromBlocks([]*Node{bullet("L", "list", bullet("a", "a")), para("z", "z")})
+	rewrite := c.ReplaceOp("L", bullet("L", "new", bullet("a", "a2")))
+	if err := c.Move("a", Position{After: "z"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Apply(rewrite); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tree(c), []string{`L bulleted_list "new"`, `z paragraph "z"`, `a bulleted_list "a"`}; !slices.Equal(got, want) {
+		t.Errorf("replaced after a block moved out: %q, want %q", got, want)
 	}
 }

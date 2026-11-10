@@ -14,12 +14,46 @@ func (d Delta) ToMarkdown() string { return d.markdown(escapeText, escapeText, L
 func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	var toks []mdToken
 	var open []mdMark
-	runs := trimSpans(d.Compact())
+	whole := d.Compact()
+	runs := trimSpans(whole)
+	// A page mention's link is its own, apart from the same link beside it: of is the run of whole it is cut from.
+	of := make([]int, len(runs))
+	for i, k, at, end := 0, 0, 0, 0; i < len(runs); i++ {
+		for ; k < len(whole) && at >= end; k++ {
+			end += len(whole[k].Text)
+		}
+		if m := runs[i].Attrs; m.Href != "" && m.Mention != nil && m.Mention.Kind == "page" {
+			of[i] = k
+		}
+		at += len(runs[i].Text)
+	}
+	marks := func(i int) []mdMark {
+		out := marksOf(runs[i].Attrs)
+		if of[i] != 0 {
+			out[0].mention = of[i]
+		}
+		return out
+	}
 	for i, r := range runs {
-		want := marksOf(r.Attrs)
+		want := marks(i)
+		spans := func(m mdMark) int {
+			n := 1
+			for n < len(runs)-i && slices.Contains(marks(i+n), m) {
+				n++
+			}
+			return n
+		}
 		k := 0
 		for k < len(open) && slices.Contains(want, open[k]) {
 			k++
+		}
+		// A mark that ends inside a page mention, at the spaces that end it, would cut its link in two: the mark
+		// closes before the link, and opens again in it.
+		if of[i] != 0 && !slices.Contains(open[:k], want[0]) {
+			link := spans(want[0])
+			if j := slices.IndexFunc(open[:k], func(m mdMark) bool { return spans(m) < link }); j >= 0 {
+				k = j
+			}
 		}
 		for len(open) > k {
 			toks = append(toks, mdToken{mark: open[len(open)-1], close: true})
@@ -31,20 +65,13 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 				opening = append(opening, m)
 			}
 		}
-		spans := func(m mdMark) int {
-			n := 1
-			for n < len(runs)-i && slices.Contains(marksOf(runs[i+n].Attrs), m) {
-				n++
-			}
-			return n
-		}
 		slices.SortStableFunc(opening, func(a, b mdMark) int { return spans(b) - spans(a) })
 		for _, m := range opening {
 			toks = append(toks, mdToken{mark: m, open: true})
 			open = append(open, m)
 		}
 		switch m := r.Attrs.Mention; {
-		case m != nil && m.ID != "" && m.Kind != "page":
+		case writtenByName(m):
 			name := m.Name
 			if name == "" {
 				name = strings.TrimPrefix(r.Text, "@")
@@ -101,9 +128,14 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 }
 
 type mdMark struct {
-	kind byte
-	href string
+	kind    byte
+	href    string
+	mention int
 }
+
+// writtenByName tells a mention of a person or an agent, written whole as a link of its name: no part of it is cut
+// out of the marks around it.
+func writtenByName(m *Mention) bool { return m != nil && m.ID != "" && m.Kind != "page" }
 
 type mdToken struct {
 	mark        mdMark
@@ -249,8 +281,9 @@ func trimSpans(d Delta) Delta {
 	cs := make([]char, 0, n)
 	for i, r := range d {
 		m := marksOf(r.Attrs)
+		named := writtenByName(r.Attrs.Mention)
 		for at, c := range r.Text {
-			cs = append(cs, char{int32(i), int32(at), (!r.Attrs.Code || c == '\n') && unicode.IsSpace(c), m})
+			cs = append(cs, char{int32(i), int32(at), !named && (!r.Attrs.Code || c == '\n') && unicode.IsSpace(c), m})
 		}
 	}
 	for _, mark := range []uint8{bold, italic, strike} {
@@ -615,6 +648,18 @@ type linkScan struct {
 	s               []rune
 	closes, urlEnds []int
 	found           map[string]map[int]int
+	code            codeSpans[rune]
+}
+
+// codeAt reads the code span the backticks at i open, as codeSpanAt does. Where it reads none, the whole run of
+// backticks is text.
+func (l *linkScan) codeAt(i int) (code string, n int) {
+	l.code.s = l.s
+	if n = l.code.span(i); n == 0 {
+		return "", 0
+	}
+	open := ticks(l.s[i:])
+	return codeText(l.s[i+open : i+n-open]), n
 }
 
 func (l *linkScan) scan() {
@@ -636,7 +681,7 @@ func (l *linkScan) scan() {
 			if q+1 == len(s) || s[q+1] != '`' {
 				runEnd = q + 1
 			}
-			next := q + 1
+			next := runEnd
 			if start, ok := runs[runEnd-q]; ok {
 				next = start + runEnd - q
 			}
@@ -745,14 +790,19 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 			continue
 		}
 		if c == '`' {
-			if code, n := codeSpanAt(s[i:]); n > 0 {
-				flush()
-				a := attrs
-				a.Code = true
-				*out = append(*out, Run{Text: code, Attrs: a})
+			code, n := links.codeAt(i)
+			if n == 0 {
+				n = ticks(s[i:])
+				plain.WriteString(string(s[i : i+n]))
 				i += n
 				continue
 			}
+			flush()
+			a := attrs
+			a.Code = true
+			*out = append(*out, Run{Text: code, Attrs: a})
+			i += n
+			continue
 		}
 		if c == '[' {
 			if text, href, n, ok := links.link(i); ok {
@@ -861,11 +911,56 @@ func sharedAttrs(d Delta, attrs Attrs) Attrs {
 	return a
 }
 
-func codeSpanAt(s []rune) (string, int) {
-	open := 0
-	for open < len(s) && s[open] == '`' {
-		open++
+// codeSpans finds the code spans of a text, each in no more time than its own length takes: one pass finds, for
+// the backticks at every place, the next run of as many, where their span ends.
+type codeSpans[T byte | rune] struct {
+	s    []T
+	ends []int
+}
+
+// span is how long the code span that the backticks at i open is, 0 where no run of as many closes it.
+func (c *codeSpans[T]) span(i int) int {
+	s := c.s
+	if c.ends == nil {
+		c.ends = make([]int, len(s))
+		runs := map[int]int{}
+		runEnd := len(s)
+		for q := len(s) - 1; q >= 0; q-- {
+			if s[q] != '`' {
+				continue
+			}
+			if q+1 == len(s) || s[q+1] != '`' {
+				runEnd = q + 1
+			}
+			if start, ok := runs[runEnd-q]; ok {
+				c.ends[q] = start + runEnd - q
+			}
+			if q == 0 || s[q-1] != '`' {
+				runs[runEnd-q] = q
+			}
+		}
 	}
+	return max(c.ends[i]-i, 0)
+}
+
+func ticks[T byte | rune](s []T) int {
+	n := 0
+	for n < len(s) && s[n] == '`' {
+		n++
+	}
+	return n
+}
+
+func codeText(s []rune) string {
+	code := string(s)
+	if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.TrimSpace(code) != "" {
+		code = code[1 : len(code)-1]
+	}
+	return code
+}
+
+func codeSpanAt(s []rune) (string, int) {
+	open := ticks(s)
 	for j := open; j < len(s); {
 		if s[j] != '`' {
 			j++
@@ -876,10 +971,7 @@ func codeSpanAt(s []rune) (string, int) {
 			end++
 		}
 		if end-j == open {
-			code := string(s[open:j])
-			if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.TrimSpace(code) != "" {
-				code = code[1 : len(code)-1]
-			}
+			code := codeText(s[open:j])
 			if code == "" {
 				return "", 0
 			}
@@ -894,9 +986,10 @@ func skipSpan(links *linkScan, j int) int {
 	s := links.s
 	switch s[j] {
 	case '`':
-		if _, n := codeSpanAt(s[j:]); n > 0 {
+		if _, n := links.codeAt(j); n > 0 {
 			return j + n
 		}
+		return j + ticks(s[j:])
 	case '[':
 		if _, _, n, ok := links.link(j); ok {
 			return j + n

@@ -663,3 +663,59 @@ func TestViewIsPublished(t *testing.T) {
 		t.Fatalf("last page %q", last)
 	}
 }
+
+func TestLinkToADeletedPageStaysHere(t *testing.T) {
+	a := templatesApp(t)
+	here, _ := a.st.CreatePage(store.NewPageOptions{Title: "Here"})
+	gone, _ := a.st.CreatePage(store.NewPageOptions{Title: "Gone"})
+	if _, err := a.st.DeletePage(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(here.ID)
+	for _, id := range []string{gone.ID, "no-such-page"} {
+		a.toasts = nil
+		a.openLink(id, "", -1)
+		if a.page == nil || a.page.id != here.ID || a.route != (Route{Kind: "page", ID: here.ID}) {
+			t.Fatalf("a link to %s left the page: %+v", id, a.route)
+		}
+		if len(a.toasts) != 1 || a.toasts[0].text != locales.EditorPageNotFound() {
+			t.Errorf("said %+v", a.toasts)
+		}
+	}
+	made, _ := a.st.CreatePage(store.NewPageOptions{Title: "Made elsewhere"})
+	if a.openPage(made.ID); a.page == nil || a.page.id != made.ID {
+		t.Errorf("a page not listed yet does not open: %+v", a.route)
+	}
+}
+
+func TestTitleRenamedElsewhereIsKept(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	a.reloadAll()
+	a.openPage(p.ID)
+	if err := a.st.RenamePage(p.ID, "Renamed elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	a.newPage("", "")
+	if q, _ := a.st.Page(p.ID); q.Title != "Renamed elsewhere" {
+		t.Errorf("a new page renamed the open one back to %q", q.Title)
+	}
+
+	a.openPage(p.ID)
+	a.page.title = "Typed here"
+	if err := a.st.RenamePage(p.ID, "Renamed again"); err != nil {
+		t.Fatal(err)
+	}
+	a.newPage("", "")
+	if q, _ := a.st.Page(p.ID); q.Title != "Typed here" {
+		t.Errorf("the title typed was not saved: %q", q.Title)
+	}
+
+	a.openPage(p.ID)
+	a.page.title = "Typed again"
+	a.saveTitle()
+	if a.saveTitle(); a.page.title != "Typed again" {
+		t.Errorf("saved twice before the pages were read again, the title is %q", a.page.title)
+	}
+}

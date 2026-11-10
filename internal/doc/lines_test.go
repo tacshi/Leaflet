@@ -277,3 +277,93 @@ func TestTableCellLineBreaks(t *testing.T) {
 		t.Errorf("rows %q", rows)
 	}
 }
+
+func TestNestingStopsAtADepth(t *testing.T) {
+	depth := func(nodes []*Node) int {
+		var of func([]*Node) int
+		of = func(nodes []*Node) int {
+			most := 0
+			for _, n := range nodes {
+				most = max(most, of(n.Children))
+			}
+			return most + 1
+		}
+		return of(nodes) - 1
+	}
+	const n = maxDepth + 20
+	var items, toggles, mixed strings.Builder
+	var want, twice []string
+	for i := range n {
+		fmt.Fprintf(&items, "%s- item %d\n", strings.Repeat("\t", i), i)
+		fmt.Fprintf(&toggles, "<details><summary>item %d</summary>\n", i)
+		fmt.Fprintf(&mixed, "%s- item %d\n%[1]s  <details>\n%[1]s  <summary>item %[2]d</summary>\n", strings.Repeat("    ", i), i)
+		want = append(want, fmt.Sprintf("item %d", i))
+		twice = append(twice, want[i], want[i])
+	}
+	toggles.WriteString("inside\n" + strings.Repeat("</details>\n", n) + "\nafter")
+	oneLine := "x\n" + strings.Repeat("<details>", n) + "inside" + strings.Repeat("\n</details>", n) + "\nafter"
+	for name, tc := range map[string]struct {
+		md   string
+		want []string
+	}{
+		"items":    {items.String(), want},
+		"toggles":  {toggles.String(), append(slices.Clone(want), "inside", "after")},
+		"one line": {oneLine, append(append([]string{"x"}, make([]string, n)...), "inside", "after")},
+		"mixed":    {mixed.String(), twice},
+	} {
+		c := FromBlocks(ParseLines(tc.md))
+		if got := depth(c.Children); got != maxDepth {
+			t.Errorf("%s: read %d deep, want %d", name, got, maxDepth)
+		}
+		if got := texts(c); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: read as %q, want %q", name, got, tc.want)
+		}
+	}
+	after := ParseLines(toggles.String())
+	if last := after[len(after)-1]; len(after) != 2 || last.Delta().Plain() != "after" {
+		t.Errorf("the toggles close on %d blocks", len(after))
+	}
+	c := FromBlocks(ParseLines("x\n" + strings.Repeat("<details>", 20000)))
+	if _, err := Decode(c.Encode()); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestTableCellLinksReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	read := func(n int) func() {
+		md := "| " + strings.Repeat("[", n) + "<br>" + strings.Repeat("](u)", n) + " |\n| a |"
+		return func() { ParseLines(md) }
+	}
+	small, large := bestInTurns(read(1000), read(16000))
+	if large > 64*small {
+		t.Errorf("1000 links read in %v, 16000 in %v", small, large)
+	}
+	rows := TableRows(ParseLines("| [a<br>[b<br>c](v)](u<br>) | `<br>` |\n| x | y |")[0])
+	if want := "[a\n[b\nc](v)](u<br>)"; cellBreaks("[a<br>[b<br>c](v)](u<br>)") != want || len(rows) != 2 || rows[0][1] != "`<br>`" {
+		t.Errorf("breaks in links read as %q, %q", cellBreaks("[a<br>[b<br>c](v)](u<br>)"), rows)
+	}
+}
+
+func TestTogglesOnALineReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	for _, unit := range []string{"<details>", "<details><summary>a</summary>", "<details> <summary>`a` ``</summary>  ", "<details>`a` "} {
+		read := func(n int) func() {
+			md := strings.Repeat(unit, n)
+			return func() { ParseLines(md) }
+		}
+		small, large := bestInTurns(read(500), read(8000))
+		if large > 64*small {
+			t.Errorf("%q: 500 read in %v, 8000 in %v", unit, small, large)
+		}
+	}
+	got := ParseLines("<details> <summary>a `</summary>` b</summary>  <details open><summary>c ``</summary>d `e` \n</details>\nf")
+	want := []string{"toggle_list collapsed=true \"a `</summary>` b\"", "  toggle_list collapsed=false \"c \\\\`\\\\`\"", "    paragraph \"d `e`\"", "  paragraph \"f\""}
+	if !slices.Equal(shape(got), want) {
+		t.Errorf("toggles on a line read as %q, want %q", shape(got), want)
+	}
+}

@@ -36,7 +36,7 @@ type Workspace struct {
 	Reading      bool
 	Pages        func() ([]WorkspacePage, error)
 	Page         func(id string) (WorkspacePage, bool)
-	ReadPage     func(id string) (map[string]any, error)
+	ReadPage     func(id string, offset, limit int) (map[string]any, error)
 	Search       func(query string) ([]map[string]any, error)
 	Folders      func() []map[string]any
 	CreatePage   func(title string, nodes []*doc.Node, parentID, folderID string) (doc.NewPage, error)
@@ -55,7 +55,7 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 			tool("list_pages", "List the user's pages, at most 500, fewer where their titles are long (more_pages says how many more; search_pages finds them): their IDs, titles and tags, the page or folder each is in, and whether others share it; and their folders.", map[string]any{}),
 			tool("search_pages", "Find the user's pages by title, tag or text. Words starting with # (as #work) keep to the pages with those tags.",
 				map[string]any{"query": map[string]any{"type": "string"}}, "query"),
-			tool("read_page", "Read one of the user's pages: every block with its ID, its tags and its subpages. Read-only.", map[string]any{"page_id": pageID}, "page_id"))
+			tool("read_page", "Read one of the user's pages: every block with its ID, its tags and its subpages. "+partsNote+" Read-only.", append(ordered{{"page_id", pageID}}, partSchema...), "page_id"))
 	}
 	return append(out,
 		tool("list_folders", "List the user's folders: their names and IDs, and the folder each is in.", map[string]any{}),
@@ -127,8 +127,12 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		if p.People {
 			return nil, terr("“%s” is shared with other people, who write in it too: the agent here reads none of it. To work with it, ask the agent on that page.", p.Title)
 		}
+		offset, limit, err := PartArgs(args)
+		if err != nil {
+			return nil, err
+		}
 		x.armed, x.readPages = true, true
-		out, err := w.ReadPage(p.ID)
+		out, err := w.ReadPage(p.ID, offset, limit)
 		if err != nil {
 			return nil, terr("Could not read “%s”: %v", p.Title, err)
 		}
@@ -464,7 +468,7 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			return out, nil
 		},
 		Page: page,
-		ReadPage: func(id string) (map[string]any, error) {
+		ReadPage: func(id string, offset, limit int) (map[string]any, error) {
 			p, err := st.Page(id)
 			if err != nil {
 				return nil, err
@@ -473,17 +477,13 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if err != nil {
 				return nil, err
 			}
-			subpages := []map[string]any{}
-			if kids, err := st.Children(id, ""); err == nil {
-				for _, k := range kids {
-					subpages = append(subpages, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
-				}
-			}
 			info := map[string]any{"id": id, "title": p.DisplayTitle()}
 			if len(p.Tags) > 0 {
 				info["tags"] = p.Tags
 			}
-			return map[string]any{"page": info, "blocks": reader.viewsOf(id, c), "subpages": subpages}, nil
+			r := reader
+			r.Subpages = func() []map[string]any { return subpagesOf(st, id) }
+			return r.ReadPart(id, info, c, offset, limit), nil
 		},
 		Search: func(query string) ([]map[string]any, error) {
 			hits, err := st.SearchPages(ctx, query, 20, mine)

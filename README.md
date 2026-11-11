@@ -84,8 +84,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   math, diagrams, charts, images, files, videos, link cards and sandboxed
   interactive embeds.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
-  pages, a selection toolbar with text colors, folding headings, an
-  outline, and links to pages and to single blocks.
+  pages, a selection toolbar with text colors, formulas typeset in the line
+  from `$x^2$`, folding headings, an outline, and links to pages and to
+  single blocks.
 - Videos from YouTube, Vimeo, Bilibili, Dailymotion and Niconico, or video
   files, that play in the page, with notes under each, as a video's
   description has them: a time in them plays that video from there. A link
@@ -297,7 +298,8 @@ last on this device, with no selection.
 
 Agents read and write text color and highlight in text fields as
 `<span style="color:#ef4444;background:#fde68a">text</span>`, in hex.
-`leaflet cat` and exports leave colors out.
+`leaflet cat` and exports leave colors out. A formula in the line is
+`$x^2$`, in TeX.
 
 To try it on a development build, give a binary the dev app's data folder:
 
@@ -430,7 +432,8 @@ rules.
 | `internal/editor` | The block editor: model, editing, layout, input and blocks |
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
 | `internal/menu`, `internal/shortcut` | What the `/` and `@` menus offer, and what Markdown typed in a page becomes, for both apps' editors |
-| `internal/rendered` | The pages that draw math (KaTeX) and diagrams (Pele), in frames with no network |
+| `internal/rendered` | The pages that draw diagrams (Pele) and hold embeds, in frames with no network |
+| `internal/mathtex` | Formulas laid out from TeX with Untie, for both apps to draw and for web pages as SVG |
 | `internal/webpage` | A page as a web page that stands alone, as a public link shares it and Export › PDF prints it, on both apps |
 | `internal/starters` | The templates that come with Leaflet |
 | `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
@@ -458,7 +461,7 @@ rules.
 
 Microphone capture runs in a small page on the app's own `leaflet-rec://`
 scheme, a secure context the system's web view lets use the microphone, so
-the app needs no native code to capture audio. Embeds, math and diagrams
+the app needs no native code to capture audio. Embeds and diagrams
 run in sandboxed frames under a content security policy with no network,
 and can never call the app's Go code. WebRTC, which such a policy does not cover,
 is blocked where the web view knows CSP's `webrtc` directive and otherwise

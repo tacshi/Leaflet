@@ -442,9 +442,9 @@ JSON body.
 | --- | --- | --- |
 | `account` | `{ action: "delete" }` | `{ ok }` |
 
-A project keeps the `agent`, `providers` and `stt` functions an earlier
-build deployed, for the devices still on that build: a newer build deploys
-`account` alone, leaves the others in place, and calls none of them.
+The app deploys `account` alone, and as it does, deletes the `agent`,
+`providers` and `stt` functions an earlier build deployed: agents and
+transcription run on the device (§4).
 
 ## 6. Sync
 
@@ -743,19 +743,16 @@ template a folder's new pages, or a page's new subpages, start from (null
 for blank ones); there is no foreign key, and a template the app can't
 find leaves new pages blank.
 
-The app uses none of what the `agent`, `providers` and `stt` functions of
-an earlier build work through: the tables `ai_jobs` (a run's job),
-`model_providers` (a provider, whose `encrypted_secret` and `refresh_token`
-hold Vault secret IDs and are not selectable by clients), `stt_settings`,
-`stt_secrets`, `stt_jobs` and `stt_file_jobs`, their secrets in Vault, and
-the RPCs `set_provider_secret`, `get_provider_secret`, `set_stt_secret`,
+Agents and transcription run on the device (§4), which keeps its
+providers, speech settings and keys: the server has no table, secret or
+RPC of theirs. What the `agent`, `providers` and `stt` functions of an
+earlier build worked through is gone since `20261114000000`: the tables
+`ai_jobs`, `model_providers`, `stt_settings`, `stt_secrets`, `stt_jobs` and
+`stt_file_jobs`, their secrets in Vault, `page_history.ai_job_id`, and the
+RPCs `set_provider_secret`, `get_provider_secret`, `set_stt_secret`,
 `get_stt_secret`, `has_stt_secret`, `agent_shared_pages`,
-`agent_card_pages` and `agent_search_pages`. Agents and transcription run
-on the device (§4), which keeps its providers, speech settings and keys.
-The migrations still make them, and a project keeps them and their rows as
-they are: a device still on such a build runs its agents and
-transcriptions through the functions it deployed, which read and write
-them.
+`agent_card_pages` and `agent_search_pages`. A device still on such a
+build syncs as before, and runs no agent or transcription.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.wav`, 16 kHz mono WAV), `files`
 (`{space_id}/{file_id}/{name}`, `{name}` being the file's with `_` for what Storage takes in no key: §6), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).

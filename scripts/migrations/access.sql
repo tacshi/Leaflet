@@ -33,6 +33,24 @@ begin
   if to_regclass('public.page_updates') is not null or to_regproc('public.can_access_space_path') is not null then
     raise exception 'page_updates or can_access_space_path is still there';
   end if;
+
+  -- What agents and speech to text worked through on the server, before
+  -- they ran on the device.
+  select string_agg(n, ', ' order by n) into v_open
+  from unnest(array['ai_jobs', 'model_providers', 'stt_settings', 'stt_secrets', 'stt_jobs', 'stt_file_jobs']) n
+  where to_regclass('public.' || n) is not null;
+  if v_open is not null then
+    raise exception 'tables of the agents and speech to text are still there: %', v_open;
+  end if;
+  select string_agg(distinct p.proname, ', ') into v_open
+  from pg_proc p
+  where p.pronamespace = 'public'::regnamespace
+    and (p.proname like 'agent\_%' or p.proname like '%provider\_secret' or p.proname like '%stt\_secret%'
+      or p.proname in ('page_own_text', 'base_url_origin', 'ai_jobs_in_bounds', 'model_providers_key_stays',
+        'model_providers_cleanup'));
+  if v_open is not null then
+    raise exception 'functions of the agents and speech to text are still there: %', v_open;
+  end if;
 end;
 $$;
 
@@ -47,20 +65,17 @@ declare
 begin
   with expected (tbl, who, privs) as (
     values
-      ('ai_jobs', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('comments', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('devices', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('files', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('folders', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
-      ('model_providers', 'authenticated', 'DELETE'),
       ('page_content', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('page_history', 'authenticated', 'INSERT,SELECT'),
       ('page_permissions', 'authenticated', 'DELETE,SELECT'),
       ('pages', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('profiles', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('recordings', 'authenticated', 'INSERT,SELECT,UPDATE'),
-      ('spaces', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
-      ('stt_settings', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE')
+      ('spaces', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE')
     union all
     select c.relname::text, 'service_role', 'DELETE,INSERT,SELECT,UPDATE'
     from pg_class c
@@ -87,33 +102,21 @@ begin
     raise exception 'table privileges: %', v_drift;
   end if;
 
-  -- model_providers' columns: all but the Vault secrets' IDs, to read.
-  select string_agg(a.attname, ', ' order by a.attname) into v_drift
-  from pg_attribute a
-  where a.attrelid = 'public.model_providers'::regclass and a.attnum > 0 and not a.attisdropped
-    and has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')
-      = (a.attname in ('encrypted_secret', 'refresh_token'));
-  if v_drift is not null
-     or has_any_column_privilege('authenticated', 'public.model_providers', 'INSERT')
-     or has_any_column_privilege('authenticated', 'public.model_providers', 'UPDATE') then
-    raise exception 'model_providers columns readable as they should not be, or writable: %', v_drift;
-  end if;
-
   with expected (fn, who) as (
     select f, 'authenticated'
     from unnest(array[
-      'accept_page_invite', 'agent_card_pages', 'agent_search_pages', 'agent_shared_pages', 'can_edit_page', 'can_read_page',
+      'accept_page_invite', 'can_edit_page', 'can_read_page',
       'can_view_image_path',
       'can_view_page',
       'can_write_file_path', 'claim_starter_pages',
-      'decline_page_invite', 'has_space_access', 'has_stt_secret', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
-      'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_own_text', 'page_role',
-      'set_provider_secret', 'set_stt_secret', 'share_page', 'shares_page_with', 'sign_out_device', 'tags_in_bounds',
+      'decline_page_invite', 'has_space_access', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
+      'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_role',
+      'share_page', 'shares_page_with', 'sign_out_device', 'tags_in_bounds',
       'unshare_page'
     ]) f
     union all
     select f, 'service_role'
-    from unnest(array['get_provider_secret', 'get_stt_secret', 'release_kept_recordings', 'tags_in_bounds']) f
+    from unnest(array['release_kept_recordings', 'tags_in_bounds']) f
   ),
   actual as (
     select p.proname::text as fn, r.who
@@ -787,212 +790,6 @@ begin
 end;
 $$;
 
--- Keys in Vault: a provider's key saved again changes it there, and
--- cleared, or its provider deleted, it goes from there; a speech-to-text
--- key the same. postgres does it, who owns the functions that do.
-reset role;
-insert into public.model_providers (id, user_id, preset)
-values ('e0000000-0000-0000-0000-0000000000ee', 'a1000000-0000-0000-0000-000000000001', 'openai');
-create function pg_temp.provider_key() returns text
-language sql as $$
-  select s.decrypted_secret from public.model_providers mp
-  join vault.decrypted_secrets s on s.id = mp.encrypted_secret
-  where mp.id = 'e0000000-0000-0000-0000-0000000000ee'
-$$;
-create temp table vault_secrets_before as select id from vault.secrets;
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-1');
-select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-2');
-reset role;
-do $$
-begin
-  if pg_temp.provider_key() is distinct from 'key-2'
-     or (select count(*) from vault.secrets where id not in (select id from vault_secrets_before)) <> 1 then
-    raise exception 'saving a key again did not change it in place';
-  end if;
-end;
-$$;
-set local role service_role;
-do $$
-begin
-  if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', 'openai') is distinct from 'key-2' then
-    raise exception 'the Functions read another key';
-  end if;
-  -- The functions deployed before the address came with the read still
-  -- read the key by the provider's id, until Setup deploys these.
-  if public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee') is distinct from 'key-2' then
-    raise exception 'the functions from before read another key';
-  end if;
-  -- Read for an address or preset the provider no longer has, the key is
-  -- not given.
-  begin
-    perform public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'https://old.example/v1', 'openai');
-    raise exception 'a key was read for an address its provider left';
-  exception when serialization_failure then
-  end;
-  begin
-    perform public.get_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', 'custom');
-    raise exception 'a key was read for a preset its provider left';
-  exception when serialization_failure then
-  end;
-end;
-$$;
--- Saved, or cleared, for an address or preset the provider no longer has,
--- the key stays as it was; for the ones it has, it changes.
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-do $$
-begin
-  begin
-    perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-x', 'https://old.example/v1', 'openai');
-    raise exception 'a key was saved for an address its provider left';
-  exception when serialization_failure then
-  end;
-  begin
-    perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', '', '', 'custom');
-    raise exception 'a key was cleared for a preset its provider left';
-  exception when serialization_failure then
-  end;
-end;
-$$;
-reset role;
-do $$
-begin
-  if pg_temp.provider_key() is distinct from 'key-2' then
-    raise exception 'a key saved for an address its provider left changed it';
-  end if;
-end;
-$$;
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-2b', '', 'openai');
-reset role;
-do $$
-begin
-  if pg_temp.provider_key() is distinct from 'key-2b' then
-    raise exception 'a key saved for the provider''s own address did not change';
-  end if;
-end;
-$$;
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', '');
-reset role;
-do $$
-begin
-  if pg_temp.provider_key() is not null or exists (select 1 from vault.secrets where id not in (select id from vault_secrets_before)) then
-    raise exception 'a cleared key is still in Vault';
-  end if;
-end;
-$$;
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-select public.set_provider_secret('e0000000-0000-0000-0000-0000000000ee', 'key-3');
-delete from public.model_providers where id = 'e0000000-0000-0000-0000-0000000000ee';
-select public.set_stt_secret('soniox', 'stt-1');
-reset role;
-do $$
-begin
-  if (select count(*) from vault.secrets where id not in (select id from vault_secrets_before)) <> 1 then
-    raise exception 'a deleted provider''s key is still in Vault, or the speech-to-text key is not';
-  end if;
-end;
-$$;
-set local role authenticated;
-select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-select public.set_stt_secret('soniox', '');
-reset role;
-do $$
-begin
-  if exists (select 1 from vault.secrets where id not in (select id from vault_secrets_before)) then
-    raise exception 'a cleared speech-to-text key is still in Vault';
-  end if;
-end;
-$$;
-
--- A provider's key stays with the address it was saved for, whoever
--- writes the row (the providers function writes it as the service role):
--- a path changed at the same origin keeps it; another origin, another
--- preset, or turning local, and it goes, from Vault too; a key saved after
--- such a move, as the function saves one, stays.
-insert into public.model_providers (id, user_id, preset, base_url)
-values ('e0000000-0000-0000-0000-0000000000ef', 'a1000000-0000-0000-0000-000000000001', 'openai', 'https://api.openai.com/v1');
-create function pg_temp.moved_key(p_change text, p_key text) returns text
-language plpgsql as $$
-declare
-  v_secret uuid;
-  v_key text;
-begin
-  set local role authenticated;
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ef', p_key);
-  reset role;
-  select encrypted_secret into v_secret from public.model_providers where id = 'e0000000-0000-0000-0000-0000000000ef';
-  set local role service_role;
-  execute format('update public.model_providers set %s where id = ''e0000000-0000-0000-0000-0000000000ef''', p_change);
-  reset role;
-  select s.decrypted_secret into v_key from public.model_providers mp
-  join vault.decrypted_secrets s on s.id = mp.encrypted_secret
-  where mp.id = 'e0000000-0000-0000-0000-0000000000ef';
-  if v_key is null and exists (select 1 from vault.secrets where id = v_secret) then
-    raise exception 'a key dropped by "%" is still in Vault', p_change;
-  end if;
-  return v_key;
-end;
-$$;
-do $$
-begin
-  if pg_temp.moved_key('base_url = ''https://API.openai.com:443/v2''', 'key-a') is distinct from 'key-a' then
-    raise exception 'a new path at the same origin lost the key';
-  end if;
-  if pg_temp.moved_key('base_url = ''https://elsewhere.example/v1''', 'key-b') is not null then
-    raise exception 'the key went to another origin';
-  end if;
-  -- A URL parser reads its host as evil.example: a backslash is a slash.
-  if pg_temp.moved_key('base_url = ''https://evil.example\@api.openai.com/v1''', 'key-g') is not null then
-    raise exception 'the key went to a host behind a backslash';
-  end if;
-  if pg_temp.moved_key('base_url = ''https://api.openai.com/v1''', 'key-h') is not null then
-    raise exception 'the key went back from a URL read its own way';
-  end if;
-  if pg_temp.moved_key('preset = ''custom''', 'key-c') is not null then
-    raise exception 'the key went to another preset';
-  end if;
-  if pg_temp.moved_key('is_local = true, preset = ''ollama''', 'key-d') is not null then
-    raise exception 'the key went with a provider turned local';
-  end if;
-  if pg_temp.moved_key('is_local = false, preset = ''openai'', base_url = ''https://api.openai.com/v1''', 'key-e') is not null then
-    raise exception 'the key went with a provider turned cloud again';
-  end if;
-  -- The origins compared, as a URL parser reads them; one it reads its
-  -- own way, or with no host, is the whole URL.
-  if (select string_agg(coalesce(public.base_url_origin(u), 'null'), ' ' order by n)
-      from unnest(array[
-        'https://API.openai.com:443/v2', 'api.openai.com/v1', 'https://user:pw@api.openai.com/v1',
-        E'https://api.openai.com\t.evil.example/v1', 'https:///a.example/v1', 'http://example.com:80/v1',
-        'https://evil.example\@api.openai.com/v1', E'https://\u0430pi.openai.com/v1', '', 'https:///'
-      ]) with ordinality v (u, n))
-     is distinct from
-     'https://api.openai.com https://api.openai.com https://api.openai.com https://api.openai.com.evil.example '
-     || 'https://a.example http://example.com https://evil.example\@api.openai.com/v1 '
-     || E'https://\u0430pi.openai.com/v1 https:// https:///' then
-    raise exception 'base URLs'' origins are not as a URL parser reads them';
-  end if;
-  set local role authenticated;
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ef', 'key-f');
-  reset role;
-  if (select s.decrypted_secret from public.model_providers mp
-      join vault.decrypted_secrets s on s.id = mp.encrypted_secret
-      where mp.id = 'e0000000-0000-0000-0000-0000000000ef') is distinct from 'key-f' then
-    raise exception 'a key saved after a move did not stay';
-  end if;
-end;
-$$;
-delete from public.model_providers where id = 'e0000000-0000-0000-0000-0000000000ef';
-set local role authenticated;
-
 -- Unshared, the editor sees the page no more, nor its content.
 select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
 select public.unshare_page('e0000000-0000-0000-0000-0000000000e1', 'a2000000-0000-0000-0000-000000000002');
@@ -1519,165 +1316,6 @@ select 'a4000000-0000-0000-0000-000000000004', 'Signed out', now() from generate
 set local role authenticated;
 select pg_temp.act_as('a4000000-0000-0000-0000-000000000004');
 insert into public.devices (user_id, name) values ('a4000000-0000-0000-0000-000000000004', 'New one');
-
--- An AI job's request is in bounds as it is written; the apps and the
--- function send far less.
-do $$
-begin
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  begin
-    insert into public.ai_jobs (surface, request)
-    values ('workspace', jsonb_build_object('instruction', repeat('x', 1048577)));
-    raise exception 'an AI job request over 1 MB went in';
-  exception when check_violation then
-    if sqlerrm <> 'ai_job_request_too_long' then
-      raise;
-    end if;
-  end;
-end;
-$$;
--- A job already past the bounds, from before they were kept, still
--- changes: it is marked failed, and given a result; its request is not
--- made longer.
-reset role;
-alter table public.ai_jobs disable trigger ai_jobs_in_bounds;
-insert into public.ai_jobs (id, user_id, surface, status, request)
-values ('fa000000-0000-0000-0000-0000000000a9', 'a1000000-0000-0000-0000-000000000001', 'workspace', 'running',
-        jsonb_build_object('instruction', repeat('x', 1048577)));
-alter table public.ai_jobs enable trigger ai_jobs_in_bounds;
-set local role authenticated;
-do $$
-begin
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  update public.ai_jobs set status = 'failed', error = 'The run stopped before it finished'
-  where id = 'fa000000-0000-0000-0000-0000000000a9';
-  update public.ai_jobs set result = '{"reply": ""}' where id = 'fa000000-0000-0000-0000-0000000000a9';
-  if (select status from public.ai_jobs where id = 'fa000000-0000-0000-0000-0000000000a9') <> 'failed' then
-    raise exception 'a job past the bounds could not be marked failed';
-  end if;
-  begin
-    update public.ai_jobs set request = jsonb_build_object('instruction', repeat('y', 1048577))
-    where id = 'fa000000-0000-0000-0000-0000000000a9';
-    raise exception 'a job''s request was written past 1 MB';
-  exception when check_violation then
-    if sqlerrm <> 'ai_job_request_too_long' then
-      raise;
-    end if;
-  end;
-end;
-$$;
-
--- A speech-to-text key is saved for Soniox alone.
-do $$
-begin
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  begin
-    perform public.set_stt_secret('made-up', 'k');
-    raise exception 'a key was saved for a provider that has none here';
-  exception when invalid_parameter_value then
-    if sqlerrm <> 'unknown_stt_provider' then
-      raise;
-    end if;
-  end;
-  perform public.set_stt_secret('soniox', 'k');
-  if not public.has_stt_secret('soniox') then
-    raise exception 'Soniox''s key was not saved';
-  end if;
-  perform public.set_stt_secret('soniox', '');
-end;
-$$;
-
--- The workspace agent reads a page's title as one others read when its
--- card is on a page they read, by a subpage block or an inline mention in
--- its text.
-do $$
-declare
-  v_host constant uuid := 'fa000000-0000-0000-0000-00000000000a';
-  v_mentioned constant uuid := 'fa000000-0000-0000-0000-00000000000b';
-  v_carded constant uuid := 'fa000000-0000-0000-0000-00000000000c';
-  v_space uuid;
-  v_found uuid[];
-begin
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  select id into v_space from public.spaces where owner_id = auth.uid();
-  insert into public.pages (id, space_id, title) values
-    (v_host, v_space, 'Host'), (v_mentioned, v_space, 'Mentioned'), (v_carded, v_space, 'Carded');
-  insert into public.page_content (page_id, content) values (v_host, jsonb_build_object(
-    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
-      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
-        jsonb_build_object('insert', 'see '),
-        jsonb_build_object('insert', 'Mentioned', 'attributes', jsonb_build_object(
-          'mention', jsonb_build_object('kind', 'page', 'id', v_mentioned::text, 'name', 'Mentioned')))))),
-      jsonb_build_object('id', 'b2', 'type', 'subpage', 'data', jsonb_build_object('page_id', v_carded::text)))),
-    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)));
-  select array_agg(page_id::uuid order by page_id) into v_found
-  from public.agent_card_pages(array[v_host]);
-  if not (v_found @> array[v_mentioned, v_carded]) then
-    raise exception 'the agent did not read a title through a mention and a card: %', v_found;
-  end if;
-end;
-$$;
-
--- The workspace agent's search cuts a match's words from a page's own
--- text: not from what its sites wrote, a link card's title and description
--- and a video's title, though the page is found by them still, in its
--- place, with no words. A card's link and a video's notes are its own.
-do $$
-declare
-  v_older constant uuid := 'fa000000-0000-0000-0000-0000000000b1';
-  v_newer constant uuid := 'fa000000-0000-0000-0000-0000000000b2';
-  v_space uuid;
-  v_hits text[];
-  v_snippets text[];
-begin
-  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  select id into v_space from public.spaces where owner_id = auth.uid();
-  insert into public.pages (id, space_id, title) values (v_older, v_space, 'Snippet host');
-  insert into public.page_content (page_id, content, plain_text) values (v_older, jsonb_build_object(
-    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
-      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
-        jsonb_build_object('insert', 'my own words about '),
-        jsonb_build_object('insert', 'quokkas', 'attributes', jsonb_build_object('bold', true))))),
-      jsonb_build_object('id', 'b2', 'type', 'link_preview', 'data', jsonb_build_object(
-        'url', 'https://example.com/z', 'title', 'Sites write zebras here', 'description', 'zebras galore')),
-      jsonb_build_object('id', 'b3', 'type', 'video', 'data', jsonb_build_object(
-        'url', 'https://example.com/v', 'title', 'Elephant video', 'notes', 'Notes I took')))),
-    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)),
-    E'my own words about quokkas\nSites write zebras here\nElephant video\nNotes I took');
-  insert into public.pages (id, space_id, title) values (v_newer, v_space, 'Second host');
-  insert into public.page_content (page_id, content, plain_text) values (v_newer, jsonb_build_object(
-    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
-      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
-        jsonb_build_object('insert', 'zebras of my own')))))),
-    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)),
-    'zebras of my own');
-
-  if public.page_own_text((select content from public.page_content where page_id = v_older))
-     is distinct from E'my own words about quokkas\nhttps://example.com/z\nNotes I took' then
-    raise exception 'a page''s own text kept what its sites wrote, or lost its own';
-  end if;
-
-  -- Found by the newer page's own text and the older page's card, the
-  -- newer first, as before; the older has no words.
-  select array_agg(page_id::text order by ord), array_agg(coalesce(snippet, '-') order by ord)
-  into v_hits, v_snippets
-  from public.agent_search_pages('zebras', '{}', 20) with ordinality s (page_id, title, snippet, ord);
-  if v_hits is distinct from array[v_newer::text, v_older::text]
-     or v_snippets is distinct from array['zebras of my own', '-'] then
-    raise exception 'a search found %, with %', v_hits, v_snippets;
-  end if;
-  if (select snippet from public.agent_search_pages('Elephant', '{}', 20) where page_id = v_older) is not null then
-    raise exception 'a search''s words were a video''s title';
-  end if;
-  if (select snippet from public.agent_search_pages('quokkas', '{}', 20) where page_id = v_older)
-     is distinct from E'my own words about quokkas\nhttps://example.com/z\nNotes I took' then
-    raise exception 'a search''s words were not cut from the page''s own text';
-  end if;
-  if (select snippet from public.agent_search_pages('took', '{}', 20) where page_id = v_older) is null then
-    raise exception 'a search found no words in a video''s notes';
-  end if;
-end;
-$$;
 
 -- changed_at is when a row was changed where it was changed: the time its
 -- writer sends, no later than the server's clock, or the server's when it

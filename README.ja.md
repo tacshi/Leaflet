@@ -84,8 +84,9 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   ダイアグラム、グラフ、画像、ファイル、動画、リンクカード、サンドボックス内で
   動くインタラクティブな埋め込み。
 - Markdown のショートカット、`/` メニュー、メンバー・エージェント・ページへの
-  `@` メンション、文字色を変えられる選択ツールバー、折りたためる見出し、
-  アウトライン、ページや個々のブロックへのリンク。
+  `@` メンション、文字色を変えられる選択ツールバー、`$x^2$` と書くと行の中に
+  組まれる数式、折りたためる見出し、アウトライン、ページや個々のブロックへの
+  リンク。
 - YouTube、Vimeo、Bilibili、Dailymotion、ニコニコの動画や動画ファイルを
   ページ内で再生し、それぞれの下に動画の概要欄のようなメモを置けます：
   メモの時刻をクリックすると、その動画をそこから再生します。動画や録音の
@@ -298,7 +299,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 
 エージェントはテキストフィールドで文字色とハイライトを
 `<span style="color:#ef4444;background:#fde68a">テキスト</span>` のように 16 進数で
-読み書きします。`leaflet cat` とエクスポートには色は含まれません。
+読み書きします。`leaflet cat` とエクスポートには色は含まれません。行の中の数式は
+TeX で `$x^2$` のように書きます。
 
 開発ビルドで試すには、開発版アプリのデータフォルダをバイナリに渡します：
 
@@ -428,7 +430,8 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 | `internal/editor` | ブロックエディタ：モデル、編集、レイアウト、入力、ブロック |
 | `internal/doc` | ページのドキュメントモデル：ブロック、差分、インライン Markdown、操作、ブロック単位のマージ、Markdown 書き出し |
 | `internal/menu`、`internal/shortcut` | `/` と `@` のメニューの項目と、ページで入力した Markdown の変換（両アプリのエディタで共通） |
-| `internal/rendered` | 数式（KaTeX）とダイアグラム（Pele）を描画するページ。ネットワークのないフレームで動きます |
+| `internal/rendered` | ダイアグラム（Pele）を描画し、埋め込みを収めるページ。ネットワークのないフレームで動きます |
+| `internal/mathtex` | Untie で TeX から組む数式。両方のアプリが描画し、Web ページには SVG として入ります |
 | `internal/webpage` | 単独で開けるウェブページとしてのページ。公開リンクで共有し、書き出し › PDF で印刷するもので、両方のアプリで使います |
 | `internal/starters` | Leaflet に付属するテンプレート |
 | `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
@@ -456,7 +459,7 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 
 マイクのキャプチャは、アプリ独自の `leaflet-rec://` スキーム上の小さなページで
 動きます。これはシステムの Web ビューがマイクの使用を許すセキュアコンテキストな
-ので、音声のキャプチャにネイティブのコードは要りません。埋め込み、数式、
+ので、音声のキャプチャにネイティブのコードは要りません。埋め込みと
 ダイアグラムはネットワークを許さないコンテンツセキュリティポリシーの下、
 サンドボックス化されたフレームで動き、アプリの Go コードを呼び出すことは
 できません。このポリシーが対象としない WebRTC は、Web ビューが CSP の
@@ -483,10 +486,11 @@ SIL Open Font License の [Figtree](https://github.com/erikdkennedy/figtree)
 と [Source Serif 4](https://github.com/adobe-fonts/source-serif)
 （`internal/theme/fonts/OFL-*.txt`）、ISC ライセンスの
 [Lucide](https://lucide.dev) アイコン（`internal/theme/icons/LICENSE`）、
-数式とダイアグラムのための MIT ライセンスの [KaTeX](https://katex.org) と
-[Pele](https://github.com/obsidianmd/pele)
-（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）を同梱
-しています。
+ダイアグラムのための MIT ライセンスの [Pele](https://github.com/obsidianmd/pele)
+（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）、
+数式のための Apache 2.0 ライセンスの [Untie](https://github.com/caelyreth/untie)
+と GUST フォントライセンスの New Computer Modern Math フォント
+（`internal/mathtex/font/GUST-FONT-LICENSE.txt`）を同梱しています。
 
 ## ライセンス
 

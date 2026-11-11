@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui/richtext"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/theme"
 )
 
 func TestDeleteIntoCodeKeepsItPlain(t *testing.T) {
@@ -697,5 +698,53 @@ func TestACompositionThatEndsEmptyIsAChange(t *testing.T) {
 	e.SetMarkedText(nil, "", ui.TextInputRange{})
 	if _, marked := e.MarkedRange(); marked || changes == 0 {
 		t.Errorf("marked %v, %d changes told", marked, changes)
+	}
+}
+
+func TestAFormulaIsTypesetUntilTheCaretIsAtIt(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("area $x^2$")
+	n := e.Content.Children[0]
+	d := n.Delta()
+	if len(d) != 2 || !d[1].Attrs.Math || d[1].Text != "x^2" {
+		t.Fatalf("typed as %+v", d)
+	}
+	font, _, _ := e.style(n)
+	typeset := func() bool {
+		spans, maths := e.spans(n, theme.For(false), font)
+		text := ""
+		for _, s := range spans {
+			text += s.Text
+		}
+		if text != "area x^2" {
+			t.Fatalf("the line reads %q", text)
+		}
+		return len(maths) == 1 && spans[1].ObjectWidth > 0
+	}
+	if typeset() {
+		t.Error("typeset with the caret at its end")
+	}
+	e.anchor, e.focus = Pos{n.ID, 2}, Pos{n.ID, 2}
+	if !typeset() {
+		t.Error("not typeset with the caret away")
+	}
+	if l := e.layout(n, theme.For(false)); len(l.maths) != 1 || len(l.layout.Objects()) == 0 {
+		t.Errorf("laid out with %d formulas, %d objects", len(l.maths), len(l.layout.Objects()))
+	}
+	e.anchor, e.focus = Pos{n.ID, 6}, Pos{n.ID, 6}
+	if typeset() {
+		t.Error("typeset with the caret in it")
+	}
+	if l := e.layout(n, theme.For(false)); len(l.maths) != 0 {
+		t.Error("the layout kept the formula typeset with the caret in it")
+	}
+	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 8}
+	if typeset() {
+		t.Error("typeset with the selection over it")
+	}
+	e.anchor, e.focus = Pos{n.ID, 2}, Pos{n.ID, 2}
+	n.SetDelta(doc.Delta{{Text: "area "}, {Text: `\frac{1`, Attrs: doc.Attrs{Math: true}}})
+	if _, maths := e.spans(n, theme.For(false), font); len(maths) != 0 {
+		t.Error("half a formula typeset")
 	}
 }

@@ -491,6 +491,7 @@ final class EditingRules {
             case "bold": (.leafletBold, true)
             case "strike": (.leafletStrike, true)
             case "code": (.leafletCode, true)
+            case "math": (.leafletMath, true)
             default: (.leafletItalic, true)
             }
         let at = para.location

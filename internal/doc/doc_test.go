@@ -2015,3 +2015,61 @@ func TestReplaceLeavesABlockMovedOutWhereItWent(t *testing.T) {
 		t.Errorf("replaced after a block moved out: %q, want %q", got, want)
 	}
 }
+
+func TestInlineMathMarkdown(t *testing.T) {
+	math := func(tex string) Run { return Run{Text: tex, Attrs: Attrs{Math: true}} }
+	for md, want := range map[string]Delta{
+		"the area is $\\pi r^2$.": {{Text: "the area is "}, math(`\pi r^2`), {Text: "."}},
+		"$a$ and $b$":             {math("a"), {Text: " and "}, math("b")},
+		"it costs $5 and $10":     {{Text: "it costs $5 and $10"}},
+		"from $5 to $6-ish":       {{Text: "from $5 to $6-ish"}},
+		"a lone $ sign":           {{Text: "a lone $ sign"}},
+		"spaced $ x $ out":        {{Text: "spaced $ x $ out"}},
+		"escaped \\$x\\$":         {{Text: "escaped $x$"}},
+		"fenced $`a $ b`$ here":   {{Text: "fenced "}, math("a $ b"), {Text: " here"}},
+		"doubled $$x^2$$ here":    {{Text: "doubled "}, math("x^2"), {Text: " here"}},
+		"**bold $x$**":            {{Text: "bold ", Attrs: Attrs{Bold: true}}, {Text: "x", Attrs: Attrs{Bold: true, Math: true}}},
+		"`code $x$`":              {{Text: "code $x$", Attrs: Attrs{Code: true}}},
+	} {
+		got := FromMarkdown(md)
+		if len(got) != len(want) {
+			t.Errorf("%q read as %+v", md, got)
+			continue
+		}
+		for i := range got {
+			if got[i].Text != want[i].Text || !got[i].Attrs.Equal(want[i].Attrs) {
+				t.Errorf("%q read as %+v", md, got)
+				break
+			}
+		}
+	}
+	for _, d := range []Delta{
+		{{Text: "x = "}, math(`\frac{1}{2}`), {Text: "5 apples"}},
+		{{Text: "$a"}, math("b"), {Text: "c$ and $d$"}},
+		{math(" spaced "), {Text: " then $x$ in text"}},
+		{math("has $ sign"), math("`tick")},
+		{{Text: "price $5 and $10 and a$b$c"}},
+	} {
+		md := d.ToMarkdown()
+		back := FromMarkdown(md)
+		if back.Plain() != d.Compact().Plain() || len(back) != len(d.Compact()) {
+			t.Errorf("%+v wrote %q, read back as %+v", d, md, back)
+			continue
+		}
+		for i, r := range d.Compact() {
+			if back[i].Text != r.Text || back[i].Attrs.Math != r.Attrs.Math {
+				t.Errorf("%+v wrote %q, read back as %+v", d, md, back)
+				break
+			}
+		}
+	}
+	if md := (Delta{{Text: "it costs $5 and $10"}}).ToMarkdown(); md != "it costs $5 and $10" {
+		t.Errorf("prices wrote as %q", md)
+	}
+	if h := (Delta{math("a<b")}).HTML(); !strings.HasPrefix(h, `<span class="tex" title="a&lt;b"><svg `) || !strings.HasSuffix(h, "</svg></span>") {
+		t.Errorf("a formula's HTML: %s", h)
+	}
+	if h := (Delta{math(`\frac{1`)}).HTML(); h != `<code>\frac{1</code>` {
+		t.Errorf("half a formula's HTML: %s", h)
+	}
+}

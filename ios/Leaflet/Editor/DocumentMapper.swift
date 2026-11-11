@@ -89,6 +89,7 @@ enum DocumentMapper {
         if a["underline"]?.bool == true { out[.leafletUnderline] = true }
         if a["strikethrough"]?.bool == true { out[.leafletStrike] = true }
         if a["code"]?.bool == true { out[.leafletCode] = true }
+        if a["math"]?.bool == true { out[.leafletMath] = true }
         if let href = a["href"]?.string, !href.isEmpty { out[.leafletHref] = href }
         if let color = a["color"]?.string { out[.leafletColor] = color }
         if let bg = a["background"]?.string { out[.leafletBackground] = bg }
@@ -237,6 +238,7 @@ enum DocumentMapper {
             if attrs[.leafletUnderline] as? Bool == true { a["underline"] = .bool(true) }
             if attrs[.leafletStrike] as? Bool == true { a["strikethrough"] = .bool(true) }
             if attrs[.leafletCode] as? Bool == true { a["code"] = .bool(true) }
+            if attrs[.leafletMath] as? Bool == true { a["math"] = .bool(true) }
             if let href = attrs[.leafletHref] as? String { a["href"] = .string(href) }
             if let c = attrs[.leafletColor] as? String { a["color"] = .string(c) }
             if let c = attrs[.leafletBackground] as? String { a["background"] = .string(c) }

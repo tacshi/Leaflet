@@ -4244,6 +4244,10 @@
   "@editorInlineCode": {
     "description": "Selection toolbar button that formats text as inline code."
   },
+  "editorInlineMath": "Formula",
+  "@editorInlineMath": {
+    "description": "Selection toolbar button that formats text as a formula in the line, written in TeX."
+  },
   "editorLink": "Link",
   "@editorLink": {
     "description": "Selection toolbar button that adds a link; also the link editor's button that applies it."
@@ -5654,7 +5658,7 @@
   "@welcomeImageAlt": {
     "description": "The welcome guide page, made once on first run: the picture's alternative text."
   },
-  "welcomeIntro": "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync between your devices when you are online. This page shows what a page can do; change anything, it is yours.",
+  "welcomeIntro": "Pages are living documents you write, with agents to help. They are saved on this device and sync between your devices. This page shows what a page can do; change anything, it is yours.",
   "@welcomeIntro": {
     "description": "The welcome guide page, made once on first run: the first paragraph."
   },
@@ -5698,35 +5702,19 @@
   "@welcomeWritingHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeWritingMarkdown": "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they format as you go. At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` a divider. Pasted Markdown keeps its headings, lists, tables and code.",
+  "welcomeWritingMarkdown": "Markdown formats as you type: **bold**, *italic*, `code`, ~~strikethrough~~, [links](https://github.com/egoist/mygo), and dollar signs around TeX for a formula such as $E = mc^2$. Select text to give it a <span style=\"color:#ef4444\">color</span> or a <span style=\"background:#fde68a\">highlight</span>.",
   "@welcomeWritingMarkdown": {
     "description": "The welcome guide page, made once on first run: a paragraph showing inline Markdown; keep the Markdown and the link."
   },
-  "welcomeQuote": "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away.",
-  "@welcomeQuote": {
-    "description": "The welcome guide page, made once on first run: an example quote block."
-  },
-  "welcomeListOutline": "Write a rough outline",
-  "@welcomeListOutline": {
-    "description": "The welcome guide page, made once on first run: an example numbered list item."
-  },
-  "welcomeListNest": "Press **Tab** to nest an item, **⇧Tab** to lift it back",
-  "@welcomeListNest": {
-    "description": "The welcome guide page, made once on first run: an example nested bullet (Markdown)."
-  },
-  "welcomeListAsk": "Ask an agent to fill in a section",
-  "@welcomeListAsk": {
-    "description": "The welcome guide page, made once on first run: an example numbered list item."
-  },
-  "welcomeListReview": "Review its edits, and **Undo** if you don't like them",
-  "@welcomeListReview": {
-    "description": "The welcome guide page, made once on first run: an example numbered list item (Markdown)."
+  "welcomeWritingLines": "At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` a divider. **Tab** nests a list item, and pasted Markdown keeps its structure.",
+  "@welcomeWritingLines": {
+    "description": "The welcome guide: what typed at the start of a line makes a block, how lists nest, and that pasted Markdown keeps its structure. Inline Markdown."
   },
   "welcomeBlocksHeading": "Blocks",
   "@welcomeBlocksHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeBlocksTable": "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting.",
+  "welcomeBlocksTable": "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end.",
   "@welcomeBlocksTable": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -5782,10 +5770,6 @@
   "@welcomeFriday": {
     "description": "The welcome guide page, made once on first run: a due day in the example table."
   },
-  "welcomeCodeIntro": "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block.",
-  "@welcomeCodeIntro": {
-    "description": "The welcome guide page, made once on first run: a paragraph before the code example."
-  },
   "welcomeCodeComment": "Count the words in a page's text, as a byline might.",
   "@welcomeCodeComment": {
     "description": "The welcome guide page, made once on first run: the comment on the first line of the JavaScript example."
@@ -5802,7 +5786,7 @@
   "@welcomeToggleInside": {
     "description": "The welcome guide page, made once on first run: the paragraph inside the example toggle (Markdown)."
   },
-  "welcomeMathDiagram": "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **File** keeps any file with the page.",
+  "welcomeMathDiagram": "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source.",
   "@welcomeMathDiagram": {
     "description": "The welcome guide page, made once on first run: a paragraph naming blocks of the / menu (Markdown)."
   },
@@ -5830,13 +5814,21 @@
   "@welcomeDiagramPublish": {
     "description": "The welcome guide page, made once on first run: a node of the example Mermaid flowchart."
   },
-  "welcomeMediaHeading": "Pictures, video and charts",
+  "welcomeMediaHeading": "Media, charts and embeds",
   "@welcomeMediaHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeMediaImages": "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video that plays in place.",
+  "welcomeMediaImages": "Images are saved with the page. A YouTube, Vimeo, Bilibili, Dailymotion or Niconico link pasted on an empty line plays in place, and each line of a video's notes that starts with a time plays it from there.",
   "@welcomeMediaImages": {
     "description": "The welcome guide page, made once on first run: a paragraph."
+  },
+  "welcomeVideoNotes": "0:00 The opening\n1:00 One minute in\n5:00 Five minutes in",
+  "@welcomeVideoNotes": {
+    "description": "The welcome guide: the notes of its sample video, a line each, every line starting with a time such as 0:00 that plays the video from there. Keep the times and the line breaks."
+  },
+  "welcomeMediaFiles": "**File** keeps any file with the page. Audio and video files play here with notes of their own, and **Transcribe** writes what is said into them.",
+  "@welcomeMediaFiles": {
+    "description": "The welcome guide: what a file block is, that audio and video files play in the page with notes, and that Transcribe writes what is said into the notes. Inline Markdown."
   },
   "welcomeMediaCharts": "Charts are bar, line or pie. Agents make them from your numbers, and **Edit data** changes them by hand.",
   "@welcomeMediaCharts": {
@@ -5870,193 +5862,9 @@
   "@welcomeChartCaption": {
     "description": "The welcome guide page, made once on first run: the caption of the example bar chart."
   },
-  "welcomeChartWordsTitle": "Words written per day",
-  "@welcomeChartWordsTitle": {
-    "description": "The welcome guide page, made once on first run: the title of the example line chart."
-  },
-  "welcomeChartMon": "Mon",
-  "@welcomeChartMon": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartTue": "Tue",
-  "@welcomeChartTue": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartWed": "Wed",
-  "@welcomeChartWed": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartThu": "Thu",
-  "@welcomeChartThu": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartFri": "Fri",
-  "@welcomeChartFri": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartSat": "Sat",
-  "@welcomeChartSat": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartSun": "Sun",
-  "@welcomeChartSun": {
-    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
-  },
-  "welcomeChartAgents": "Agents",
-  "@welcomeChartAgents": {
-    "description": "The welcome guide page, made once on first run: a series of the example line chart."
-  },
-  "welcomeChartWeekTitle": "Where the week went",
-  "@welcomeChartWeekTitle": {
-    "description": "The welcome guide page, made once on first run: the title of the example pie chart."
-  },
-  "welcomeChartWriting": "Writing",
-  "@welcomeChartWriting": {
-    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
-  },
-  "welcomeChartMeetings": "Meetings",
-  "@welcomeChartMeetings": {
-    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
-  },
-  "welcomeChartEmail": "Email",
-  "@welcomeChartEmail": {
-    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
-  },
-  "welcomeChartHours": "Hours",
-  "@welcomeChartHours": {
-    "description": "The welcome guide page, made once on first run: the series of the example pie chart."
-  },
-  "welcomeEmbedsHeading": "Interactive embeds",
-  "@welcomeEmbedsHeading": {
-    "description": "The welcome guide page, made once on first run: a section heading."
-  },
-  "welcomeEmbedsIntro": "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try these:",
+  "welcomeEmbedsIntro": "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try this:",
   "@welcomeEmbedsIntro": {
     "description": "The welcome guide page, made once on first run: a paragraph before the example embeds."
-  },
-  "welcomeSolarTitle": "The solar system, at your speed",
-  "@welcomeSolarTitle": {
-    "description": "An interactive embed in the welcome guide: its title."
-  },
-  "welcomeSolarPause": "Pause",
-  "@welcomeSolarPause": {
-    "description": "An interactive embed in the welcome guide: the solar system's button that stops it."
-  },
-  "welcomeSolarPlay": "Play",
-  "@welcomeSolarPlay": {
-    "description": "An interactive embed in the welcome guide: the solar system's button that starts it again."
-  },
-  "welcomeSolarSpeed": "Speed",
-  "@welcomeSolarSpeed": {
-    "description": "An interactive embed in the welcome guide: the label of the solar system's speed slider."
-  },
-  "welcomeSolarDaysPerSecond": "{count, plural, one {{days} day / s} other {{days} days / s}}",
-  "@welcomeSolarDaysPerSecond": {
-    "description": "An interactive embed in the welcome guide: the solar system's speed: simulated days per second; days is count written out.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "60"
-      },
-      "days": {
-        "type": "String",
-        "example": "60"
-      }
-    }
-  },
-  "welcomeSolarYear": "Year {year}",
-  "@welcomeSolarYear": {
-    "description": "An interactive embed in the welcome guide: the solar system's elapsed time, as Year 1.5.",
-    "placeholders": {
-      "year": {
-        "type": "String",
-        "example": "1.5"
-      }
-    }
-  },
-  "welcomeSolarMercury": "Mercury",
-  "@welcomeSolarMercury": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarVenus": "Venus",
-  "@welcomeSolarVenus": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarEarth": "Earth",
-  "@welcomeSolarEarth": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarMars": "Mars",
-  "@welcomeSolarMars": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarJupiter": "Jupiter",
-  "@welcomeSolarJupiter": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarSaturn": "Saturn",
-  "@welcomeSolarSaturn": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarUranus": "Uranus",
-  "@welcomeSolarUranus": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSolarNeptune": "Neptune",
-  "@welcomeSolarNeptune": {
-    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
-  },
-  "welcomeSavingsTitle": "Savings calculator",
-  "@welcomeSavingsTitle": {
-    "description": "An interactive embed in the welcome guide: its title."
-  },
-  "welcomeSavingsMonthly": "Saved every month",
-  "@welcomeSavingsMonthly": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the monthly deposit."
-  },
-  "welcomeSavingsReturn": "Yearly return",
-  "@welcomeSavingsReturn": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the yearly return."
-  },
-  "welcomeSavingsYears": "Years",
-  "@welcomeSavingsYears": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the years."
-  },
-  "welcomeSavingsYearCount": "{count, plural, one {{years} year} other {{years} years}}",
-  "@welcomeSavingsYearCount": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's number of years; years is count written out.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "20"
-      },
-      "years": {
-        "type": "String",
-        "example": "20"
-      }
-    }
-  },
-  "welcomeSavingsSaved": "Saved",
-  "@welcomeSavingsSaved": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's legend: the money put in."
-  },
-  "welcomeSavingsEarned": "Earned",
-  "@welcomeSavingsEarned": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's legend: the money earned."
-  },
-  "welcomeSavingsSummary": "{saved} saved, {earned} earned",
-  "@welcomeSavingsSummary": {
-    "description": "An interactive embed in the welcome guide: the savings calculator's line under the total; both are amounts of money.",
-    "placeholders": {
-      "saved": {
-        "type": "String",
-        "example": "$120,000"
-      },
-      "earned": {
-        "type": "String",
-        "example": "$85,510"
-      }
-    }
   },
   "welcomePianoTitle": "A piano to play",
   "@welcomePianoTitle": {
@@ -6078,7 +5886,7 @@
   "@welcomeTodosDue": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeRecordings": "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the transcript in the page or has an agent sum it up. **Settings › Speech to text** picks Soniox or an OpenAI-compatible server, which can run on your own network, and the language. The menu bar icon starts a recording without opening the window.",
+  "welcomeRecordings": "A recording comes with a transcript: click a line's time to play from there, and its **…** menu puts the transcript in the page or has an agent sum it up. **Settings › Speech to text** picks what transcribes: this device, Soniox, MOSS or a server of your own.",
   "@welcomeRecordings": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -6086,7 +5894,7 @@
   "@welcomeAgentsHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeAgentsIntro": "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, and the blocks it changed stay tinted until the next.",
+  "welcomeAgentsIntro": "Agents read the page and edit it with you. Each run is one step you can undo, and the blocks it changed stay tinted until the next.",
   "@welcomeAgentsIntro": {
     "description": "The welcome guide page, made once on first run: a paragraph."
   },
@@ -6102,11 +5910,15 @@
   "@welcomeAgentsPanel": {
     "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
   },
+  "welcomeAgentsWorkspace": "With no page open, **Ask the agent** works across all your pages: it finds, makes, tags and files them",
+  "@welcomeAgentsWorkspace": {
+    "description": "The welcome guide, a list item: with no page open, the Ask the agent button starts a chat that works on all the user's pages. Inline Markdown; no period at the end."
+  },
   "welcomeAgentsSettings": "**Settings › Agent providers** sets the default agent and whether agents may read your other pages",
   "@welcomeAgentsSettings": {
     "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
   },
-  "welcomeAgentsExternal": "Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets them up",
+  "welcomeAgentsExternal": "Claude Code, Codex, Cursor and other MCP clients, and the `leaflet` command line, work on your pages too: **Settings › External agents** sets them up",
   "@welcomeAgentsExternal": {
     "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
   },
@@ -6128,11 +5940,15 @@
       }
     }
   },
-  "welcomeOrganizingFolders": "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
+  "welcomeOrganizingFolders": "Folders, from the folder button at the top of the sidebar, group pages and go inside folders. Drag a page or a folder onto one, or choose **Move to…** in its menu.",
   "@welcomeOrganizingFolders": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeOrganizingTags": "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button beside the byline; the sidebar's **Tags** tab groups pages by tag, and a click on a tag opens it there. In search, **#{meetings}** keeps to the pages tagged {meetings}.",
+  "welcomeOrganizingMenu": "A page's **…** menu duplicates it with its subpages, exports it as Markdown or PDF, or saves it as a template, which a blank page then offers to start from.",
+  "@welcomeOrganizingMenu": {
+    "description": "The welcome guide: what a page's … menu does. Inline Markdown."
+  },
+  "welcomeOrganizingTags": "Tags file a page under several names at once, as **{guide}** under this page's title. The sidebar's **Tags** tab groups pages by tag, and **#{meetings}** in search keeps to the pages tagged {meetings}.",
   "@welcomeOrganizingTags": {
     "description": "The welcome guide page, made once on first run: how tags work, naming the guide's and the meeting's tags (Markdown).",
     "placeholders": {
@@ -6150,9 +5966,13 @@
   "@welcomeOrganizingHeadings": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeTogetherHeading": "Comments, history and sync",
+  "welcomeTogetherHeading": "Sharing, comments and sync",
   "@welcomeTogetherHeading": {
     "description": "The welcome guide page, made once on first run: the heading of the section on comments, page history and sync."
+  },
+  "welcomeTogetherShare": "**Share** in the header invites people by email to read or edit a page, or makes a temporary public link.",
+  "@welcomeTogetherShare": {
+    "description": "The welcome guide: the Share button invites people by email or makes a temporary public link. Inline Markdown."
   },
   "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them.",
   "@welcomeTogetherComments": {
@@ -6162,11 +5982,11 @@
   "@welcomeComment": {
     "description": "The welcome guide page, made once on first run: a comment the guide comes with, on its paragraph about comments, from Leaflet (plain text)."
   },
-  "welcomeTogetherHistory": "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what changed since one, inline or side by side, name the current one, or restore it.",
+  "welcomeTogetherHistory": "**Page history** in the **…** menu keeps a version as you edit and before each agent run: see what changed since one, or restore it.",
   "@welcomeTogetherHistory": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeTogetherSync": "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settings › Sync and storage** turns iCloud sync on and chooses which pages stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.",
+  "welcomeTogetherSync": "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in: **Settings › Sync and storage**.",
   "@welcomeTogetherSync": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },

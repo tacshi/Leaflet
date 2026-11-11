@@ -76,6 +76,7 @@ struct FormatCommands: View {
                 .keyboardShortcut("x", modifiers: [.command, .shift])
             Button(L.editorInlineCode) { editor?.toggleInline(.leafletCode) }
                 .keyboardShortcut("e")
+            Button(L.editorInlineMath) { editor?.toggleInline(.leafletMath) }
             Button(L.editorLink + "…") { editor?.editLink() }
                 .keyboardShortcut("k")
             Divider()

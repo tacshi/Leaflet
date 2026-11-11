@@ -13,9 +13,6 @@ import (
 	"leaflet/internal/doc"
 )
 
-//go:embed third_party/katex/katex.min.js
-var KatexJS string
-
 //go:embed third_party/pele/pele.js
 var peleJS string
 
@@ -57,24 +54,6 @@ func ScriptsCSP(scripts ...string) string {
 func dataScript(id string, v any) string {
 	b, _ := json.Marshal(v)
 	return `<script type="application/json" id="` + id + `">` + strings.ReplaceAll(string(b), "</", `<\/`) + `</script>`
-}
-
-const mathScript = `var m = document.getElementById("m");
-try { katex.render(JSON.parse(document.getElementById("formula").textContent), m, {displayMode: true, output: "mathml", throwOnError: true}); }
-catch (e) { m.className = "err"; m.textContent = e.message; }`
-
-var PageMathJS = KatexJS + "\n" + `document.querySelectorAll(".math[data-tex]").forEach(function (el) {
-  try { katex.render(el.dataset.tex, el, {displayMode: true, output: "mathml", throwOnError: true}); } catch (e) {}
-});`
-
-var MathCSP = scriptsCSP(KatexJS, mathScript)
-
-func MathPage(formula string) string {
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
-		`<meta http-equiv="Content-Security-Policy" content="` + MathCSP + `"><style>` + renderedStyle + `
-math{font-size:1.35em}</style></head><body><div id="m"></div>` + dataScript("formula", formula) + `
-<script>` + KatexJS + `</script>
-<script>` + mathScript + `</script></body></html>`
 }
 
 const ZoomScript = `function leafletZoom(view, box, on, full, zoomed) {

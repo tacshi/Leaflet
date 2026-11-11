@@ -2,6 +2,7 @@ package editor
 
 import (
 	"maps"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -10,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/mathtex"
 	"leaflet/internal/rules"
 	"leaflet/internal/theme"
 )
@@ -26,6 +28,10 @@ type blockLayout struct {
 	layout  *ui.TextLayout
 	x, y, h float32
 	font    ui.Font
+	// shown tells which formulas show their source (shownMath), and maths
+	// are the ones typeset, each where its first character is.
+	shown string
+	maths map[int]typeset
 }
 
 const indentStep = 26
@@ -160,15 +166,43 @@ func markerWidth(n *doc.Node) float32 {
 	return 0
 }
 
-func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span {
+func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) ([]ui.Span, map[int]typeset) {
 	if n.Type == "code" {
-		return codeSpans(n.Delta().Plain(), n.Str("language"), font, pal)
+		return codeSpans(n.Delta().Plain(), n.Str("language"), font, pal), nil
 	}
 	d := n.Delta()
 	muted := n.Type == "todo_list" && n.Bool("checked")
 	code := theme.CodeFamily(d.Plain())
 	var out []ui.Span
+	var maths map[int]typeset
+	at, units := 0, 0
 	for _, r := range d {
+		start := at
+		at += utf8.RuneCountInString(r.Text)
+		first := units
+		units += utf16Len(r.Text)
+		if f, ok := e.typesetMath(n, r, start, at, font); ok {
+			ink := pal.Text
+			switch {
+			case r.Attrs.Color != "":
+				ink = textColor(r.Attrs.Color, pal)
+			case muted:
+				ink = pal.TextMuted
+			}
+			if maths == nil {
+				maths = map[int]typeset{}
+			}
+			maths[first] = typeset{f, ink, start}
+			// The source stays in the line, so that every place in it is
+			// where it is in the page: its first character is as large as
+			// the formula, and the rest take no room.
+			head, rest := r.Text[:1], r.Text[1:]
+			out = append(out, ui.Span{Text: head, ObjectWidth: f.Width, ObjectHeight: f.Ascent, ObjectDescent: f.Descent})
+			if rest != "" {
+				out = append(out, ui.Span{Text: rest, Size: 0.01, Color: ui.Transparent, NoLetterSpacing: true})
+			}
+			continue
+		}
 		s := ui.Span{Text: r.Text}
 		if r.Attrs.Bold {
 			s.Weight = 700
@@ -185,7 +219,7 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 		if muted {
 			s.Color = pal.TextMuted
 		}
-		if r.Attrs.Code {
+		if r.Attrs.Code || r.Attrs.Math {
 			s.Font = code
 			s.Size = font.Size * 0.86
 			s.Background = pal.Code
@@ -214,7 +248,71 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 	if len(out) == 0 {
 		out = []ui.Span{{Text: ""}}
 	}
-	return out
+	return out, maths
+}
+
+// A typeset formula stands in the line in place of its source.
+type typeset struct {
+	formula *mathtex.Formula
+	ink     ui.Color
+	// at counts the characters before it, where the layout's own place
+	// for it counts UTF-16 units.
+	at int
+}
+
+func utf16Len(s string) int {
+	n := 0
+	for _, c := range s {
+		n += utf16.RuneLen(c)
+	}
+	return n
+}
+
+// typesetMath lays out the formula of a run, from start to end in its
+// block, unless it shows its source: where the caret or the selection is at
+// it, and where it is no formula yet.
+func (e *Editor) typesetMath(n *doc.Node, r doc.Run, start, end int, font ui.Font) (*mathtex.Formula, bool) {
+	if !r.Attrs.Math || r.Attrs.Mention != nil || e.mathOpen(n.ID, start, end) {
+		return nil, false
+	}
+	for i := 0; i < len(r.Text); i++ {
+		// One character each, as the layout counts them.
+		if r.Text[i] >= 0x80 || r.Text[i] < 0x20 {
+			return nil, false
+		}
+	}
+	return mathtex.Layout(r.Text, font.Size)
+}
+
+// mathOpen tells whether the caret or an end of the selection is at the
+// run from start to end of a block, or the selection in the block reaches
+// into it: its source shows then, to edit.
+func (e *Editor) mathOpen(id string, start, end int) bool {
+	if e.ReadOnly || !e.focused {
+		return false
+	}
+	at := func(p Pos) bool { return p.ID == id && p.Off >= start && p.Off <= end }
+	if at(e.anchor) || at(e.focus) {
+		return true
+	}
+	return e.anchor.ID == id && e.focus.ID == id &&
+		min(e.anchor.Off, e.focus.Off) < start && max(e.anchor.Off, e.focus.Off) > end
+}
+
+// shownMath names the formulas of a block that show their source, for a
+// layout to tell that the ones it was made with are the ones now.
+func (e *Editor) shownMath(n *doc.Node) string {
+	var b strings.Builder
+	at := 0
+	for _, r := range n.Delta() {
+		start := at
+		at += utf8.RuneCountInString(r.Text)
+		if r.Attrs.Math && e.mathOpen(n.ID, start, at) {
+			b.WriteString(strconv.Itoa(start))
+			b.WriteByte(',')
+		}
+	}
+	return b.String()
 }
 
 func (e *Editor) layoutOf(n *doc.Node) *blockLayout {
@@ -240,9 +338,13 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	}
 	text, code := textIDOf(n), e.lookOf(n).code
 	pretty := e.ReadOnly && n.Type != "code"
+	shown := ""
+	if n.Type != "code" {
+		shown = e.shownMath(n)
+	}
 	var runs doc.Delta
 	if l := e.layouts[n.ID]; l != nil && l.pal == pal && l.kind == n.Type && l.width == width && l.font == font &&
-		l.code == code && l.pretty == pretty && l.x == x && l.y == top && sameRest(l.rest, n.Data) {
+		l.code == code && l.pretty == pretty && l.x == x && l.y == top && l.shown == shown && sameRest(l.rest, n.Data) {
 		if l.text == text {
 			return l
 		}
@@ -253,14 +355,14 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	} else {
 		runs = n.Delta()
 	}
-	spans := e.spans(n, pal, font)
+	spans, maths := e.spans(n, pal, font)
 	tl := ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: width, Pretty: pretty})
 	_, h := tl.Size()
 	if h == 0 {
 		h = font.Size * max(font.LineHeight, 1.3)
 	}
 	l := &blockLayout{kind: n.Type, rest: restOf(n.Data), width: width, code: code, text: text, runs: runs, pal: pal,
-		layout: tl, x: x, y: top, h: top + h + bottom, font: font, pretty: pretty}
+		layout: tl, x: x, y: top, h: top + h + bottom, font: font, pretty: pretty, shown: shown, maths: maths}
 	e.layouts[n.ID] = l
 	return l
 }

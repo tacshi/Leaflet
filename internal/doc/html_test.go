@@ -91,8 +91,7 @@ func TestPageHTMLBlocks(t *testing.T) {
 		`<img src="/tok/f/1" alt="a"`,
 		`<img src="https://x.dev/c.png"`,
 		"<em>Demo</em>",
-		`data-tex="x^2"`,
-		`<script src="/tok/math.js" defer></script>`,
+		`class="math" title="x^2"><svg `,
 		`<script src="/tok/comments.js" defer></script>`,
 		"</main><aside>threads</aside></body>",
 	} {
@@ -250,7 +249,7 @@ func TestPageHTMLPrint(t *testing.T) {
 	opts := HTMLOptions{
 		Recording: func(*Node) RecordingView { return RecordingView{Title: "Talk", Lines: lines} },
 		ScriptSource: func(name string) string {
-			if name != "math" && name != "diagram" {
+			if name != "diagram" {
 				return ""
 			}
 			return "/*" + name + "*/"
@@ -276,7 +275,8 @@ func TestPageHTMLPrint(t *testing.T) {
 		`<img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="">`,
 		`<img src="https://x.dev/c.png" alt="">`,
 		"line 11",
-		"</main><script>/*math*/</script>\n<script type=\"module\">/*diagram*/</script>\n</body>",
+		`class="math" title="x^2"><svg `,
+		"</main><script type=\"module\">/*diagram*/</script>\n</body>",
 	} {
 		if !strings.Contains(paper, want) {
 			t.Errorf("the printed page lacks %q:\n%s", want, paper)

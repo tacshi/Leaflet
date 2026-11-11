@@ -5,6 +5,9 @@ import UIKit
 struct EditorStyle {
     var textSize: CGFloat
     var palette: Palette
+    /// The selection while the page is being edited: a formula it is at
+    /// shows its source.
+    var mathOpen: NSRange?
 
     static let indent: CGFloat = 26
     static let marker: CGFloat = 26
@@ -96,6 +99,28 @@ struct EditorStyle {
         return p
     }
 
+    /// The formula at a place in a paragraph, typeset: its whole run and its
+    /// picture. Nil where its source shows instead: with the caret or the
+    /// selection at it, and for what is no formula yet.
+    @MainActor
+    private func typeset(
+        _ s: NSAttributedString, at location: Int, in para: NSRange, size: CGFloat, ink: UIColor
+    ) -> (run: NSRange, picture: MathPicture)? {
+        var run = NSRange()
+        _ = s.attribute(.leafletMath, at: location, longestEffectiveRange: &run, in: para)
+        if let open = mathOpen, open.location <= NSMaxRange(run),
+            NSMaxRange(open) >= run.location
+        {
+            return nil
+        }
+        let tex = (s.string as NSString).substring(with: run)
+        guard
+            let picture = MathPictures.picture(
+                tex, size: size, ink: ink, scale: max(UITraitCollection.current.displayScale, 2))
+        else { return nil }
+        return (run, picture)
+    }
+
     @MainActor
     func apply(to storage: NSMutableAttributedString, in range: NSRange) {
         let ns = storage.string as NSString
@@ -137,12 +162,14 @@ struct EditorStyle {
             s.removeAttribute(.leafletOrdinal, range: para)
         }
         let checked = info.type == "todo_list" && info.checked
+        var pictures: [(at: Int, picture: MathPicture)] = []
         s.enumerateAttributes(in: para) { a, r, _ in
             var font = base
             var traits = font.fontDescriptor.symbolicTraits
             if a[.leafletBold] as? Bool == true { traits.insert(.traitBold) }
             if a[.leafletItalic] as? Bool == true { traits.insert(.traitItalic) }
-            if a[.leafletCode] as? Bool == true {
+            let math = a[.leafletMath] as? Bool == true
+            if a[.leafletCode] as? Bool == true || math {
                 font = metrics.scaledFont(
                     for: .monospacedSystemFont(ofSize: textSize * 0.85, weight: .regular))
             } else if traits != font.fontDescriptor.symbolicTraits,
@@ -158,7 +185,7 @@ struct EditorStyle {
             var update: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             if let hex = a[.leafletBackground] as? String, let c = UIColor(hex: hex) {
                 update[.backgroundColor] = c
-            } else if a[.leafletCode] as? Bool == true {
+            } else if a[.leafletCode] as? Bool == true || math {
                 update[.backgroundColor] = UIColor(palette.code)
             } else if a[.leafletTinted] as? Bool == true {
                 update[.backgroundColor] = UIColor(palette.agentSection)
@@ -175,13 +202,29 @@ struct EditorStyle {
                 if checked { update[.strikethroughColor] = UIColor(palette.textMuted) }
             }
             if let target = Self.linkTarget(a) { update[.link] = target }
+            if math, info.type != "code",
+                let (run, picture) = typeset(
+                    s, at: r.location, in: para, size: base.pointSize, ink: color)
+            {
+                // The source stays in the text, too small to see: its first
+                // character takes the room the formula is drawn in.
+                update[.font] = UIFont.systemFont(ofSize: 0.1)
+                update[.foregroundColor] = UIColor.clear
+                update[.backgroundColor] = nil
+                if r.location == run.location { pictures.append((r.location, picture)) }
+            }
             s.addAttributes(update, range: r)
             for key: NSAttributedString.Key in [
                 .backgroundColor, .underlineStyle, .underlineColor, .strikethroughStyle,
-                .strikethroughColor, .link,
+                .strikethroughColor, .link, .kern, .leafletMathPicture,
             ] where update[key] == nil {
                 s.removeAttribute(key, range: r)
             }
+        }
+        for (at, picture) in pictures {
+            s.addAttributes(
+                [.kern: picture.width, .leafletMathPicture: picture],
+                range: NSRange(location: at, length: 1))
         }
         if info.type == "code", para.length > 0 {
             let code = (s.string as NSString).substring(with: para)

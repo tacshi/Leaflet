@@ -90,8 +90,6 @@ struct BlockCard: View {
         let d = node.data ?? [:]
         let palette = BlockLook.palette
         switch node.type {
-        case "math_equation":
-            return MobileMathPage(d[MobileSourceKey(node.type)]?.string ?? "")
         case "diagram":
             return MobileDiagramPage(
                 d[MobileSourceKey(node.type)]?.string ?? "", palette.surface.hex)
@@ -114,7 +112,7 @@ struct BlockCard: View {
         case "table":
             BlockHeights.of(node.id, width: width)
                 ?? CGFloat(max(TableGrid.rows(node).count, 1)) * scaled(40) + 2
-        case "math_equation": max(BlockHeights.of(node.id, width: width) ?? 96, 44)
+        case "math_equation": MathBlock.height(node, width: width)
         case "diagram":
             max(BlockHeights.of(node.id, width: width) ?? min(max(width * 0.3, 160), 320), 44)
         case "video": BlockHeights.of(node.id, width: width) ?? min(width * 9 / 16, 420) + 44
@@ -139,6 +137,8 @@ struct BlockCard: View {
             VideoBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         case "chart":
             ChartBlock(node: node)
+        case "math_equation":
+            MathBlock(node: node)
         case "table":
             TableGrid(node: node, edit: edit, onHeight: onHeight)
         case "subpage":

@@ -162,7 +162,19 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 			view := ui.Box(c.Key("view")).FillWidth().MinHeight(font.Size * 1.3).Cursor(ui.CursorText)
 			view.Children(func() {
 				if para != nil && para.Delta().Len() > 0 {
-					ui.RichText(c, e.spans(para, pal, font)...).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).TextColor(pal.Text)
+					spans, maths := e.spans(para, pal, font)
+					text := ui.RichText(c, spans...).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).TextColor(pal.Text)
+					if len(maths) > 0 {
+						at := make(map[int]typeset, len(maths))
+						for _, m := range maths {
+							at[m.at] = m
+						}
+						text.DrawObjects(func(p *ui.Painter, i int, r ui.Rect) {
+							if m, ok := at[i]; ok {
+								paintMath(p, m, r.X, r.Y+m.formula.Ascent)
+							}
+						})
+					}
 				}
 			})
 			if !e.ReadOnly && view.Clicked() {

@@ -80,13 +80,14 @@ metadata:
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
 | `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `url` is `file://<file_id>/<name>`, no path on a device, which other devices and people would read: `file_id` finds the file, and a Markdown export writes the file's name alone for a `file:` URL; `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1" |
-| `math_equation` | `formula` | TeX, drawn in display style by KaTeX |
+| `math_equation` | `formula` | TeX, drawn in display style |
 | `diagram` | `source` | Mermaid, drawn by Pele |
 | `recording` | `recording_id`, `title`, `duration_ms` | transcript lives in `recordings` |
 | `subpage` | `page_id` | link card to a child page |
 
 Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
-`href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
+`math` (a formula in the line: the run's text is its TeX source, written
+`$x^2$` in inline Markdown), `href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
 and `color` and `background`, the text's color and highlight as hex
 (`"#rrggbbaa"`). In agents' inline Markdown they are
 `<span style="color:#ef4444ff;background:#eab30840">text</span>`, either

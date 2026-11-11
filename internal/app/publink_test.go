@@ -160,7 +160,7 @@ func TestPubKeepsWhatNeverChanges(t *testing.T) {
 	if page.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("the page is kept: %v", page.Header())
 	}
-	for _, name := range []string{"math.js", "diagram.js", "comments.js", "embed.js", "recording.js", "video.js", "favicon.png"} {
+	for _, name := range []string{"diagram.js", "comments.js", "embed.js", "recording.js", "video.js", "favicon.png"} {
 		served := pubStatic().names[name]
 		if served == name || !strings.HasPrefix(served, strings.TrimSuffix(strings.TrimSuffix(name, ".js"), ".png")+".") {
 			t.Errorf("%s is served as %q", name, served)

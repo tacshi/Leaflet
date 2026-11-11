@@ -81,7 +81,8 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
   折叠块、表格、带语法高亮的代码、数学公式、图表与示意图、图片、文件、
   视频、链接卡片，以及在沙盒中运行的交互式嵌入。
 - Markdown 快捷输入、`/` 菜单、用 `@` 提及成员、智能体和页面、带文字颜色
-  的选区工具栏、可折叠的标题、大纲，以及指向页面和单个块的链接。
+  的选区工具栏、输入 `$x^2$` 即可排版的行内公式、可折叠的标题、大纲，以及
+  指向页面和单个块的链接。
 - 在页面中播放 YouTube、Vimeo、哔哩哔哩、Dailymotion 和 niconico 的视频或
   视频文件，每个视频下方可以写笔记，就像视频的简介栏：点击笔记中的时间，
   就从那里播放这个视频。指向视频或录音某一刻的链接，在任何页面或聊天中点击，
@@ -266,7 +267,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 给出这台设备上最后打开的页面，不含选区。
 
 智能体在文本字段中用 `<span style="color:#ef4444;background:#fde68a">文字</span>`
-读写文字颜色和高亮，颜色为十六进制。`leaflet cat` 和导出不包含颜色。
+读写文字颜色和高亮，颜色为十六进制。`leaflet cat` 和导出不包含颜色。行内公式
+用 TeX 写作 `$x^2$`。
 
 要在开发构建上试用，把开发版应用的数据文件夹交给一个二进制文件：
 
@@ -389,7 +391,8 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 | `internal/editor` | 块编辑器：模型、编辑、布局、输入和块 |
 | `internal/doc` | 页面文档模型：块、增量、行内 Markdown、操作、按块合并和 Markdown 导出 |
 | `internal/menu`、`internal/shortcut` | `/` 和 `@` 菜单提供的内容，以及在页面中输入的 Markdown 会变成什么（两个应用的编辑器通用） |
-| `internal/rendered` | 绘制数学公式（KaTeX）和示意图（Pele）的页面，运行在不能联网的框架中 |
+| `internal/rendered` | 绘制示意图（Pele）并承载嵌入的页面，运行在不能联网的框架中 |
+| `internal/mathtex` | 用 Untie 把 TeX 排成公式，供两个应用绘制，并以 SVG 写入网页 |
 | `internal/webpage` | 可独立打开的网页形式的页面：公开链接分享的、导出 › PDF 打印的都是它，两个应用共用 |
 | `internal/starters` | Leaflet 自带的模板 |
 | `internal/export` | 把所有页面连同图片、文件和录音导出为 Markdown 压缩包 |
@@ -416,8 +419,7 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 | `ios` | iPhone 和 iPad 应用：SwiftUI 和 UIKit、它的 XcodeGen 项目和构建脚本 |
 
 麦克风采集运行在应用自有的 `leaflet-rec://` 协议下的一个小页面中，系统的
-网页视图允许这种安全上下文使用麦克风，因此采集音频无需原生代码。嵌入、数学
-公式和示意图运行在沙盒框架中，受禁止联网的内容安全策略约束，永远无法调用
+网页视图允许这种安全上下文使用麦克风，因此采集音频无需原生代码。嵌入和示意图运行在沙盒框架中，受禁止联网的内容安全策略约束，永远无法调用
 应用的 Go 代码。这种策略管不到 WebRTC：网页视图支持 CSP 的 `webrtc` 指令时
 用它来阻止，否则在嵌入的脚本运行之前尽可能把它从框架中移除。
 
@@ -439,9 +441,11 @@ Open Font License 授权的 [Figtree](https://github.com/erikdkennedy/figtree)
 和 [Source Serif 4](https://github.com/adobe-fonts/source-serif)
 （`internal/theme/fonts/OFL-*.txt`）、以 ISC 许可证授权的
 [Lucide](https://lucide.dev) 图标（`internal/theme/icons/LICENSE`），以及
-以 MIT 许可证授权、用于数学公式和示意图的 [KaTeX](https://katex.org) 和
-[Pele](https://github.com/obsidianmd/pele)
-（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）。
+以 MIT 许可证授权、用于示意图的 [Pele](https://github.com/obsidianmd/pele)
+（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)），
+以及用于数学公式、以 Apache 2.0 许可证授权的
+[Untie](https://github.com/caelyreth/untie) 和以 GUST 字体许可证授权的
+New Computer Modern Math 字体（`internal/mathtex/font/GUST-FONT-LICENSE.txt`）。
 
 ## 许可证
 

@@ -41,7 +41,7 @@ type Options struct {
 	Video       func(v doc.Video) doc.Video
 }
 
-var PrintCSP = rendered.ScriptsCSP(rendered.PageMathJS, rendered.PrintDiagramJS) + "; img-src data: https:"
+var PrintCSP = rendered.ScriptsCSP(rendered.PrintDiagramJS) + "; img-src data: https:"
 
 func HTML(c *doc.Content, o Options) string {
 	localPath, _ := export.OwnFiles(o.Files)
@@ -154,10 +154,7 @@ func HTML(c *doc.Content, o Options) string {
 	if o.Print {
 		opts.Script = nil
 		opts.ScriptSource = func(name string) string {
-			switch name {
-			case "math":
-				return rendered.PageMathJS
-			case "diagram":
+			if name == "diagram" {
 				return rendered.PrintDiagramJS
 			}
 			return ""

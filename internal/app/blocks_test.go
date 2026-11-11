@@ -34,9 +34,6 @@ func TestRenderedPages(t *testing.T) {
 	if full := rendered.DiagramPage("graph TD\n  A-->B", "#ffffff", true); !strings.Contains(full, `"full":true`) || !strings.Contains(full, "#v{height:100%}") {
 		t.Error("full screen diagram page does not fill its frame")
 	}
-	if page := rendered.MathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
-		t.Error("math page")
-	}
 }
 
 func TestRenderedBlockShowsChromeOnHover(t *testing.T) {

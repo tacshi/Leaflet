@@ -90,6 +90,9 @@ final class EditorMenus {
                     title: L.editorInlineCode,
                     image: UIImage(systemName: "chevron.left.forwardslash.chevron.right"),
                     handler: toggle(.leafletCode)),
+                UIAction(
+                    title: L.editorInlineMath, image: UIImage(systemName: "function"),
+                    handler: toggle(.leafletMath)),
                 UIAction(title: L.editorLink, image: UIImage(systemName: "link")) { [weak self] _ in
                     self?.editor.format.editLink()
                 },

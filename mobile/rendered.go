@@ -6,11 +6,6 @@ import (
 	"leaflet/internal/web"
 )
 
-func MathPage(formula string) string {
-	defer catch(nil)
-	return rendered.MathPage(formula)
-}
-
 func DiagramPage(source, bg string) string {
 	defer catch(nil)
 	return rendered.DiagramPage(source, bg, false)

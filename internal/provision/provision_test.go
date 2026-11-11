@@ -27,6 +27,8 @@ type fakeProject struct {
 	secrets       []supabaseapi.Secret
 	queries       []string
 	deployed      []string
+	functions     []string
+	deleteDown    bool
 	status        []string
 	created       string
 	restored      []string
@@ -148,6 +150,15 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 		case strings.HasSuffix(path, "/functions/deploy"):
 			f.deployed = append(f.deployed, r.URL.Query().Get("slug"))
 			w.WriteHeader(http.StatusCreated)
+		case strings.Contains(path, "/functions/") && r.Method == "DELETE" && f.deleteDown:
+			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
+		case strings.Contains(path, "/functions/") && r.Method == "DELETE":
+			slug := path[strings.LastIndex(path, "/")+1:]
+			if !slices.Contains(f.functions, slug) {
+				http.Error(w, `{"message":"Function not found"}`, http.StatusNotFound)
+				return
+			}
+			f.functions = slices.DeleteFunc(f.functions, func(s string) bool { return s == slug })
 		case strings.HasSuffix(path, "/config/storage"):
 		case strings.HasSuffix(path, "/api-keys"):
 			_, _ = io.WriteString(w, `[{"name":"anon","type":"legacy","api_key":"eyJanon"},{"name":"service_role","type":"legacy","api_key":"eyJservice"}]`)
@@ -240,6 +251,8 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 	f := &fakeProject{
 		applied: map[string][]supabaseapi.Migration{"p": {{Version: all[0].Version, Name: all[0].Name}}},
 		secrets: []supabaseapi.Secret{{Name: "LEAFLET_FUNCTIONS_0123456789ABCDEF", Value: "digest"}, {Name: "OTHER", Value: "digest"}},
+		// stt was deleted by hand: the two left go, and the one gone is no failure.
+		functions: []string{"account", "agent", "providers", "theirs"},
 	}
 	api := f.serve(t)
 	var steps [][2]int
@@ -260,6 +273,9 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 	}
 	if strings.Join(f.deployed, ",") != strings.Join(Functions, ",") {
 		t.Errorf("deployed %v", f.deployed)
+	}
+	if strings.Join(f.functions, ",") != "account,theirs" {
+		t.Errorf("functions left %v", f.functions)
 	}
 	if want := len(all) - 1 + len(Functions); len(steps) != want || steps[len(steps)-1] != [2]int{want, want} {
 		t.Errorf("progress %v", steps)
@@ -351,6 +367,7 @@ var functionsHashes = map[int]string{
 	17: "6c5ee661b43c5e2fba84dcf1e8c4ffa2210c037dbfc97ad6873e6b57f03ce0e4",
 	18: "bc9982d99067af9a8616cb61ebf6c856f9671890753d8eba8ee9cff68a8da3f0",
 	19: "8e0fc74e251d22b92a210ce1e93e4012985fd24ab850ca4c1810d6e0d679f8c4",
+	20: "8e0fc74e251d22b92a210ce1e93e4012985fd24ab850ca4c1810d6e0d679f8c4",
 }
 
 func TestFunctionsImportExactVersions(t *testing.T) {
@@ -628,5 +645,33 @@ func TestSetupDeploysAndLeavesTheDatabase(t *testing.T) {
 	f.mu.Unlock()
 	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.deployed, Functions) || len(f.queries) != 0 {
 		t.Errorf("deployed %v: %v, queries %q", f.deployed, err, f.queries)
+	}
+}
+
+func TestSetupDeletesTheFunctionsOfEarlierBuilds(t *testing.T) {
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeProject{
+		applied:    map[string][]supabaseapi.Migration{"p": nil},
+		functions:  []string{"account", "agent", "providers", "stt"},
+		deleteDown: true,
+	}
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); err == nil || len(f.secrets) != 0 || len(f.functions) != 4 {
+		t.Errorf("with deletes failing: %v, secrets %v, functions %v", err, f.secrets, f.functions)
+	}
+	f.mu.Lock()
+	f.deleteDown = false
+	f.mu.Unlock()
+	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.functions, []string{"account"}) || len(f.secrets) != 1 {
+		t.Errorf("functions left %v: %v, secrets %v", f.functions, err, f.secrets)
+	}
+	if err := Setup(context.Background(), api, "p", nil); err != nil || !slices.Equal(f.functions, []string{"account"}) {
+		t.Errorf("set up again: %v, functions %v", err, f.functions)
 	}
 }

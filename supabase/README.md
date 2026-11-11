@@ -45,10 +45,9 @@ Leaflet, then sets it up from this folder, built into the app:
   says which they are (the name, since the API lists secrets' values only
   as digests). A build never deploys over functions of its version or a
   newer one, so two builds never take turns; a development build replaces
-  those of its own version, as they change while it is worked on. The
-  `agent`, `providers` and `stt` functions an earlier build deployed stay
-  in the project, with the tables and keys they work through, for the
-  devices still on that build;
+  those of its own version, as they change while it is worked on. With
+  them it deletes the `agent`, `providers` and `stt` functions an earlier
+  build deployed, whose tables and keys `20261114000000` drops;
 - the Realtime policy for a page's saves, once Realtime has made the table
   it goes on: until then the setup runs again as the app starts;
 - a 500 MiB upload limit, where the plan allows it.
@@ -191,13 +190,9 @@ code.
 
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project.
 The app keeps no key in it: a provider's key, and a speech-to-text one,
-stay in the keychain of the device that uses them. The migrations' Vault
-helpers are for the functions an earlier build deployed, which keep keys
-in it through `vault.create_secret` and `vault.update_secret` and read
-them from `vault.decrypted_secrets`; clearing a key (`set_provider_secret`,
-`set_stt_secret`) and deleting a provider or a speech-to-text key (the
-`model_providers_cleanup` and `stt_secrets_cleanup` triggers) delete its
-row from `vault.secrets` directly, as `postgres`, who owns those functions.
+stay in the keychain of the device that uses them. The keys the functions
+of an earlier build kept there are deleted by `20261114000000`, with the
+tables and RPCs they went through.
 The `supabase/postgres` image grants `postgres` that, and `access.sql`
 checks it.
 

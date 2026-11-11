@@ -2,7 +2,8 @@
 -- them, each right after the migration it is named for: shares kept,
 -- invites moved, deleted comments emptied, history pruned and dated back,
 -- pages placed, deleted pages read by who had them, folders out of their
--- loops, and all of it gone with its owner's account.
+-- loops, the agents' keys gone from Vault, and all of it gone with its
+-- owner's account.
 -- scripts/check-migrations.sh runs it, as postgres, after every
 -- migration. It changes nothing: it rolls back each of its two
 -- transactions. A check that fails raises, and psql stops there.
@@ -285,6 +286,23 @@ begin
       and role = 'editor' and accepted_at is null
   ) then
     raise exception 'confirming the address did not take the invite waiting for it';
+  end if;
+end;
+$$;
+
+-- The keys the functions of the builds before agents ran on the device
+-- kept in Vault are gone with their tables, and nothing else from there;
+-- a snapshot that named a job stays.
+do $$
+begin
+  if exists (select 1 from vault.secrets where name in ('seed_provider_key', 'seed_provider_refresh', 'seed_stt_key')) then
+    raise exception 'a provider''s or a speech-to-text key is still in Vault';
+  end if;
+  if not exists (select 1 from vault.secrets where name = 'seed_other') then
+    raise exception 'a secret that was none of the agents'' went from Vault';
+  end if;
+  if not exists (select 1 from public.page_history where id = '5eed0000-0000-0000-0000-0000000000c3') then
+    raise exception 'a snapshot went with the job it named';
   end if;
 end;
 $$;

@@ -350,6 +350,10 @@ type File struct {
 	Data []byte
 }
 
+func (c *Client) DeleteFunction(ctx context.Context, ref, slug string) error {
+	return c.call(ctx, "DELETE", "/v1/projects/"+url.PathEscape(ref)+"/functions/"+url.PathEscape(slug), nil, "", nil)
+}
+
 func (c *Client) DeployFunction(ctx context.Context, ref, slug, entrypoint string, verifyJWT bool, files []File) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)

@@ -38,7 +38,9 @@ func ownName(name string) bool {
 
 var Functions = []string{"account"}
 
-const FunctionsVersion = 19
+var Retired = []string{"agent", "providers", "stt"}
+
+const FunctionsVersion = 20
 
 const hashSecret = "LEAFLET_FUNCTIONS_"
 
@@ -353,6 +355,11 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		}
 		step()
 	}
+	for _, slug := range Retired {
+		if err := api.DeleteFunction(ctx, ref, slug); err != nil && !notFound(err) {
+			return err
+		}
+	}
 	var old []string
 	for _, s := range secrets {
 		if strings.HasPrefix(s.Name, hashSecret) && s.Name != name {
@@ -398,6 +405,11 @@ func hearSaves(ctx context.Context, api *supabaseapi.Client, ref string) error {
 		return fmt.Errorf("%w: %w", ErrRealtimeWaits, err)
 	}
 	return nil
+}
+
+func notFound(err error) bool {
+	e, ok := errors.AsType[*supabaseapi.Error](err)
+	return ok && e.Status == http.StatusNotFound
 }
 
 func refusedForGood(err error) bool {

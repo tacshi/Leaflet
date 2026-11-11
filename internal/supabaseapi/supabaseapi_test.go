@@ -248,3 +248,24 @@ func TestSignInFailsInTheAppsLanguage(t *testing.T) {
 		t.Errorf("signed out: %v", ErrSignedOut)
 	}
 }
+
+func TestDeleteFunction(t *testing.T) {
+	var asked []string
+	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.Method+" "+r.URL.Path)
+		if r.URL.Path != "/v1/projects/abc/functions/agent" {
+			http.Error(w, `{"message":"Function not found"}`, http.StatusNotFound)
+		}
+	})
+	c := Resume("refresh-0")
+	if err := c.DeleteFunction(context.Background(), "abc", "agent"); err != nil {
+		t.Fatal(err)
+	}
+	err := c.DeleteFunction(context.Background(), "abc", "stt")
+	if e, ok := errors.AsType[*Error](err); !ok || e.Status != http.StatusNotFound {
+		t.Errorf("a function that is not there: %v", err)
+	}
+	if strings.Join(asked, ",") != "DELETE /v1/projects/abc/functions/agent,DELETE /v1/projects/abc/functions/stt" {
+		t.Errorf("asked %v", asked)
+	}
+}

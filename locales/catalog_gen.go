@@ -15895,13 +15895,13 @@ func (msgs Messages) WelcomeImageAlt() string {
 	return Catalog.Format(msgs.locale, "welcomeImageAlt", nil)
 }
 
-// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
+// WelcomeIntro says "Pages are living documents you write, with agents to help. They are saved on this device and sync between your device…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: the first paragraph.
 func WelcomeIntro() string { return In(i18n.Locale()).WelcomeIntro() }
 
-// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
+// WelcomeIntro says "Pages are living documents you write, with agents to help. They are saved on this device and sync between your device…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: the first paragraph.
@@ -16065,14 +16065,14 @@ func (msgs Messages) WelcomeWritingHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeWritingHeading", nil)
 }
 
-// WelcomeWritingMarkdown says "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they f…"
+// WelcomeWritingMarkdown says "Markdown formats as you type: **bold**, *italic*, `code`, ~~strikethrough~~, [links](https://github.com/egoist/mygo),…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph showing
 // inline Markdown; keep the Markdown and the link.
 func WelcomeWritingMarkdown() string { return In(i18n.Locale()).WelcomeWritingMarkdown() }
 
-// WelcomeWritingMarkdown says "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they f…"
+// WelcomeWritingMarkdown says "Markdown formats as you type: **bold**, *italic*, `code`, ~~strikethrough~~, [links](https://github.com/egoist/mygo),…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph showing
@@ -16081,82 +16081,22 @@ func (msgs Messages) WelcomeWritingMarkdown() string {
 	return Catalog.Format(msgs.locale, "welcomeWritingMarkdown", nil)
 }
 
-// WelcomeQuote says "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away."
+// WelcomeWritingLines says "At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` …"
 // in the language the app shows.
 //
-// The welcome guide page, made once on first run: an example quote block.
-func WelcomeQuote() string { return In(i18n.Locale()).WelcomeQuote() }
+// The welcome guide: what typed at the start of a line makes a block, how
+// lists nest, and that pasted Markdown keeps its structure. Inline
+// Markdown.
+func WelcomeWritingLines() string { return In(i18n.Locale()).WelcomeWritingLines() }
 
-// WelcomeQuote says "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away."
+// WelcomeWritingLines says "At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` …"
 // in the language of msgs.
 //
-// The welcome guide page, made once on first run: an example quote block.
-func (msgs Messages) WelcomeQuote() string {
-	return Catalog.Format(msgs.locale, "welcomeQuote", nil)
-}
-
-// WelcomeListOutline says "Write a rough outline"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item.
-func WelcomeListOutline() string { return In(i18n.Locale()).WelcomeListOutline() }
-
-// WelcomeListOutline says "Write a rough outline"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item.
-func (msgs Messages) WelcomeListOutline() string {
-	return Catalog.Format(msgs.locale, "welcomeListOutline", nil)
-}
-
-// WelcomeListNest says "Press **Tab** to nest an item, **⇧Tab** to lift it back"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: an example nested bullet
-// (Markdown).
-func WelcomeListNest() string { return In(i18n.Locale()).WelcomeListNest() }
-
-// WelcomeListNest says "Press **Tab** to nest an item, **⇧Tab** to lift it back"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: an example nested bullet
-// (Markdown).
-func (msgs Messages) WelcomeListNest() string {
-	return Catalog.Format(msgs.locale, "welcomeListNest", nil)
-}
-
-// WelcomeListAsk says "Ask an agent to fill in a section"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item.
-func WelcomeListAsk() string { return In(i18n.Locale()).WelcomeListAsk() }
-
-// WelcomeListAsk says "Ask an agent to fill in a section"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item.
-func (msgs Messages) WelcomeListAsk() string {
-	return Catalog.Format(msgs.locale, "welcomeListAsk", nil)
-}
-
-// WelcomeListReview says "Review its edits, and **Undo** if you don't like them"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item (Markdown).
-func WelcomeListReview() string { return In(i18n.Locale()).WelcomeListReview() }
-
-// WelcomeListReview says "Review its edits, and **Undo** if you don't like them"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: an example numbered list
-// item (Markdown).
-func (msgs Messages) WelcomeListReview() string {
-	return Catalog.Format(msgs.locale, "welcomeListReview", nil)
+// The welcome guide: what typed at the start of a line makes a block, how
+// lists nest, and that pasted Markdown keeps its structure. Inline
+// Markdown.
+func (msgs Messages) WelcomeWritingLines() string {
+	return Catalog.Format(msgs.locale, "welcomeWritingLines", nil)
 }
 
 // WelcomeBlocksHeading says "Blocks"
@@ -16173,13 +16113,13 @@ func (msgs Messages) WelcomeBlocksHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeBlocksHeading", nil)
 }
 
-// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting."
+// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end."
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeBlocksTable() string { return In(i18n.Locale()).WelcomeBlocksTable() }
 
-// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting."
+// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end."
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -16393,22 +16333,6 @@ func (msgs Messages) WelcomeFriday() string {
 	return Catalog.Format(msgs.locale, "welcomeFriday", nil)
 }
 
-// WelcomeCodeIntro says "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block."
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a paragraph before the
-// code example.
-func WelcomeCodeIntro() string { return In(i18n.Locale()).WelcomeCodeIntro() }
-
-// WelcomeCodeIntro says "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block."
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a paragraph before the
-// code example.
-func (msgs Messages) WelcomeCodeIntro() string {
-	return Catalog.Format(msgs.locale, "welcomeCodeIntro", nil)
-}
-
 // WelcomeCodeComment says "Count the words in a page's text, as a byline might."
 // in the language the app shows.
 //
@@ -16469,14 +16393,14 @@ func (msgs Messages) WelcomeToggleInside() string {
 	return Catalog.Format(msgs.locale, "welcomeToggleInside", nil)
 }
 
-// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **Fil…"
+// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source."
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph naming blocks
 // of the / menu (Markdown).
 func WelcomeMathDiagram() string { return In(i18n.Locale()).WelcomeMathDiagram() }
 
-// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **Fil…"
+// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source."
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph naming blocks
@@ -16581,13 +16505,13 @@ func (msgs Messages) WelcomeDiagramPublish() string {
 	return Catalog.Format(msgs.locale, "welcomeDiagramPublish", nil)
 }
 
-// WelcomeMediaHeading says "Pictures, video and charts"
+// WelcomeMediaHeading says "Media, charts and embeds"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a section heading.
 func WelcomeMediaHeading() string { return In(i18n.Locale()).WelcomeMediaHeading() }
 
-// WelcomeMediaHeading says "Pictures, video and charts"
+// WelcomeMediaHeading says "Media, charts and embeds"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a section heading.
@@ -16595,18 +16519,54 @@ func (msgs Messages) WelcomeMediaHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeMediaHeading", nil)
 }
 
-// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video t…"
+// WelcomeMediaImages says "Images are saved with the page. A YouTube, Vimeo, Bilibili, Dailymotion or Niconico link pasted on an empty line play…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph.
 func WelcomeMediaImages() string { return In(i18n.Locale()).WelcomeMediaImages() }
 
-// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video t…"
+// WelcomeMediaImages says "Images are saved with the page. A YouTube, Vimeo, Bilibili, Dailymotion or Niconico link pasted on an empty line play…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph.
 func (msgs Messages) WelcomeMediaImages() string {
 	return Catalog.Format(msgs.locale, "welcomeMediaImages", nil)
+}
+
+// WelcomeVideoNotes says "0:00 The opening\n1:00 One minute in\n5:00 Five minutes in"
+// in the language the app shows.
+//
+// The welcome guide: the notes of its sample video, a line each, every line
+// starting with a time such as 0:00 that plays the video from there. Keep
+// the times and the line breaks.
+func WelcomeVideoNotes() string { return In(i18n.Locale()).WelcomeVideoNotes() }
+
+// WelcomeVideoNotes says "0:00 The opening\n1:00 One minute in\n5:00 Five minutes in"
+// in the language of msgs.
+//
+// The welcome guide: the notes of its sample video, a line each, every line
+// starting with a time such as 0:00 that plays the video from there. Keep
+// the times and the line breaks.
+func (msgs Messages) WelcomeVideoNotes() string {
+	return Catalog.Format(msgs.locale, "welcomeVideoNotes", nil)
+}
+
+// WelcomeMediaFiles says "**File** keeps any file with the page. Audio and video files play here with notes of their own, and **Transcribe** wr…"
+// in the language the app shows.
+//
+// The welcome guide: what a file block is, that audio and video files play
+// in the page with notes, and that Transcribe writes what is said into the
+// notes. Inline Markdown.
+func WelcomeMediaFiles() string { return In(i18n.Locale()).WelcomeMediaFiles() }
+
+// WelcomeMediaFiles says "**File** keeps any file with the page. Audio and video files play here with notes of their own, and **Transcribe** wr…"
+// in the language of msgs.
+//
+// The welcome guide: what a file block is, that audio and video files play
+// in the page with notes, and that Transcribe writes what is said into the
+// notes. Inline Markdown.
+func (msgs Messages) WelcomeMediaFiles() string {
+	return Catalog.Format(msgs.locale, "welcomeMediaFiles", nil)
 }
 
 // WelcomeMediaCharts says "Charts are bar, line or pie. Agents make them from your numbers, and **Edit data** changes them by hand."
@@ -16735,244 +16695,6 @@ func (msgs Messages) WelcomeChartCaption() string {
 	return Catalog.Format(msgs.locale, "welcomeChartCaption", nil)
 }
 
-// WelcomeChartWordsTitle says "Words written per day"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: the title of the example
-// line chart.
-func WelcomeChartWordsTitle() string { return In(i18n.Locale()).WelcomeChartWordsTitle() }
-
-// WelcomeChartWordsTitle says "Words written per day"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: the title of the example
-// line chart.
-func (msgs Messages) WelcomeChartWordsTitle() string {
-	return Catalog.Format(msgs.locale, "welcomeChartWordsTitle", nil)
-}
-
-// WelcomeChartMon says "Mon"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartMon() string { return In(i18n.Locale()).WelcomeChartMon() }
-
-// WelcomeChartMon says "Mon"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartMon() string {
-	return Catalog.Format(msgs.locale, "welcomeChartMon", nil)
-}
-
-// WelcomeChartTue says "Tue"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartTue() string { return In(i18n.Locale()).WelcomeChartTue() }
-
-// WelcomeChartTue says "Tue"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartTue() string {
-	return Catalog.Format(msgs.locale, "welcomeChartTue", nil)
-}
-
-// WelcomeChartWed says "Wed"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartWed() string { return In(i18n.Locale()).WelcomeChartWed() }
-
-// WelcomeChartWed says "Wed"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartWed() string {
-	return Catalog.Format(msgs.locale, "welcomeChartWed", nil)
-}
-
-// WelcomeChartThu says "Thu"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartThu() string { return In(i18n.Locale()).WelcomeChartThu() }
-
-// WelcomeChartThu says "Thu"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartThu() string {
-	return Catalog.Format(msgs.locale, "welcomeChartThu", nil)
-}
-
-// WelcomeChartFri says "Fri"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartFri() string { return In(i18n.Locale()).WelcomeChartFri() }
-
-// WelcomeChartFri says "Fri"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartFri() string {
-	return Catalog.Format(msgs.locale, "welcomeChartFri", nil)
-}
-
-// WelcomeChartSat says "Sat"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartSat() string { return In(i18n.Locale()).WelcomeChartSat() }
-
-// WelcomeChartSat says "Sat"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartSat() string {
-	return Catalog.Format(msgs.locale, "welcomeChartSat", nil)
-}
-
-// WelcomeChartSun says "Sun"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func WelcomeChartSun() string { return In(i18n.Locale()).WelcomeChartSun() }
-
-// WelcomeChartSun says "Sun"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a day on the line chart's
-// axis.
-func (msgs Messages) WelcomeChartSun() string {
-	return Catalog.Format(msgs.locale, "welcomeChartSun", nil)
-}
-
-// WelcomeChartAgents says "Agents"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a series of the example
-// line chart.
-func WelcomeChartAgents() string { return In(i18n.Locale()).WelcomeChartAgents() }
-
-// WelcomeChartAgents says "Agents"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a series of the example
-// line chart.
-func (msgs Messages) WelcomeChartAgents() string {
-	return Catalog.Format(msgs.locale, "welcomeChartAgents", nil)
-}
-
-// WelcomeChartWeekTitle says "Where the week went"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: the title of the example
-// pie chart.
-func WelcomeChartWeekTitle() string { return In(i18n.Locale()).WelcomeChartWeekTitle() }
-
-// WelcomeChartWeekTitle says "Where the week went"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: the title of the example
-// pie chart.
-func (msgs Messages) WelcomeChartWeekTitle() string {
-	return Catalog.Format(msgs.locale, "welcomeChartWeekTitle", nil)
-}
-
-// WelcomeChartWriting says "Writing"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func WelcomeChartWriting() string { return In(i18n.Locale()).WelcomeChartWriting() }
-
-// WelcomeChartWriting says "Writing"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func (msgs Messages) WelcomeChartWriting() string {
-	return Catalog.Format(msgs.locale, "welcomeChartWriting", nil)
-}
-
-// WelcomeChartMeetings says "Meetings"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func WelcomeChartMeetings() string { return In(i18n.Locale()).WelcomeChartMeetings() }
-
-// WelcomeChartMeetings says "Meetings"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func (msgs Messages) WelcomeChartMeetings() string {
-	return Catalog.Format(msgs.locale, "welcomeChartMeetings", nil)
-}
-
-// WelcomeChartEmail says "Email"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func WelcomeChartEmail() string { return In(i18n.Locale()).WelcomeChartEmail() }
-
-// WelcomeChartEmail says "Email"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a slice of the example
-// pie chart.
-func (msgs Messages) WelcomeChartEmail() string {
-	return Catalog.Format(msgs.locale, "welcomeChartEmail", nil)
-}
-
-// WelcomeChartHours says "Hours"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: the series of the example
-// pie chart.
-func WelcomeChartHours() string { return In(i18n.Locale()).WelcomeChartHours() }
-
-// WelcomeChartHours says "Hours"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: the series of the example
-// pie chart.
-func (msgs Messages) WelcomeChartHours() string {
-	return Catalog.Format(msgs.locale, "welcomeChartHours", nil)
-}
-
-// WelcomeEmbedsHeading says "Interactive embeds"
-// in the language the app shows.
-//
-// The welcome guide page, made once on first run: a section heading.
-func WelcomeEmbedsHeading() string { return In(i18n.Locale()).WelcomeEmbedsHeading() }
-
-// WelcomeEmbedsHeading says "Interactive embeds"
-// in the language of msgs.
-//
-// The welcome guide page, made once on first run: a section heading.
-func (msgs Messages) WelcomeEmbedsHeading() string {
-	return Catalog.Format(msgs.locale, "welcomeEmbedsHeading", nil)
-}
-
 // WelcomeEmbedsIntro says "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ …"
 // in the language the app shows.
 //
@@ -16987,360 +16709,6 @@ func WelcomeEmbedsIntro() string { return In(i18n.Locale()).WelcomeEmbedsIntro()
 // example embeds.
 func (msgs Messages) WelcomeEmbedsIntro() string {
 	return Catalog.Format(msgs.locale, "welcomeEmbedsIntro", nil)
-}
-
-// WelcomeSolarTitle says "The solar system, at your speed"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: its title.
-func WelcomeSolarTitle() string { return In(i18n.Locale()).WelcomeSolarTitle() }
-
-// WelcomeSolarTitle says "The solar system, at your speed"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: its title.
-func (msgs Messages) WelcomeSolarTitle() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarTitle", nil)
-}
-
-// WelcomeSolarPause says "Pause"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the solar system's button that
-// stops it.
-func WelcomeSolarPause() string { return In(i18n.Locale()).WelcomeSolarPause() }
-
-// WelcomeSolarPause says "Pause"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the solar system's button that
-// stops it.
-func (msgs Messages) WelcomeSolarPause() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarPause", nil)
-}
-
-// WelcomeSolarPlay says "Play"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the solar system's button that
-// starts it again.
-func WelcomeSolarPlay() string { return In(i18n.Locale()).WelcomeSolarPlay() }
-
-// WelcomeSolarPlay says "Play"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the solar system's button that
-// starts it again.
-func (msgs Messages) WelcomeSolarPlay() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarPlay", nil)
-}
-
-// WelcomeSolarSpeed says "Speed"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the label of the solar
-// system's speed slider.
-func WelcomeSolarSpeed() string { return In(i18n.Locale()).WelcomeSolarSpeed() }
-
-// WelcomeSolarSpeed says "Speed"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the label of the solar
-// system's speed slider.
-func (msgs Messages) WelcomeSolarSpeed() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarSpeed", nil)
-}
-
-// WelcomeSolarDaysPerSecond says "{count, plural, one {{days} day / s} other {{days} days / s}}"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the solar system's speed:
-// simulated days per second; days is count written out.
-func WelcomeSolarDaysPerSecond(count int, days string) string {
-	return In(i18n.Locale()).WelcomeSolarDaysPerSecond(count, days)
-}
-
-// WelcomeSolarDaysPerSecond says "{count, plural, one {{days} day / s} other {{days} days / s}}"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the solar system's speed:
-// simulated days per second; days is count written out.
-func (msgs Messages) WelcomeSolarDaysPerSecond(count int, days string) string {
-	return Catalog.Format(msgs.locale, "welcomeSolarDaysPerSecond", map[string]any{"count": count, "days": days})
-}
-
-// WelcomeSolarYear says "Year {year}"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the solar system's elapsed
-// time, as Year 1.5.
-func WelcomeSolarYear(year string) string { return In(i18n.Locale()).WelcomeSolarYear(year) }
-
-// WelcomeSolarYear says "Year {year}"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the solar system's elapsed
-// time, as Year 1.5.
-func (msgs Messages) WelcomeSolarYear(year string) string {
-	return Catalog.Format(msgs.locale, "welcomeSolarYear", map[string]any{"year": year})
-}
-
-// WelcomeSolarMercury says "Mercury"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarMercury() string { return In(i18n.Locale()).WelcomeSolarMercury() }
-
-// WelcomeSolarMercury says "Mercury"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarMercury() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarMercury", nil)
-}
-
-// WelcomeSolarVenus says "Venus"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarVenus() string { return In(i18n.Locale()).WelcomeSolarVenus() }
-
-// WelcomeSolarVenus says "Venus"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarVenus() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarVenus", nil)
-}
-
-// WelcomeSolarEarth says "Earth"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarEarth() string { return In(i18n.Locale()).WelcomeSolarEarth() }
-
-// WelcomeSolarEarth says "Earth"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarEarth() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarEarth", nil)
-}
-
-// WelcomeSolarMars says "Mars"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarMars() string { return In(i18n.Locale()).WelcomeSolarMars() }
-
-// WelcomeSolarMars says "Mars"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarMars() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarMars", nil)
-}
-
-// WelcomeSolarJupiter says "Jupiter"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarJupiter() string { return In(i18n.Locale()).WelcomeSolarJupiter() }
-
-// WelcomeSolarJupiter says "Jupiter"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarJupiter() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarJupiter", nil)
-}
-
-// WelcomeSolarSaturn says "Saturn"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarSaturn() string { return In(i18n.Locale()).WelcomeSolarSaturn() }
-
-// WelcomeSolarSaturn says "Saturn"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarSaturn() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarSaturn", nil)
-}
-
-// WelcomeSolarUranus says "Uranus"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarUranus() string { return In(i18n.Locale()).WelcomeSolarUranus() }
-
-// WelcomeSolarUranus says "Uranus"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarUranus() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarUranus", nil)
-}
-
-// WelcomeSolarNeptune says "Neptune"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func WelcomeSolarNeptune() string { return In(i18n.Locale()).WelcomeSolarNeptune() }
-
-// WelcomeSolarNeptune says "Neptune"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: a planet's name in the solar
-// system.
-func (msgs Messages) WelcomeSolarNeptune() string {
-	return Catalog.Format(msgs.locale, "welcomeSolarNeptune", nil)
-}
-
-// WelcomeSavingsTitle says "Savings calculator"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: its title.
-func WelcomeSavingsTitle() string { return In(i18n.Locale()).WelcomeSavingsTitle() }
-
-// WelcomeSavingsTitle says "Savings calculator"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: its title.
-func (msgs Messages) WelcomeSavingsTitle() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsTitle", nil)
-}
-
-// WelcomeSavingsMonthly says "Saved every month"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the monthly deposit.
-func WelcomeSavingsMonthly() string { return In(i18n.Locale()).WelcomeSavingsMonthly() }
-
-// WelcomeSavingsMonthly says "Saved every month"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the monthly deposit.
-func (msgs Messages) WelcomeSavingsMonthly() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsMonthly", nil)
-}
-
-// WelcomeSavingsReturn says "Yearly return"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the yearly return.
-func WelcomeSavingsReturn() string { return In(i18n.Locale()).WelcomeSavingsReturn() }
-
-// WelcomeSavingsReturn says "Yearly return"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the yearly return.
-func (msgs Messages) WelcomeSavingsReturn() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsReturn", nil)
-}
-
-// WelcomeSavingsYears says "Years"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the years.
-func WelcomeSavingsYears() string { return In(i18n.Locale()).WelcomeSavingsYears() }
-
-// WelcomeSavingsYears says "Years"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// slider of the years.
-func (msgs Messages) WelcomeSavingsYears() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsYears", nil)
-}
-
-// WelcomeSavingsYearCount says "{count, plural, one {{years} year} other {{years} years}}"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// number of years; years is count written out.
-func WelcomeSavingsYearCount(count int, years string) string {
-	return In(i18n.Locale()).WelcomeSavingsYearCount(count, years)
-}
-
-// WelcomeSavingsYearCount says "{count, plural, one {{years} year} other {{years} years}}"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// number of years; years is count written out.
-func (msgs Messages) WelcomeSavingsYearCount(count int, years string) string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsYearCount", map[string]any{"count": count, "years": years})
-}
-
-// WelcomeSavingsSaved says "Saved"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// legend: the money put in.
-func WelcomeSavingsSaved() string { return In(i18n.Locale()).WelcomeSavingsSaved() }
-
-// WelcomeSavingsSaved says "Saved"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// legend: the money put in.
-func (msgs Messages) WelcomeSavingsSaved() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsSaved", nil)
-}
-
-// WelcomeSavingsEarned says "Earned"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// legend: the money earned.
-func WelcomeSavingsEarned() string { return In(i18n.Locale()).WelcomeSavingsEarned() }
-
-// WelcomeSavingsEarned says "Earned"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's
-// legend: the money earned.
-func (msgs Messages) WelcomeSavingsEarned() string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsEarned", nil)
-}
-
-// WelcomeSavingsSummary says "{saved} saved, {earned} earned"
-// in the language the app shows.
-//
-// An interactive embed in the welcome guide: the savings calculator's line
-// under the total; both are amounts of money.
-func WelcomeSavingsSummary(saved string, earned string) string {
-	return In(i18n.Locale()).WelcomeSavingsSummary(saved, earned)
-}
-
-// WelcomeSavingsSummary says "{saved} saved, {earned} earned"
-// in the language of msgs.
-//
-// An interactive embed in the welcome guide: the savings calculator's line
-// under the total; both are amounts of money.
-func (msgs Messages) WelcomeSavingsSummary(saved string, earned string) string {
-	return Catalog.Format(msgs.locale, "welcomeSavingsSummary", map[string]any{"saved": saved, "earned": earned})
 }
 
 // WelcomePianoTitle says "A piano to play"
@@ -17417,13 +16785,13 @@ func (msgs Messages) WelcomeTodosDue() string {
 	return Catalog.Format(msgs.locale, "welcomeTodosDue", nil)
 }
 
-// WelcomeRecordings says "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the …"
+// WelcomeRecordings says "A recording comes with a transcript: click a line's time to play from there, and its **…** menu puts the transcript…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeRecordings() string { return In(i18n.Locale()).WelcomeRecordings() }
 
-// WelcomeRecordings says "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the …"
+// WelcomeRecordings says "A recording comes with a transcript: click a line's time to play from there, and its **…** menu puts the transcript…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -17445,13 +16813,13 @@ func (msgs Messages) WelcomeAgentsHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeAgentsHeading", nil)
 }
 
-// WelcomeAgentsIntro says "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, …"
+// WelcomeAgentsIntro says "Agents read the page and edit it with you. Each run is one step you can undo, and the blocks it changed stay tinted u…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph.
 func WelcomeAgentsIntro() string { return In(i18n.Locale()).WelcomeAgentsIntro() }
 
-// WelcomeAgentsIntro says "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, …"
+// WelcomeAgentsIntro says "Agents read the page and edit it with you. Each run is one step you can undo, and the blocks it changed stay tinted u…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph.
@@ -17501,6 +16869,24 @@ func (msgs Messages) WelcomeAgentsPanel() string {
 	return Catalog.Format(msgs.locale, "welcomeAgentsPanel", nil)
 }
 
+// WelcomeAgentsWorkspace says "With no page open, **Ask the agent** works across all your pages: it finds, makes, tags and files them"
+// in the language the app shows.
+//
+// The welcome guide, a list item: with no page open, the Ask the agent
+// button starts a chat that works on all the user's pages. Inline Markdown;
+// no period at the end.
+func WelcomeAgentsWorkspace() string { return In(i18n.Locale()).WelcomeAgentsWorkspace() }
+
+// WelcomeAgentsWorkspace says "With no page open, **Ask the agent** works across all your pages: it finds, makes, tags and files them"
+// in the language of msgs.
+//
+// The welcome guide, a list item: with no page open, the Ask the agent
+// button starts a chat that works on all the user's pages. Inline Markdown;
+// no period at the end.
+func (msgs Messages) WelcomeAgentsWorkspace() string {
+	return Catalog.Format(msgs.locale, "welcomeAgentsWorkspace", nil)
+}
+
 // WelcomeAgentsSettings says "**Settings › Agent providers** sets the default agent and whether agents may read your other pages"
 // in the language the app shows.
 //
@@ -17515,13 +16901,13 @@ func (msgs Messages) WelcomeAgentsSettings() string {
 	return Catalog.Format(msgs.locale, "welcomeAgentsSettings", nil)
 }
 
-// WelcomeAgentsExternal says "Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets th…"
+// WelcomeAgentsExternal says "Claude Code, Codex, Cursor and other MCP clients, and the `leaflet` command line, work on your pages too: **Settings …"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a bullet (Markdown).
 func WelcomeAgentsExternal() string { return In(i18n.Locale()).WelcomeAgentsExternal() }
 
-// WelcomeAgentsExternal says "Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets th…"
+// WelcomeAgentsExternal says "Claude Code, Codex, Cursor and other MCP clients, and the `leaflet` command line, work on your pages too: **Settings …"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a bullet (Markdown).
@@ -17573,13 +16959,13 @@ func (msgs Messages) WelcomeOrganizingLink(page string) string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingLink", map[string]any{"page": page})
 }
 
-// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages and go inside folders. Drag a page or a folder…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeOrganizingFolders() string { return In(i18n.Locale()).WelcomeOrganizingFolders() }
 
-// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages and go inside folders. Drag a page or a folder…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -17587,7 +16973,21 @@ func (msgs Messages) WelcomeOrganizingFolders() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingFolders", nil)
 }
 
-// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// WelcomeOrganizingMenu says "A page's **…** menu duplicates it with its subpages, exports it as Markdown or PDF, or saves it as a template, whic…"
+// in the language the app shows.
+//
+// The welcome guide: what a page's … menu does. Inline Markdown.
+func WelcomeOrganizingMenu() string { return In(i18n.Locale()).WelcomeOrganizingMenu() }
+
+// WelcomeOrganizingMenu says "A page's **…** menu duplicates it with its subpages, exports it as Markdown or PDF, or saves it as a template, whic…"
+// in the language of msgs.
+//
+// The welcome guide: what a page's … menu does. Inline Markdown.
+func (msgs Messages) WelcomeOrganizingMenu() string {
+	return Catalog.Format(msgs.locale, "welcomeOrganizingMenu", nil)
+}
+
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. The sidebar's **Tags** tab grou…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: how tags work, naming the
@@ -17596,7 +16996,7 @@ func WelcomeOrganizingTags(guide string, meetings string) string {
 	return In(i18n.Locale()).WelcomeOrganizingTags(guide, meetings)
 }
 
-// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. The sidebar's **Tags** tab grou…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: how tags work, naming the
@@ -17619,20 +17019,36 @@ func (msgs Messages) WelcomeOrganizingHeadings() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingHeadings", nil)
 }
 
-// WelcomeTogetherHeading says "Comments, history and sync"
+// WelcomeTogetherHeading says "Sharing, comments and sync"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: the heading of the
 // section on comments, page history and sync.
 func WelcomeTogetherHeading() string { return In(i18n.Locale()).WelcomeTogetherHeading() }
 
-// WelcomeTogetherHeading says "Comments, history and sync"
+// WelcomeTogetherHeading says "Sharing, comments and sync"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: the heading of the
 // section on comments, page history and sync.
 func (msgs Messages) WelcomeTogetherHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherHeading", nil)
+}
+
+// WelcomeTogetherShare says "**Share** in the header invites people by email to read or edit a page, or makes a temporary public link."
+// in the language the app shows.
+//
+// The welcome guide: the Share button invites people by email or makes a
+// temporary public link. Inline Markdown.
+func WelcomeTogetherShare() string { return In(i18n.Locale()).WelcomeTogetherShare() }
+
+// WelcomeTogetherShare says "**Share** in the header invites people by email to read or edit a page, or makes a temporary public link."
+// in the language of msgs.
+//
+// The welcome guide: the Share button invites people by email or makes a
+// temporary public link. Inline Markdown.
+func (msgs Messages) WelcomeTogetherShare() string {
+	return Catalog.Format(msgs.locale, "welcomeTogetherShare", nil)
 }
 
 // WelcomeTogetherComments says "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply a…"
@@ -17665,13 +17081,13 @@ func (msgs Messages) WelcomeComment() string {
 	return Catalog.Format(msgs.locale, "welcomeComment", nil)
 }
 
-// WelcomeTogetherHistory says "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what…"
+// WelcomeTogetherHistory says "**Page history** in the **…** menu keeps a version as you edit and before each agent run: see what changed since on…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeTogetherHistory() string { return In(i18n.Locale()).WelcomeTogetherHistory() }
 
-// WelcomeTogetherHistory says "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what…"
+// WelcomeTogetherHistory says "**Page history** in the **…** menu keeps a version as you edit and before each agent run: see what changed since on…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -17679,13 +17095,13 @@ func (msgs Messages) WelcomeTogetherHistory() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherHistory", nil)
 }
 
-// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settin…"
+// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in: **Settin…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeTogetherSync() string { return In(i18n.Locale()).WelcomeTogetherSync() }
 
-// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settin…"
+// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in: **Settin…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).

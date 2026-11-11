@@ -44,13 +44,13 @@ func TestWelcomePage(t *testing.T) {
 			image = n
 		}
 	}
-	for typ, want := range map[string]int{"embed": 3, "chart": 3, "table": 2, "image": 1, "subpage": 1, "code": 1, "video": 1,
-		"callout": 1, "toggle_list": 1, "math_equation": 1, "diagram": 1, "quote": 1} {
+	for typ, want := range map[string]int{"embed": 1, "chart": 1, "table": 2, "image": 1, "subpage": 1, "code": 1, "video": 1,
+		"callout": 1, "toggle_list": 1, "math_equation": 1, "diagram": 1} {
 		if kinds[typ] != want {
 			t.Errorf("%d %s blocks, want %d", kinds[typ], typ, want)
 		}
 	}
-	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Comments, history and sync, Shortcuts" {
+	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Media, charts and embeds, To-dos and recordings, Agents, Organizing pages, Sharing, comments and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
 	kept, err := st.File(image.Str("file_id"))
@@ -79,8 +79,26 @@ func TestWelcomePage(t *testing.T) {
 	if p, _ := st.Page(sub); !slices.Equal(p.Tags, []string{"meetings"}) {
 		t.Errorf("the subpage's tags %q", p.Tags)
 	}
-	if !strings.Contains(c.PlainText(), "In search, #meetings keeps to the pages tagged meetings") {
-		t.Error("the guide does not say how tags work")
+	plain := c.PlainText()
+	for _, says := range []string{
+		"#meetings in search keeps to the pages tagged meetings", "a color or a highlight", "go inside folders",
+		"Markdown or PDF", "leaflet command line", "temporary public link", "Transcribe writes what is said",
+	} {
+		if !strings.Contains(plain, says) {
+			t.Errorf("the guide does not say %q", says)
+		}
+	}
+	var formula, colored, highlit, notes bool
+	for _, n := range c.All() {
+		for _, r := range n.Delta() {
+			formula = formula || r.Attrs.Math && r.Text == "E = mc^2"
+			colored = colored || r.Attrs.Color != ""
+			highlit = highlit || r.Attrs.Background != ""
+		}
+		notes = notes || n.Type == "video" && strings.HasPrefix(n.Str("notes"), "0:00 ")
+	}
+	if !formula || !colored || !highlit || !notes {
+		t.Errorf("the guide shows a formula %v, a color %v, a highlight %v, a video's notes %v", formula, colored, highlit, notes)
 	}
 	templates, _ := st.Templates()
 	if len(templates) != 1 || templates[0].Title != "Weekly team sync" || !slices.Equal(templates[0].Tags, []string{"meetings"}) {

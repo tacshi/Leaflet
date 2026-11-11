@@ -322,6 +322,13 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 			p.RichText(ox, oy+first.Y+(first.H-h)/2, r.W-l.x, hint)
 		}
 		p.TextLayout(l.layout, ox, oy, pal.Text)
+		if len(l.maths) > 0 {
+			for _, o := range l.layout.Objects() {
+				if m, ok := l.maths[o.Index]; ok {
+					paintMath(p, m, ox+o.Rect.X, oy+o.Rect.Y+m.formula.Ascent)
+				}
+			}
+		}
 		if marked {
 			a, b := utf16Off(n, mStart), utf16Off(n, mEnd)
 			for _, s := range l.layout.SelectionRects(ui.TextInputRange{Start: a, End: b}) {
@@ -721,6 +728,7 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					toggle("bold", locales.EditorBold(), e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
 					toggle("italic", locales.EditorItalic(), e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
 					toggle("code", locales.EditorInlineCode(), e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
+					toggle("sigma", locales.EditorInlineMath(), e.Has(func(a doc.Attrs) bool { return a.Math }), e.ToggleMath)
 					toggle("link", locales.EditorLink(), e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
 					e.colorButton(c, pal)
 				}

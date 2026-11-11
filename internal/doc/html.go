@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"leaflet/internal/mathtex"
 	"leaflet/locales"
 )
 
@@ -43,14 +44,17 @@ type TranscriptLine struct {
 	Time, Speaker, Text string
 }
 
+// pageTextSize is the size formulas are laid out at for a web page: their
+// pictures are in ems, so they follow the text they are in at any size.
+const pageTextSize = 16
+
 func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	var body strings.Builder
-	math, diagram, embed, recording := false, false, false, false
+	diagram, embed, recording := false, false, false
 	videos := map[string]Video{}
 	media := map[string]bool{}
 	files := map[string]servedFile{}
 	c.Walk(func(n, _ *Node) {
-		math = math || n.Type == "math_equation"
 		diagram = diagram || n.Type == "diagram"
 		embed = embed || n.Type == "embed" && opts.Embed != nil
 		if n.Type == "recording" {
@@ -85,13 +89,10 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		return opts.ScriptSource(name)
 	}
 	served := func(name string) bool { return source(name) != "" || script(name) != "" }
-	if !math || !served("math") {
-		math = false
-	}
 	if !diagram || !served("diagram") {
 		diagram = false
 	}
-	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram, videos: videos, media: media, files: files}
+	w := htmlWriter{b: &body, opts: opts, diagram: diagram, videos: videos, media: media, files: files}
 	w.blocks(c.Children)
 
 	var b strings.Builder
@@ -106,8 +107,8 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	}
 	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + css + `</style>` + opts.Head)
 	var inline strings.Builder
-	for _, name := range []string{"math", "diagram", "embed", "recording", "video", "comments"} {
-		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
+	for _, name := range []string{"diagram", "embed", "recording", "video", "comments"} {
+		if name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
 			continue
 		}
 		kind := " defer"
@@ -127,12 +128,12 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 }
 
 type htmlWriter struct {
-	b             *strings.Builder
-	opts          HTMLOptions
-	math, diagram bool
-	videos        map[string]Video
-	media         map[string]bool
-	files         map[string]servedFile
+	b       *strings.Builder
+	opts    HTMLOptions
+	diagram bool
+	videos  map[string]Video
+	media   map[string]bool
+	files   map[string]servedFile
 }
 
 type servedFile struct{ href, name, detail string }
@@ -430,11 +431,11 @@ func (w htmlWriter) block(n *Node) {
 		}
 		w.write("<p", w.attrs(n, "card"), ">", html.EscapeString(name), "</p>\n")
 	case "math_equation":
-		f := html.EscapeString(n.Str("formula"))
-		if w.math {
-			w.write("<div", w.attrs(n, "math"), ` data-tex="`, f, `"><pre>`, f, "</pre></div>\n")
+		tex := n.Str("formula")
+		if f, ok := mathtex.Display(tex, pageTextSize, 0); ok {
+			w.write("<div", w.attrs(n, "math"), ` title="`, html.EscapeString(tex), `">`, f.SVG(pageTextSize), "</div>\n")
 		} else {
-			w.write("<pre", w.attrs(n, ""), "><code>", f, "</code></pre>\n")
+			w.write("<pre", w.attrs(n, ""), "><code>", html.EscapeString(tex), "</code></pre>\n")
 		}
 	case "diagram":
 		src := html.EscapeString(n.Str("source"))
@@ -713,6 +714,14 @@ func (d Delta) html(link func(href string) (to, attrs string)) string {
 		if a.Code {
 			wrap("<code>", "</code>")
 		}
+		if a.Math {
+			if f, ok := mathtex.Layout(r.Text, pageTextSize); ok {
+				text = `<span class="tex" title="` + text + `">` + f.SVG(pageTextSize) + "</span>"
+			} else {
+				// What is no formula yet reads as its source.
+				wrap("<code>", "</code>")
+			}
+		}
 		var style []string
 		if ValidColor(a.Color) {
 			style = append(style, "color:"+a.Color)
@@ -901,6 +910,7 @@ figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .notes .ts:hover,.notes .at:hover{text-decoration:underline}
 .notes .at{color:var(--link);font-variant-numeric:tabular-nums}
 .math,.diagram{text-align:center;overflow-x:auto}
+.tex{white-space:nowrap}
 .diagram svg{max-width:100%;height:auto}
 @media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}
 th:not(.nowrap),td:not(.nowrap){min-width:9em}.card.link img{width:96px}}

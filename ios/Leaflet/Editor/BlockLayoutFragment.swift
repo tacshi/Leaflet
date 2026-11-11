@@ -132,6 +132,7 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
                     bottom: line.typographicBounds.maxY))
         }
         super.draw(at: point, in: context)
+        drawFormulas(at: point, in: context)
         if let palette {
             UIGraphicsPushContext(context)
             for chip in dueChips() {
@@ -139,6 +140,32 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
                     chip.info, in: chip.rect.offsetBy(dx: point.x, dy: point.y), palette: palette)
             }
             UIGraphicsPopContext()
+        }
+    }
+
+    /// Draws each typeset formula where the first character of its source
+    /// is, on that line's baseline.
+    private func drawFormulas(at point: CGPoint, in context: CGContext) {
+        guard let p = textElement as? NSTextParagraph else { return }
+        let text = p.attributedString
+        var found: [(at: Int, picture: MathPicture)] = []
+        text.enumerateAttribute(
+            .leafletMathPicture, in: NSRange(location: 0, length: text.length)
+        ) { value, range, _ in
+            if let picture = value as? MathPicture { found.append((range.location, picture)) }
+        }
+        guard !found.isEmpty else { return }
+        UIGraphicsPushContext(context)
+        defer { UIGraphicsPopContext() }
+        for (at, picture) in found {
+            guard
+                let line = textLineFragments.first(where: {
+                    NSLocationInRange(at, $0.characterRange)
+                })
+            else { continue }
+            let x = line.typographicBounds.minX + line.locationForCharacter(at: at).x
+            let baseline = line.typographicBounds.minY + line.glyphOrigin.y
+            picture.draw(x: point.x + x, baseline: point.y + baseline)
         }
     }
 

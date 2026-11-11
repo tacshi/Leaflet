@@ -33,11 +33,11 @@ func TestTextColorAndHighlight(t *testing.T) {
 		t.Fatalf("delta %+v", d)
 	}
 	e.SetHighlight("#eab30840")
-	spans := e.spans(n, theme.For(false), ui.Font{})
+	spans, _ := e.spans(n, theme.For(false), ui.Font{})
 	if spans[1].Color != ui.Hex("#ef4444") || spans[1].Background != ui.Hex("#eab30840") {
 		t.Errorf("span %+v", spans[1])
 	}
-	spans = e.spans(n, theme.For(true), ui.Font{})
+	spans, _ = e.spans(n, theme.For(true), ui.Font{})
 	if spans[1].Color != ui.Hex("#f87171") || spans[1].Background != ui.Hex("#eab30840") {
 		t.Errorf("dark span %+v", spans[1])
 	}

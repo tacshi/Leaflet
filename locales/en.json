@@ -4244,6 +4244,10 @@
   "@editorInlineCode": {
     "description": "Selection toolbar button that formats text as inline code."
   },
+  "editorInlineMath": "Formula",
+  "@editorInlineMath": {
+    "description": "Selection toolbar button that formats text as a formula in the line, written in TeX."
+  },
   "editorLink": "Link",
   "@editorLink": {
     "description": "Selection toolbar button that adds a link; also the link editor's button that applies it."

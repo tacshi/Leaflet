@@ -12,12 +12,12 @@ final class FormatController {
     var plainAt: Int?
 
     static let formatKeys: [NSAttributedString.Key] = [
-        .leafletBold, .leafletItalic, .leafletCode, .leafletUnderline, .leafletStrike,
-        .leafletColor, .leafletBackground,
+        .leafletBold, .leafletItalic, .leafletCode, .leafletMath, .leafletUnderline,
+        .leafletStrike, .leafletColor, .leafletBackground,
     ]
     private static let shownKeys: [NSAttributedString.Key] = [
         .underlineStyle, .underlineColor, .strikethroughStyle, .strikethroughColor, .link,
-        .backgroundColor,
+        .backgroundColor, .kern, .leafletMathPicture,
     ]
 
     init(_ editor: EditorController) { self.editor = editor }

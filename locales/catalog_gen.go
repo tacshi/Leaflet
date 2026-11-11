@@ -11863,6 +11863,22 @@ func (msgs Messages) EditorInlineCode() string {
 	return Catalog.Format(msgs.locale, "editorInlineCode", nil)
 }
 
+// EditorInlineMath says "Formula"
+// in the language the app shows.
+//
+// Selection toolbar button that formats text as a formula in the line,
+// written in TeX.
+func EditorInlineMath() string { return In(i18n.Locale()).EditorInlineMath() }
+
+// EditorInlineMath says "Formula"
+// in the language of msgs.
+//
+// Selection toolbar button that formats text as a formula in the line,
+// written in TeX.
+func (msgs Messages) EditorInlineMath() string {
+	return Catalog.Format(msgs.locale, "editorInlineMath", nil)
+}
+
 // EditorLink says "Link"
 // in the language the app shows.
 //

@@ -800,6 +800,7 @@
   "editorBold": "太字",
   "editorItalic": "斜体",
   "editorInlineCode": "コード",
+  "editorInlineMath": "数式",
   "editorLink": "リンク",
   "editorFormat": "書式",
   "editorPasteLink": "リンクを貼り付け",

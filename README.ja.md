@@ -483,10 +483,11 @@ SIL Open Font License の [Figtree](https://github.com/erikdkennedy/figtree)
 と [Source Serif 4](https://github.com/adobe-fonts/source-serif)
 （`internal/theme/fonts/OFL-*.txt`）、ISC ライセンスの
 [Lucide](https://lucide.dev) アイコン（`internal/theme/icons/LICENSE`）、
-数式とダイアグラムのための MIT ライセンスの [KaTeX](https://katex.org) と
-[Pele](https://github.com/obsidianmd/pele)
-（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）を同梱
-しています。
+ダイアグラムのための MIT ライセンスの [Pele](https://github.com/obsidianmd/pele)
+（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）、
+数式のための Apache 2.0 ライセンスの [Untie](https://github.com/caelyreth/untie)
+と GUST フォントライセンスの New Computer Modern Math フォント
+（`internal/mathtex/font/GUST-FONT-LICENSE.txt`）を同梱しています。
 
 ## ライセンス
 

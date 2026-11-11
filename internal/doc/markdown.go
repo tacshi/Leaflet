@@ -77,6 +77,8 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 				name = strings.TrimPrefix(r.Text, "@")
 			}
 			toks = append(toks, mdToken{text: "[@" + linked(name) + "](" + dest(MentionLink(m.Kind, m.ID)) + ")"})
+		case r.Attrs.Math:
+			toks = append(toks, mdToken{text: r.Text, math: true})
 		case r.Attrs.Code:
 			if n := len(toks); n > 0 && toks[n-1].code {
 				toks[n-1].text += r.Text
@@ -94,7 +96,28 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 	}
 	toks = spacesOutside(toks)
 	var b strings.Builder
+	// plain[i] tells that byte i of b is text of the page's, where a dollar
+	// sign is one to escape if it would read as the start of a formula.
+	var plain []bool
+	defer func() { plain = nil }()
 	for i, t := range toks {
+		before := b.Len()
+		if t.math {
+			next := ""
+			for _, after := range toks[i+1:] {
+				if after.text != "" || after.code {
+					next = after.text
+					break
+				}
+				if after.open || after.close {
+					next = "*"
+					break
+				}
+			}
+			b.WriteString(mathSpan(t.text, next))
+			plain = append(plain, make([]bool, b.Len()-len(plain))...)
+			continue
+		}
 		if t.open && t.mark.kind == '[' || plainToken(t) && strings.HasPrefix(t.text, "[") {
 			if out := b.String(); strings.HasSuffix(out, "!") {
 				b.Reset()
@@ -123,8 +146,97 @@ func (d Delta) markdown(escape, linked, dest func(string) string) string {
 		case t.mark.kind == '~':
 			b.WriteString("~~")
 		}
+		plain = append(plain[:min(len(plain), before)], make([]bool, b.Len()-min(len(plain), before))...)
+		if plainToken(t) {
+			for j := before; j < len(plain); j++ {
+				plain[j] = true
+			}
+		}
 	}
-	return b.String()
+	return escapeDollars(b.String(), plain)
+}
+
+// mathSpan writes a formula as $x^2$, or between backticks as $`x^2`$ where
+// the plain form would not read back as it is: next is the text after it.
+func mathSpan(tex, next string) string {
+	simple := tex != "" && !strings.ContainsAny(tex, "$`\n") && !strings.HasSuffix(tex, `\`) &&
+		!unicode.IsSpace([]rune(tex)[0]) && !unicode.IsSpace([]rune(tex)[len([]rune(tex))-1])
+	if simple && (next == "" || !unicode.IsDigit([]rune(next)[0])) {
+		return "$" + tex + "$"
+	}
+	return "$" + codeSpan(tex) + "$"
+}
+
+// escapeDollars escapes the dollar signs of plain text that would start a
+// formula, and no other: a price stays as it is written.
+func escapeDollars(s string, plain []bool) string {
+	if !strings.Contains(s, "$") {
+		return s
+	}
+	var runes []rune
+	var text []bool
+	for i, c := range s {
+		runes, text = append(runes, c), append(text, i < len(plain) && plain[i])
+	}
+	// From the end, so that each is read with the ones after it as they
+	// will be written: one escaped is none a formula ends at.
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] != '$' || !text[i] {
+			continue
+		}
+		if _, n := mathAt(runes, i); n > 0 {
+			runes = slices.Insert(runes, i, '\\')
+			text = slices.Insert(text, i, true)
+		}
+	}
+	return string(runes)
+}
+
+// mathAt reads the formula the dollar sign at i opens: $x^2$, which starts
+// and ends at no space and ends before no digit, so that prices are not
+// formulas; $$x^2$$; or $`x^2`$, which holds anything. n is 0 where none
+// opens there.
+func mathAt(s []rune, i int) (tex string, n int) {
+	rest := s[i+1:]
+	switch {
+	case len(rest) == 0:
+		return "", 0
+	case rest[0] == '`':
+		code, n := codeSpanAt(rest)
+		if n == 0 || n >= len(rest) || rest[n] != '$' {
+			return "", 0
+		}
+		return code, n + 2
+	case rest[0] == '$':
+		for j := 1; j+1 < len(rest); j++ {
+			if rest[j] == '\n' {
+				break
+			}
+			if rest[j] == '$' && rest[j+1] == '$' {
+				if tex := strings.TrimSpace(string(rest[1:j])); tex != "" && !strings.Contains(tex, "$") {
+					return tex, j + 3
+				}
+				break
+			}
+		}
+		return "", 0
+	case unicode.IsSpace(rest[0]):
+		return "", 0
+	}
+	for j := 0; j < len(rest); j++ {
+		switch rest[j] {
+		case '\\':
+			j++
+		case '\n':
+			return "", 0
+		case '$':
+			if j == 0 || unicode.IsSpace(rest[j-1]) || j+1 < len(rest) && unicode.IsDigit(rest[j+1]) {
+				return "", 0
+			}
+			return string(rest[:j]), j + 2
+		}
+	}
+	return "", 0
 }
 
 type mdMark struct {
@@ -141,10 +253,10 @@ type mdToken struct {
 	mark        mdMark
 	open, close bool
 	text        string
-	code        bool
+	code, math  bool
 }
 
-func plainToken(t mdToken) bool { return !t.open && !t.close && !t.code }
+func plainToken(t mdToken) bool { return !t.open && !t.close && !t.code && !t.math }
 
 func marksOf(a Attrs) []mdMark {
 	var out []mdMark
@@ -283,7 +395,8 @@ func trimSpans(d Delta) Delta {
 		m := marksOf(r.Attrs)
 		named := writtenByName(r.Attrs.Mention)
 		for at, c := range r.Text {
-			cs = append(cs, char{int32(i), int32(at), !named && (!r.Attrs.Code || c == '\n') && unicode.IsSpace(c), m})
+			kept := r.Attrs.Code || r.Attrs.Math
+			cs = append(cs, char{int32(i), int32(at), !named && (!kept || c == '\n') && unicode.IsSpace(c), m})
 		}
 	}
 	for _, mark := range []uint8{bold, italic, strike} {
@@ -804,6 +917,16 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 			i += n
 			continue
 		}
+		if c == '$' {
+			if tex, n := mathAt(s, i); n > 0 {
+				flush()
+				a := attrs
+				a.Math = true
+				*out = append(*out, Run{Text: tex, Attrs: a})
+				i += n
+				continue
+			}
+		}
 		if c == '[' {
 			if text, href, n, ok := links.link(i); ok {
 				flush()
@@ -900,7 +1023,7 @@ func sharedAttrs(d Delta, attrs Attrs) Attrs {
 	for _, r := range d[1:] {
 		b := r.Attrs
 		a.Bold, a.Italic, a.Under = a.Bold && b.Bold, a.Italic && b.Italic, a.Under && b.Under
-		a.Strike, a.Code = a.Strike && b.Strike, a.Code && b.Code
+		a.Strike, a.Code, a.Math = a.Strike && b.Strike, a.Code && b.Code, a.Math && b.Math
 		if a.Color != b.Color {
 			a.Color = ""
 		}

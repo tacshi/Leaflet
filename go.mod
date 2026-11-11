@@ -10,6 +10,7 @@ tool (
 )
 
 require (
+	github.com/caelyreth/untie v0.5.0
 	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.8.3
@@ -27,6 +28,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/go-typeset/bidi v0.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

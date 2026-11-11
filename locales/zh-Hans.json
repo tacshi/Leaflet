@@ -800,6 +800,7 @@
   "editorBold": "粗体",
   "editorItalic": "斜体",
   "editorInlineCode": "代码",
+  "editorInlineMath": "公式",
   "editorLink": "链接",
   "editorFormat": "格式",
   "editorPasteLink": "粘贴链接",

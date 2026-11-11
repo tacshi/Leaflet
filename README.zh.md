@@ -439,9 +439,11 @@ Open Font License 授权的 [Figtree](https://github.com/erikdkennedy/figtree)
 和 [Source Serif 4](https://github.com/adobe-fonts/source-serif)
 （`internal/theme/fonts/OFL-*.txt`）、以 ISC 许可证授权的
 [Lucide](https://lucide.dev) 图标（`internal/theme/icons/LICENSE`），以及
-以 MIT 许可证授权、用于数学公式和示意图的 [KaTeX](https://katex.org) 和
-[Pele](https://github.com/obsidianmd/pele)
-（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）。
+以 MIT 许可证授权、用于示意图的 [Pele](https://github.com/obsidianmd/pele)
+（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)），
+以及用于数学公式、以 Apache 2.0 许可证授权的
+[Untie](https://github.com/caelyreth/untie) 和以 GUST 字体许可证授权的
+New Computer Modern Math 字体（`internal/mathtex/font/GUST-FONT-LICENSE.txt`）。
 
 ## 许可证
 

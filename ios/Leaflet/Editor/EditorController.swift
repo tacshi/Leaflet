@@ -13,8 +13,13 @@ final class EditorController: NSObject, UITextViewDelegate {
 
     let textView: EditorTextView
     let text: BlockText
+    /// The selection a formula shows its source at, which a new style from
+    /// the page's view takes on.
+    var mathOpen: NSRange?
+
     var style: EditorStyle {
         didSet {
+            if style.mathOpen != mathOpen { style.mathOpen = mathOpen }
             BlockLook.palette = style.palette
             BlockLook.textSize = style.textSize
             let restyled = oldValue.palette.key != style.palette.key
@@ -311,17 +316,20 @@ final class EditorController: NSObject, UITextViewDelegate {
         format.updateTypingAttributes()
         if !session.updating { caretMenu.update() }
         due.updateDateOffer()
+        mathFollowsSelection()
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
         onEditing?(true)
         due.updateDateOffer()
+        mathFollowsSelection()
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
         onEditing?(false)
         caretMenu.close()
         due.updateDateOffer()
+        mathFollowsSelection()
     }
 
     func textView(

@@ -240,7 +240,11 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 		"strike": func(a *doc.Attrs) { a.Strike = true },
 		"code":   func(a *doc.Attrs) { a.Code = true },
 		"italic": func(a *doc.Attrs) { a.Italic = true },
+		"math":   func(a *doc.Attrs) { a.Math = true },
 	}[m.Format]
+	if set == nil {
+		return
+	}
 	e.pushUndo(false)
 	d = d.Delete(m.Close, m.End)
 	d = d.Format(m.Inner, m.Close, set)
@@ -250,7 +254,7 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 	off := m.Close - (m.Inner - m.Open)
 	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
 	e.typing, e.hasTyping = d.AttrsAt(m.Open), true
-	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
+	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike, e.typing.Math = false, false, false, false, false
 }
 
 func (e *Editor) ruleBlock(n *doc.Node) rules.Block {
@@ -924,6 +928,9 @@ func (e *Editor) ToggleStrike() {
 }
 func (e *Editor) ToggleCode() {
 	e.Format(func(a doc.Attrs) bool { return a.Code }, func(a *doc.Attrs, on bool) { a.Code = on })
+}
+func (e *Editor) ToggleMath() {
+	e.Format(func(a doc.Attrs) bool { return a.Math }, func(a *doc.Attrs, on bool) { a.Math = on })
 }
 
 func (e *Editor) SetLink(url string) {

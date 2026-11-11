@@ -37,3 +37,14 @@ func TestMarkdownBlocks(t *testing.T) {
 		t.Errorf("empty = %q, %v", empty, err)
 	}
 }
+
+func TestInlineMathPicture(t *testing.T) {
+	raw := InlineMath(`x^2+\frac{1}{2}`, 17, 3, 0, 0, 0, 255)
+	var p mathPicture
+	if err := json.Unmarshal([]byte(raw), &p); err != nil || p.Width <= 0 || p.Ascent <= 0 || p.Descent <= 0 || len(p.PNG) < 100 {
+		t.Fatalf("a formula's picture: %v, %+v", err, p.Width)
+	}
+	if InlineMath(`\frac{1`, 17, 3, 0, 0, 0, 255) != "" {
+		t.Error("half a formula has a picture")
+	}
+}

@@ -485,9 +485,12 @@ Leaflet is built on [MyGo](https://github.com/egoist/mygo). It bundles
 [Source Serif 4](https://github.com/adobe-fonts/source-serif) under the SIL
 Open Font License (`internal/theme/fonts/OFL-*.txt`),
 [Lucide](https://lucide.dev) icons under the ISC license
-(`internal/theme/icons/LICENSE`), and [KaTeX](https://katex.org) and
-[Pele](https://github.com/obsidianmd/pele) under the MIT license for math
-and diagrams ([`internal/rendered/third_party`](internal/rendered/third_party/README.md)).
+(`internal/theme/icons/LICENSE`),
+[Pele](https://github.com/obsidianmd/pele) under the MIT license for
+diagrams ([`internal/rendered/third_party`](internal/rendered/third_party/README.md)),
+and, for formulas, [Untie](https://github.com/caelyreth/untie) under the
+Apache 2.0 license with the New Computer Modern Math font under the GUST
+Font License (`internal/mathtex/font/GUST-FONT-LICENSE.txt`).
 
 ## License
 

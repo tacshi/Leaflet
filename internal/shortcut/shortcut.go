@@ -79,7 +79,7 @@ type Match struct {
 }
 
 var markers = []struct{ marker, format string }{
-	{"**", "bold"}, {"~~", "strike"}, {"`", "code"}, {"*", "italic"},
+	{"**", "bold"}, {"~~", "strike"}, {"`", "code"}, {"*", "italic"}, {"$", "math"},
 }
 
 func Inline[T rune | uint16](text []T, end int, mentioned func(from, to int) bool) (Match, bool) {
@@ -110,6 +110,10 @@ func Inline[T rune | uint16](text []T, end int, mentioned func(from, to int) boo
 				break
 			}
 			if m == 1 && openAt > 0 && text[openAt-1] == T(mk.marker[0]) {
+				break
+			}
+			// Two prices are no formula: one starts with no digit.
+			if mk.format == "math" && unicode.IsDigit(rune(inner[0])) {
 				break
 			}
 			return Match{Open: openAt, Inner: start + 1, Close: closeAt, End: end, Format: mk.format}, true

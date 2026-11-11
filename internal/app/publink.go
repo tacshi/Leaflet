@@ -989,7 +989,6 @@ var pubStatic = sync.OnceValue(func() pubAssets {
 		a.names[name+ext], a.assets[served] = served, pubAsset{typ: typ, body: []byte(body)}
 	}
 	const js = "text/javascript; charset=utf-8"
-	add("math", ".js", js, rendered.PageMathJS)
 	add("diagram", ".js", js, rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
 	add("comments", ".js", js, commentsScript)
 	add("embed", ".js", js, embedScript)

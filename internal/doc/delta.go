@@ -12,11 +12,13 @@ type Mention struct {
 }
 
 type Attrs struct {
-	Bold              bool
-	Italic            bool
-	Under             bool
-	Strike            bool
-	Code              bool
+	Bold   bool
+	Italic bool
+	Under  bool
+	Strike bool
+	Code   bool
+	// Math marks a formula in the line: the run's text is its TeX source.
+	Math              bool
 	Href              string
 	Mention           *Mention
 	Color, Background string
@@ -38,7 +40,7 @@ func (a Attrs) Zero() bool { return a == Attrs{} }
 
 func (a Attrs) Equal(b Attrs) bool {
 	if a.Bold != b.Bold || a.Italic != b.Italic || a.Under != b.Under ||
-		a.Strike != b.Strike || a.Code != b.Code || a.Href != b.Href ||
+		a.Strike != b.Strike || a.Code != b.Code || a.Math != b.Math || a.Href != b.Href ||
 		a.Color != b.Color || a.Background != b.Background {
 		return false
 	}
@@ -87,6 +89,7 @@ func attrsFromJSON(v any) Attrs {
 	a.Under, _ = m["underline"].(bool)
 	a.Strike, _ = m["strikethrough"].(bool)
 	a.Code, _ = m["code"].(bool)
+	a.Math, _ = m["math"].(bool)
 	a.Href, _ = m["href"].(string)
 	if s, _ := m["color"].(string); ValidColor(s) {
 		a.Color = s
@@ -120,6 +123,9 @@ func (a Attrs) json() map[string]any {
 	}
 	if a.Code {
 		m["code"] = true
+	}
+	if a.Math {
+		m["math"] = true
 	}
 	if a.Href != "" {
 		m["href"] = a.Href

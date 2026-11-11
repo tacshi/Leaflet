@@ -89,6 +89,8 @@ extension NSAttributedString.Key {
     static let leafletBold = NSAttributedString.Key("leaflet.bold")
     static let leafletItalic = NSAttributedString.Key("leaflet.italic")
     static let leafletCode = NSAttributedString.Key("leaflet.code")
+    /// A formula in the line: the run's text is its TeX source.
+    static let leafletMath = NSAttributedString.Key("leaflet.math")
     static let leafletUnderline = NSAttributedString.Key("leaflet.underline")
     static let leafletStrike = NSAttributedString.Key("leaflet.strike")
     static let leafletHref = NSAttributedString.Key("leaflet.href")

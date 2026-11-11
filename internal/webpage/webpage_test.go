@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"leaflet/internal/doc"
-	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -74,7 +73,6 @@ func TestPrintedPage(t *testing.T) {
 		own, `<div id="b-fl" data-block="fl" class="card file">`, locales.CardFileDetail("PDF", FileSize(2048)),
 		`<span class="muted">1:05</span>`, "Hello there.",
 		`<meta http-equiv="Content-Security-Policy" content="` + PrintCSP + `">`,
-		"<script>" + rendered.PageMathJS + "</script>",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %q", want)

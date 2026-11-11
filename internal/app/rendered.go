@@ -6,6 +6,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/editor"
+	"leaflet/internal/mathtex"
 	"leaflet/internal/rendered"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -15,7 +17,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	_, source := doc.BlockSource(n)
 	name, empty, edit := locales.RenderedMath(), locales.RenderedWriteFormula(), locales.RenderedEditMath()
-	page := func() string { return rendered.MathPage(source) }
+	var page func() string
 	if n.Type == "diagram" {
 		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
 		page = func() string { return rendered.DiagramPage(source, hexOf(pal.Surface), false) }
@@ -67,15 +69,36 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 			}
 			return
 		}
-		height := float32(64)
-		if n.Type == "diagram" {
-			height = 220
+		if n.Type == "math_equation" {
+			a.formula(c, source, width-2-2*pad)
+			return
 		}
-		in := embedInput{src: source, kind: n.Type, toPage: n.Type == "math_equation"}
+		in := embedInput{src: source, kind: n.Type}
 		a.sandbox(c, blockView(n.ID), in, page, width-2-2*pad, func(content float32) float32 {
 			return min(max(content, 32), 1600)
-		}, height)
+		}, 220)
 	})
+}
+
+// formula draws a formula block's formula on lines of its own, in the
+// middle of the block: broken where it is wider than the block and has
+// places to break, and as its source where it is no formula.
+func (a *App) formula(c *ui.Context, tex string, width float32) {
+	pal := theme.Of(c)
+	size := float32(a.settings.TextSize)
+	f, ok := mathtex.Display(tex, size, 0)
+	if ok && f.Width > width {
+		f, ok = mathtex.Display(tex, size, width)
+	}
+	if !ok {
+		ui.Text(c.Key("source"), tex).Font("monospace").FontSize(12.5).TextColor(pal.Danger).Selectable()
+		return
+	}
+	const pad = 8
+	ui.Box(c.Key("formula")).FillWidth().Height(f.Ascent + f.Descent + 2*pad).Label(tex).
+		Draw(func(p *ui.Painter, r ui.Rect) {
+			editor.PaintFormula(p, f, pal.Text, r.X+max((r.W-f.Width)/2, 0), r.Y+pad+f.Ascent)
+		})
 }
 
 func barButton(c *ui.Context, key, icon, label string, shown float32) ui.Element {

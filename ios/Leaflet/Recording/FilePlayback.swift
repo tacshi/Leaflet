@@ -119,7 +119,7 @@ final class FilePlayback {
             if playing && at == nil {
                 player.pause()
             } else {
-                resume(player)
+                resume(player, rewinding: at == nil)
             }
             return
         }
@@ -165,7 +165,7 @@ final class FilePlayback {
                 player = made
                 cover = picture
                 block = id
-                resume(made)
+                resume(made, rewinding: at == nil)
             } catch {
                 if current(this) { failed.insert(id) }
             }
@@ -184,7 +184,10 @@ final class FilePlayback {
         return UIImage(data: data)
     }
 
-    private func resume(_ player: AVPlayer) {
+    /// Plays, from the start again when the file has played to its end
+    /// (`rewinding`). A caller that has just sought passes false: its seek
+    /// has not landed yet, so the player still reads as at the end.
+    private func resume(_ player: AVPlayer, rewinding: Bool = true) {
         guard !Recorder.shared.state.recording else { return }
         VideoPlayback.shared.pauseAll()
         Recorder.shared.pausePlaying()
@@ -193,7 +196,7 @@ final class FilePlayback {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio)
         try? session.setActive(true)
-        if let length = player.currentItem?.duration.seconds, length.isFinite,
+        if rewinding, let length = player.currentItem?.duration.seconds, length.isFinite,
             player.currentTime().seconds >= length - 0.05
         {
             player.seek(to: .zero)

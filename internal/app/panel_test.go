@@ -723,3 +723,44 @@ func TestCommentKeepsItsMentionsMark(t *testing.T) {
 		t.Errorf("comment reads %q", got)
 	}
 }
+
+func TestCodeNamingAPageOrAnAddressIsALink(t *testing.T) {
+	a := workspaceApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	for code, want := range map[string]string{
+		p.ID:                         doc.PageLink(p.ID),
+		doc.BlockLink(p.ID, "b1"):    doc.BlockLink(p.ID, "b1"),
+		"https://example.com/a?b=1":  "https://example.com/a?b=1",
+		"http://localhost:8080":      "http://localhost:8080",
+		doc.PageLink("gone"):         "",
+		"gone":                       "",
+		"go test ./...":              "",
+		"https://example.com/a b":    "",
+		"ftp://example.com":          "",
+		"mailto:someone@example.com": "",
+		"javascript:alert(1)":        "",
+	} {
+		got, ok := a.codeLink(code)
+		if ok != (want != "") || got != want && ok {
+			t.Errorf("%q: %q, %v; want %q", code, got, ok, want)
+		}
+	}
+
+	var opened string
+	o := markdown.Options{OnLink: func(url string) { opened = url }, CodeLink: a.codeLink}
+	tt := ui.NewTester(func(c *ui.Context) {
+		markdownView(c, "See `"+p.ID+"` for it.", &o)
+	}, 600, 200)
+	tt.Frame()
+	if err := tt.Click(p.ID); err != nil {
+		t.Fatalf("%v in %q", err, tt.Texts())
+	}
+	tt.Frame()
+	if opened != doc.PageLink(p.ID) {
+		t.Errorf("opened %q", opened)
+	}
+}

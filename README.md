@@ -183,7 +183,7 @@ iPad app is SwiftUI and UIKit, on the same Go core.
 
 - macOS 13 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
 - iOS or iPadOS 26 or later, on iPhone and iPad.
-- To build from source: Go 1.27.3 or later; the Go code needs no cgo or C
+- To build from source: Go 1.27.4 or later; the Go code needs no cgo or C
   compiler. The Mac app's on-device speech helper ([`speech`](speech))
   is Swift, which `scripts/build-speech.sh` builds with Xcode 26 or later
   (the macOS 26 SDK): debug builds go on without it where Xcode can't build

@@ -150,6 +150,12 @@ func TestRestartToUpdateStartsAgainAfterTheRecording(t *testing.T) {
 
 func TestLogoutDoesNotWaitForTheRecording(t *testing.T) {
 	a, id := recordingApp(t)
+	// The logout leaves the recording's audio file open; Windows can't
+	// remove the temp dir until it is closed.
+	t.Cleanup(func() {
+		a.rec.Stop()
+		a.rec.Settle(5 * time.Second)
+	})
 	quits := 0
 	quit := quitApp
 	quitApp = func() { quits++ }

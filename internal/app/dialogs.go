@@ -378,13 +378,10 @@ func (a *App) folderDialog(c *ui.Context) {
 					return
 				}
 				if d.folder == nil {
-					if f, err := a.st.CreateFolderIn(name, d.folderParent); err != nil {
+					if _, err := a.st.CreateFolderIn(name, d.folderParent); err != nil {
 						a.toast(locales.DialogFolderCreateFailed(err.Error()))
 					} else {
-						if d.folderParent != "" {
-							a.openFolders(d.folderParent)
-						}
-						a.showInTree("folder", f.ID)
+						a.showSidebar(tabPages)
 					}
 				} else {
 					if err := a.st.RenameFolder(*d.folder, name); err != nil {
@@ -471,11 +468,7 @@ func (a *App) moveDialog(c *ui.Context) {
 							depth = 0
 						}
 						target("folder:"+f.ID, "folder", f.Name, depth, func() error {
-							if err := a.st.MoveFolder(id, f.ID, ""); err != nil {
-								return err
-							}
-							a.openFolders(f.ID)
-							return nil
+							return a.st.MoveFolder(id, f.ID, "")
 						})
 					}
 					return
@@ -489,8 +482,6 @@ func (a *App) moveDialog(c *ui.Context) {
 						case err != nil:
 						case parent != "":
 							a.treeOpen("page", parent)
-						case folder != "":
-							a.openFolders(folder)
 						}
 						return err
 					}

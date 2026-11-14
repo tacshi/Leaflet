@@ -63,6 +63,9 @@ type Settings struct {
 	SidebarTab              int         `json:"sidebar_tab,omitempty"`
 	SidebarWidth            float32     `json:"sidebar_width,omitempty"`
 	PanelWidth              float32     `json:"panel_width,omitempty"`
+	// TreeOpen is the sidebar's folders and pages showing what is in them,
+	// as "folder:" or "page:" and their ID.
+	TreeOpen []string `json:"tree_open,omitempty"`
 }
 
 func DefaultSettings() Settings {

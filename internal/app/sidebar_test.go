@@ -982,7 +982,7 @@ func TestFolderShowsInTheSidebar(t *testing.T) {
 		t.Fatalf("folders %+v", a.folders)
 	}
 	work := a.folders[0]
-	if !a.settings.SidebarOpen || a.settings.SidebarTab != tabPages || !a.treeState.Open.Has("folder:"+work.ID) {
+	if !a.settings.SidebarOpen || a.settings.SidebarTab != tabPages || a.treeState.Open.Has("folder:"+work.ID) {
 		t.Errorf("sidebar open %v at tab %d, folder open %v", a.settings.SidebarOpen, a.settings.SidebarTab, a.treeState.Open.Has("folder:"+work.ID))
 	}
 

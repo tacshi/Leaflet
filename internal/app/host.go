@@ -435,7 +435,6 @@ func (a *App) uploadFile(folderID string) {
 		if len(paths) == 0 {
 			return
 		}
-		a.update(func() { a.treeOpen("folder", folderID) })
 		a.addFiles(paths, folderID, "", func(store.File) {})
 	}()
 }

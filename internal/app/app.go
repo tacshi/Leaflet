@@ -340,6 +340,9 @@ func (a *App) start() error {
 	a.st, a.backend, a.sync, a.hub, a.rec = st, c.Remote, c.Sync, c.Hub, c.Rec
 	a.keepCore(c)
 	a.settings = st.Settings()
+	for _, key := range a.settings.TreeOpen {
+		a.treeState.Open.Add(key)
+	}
 	a.sidebarW = a.settings.SidebarWidth
 	a.panelW = a.settings.PanelWidth
 	a.panelOpen = false
@@ -908,13 +911,6 @@ func (a *App) openPage(id string) {
 	}
 	for _, p := range a.ancestors(id) {
 		a.treeOpen("page", p.ID)
-	}
-	top := a.pageByID(id)
-	if anc := a.ancestors(id); len(anc) > 0 {
-		top = &anc[0]
-	}
-	if top != nil && top.FolderID != "" {
-		a.openFolders(top.FolderID)
 	}
 	if a.win == nil {
 		if a.closePage() {

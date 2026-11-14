@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -84,7 +85,6 @@ func (a *App) sectionHeader(c *ui.Context, key, title string) {
 
 func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 	if m.Item(locales.SidebarNewPageInFolder()).Chosen() {
-		a.treeOpen("folder", f.ID)
 		a.newPage("", f.ID)
 	}
 	a.defaultTemplateMenu(m, locales.TemplateDefaultForFolder(), f.Name, f.DefaultTemplateID, false, func(id string) error {
@@ -113,7 +113,21 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 	}
 }
 
-func (a *App) treeOpen(kind, id string) { a.treeState.Open.Add(kind + ":" + id) }
+func (a *App) treeOpen(kind, id string) {
+	a.treeState.Open.Add(kind + ":" + id)
+	a.saveTree()
+}
+
+// saveTree keeps the folders and pages open in the sidebar in the settings
+// when they changed, for the next launch.
+func (a *App) saveTree() {
+	open := &a.treeState.Open
+	if open.Len() == len(a.settings.TreeOpen) && !slices.ContainsFunc(a.settings.TreeOpen, func(key string) bool { return !open.Has(key) }) {
+		return
+	}
+	a.settings.TreeOpen = slices.Sorted(open.All())
+	a.saveSettings()
+}
 
 func (a *App) showInTree(kind, id string) {
 	if kind == "folder" {
@@ -235,6 +249,7 @@ func (a *App) tree(c *ui.Context) {
 			}
 		}
 	}
+	a.saveTree()
 	if clicked && clickedOff(s, a.treeRow, func(key string) bool { return strings.HasPrefix(key, "page:") }) {
 		a.treeRow = openRow(s, roots, children, func(key string) bool { return a.route.Kind == "page" && key == "page:"+a.route.ID })
 	}
@@ -694,10 +709,6 @@ func (a *App) dropFolder(id, target string, at int) {
 	}
 	if err != nil {
 		a.toast(locales.SidebarCouldNotMove(err.Error()))
-		return
-	}
-	if at == dropInside || at == dropFirst {
-		a.openFolders(target)
 	}
 }
 
@@ -794,7 +805,6 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 	switch {
 	case kind == "folder":
 		move = func() error { return a.st.MovePage(id, "", target, "") }
-		a.treeOpen("folder", target)
 	case at == dropInside:
 		parent, move = target, func() error { return a.st.MovePage(id, target, "", "") }
 		a.treeOpen("page", target)

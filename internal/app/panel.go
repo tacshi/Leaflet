@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -11,6 +12,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
+	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -786,6 +788,23 @@ func markdownView(c *ui.Context, md string, o *markdown.Options) ui.Element {
 		_, _, o.Theme.Alerts[i], _ = editor.CalloutLook(tone, pal)
 	}
 	return markdown.View(c, md, o)
+}
+
+// codeLink makes code in an agent's answer or a comment a link where it
+// names something to open: a page of this workspace, by its link or its
+// ID, as an agent may quote one, or a web address.
+func (a *App) codeLink(code string) (string, bool) {
+	if id, ok := doc.PageLinkID(code); ok {
+		return code, a.pageByID(id) != nil
+	}
+	if a.pageByID(code) != nil {
+		return doc.PageLink(code), true
+	}
+	u, err := url.Parse(code)
+	if err != nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http" || strings.ContainsFunc(code, unicode.IsSpace) {
+		return "", false
+	}
+	return code, true
 }
 
 func (a *App) commentText(c *ui.Context, body string) ui.Element {

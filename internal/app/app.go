@@ -182,6 +182,7 @@ type App struct {
 	recKeeping   bool
 	relaunching  bool
 	recKeptAt    time.Time
+	running      func() // releases holdRunning's hold on App Nap
 	openView     store.OpenView
 	viewTimer    *time.Timer
 
@@ -366,6 +367,7 @@ func (a *App) start() error {
 		}
 	}
 	a.commentMD.OnLink = a.md.OnLink
+	a.md.CodeLink, a.commentMD.CodeLink = a.codeLink, a.codeLink
 	a.hub.PublicLink = a.publiclyLinked
 	a.online = mygo.Network.Status().Online
 	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
@@ -428,7 +430,7 @@ func (a *App) start() error {
 	a.updatable = mygo.Updater.Enabled()
 	go a.checkForUpdate()
 	a.capture = &webCapture{win: a.win}
-	a.rec.Attach(a.capture, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
+	a.rec.Attach(a.capture, func(fn func()) { a.update(func() { fn(); a.refreshTray(); a.holdRunning() }) })
 	go a.findSpeech()
 	a.loadSpeechKeys()
 	a.core().Start()
@@ -457,6 +459,16 @@ func (a *App) closing(e *mygo.CloseEvent) {
 }
 
 func (a *App) beforeQuit(e *mygo.QuitEvent) {
+	if e.SessionEnding {
+		// Logout or shutdown: the quit can't wait, and the process may end
+		// once this returns. The page is saved here; a recording under way
+		// is cut off and RecoverInterrupted repairs it at the next start.
+		a.quitting = true
+		a.flush()
+		a.stopPub()
+		a.endView()
+		return
+	}
 	if !a.flush() {
 		e.PreventDefault()
 		a.relaunching = false
@@ -479,7 +491,22 @@ var quitWait = 20 * time.Second
 var (
 	quitApp     = func() { mygo.App.Quit() }
 	relaunchApp = func() { mygo.App.Relaunch() }
+	keepRunning = func(reason string) func() { return mygo.Power.KeepRunning(reason) }
 )
+
+// holdRunning keeps macOS from putting Leaflet into App Nap while it
+// records or transcribes, which would throttle the capture and the live
+// transcript's streaming when its window is hidden or covered.
+func (a *App) holdRunning() {
+	busy := a.rec.Active() || len(a.rec.Transcribing) > 0 || len(a.rec.TranscribingFiles) > 0
+	switch {
+	case busy && a.running == nil:
+		a.running = keepRunning("Recording and transcribing")
+	case !busy && a.running != nil:
+		a.running()
+		a.running = nil
+	}
+}
 
 // keepRecording reports whether a quit has to wait for a recording: it
 // stops the one under way, and quits again once the audio and the

@@ -147,3 +147,38 @@ func TestRestartToUpdateStartsAgainAfterTheRecording(t *testing.T) {
 		t.Errorf("stored %+v, %v", rec, err)
 	}
 }
+
+func TestLogoutDoesNotWaitForTheRecording(t *testing.T) {
+	a, id := recordingApp(t)
+	quits := 0
+	quit := quitApp
+	quitApp = func() { quits++ }
+	defer func() { quitApp = quit }()
+	e := &mygo.QuitEvent{SessionEnding: true}
+	a.beforeQuit(e)
+	if e.DefaultPrevented() || a.recKeeping || quits != 0 || !a.quitting {
+		t.Fatalf("prevented %v, keeping %v, asked to quit %d times, quitting %v", e.DefaultPrevented(), a.recKeeping, quits, a.quitting)
+	}
+	if rec, err := a.st.Recording(id); err != nil || rec.Status != "recording" {
+		t.Errorf("stored %+v, %v; want it left for RecoverInterrupted", rec, err)
+	}
+}
+
+func TestRecordingHoldsOffAppNap(t *testing.T) {
+	holds, releases := 0, 0
+	keep := keepRunning
+	keepRunning = func(string) func() { holds++; return func() { releases++ } }
+	defer func() { keepRunning = keep }()
+	a, _ := recordingApp(t)
+	a.holdRunning()
+	a.holdRunning()
+	if holds != 1 || releases != 0 {
+		t.Fatalf("while recording: held %d times, released %d", holds, releases)
+	}
+	a.rec.Stop()
+	a.rec.Settle(5 * time.Second)
+	a.holdRunning()
+	if holds != 1 || releases != 1 || a.running != nil {
+		t.Errorf("after the recording: held %d times, released %d", holds, releases)
+	}
+}

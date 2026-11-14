@@ -37,3 +37,6 @@ DerivedData/
 /ios/Leaflet/Generated/
 
 __pycache__/
+
+# Claude Code's per-person settings
+/.claude/settings.local.json

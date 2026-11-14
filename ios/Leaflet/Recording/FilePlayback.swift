@@ -154,6 +154,9 @@ final class FilePlayback {
                 let item = AVPlayerItem(asset: asset)
                 let made = AVPlayer(playerItem: item)
                 made.defaultRate = PlaySpeed.current
+                // A video, like an audio file, plays on with the phone locked or the app away,
+                // heard and steered from the lock screen; the system pauses one by default.
+                made.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
                 if let at {
                     await made.seek(to: CMTime(seconds: Double(at), preferredTimescale: 600))
                 }

@@ -38,10 +38,18 @@ struct SidebarView: View {
     @State private var newName = ""
     @State private var renamingTag: String?
     @State private var id = UUID()
-    @State private var open: Set<String> = []
+    /// The folders ("folder:" and its ID) and pages (their IDs) showing
+    /// what is in them: none until the user opens one, kept across launches.
+    @AppStorage("sidebar.open") private var openKeys = ""
     @State private var drops = SidebarDrops()
 
     private var showsTodos: Bool { tab == .todos && query.isEmpty }
+
+    private var open: Binding<Set<String>> {
+        Binding(
+            get: { Set(openKeys.split(separator: "\n").map(String.init)) },
+            set: { openKeys = $0.sorted().joined(separator: "\n") })
+    }
 
     enum Renaming: Identifiable {
         case page(PageRow)
@@ -185,9 +193,9 @@ struct SidebarView: View {
         let lib = app.library
         Section {
             ForEach(lib.rootFolders) { folder in
-                FolderRowView(folder: folder, actions: actions, open: $open)
+                FolderRowView(folder: folder, actions: actions, open: open)
             }
-            PageRows(pages: lib.topPages, actions: actions, open: $open)
+            PageRows(pages: lib.topPages, actions: actions, open: open)
             ForEach(lib.topFiles) { FileRowView(file: $0) }
             if lib.topPages.isEmpty && lib.folders.isEmpty && lib.topFiles.isEmpty {
                 Text(L.sidebarNoPages).foregroundStyle(.secondary)
@@ -196,7 +204,7 @@ struct SidebarView: View {
         .withoutTopLine()
         if !lib.sharedPages.isEmpty {
             Section(L.sidebarSharedWithMe) {
-                PageRows(pages: lib.sharedPages, actions: actions, open: $open)
+                PageRows(pages: lib.sharedPages, actions: actions, open: open)
             }
             .withoutTopLine()
         }
@@ -553,11 +561,19 @@ struct FolderRowView: View {
     @Binding var open: Set<String>
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
-    @State private var expanded = true
     @State private var uploading = false
 
+    private var expanded: Binding<Bool> {
+        let key = "folder:" + folder.id
+        return Binding(
+            get: { open.contains(key) },
+            set: { shown in
+                if shown { open.insert(key) } else { open.remove(key) }
+            })
+    }
+
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
+        DisclosureGroup(isExpanded: expanded) {
             ForEach(app.library.subfolders(of: folder)) {
                 FolderRowView(folder: $0, actions: actions, open: $open)
             }
@@ -568,7 +584,7 @@ struct FolderRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .selectionDisabled()
                 .contentShape(.rect)
-                .onTapGesture { withAnimation { expanded.toggle() } }
+                .onTapGesture { withAnimation { expanded.wrappedValue.toggle() } }
                 .contextMenu {
                     Button(L.sidebarNewPageInFolder, systemImage: "plus") {
                         actions.newPageInFolder(folder)

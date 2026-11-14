@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -42,6 +43,16 @@ func TestSidebarNestedFolders(t *testing.T) {
 		t.Fatalf("a closed folder shows its folders: %v", tt.Texts())
 	}
 	a.openPage(roadmap.ID)
+	tt.Frame()
+	tt.Frame()
+	if tt.HasText("Plans") || tt.HasText("Memo") {
+		t.Fatalf("opening a page opened its folders: %v", tt.Texts())
+	}
+	a.treeOpen("folder", work.ID)
+	a.treeOpen("folder", plans.ID)
+	if kept := a.st.Settings().TreeOpen; !slices.Contains(kept, "folder:"+work.ID) || !slices.Contains(kept, "folder:"+plans.ID) {
+		t.Errorf("open folders kept: %v", kept)
+	}
 	tt.Frame()
 	tt.Frame()
 	above := func(upper, lower string) {

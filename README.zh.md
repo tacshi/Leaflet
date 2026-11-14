@@ -161,7 +161,7 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
 
 - macOS 13 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
 - iPhone 和 iPad 上的 iOS 或 iPadOS 26 或更高版本。
-- 从源码构建：Go 1.27.3 或更高版本；Go 代码不需要 cgo 或 C 编译器。Mac
+- 从源码构建：Go 1.27.4 或更高版本；Go 代码不需要 cgo 或 C 编译器。Mac
   应用的设备端语音识别助手（[`speech`](speech)）用 Swift 编写，
   由 `scripts/build-speech.sh` 使用 Xcode 26 或更高版本（macOS 26 SDK）
   构建：在 Xcode 无法构建它的环境中，调试构建会跳过它继续进行，发布构建则

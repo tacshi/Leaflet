@@ -180,7 +180,7 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
 
 - macOS 13 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
 - iPhone と iPad では iOS または iPadOS 26 以降。
-- ソースからビルドするには Go 1.27.3 以降。Go のコードに cgo や C
+- ソースからビルドするには Go 1.27.4 以降。Go のコードに cgo や C
   コンパイラは不要です。Mac アプリのオンデバイス音声認識ヘルパー
   （[`speech`](speech)）は Swift で書かれ、`scripts/build-speech.sh`
   が Xcode 26 以降（macOS 26 SDK）でビルドします。Xcode でビルドできない環境

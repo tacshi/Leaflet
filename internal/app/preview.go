@@ -265,12 +265,11 @@ func (a *App) previewWeb(c *ui.Context, p *filePreview, height float32) {
 }
 
 func (a *App) previewImage(c *ui.Context, p *filePreview, message func(string)) {
-	link := "file://" + p.path
-	bmp := a.images.get(link, func() { a.update(func() {}) })
+	bmp, failed := a.images.get(c, fileURL(p.path), previewSide)
 	switch {
 	case bmp != nil:
 		ui.Image(c, bmp).Fill().Fit(ui.Contain).Label(p.file.Name)
-	case a.images.hasFailed(link):
+	case failed:
 		message(locales.PreviewCannotShow())
 	default:
 		ui.Column(c).Grow(1).Center().Children(func() { ui.Spinner(c).Size(18, 18) })

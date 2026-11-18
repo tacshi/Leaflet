@@ -532,7 +532,7 @@ func mediaLink(href string) string {
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	pic, video, failed := e.Host.Image(n)
+	pic, video, failed := e.Host.Image(c, n)
 	if pic == nil {
 		label := locales.EditorLoadingImage()
 		if failed {

@@ -32,7 +32,7 @@ type Trigger struct {
 type Host interface {
 	PageTitle(id string) string
 	OpenPage(id string)
-	Image(n *doc.Node) (pic ui.ImageSource, video *ui.VideoPlayer, failed bool)
+	Image(c *ui.Context, n *doc.Node) (pic ui.ImageSource, video *ui.VideoPlayer, failed bool)
 	Embed(c *ui.Context, n *doc.Node, width float32)
 	Video(c *ui.Context, n *doc.Node, width float32)
 	Card(c *ui.Context, n *doc.Node)

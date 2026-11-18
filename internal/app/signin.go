@@ -305,6 +305,7 @@ func (a *App) usedAccount(user *store.User, replaces bool, err error) {
 	a.session = a.st.Session()
 	if replaces {
 		delete(a.drafts, agents.WorkspaceID)
+		a.images.clear()
 	}
 	a.signIn = signInState{}
 	a.account.nameEdited = false

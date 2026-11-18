@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/netimage"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
@@ -141,10 +142,8 @@ func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
 				ui.Text(c, site).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 			})
 		})
-		if info.Image != "" {
-			if bmp := a.images.get(info.Image, func() { a.update(func() {}) }); bmp != nil {
-				ui.Image(c, bmp).Size(150, 96).Fit(ui.Cover)
-			}
+		if _, failed := a.images.get(c, info.Image, cardSide); info.Image != "" && !failed {
+			netimage.Image(c, info.Image, netimage.Options{MaxSide: cardSide, Placeholder: pal.Ground}).Size(150, 96)
 		}
 	})
 	if b.Clicked() {

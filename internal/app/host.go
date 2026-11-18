@@ -1,10 +1,7 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"image"
 	"io"
 	"log"
 	"maps"
@@ -15,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -31,7 +27,6 @@ import (
 	"leaflet/internal/store"
 	"leaflet/internal/templates"
 	"leaflet/internal/theme"
-	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -81,7 +76,7 @@ type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
-func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
+func (h *host) Image(c *ui.Context, n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	redraw := func() { h.a.update(func() {}) }
 	downloaded := func(ok bool) {
 		if ok {
@@ -89,6 +84,9 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 		}
 	}
 	url := n.Str("url")
+	if p, ok := strings.CutPrefix(url, "file://"); ok {
+		url = fileURL(p) // as a path, which may hold a # or a space
+	}
 	path := ""
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
 		done := downloaded
@@ -99,12 +97,13 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 		if path, fetching = h.a.localFile(f, done); path == "" {
 			return nil, nil, !fetching
 		}
-		url = "file://" + path
+		url = fileURL(path)
 	}
-	if b := h.a.images.get(url, redraw); b != nil {
+	b, failed := h.a.images.get(c, url, 0)
+	if b != nil {
 		return b, h.a.images.player(url, n.ID, redraw), false
 	}
-	failed := url == "" || h.a.images.hasFailed(url)
+	failed = failed || url == ""
 	if failed && path != "" {
 		h.a.lost(path)
 	}
@@ -688,275 +687,8 @@ func (a *App) loadMembers(pageID string) {
 	_ = a.sync.LoadMembers(ctx, pageID)
 }
 
-type imageCache struct {
-	root     string
-	mu       sync.Mutex
-	pictures map[string]ui.ImageSource
-	used     map[string]time.Time
-	swept    time.Time
-	loading  map[string]bool
-	failed   map[string]time.Time
-	gifs     map[string][]byte
-	players  map[string]*gifPlayer
-	making   map[string]bool
-	closed   bool
-}
-
-type gifPlayer struct {
-	p     *ui.VideoPlayer
-	shown time.Time
-}
-
-const playerIdle = 30 * time.Second
-
+// imageRetry is how long a failed lookup waits before it is tried again.
 const imageRetry = time.Minute
-
-func newImageCache(root string) *imageCache {
-	return &imageCache{root: root, pictures: map[string]ui.ImageSource{}, used: map[string]time.Time{}, loading: map[string]bool{}, failed: map[string]time.Time{},
-		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
-}
-
-func (ic *imageCache) get(url string, done func()) ui.ImageSource {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	if b, ok := ic.pictures[url]; ok {
-		ic.used[url] = time.Now()
-		return b
-	}
-	if ic.loading[url] || url == "" {
-		return nil
-	}
-	if t, ok := ic.failed[url]; ok && time.Since(t) < imageRetry {
-		return nil
-	}
-	ic.loading[url] = true
-	go func() {
-		data, err := ic.read(url)
-		var b ui.ImageSource
-		if err == nil {
-			err = checkPixels(data)
-		}
-		if err == nil {
-			b, err = ui.DecodeImage(data)
-		}
-		if err != nil {
-			log.Printf("image %s: %v", url, err)
-		}
-		ic.mu.Lock()
-		delete(ic.loading, url)
-		if b != nil {
-			ic.pictures[url], ic.used[url] = b, time.Now()
-			delete(ic.failed, url)
-			if animatedGIF(data) {
-				ic.gifs[url] = data
-			}
-		} else {
-			ic.failed[url] = time.Now()
-		}
-		ic.mu.Unlock()
-		done()
-	}()
-	return nil
-}
-
-func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	data, ok := ic.gifs[url]
-	key := url + "#" + block
-	if !ok || ic.making[key] {
-		return nil
-	}
-	if gp, ok := ic.players[key]; ok {
-		gp.shown = time.Now()
-		return gp.p
-	}
-	ic.making[key] = true
-	go func() {
-		d, err := ui.NewGIFDecoder(data)
-		var p *ui.VideoPlayer
-		if err == nil {
-			p, err = ui.NewVideoPlayer(d)
-		}
-		if err != nil {
-			log.Printf("gif %s: %v", url, err)
-		} else {
-			p.SetLoop(true)
-		}
-		ic.mu.Lock()
-		delete(ic.making, key)
-		if ic.closed {
-			if p != nil {
-				p.Close()
-			}
-		} else {
-			ic.players[key] = &gifPlayer{p: p, shown: time.Now()}
-		}
-		ic.mu.Unlock()
-		done()
-	}()
-	return nil
-}
-
-func (ic *imageCache) releasePlayers(now time.Time) {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	for key, gp := range ic.players {
-		if now.Sub(gp.shown) < playerIdle {
-			continue
-		}
-		if gp.p != nil {
-			gp.p.Close()
-		}
-		delete(ic.players, key)
-	}
-}
-
-const pictureIdle = 2 * time.Minute
-
-var pictureBudget int64 = 512 << 20
-
-func (ic *imageCache) releasePictures(now time.Time) {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	if now.Sub(ic.swept) < time.Second {
-		return
-	}
-	ic.swept = now
-	type held struct {
-		url   string
-		at    time.Time
-		bytes int64
-	}
-	var kept []held
-	var total int64
-	for url, b := range ic.pictures {
-		at := ic.used[url]
-		if now.Sub(at) >= pictureIdle {
-			ic.forget(url)
-			continue
-		}
-		w, h := ui.ImageSize(b)
-		n := int64(w) * int64(h) * 4
-		kept = append(kept, held{url, at, n})
-		total += n
-	}
-	if total <= pictureBudget {
-		return
-	}
-	slices.SortFunc(kept, func(x, y held) int { return x.at.Compare(y.at) })
-	for _, p := range kept {
-		if total <= pictureBudget || now.Sub(p.at) < time.Second {
-			break
-		}
-		ic.forget(p.url)
-		total -= p.bytes
-	}
-}
-
-func (ic *imageCache) forget(url string) {
-	delete(ic.pictures, url)
-	delete(ic.gifs, url)
-	delete(ic.used, url)
-}
-
-const (
-	maxPixels    = doc.MaxPixels
-	maxGIFPixels = 200_000_000
-)
-
-var errTooLarge = errors.New("picture too large")
-
-// checkPixels refuses a picture too large to decode. One whose size can't
-// be read isn't a bitmap ui.DecodeImage can decode, which reads bitmaps
-// with the same decoders, so it can only be drawn as an SVG, whose paths
-// take no pixels of its size.
-func checkPixels(data []byte) error {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil
-	}
-	// Divided rather than multiplied, so no claimed size overflows.
-	if cfg.Width > 0 && cfg.Height > maxPixels/cfg.Width {
-		return errTooLarge
-	}
-	if _, area := gifFrames(data); area > maxGIFPixels {
-		return errTooLarge
-	}
-	return nil
-}
-
-func (ic *imageCache) close() {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	ic.closed = true
-	for key, gp := range ic.players {
-		if gp.p != nil {
-			gp.p.Close()
-		}
-		delete(ic.players, key)
-	}
-}
-
-func animatedGIF(data []byte) bool {
-	n, _ := gifFrames(data)
-	return n > 1
-}
-
-func gifFrames(data []byte) (frames, area int) {
-	if !bytes.HasPrefix(data, []byte("GIF8")) || len(data) < 13 {
-		return 0, 0
-	}
-	table := func(packed byte) int {
-		if packed&0x80 == 0 {
-			return 0
-		}
-		return 3 << (packed&7 + 1)
-	}
-	skip := func(i int) int {
-		for i < len(data) && data[i] != 0 {
-			i += 1 + int(data[i])
-		}
-		return i + 1
-	}
-	i := 13 + table(data[10])
-	for i < len(data) {
-		switch data[i] {
-		case 0x21:
-			i = skip(i + 2)
-		case 0x2C:
-			if i+10 > len(data) {
-				return frames, area
-			}
-			w, h := int(data[i+5])|int(data[i+6])<<8, int(data[i+7])|int(data[i+8])<<8
-			frames, area = frames+1, area+w*h
-			i = skip(i + 10 + table(data[i+9]) + 1)
-		default:
-			return frames, area
-		}
-	}
-	return frames, area
-}
-
-func (ic *imageCache) hasFailed(url string) bool {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	_, ok := ic.failed[url]
-	return ok && !ic.loading[url]
-}
-
-func (ic *imageCache) read(url string) ([]byte, error) {
-	path, ok := strings.CutPrefix(url, "file://")
-	if !ok {
-		return web.Fetch(url)
-	}
-	if !inFolder(ic.root, path) {
-		return nil, errNotOwnFile
-	}
-	return os.ReadFile(path) // #nosec G304
-}
-
-var errNotOwnFile = export.ErrNotOwnFile
 
 func inFolder(dir, path string) bool { return export.InFolder(dir, path) }
 

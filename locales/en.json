@@ -1307,6 +1307,26 @@
       }
     }
   },
+  "dialogHistoryChangeOf": "{index} of {count}",
+  "@dialogHistoryChangeOf": {
+    "description": "Page history: which change the caret is at, among the changes since the version (2 of 5).",
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogHistoryPreviousChange": "Previous change",
+  "@dialogHistoryPreviousChange": {
+    "description": "Page history: the button going to the change before."
+  },
+  "dialogHistoryNextChange": "Next change",
+  "@dialogHistoryNextChange": {
+    "description": "Page history: the button going to the change after."
+  },
   "dialogHistoryRestore": "Restore this version",
   "@dialogHistoryRestore": {
     "description": "Page history: the button restoring the chosen version."

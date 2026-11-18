@@ -93,7 +93,7 @@ func TestPictureDownloadFails(t *testing.T) {
 	a.post = func(fn func()) { posted <- fn }
 	h := &host{a: a}
 	n := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"file_id": id}}
-	if pic, _, failed := h.Image(n); pic != nil || failed {
+	if pic, _, failed := h.Image(nil, n); pic != nil || failed {
 		t.Fatalf("before the download: %v, failed %v", pic, failed)
 	}
 	select {
@@ -102,14 +102,14 @@ func TestPictureDownloadFails(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the download never ended")
 	}
-	if _, _, failed := h.Image(n); !failed {
+	if _, _, failed := h.Image(nil, n); !failed {
 		t.Fatal("a failed download still shows as loading")
 	}
 	if asked.Load() != 1 {
 		t.Fatalf("asked %d times", asked.Load())
 	}
 	a.downloadFails[id] = time.Now().Add(-imageRetry)
-	h.Image(n)
+	h.Image(nil, n)
 	<-posted
 	if asked.Load() != 2 {
 		t.Errorf("not tried again after the wait: asked %d times", asked.Load())
@@ -328,7 +328,7 @@ func TestFileThatCannotBeDownloaded(t *testing.T) {
 	if len(a.toasts) != 1 || a.toasts[0].text != locales.HostNotOnDevice("photo.png") {
 		t.Errorf("signed out, said %+v", a.toasts)
 	}
-	if _, _, failed := (&host{a: a}).Image(&doc.Node{ID: "img", Type: "image", Data: map[string]any{"file_id": id}}); !failed {
+	if _, _, failed := (&host{a: a}).Image(nil, &doc.Node{ID: "img", Type: "image", Data: map[string]any{"file_id": id}}); !failed {
 		t.Error("a picture that cannot be downloaded shows as loading")
 	}
 

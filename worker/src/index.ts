@@ -49,8 +49,14 @@ function refuse(status: number, error: string, description: string): Response {
   return Response.json({ error, error_description: description }, { status });
 }
 
+// The media type of a Content-Type header, without its parameters, in lower
+// case: media types are case-insensitive (RFC 9110 §8.3.1).
+function mediaType(header: string | null): string {
+  return (header ?? "").split(";", 1)[0].trim().toLowerCase();
+}
+
 async function token(request: Request, env: Env): Promise<Response> {
-  if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+  if (mediaType(request.headers.get("content-type")) !== "application/x-www-form-urlencoded") {
     return refuse(415, "invalid_request", "Send the form url-encoded.");
   }
   const form = new URLSearchParams(await request.text());
@@ -109,6 +115,9 @@ export default {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
           "Referrer-Policy": "no-referrer",
+          // The page hands an OAuth code to the app: no other site frames it.
+          "Content-Security-Policy": "frame-ancestors 'none'",
+          "X-Frame-Options": "DENY",
         },
       });
     }

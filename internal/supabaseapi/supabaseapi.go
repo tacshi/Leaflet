@@ -65,7 +65,15 @@ type Client struct {
 	OnRefresh func(refresh string)
 }
 
-var httpClient = &http.Client{Timeout: 2 * time.Minute}
+var httpClient = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: noRedirect}
+
+var errRedirected = errors.New("the Supabase API answered with a redirect")
+
+func noRedirect(*http.Request, []*http.Request) error { return errRedirected }
+
+const maxAnswerBytes = 8 << 20
+
+var errTooLong = errors.New("the Supabase API's answer is too long to read")
 
 func Resume(refresh string) *Client { return &Client{refresh: refresh} }
 
@@ -133,7 +141,10 @@ func FinishSignIn(ctx context.Context, answer url.Values, state, verifier string
 
 func (c *Client) exchange(ctx context.Context, form url.Values) error {
 	form.Set("client_id", ClientID)
-	req, _ := http.NewRequestWithContext(ctx, "POST", tokenURL(), strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return &failed{locales.SupabaseSignInFailed(err.Error()), err}
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	var t struct {
@@ -142,8 +153,7 @@ func (c *Client) exchange(ctx context.Context, form url.Values) error {
 		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if err := send(httpClient, req, &t); err != nil {
-		var e *Error
-		if errors.As(err, &e) && form.Get("grant_type") == "refresh_token" && e.Status == http.StatusBadRequest {
+		if e, ok := errors.AsType[*Error](err); ok && form.Get("grant_type") == "refresh_token" && e.Status == http.StatusBadRequest {
 			return ErrSignedOut
 		}
 		return &failed{locales.SupabaseSignInFailed(err.Error()), err}
@@ -196,9 +206,15 @@ func send(hc *http.Client, req *http.Request, out any) error {
 		return err
 	}
 	defer func() { _ = res.Body.Close() }()
-	data, _ := io.ReadAll(res.Body)
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxAnswerBytes+1))
+	if err == nil && len(data) > maxAnswerBytes {
+		err = errTooLong
+	}
 	if res.StatusCode >= 400 {
 		return &Error{Status: res.StatusCode, Message: message(data, res.Status)}
+	}
+	if err != nil {
+		return err
 	}
 	if out == nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil
@@ -229,7 +245,10 @@ func (c *Client) call(ctx context.Context, method, path string, body any, ctype 
 	case *bytes.Buffer:
 		r = b
 	default:
-		raw, _ := json.Marshal(b)
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return err
+		}
 		r, ctype = bytes.NewReader(raw), "application/json"
 	}
 	req, err := http.NewRequestWithContext(ctx, method, Base+path, r)
@@ -357,7 +376,10 @@ func (c *Client) DeleteFunction(ctx context.Context, ref, slug string) error {
 func (c *Client) DeployFunction(ctx context.Context, ref, slug, entrypoint string, verifyJWT bool, files []File) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
-	meta, _ := json.Marshal(map[string]any{"name": slug, "entrypoint_path": entrypoint, "verify_jwt": verifyJWT})
+	meta, err := json.Marshal(map[string]any{"name": slug, "entrypoint_path": entrypoint, "verify_jwt": verifyJWT})
+	if err != nil {
+		return err
+	}
 	if err := w.WriteField("metadata", string(meta)); err != nil {
 		return err
 	}

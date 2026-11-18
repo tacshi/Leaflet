@@ -518,3 +518,43 @@ func TestDrainWaitsNoLongerThanItsLimit(t *testing.T) {
 	close(srv.hold)
 	awaitUpload(t, svc)
 }
+
+func TestACopyWhoseDownloadStallsGivesWay(t *testing.T) {
+	shortened(t, 10*time.Millisecond, 200*time.Millisecond)
+	retryBase = time.Minute
+	t.Cleanup(func() { retryBase = 0 })
+	st := openStore(t)
+	page, err := st.CreatePage(store.NewPageOptions{Title: "Copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := oldFileCopy(t, st, page.ID, store.File{Name: "film.mov", MimeType: "video/quicktime", StoragePath: "elsewhere/f/film.mov"})
+	srv := &storageServer{closing: make(chan struct{})}
+	stalled := make(chan struct{})
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/") {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			select {
+			case <-stalled:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		srv.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hs.Close)
+	t.Cleanup(func() { close(stalled) })
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	awaitRuns(t, svc, "files/"+c.ID)
+	awaitUpload(t, svc)
+	if n := attempts(t, st, "storage", "files/"+c.ID); n != 1 {
+		t.Errorf("%d failures", n)
+	}
+}

@@ -68,6 +68,28 @@ func TestLoopbackTakesTheAnswer(t *testing.T) {
 	}
 }
 
+func TestLoopbackSendsThePageWhenClosedAtOnce(t *testing.T) {
+	for _, q := range []string{"state=the-state&code=c", "state=the-state&error=access_denied"} {
+		for range 20 {
+			l, err := ListenFor("Example", 0, false, "the-state", "the-verifier")
+			if err != nil {
+				t.Fatal(err)
+			}
+			closed := make(chan struct{})
+			go func() {
+				defer close(closed)
+				_, _ = l.Wait(t.Context())
+				l.Close()
+			}()
+			status, body := comeBack(t, l, q, "")
+			<-closed
+			if status != http.StatusOK || !strings.HasSuffix(body, "</body>") {
+				t.Fatalf("%s: answered %d %q", q, status, body)
+			}
+		}
+	}
+}
+
 func TestLoopbackRefusesAStaleState(t *testing.T) {
 	l := listen(t)
 	for _, q := range []string{"state=earlier&code=old", "code=old", "state=earlier&error=access_denied"} {

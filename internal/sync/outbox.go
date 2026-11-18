@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"leaflet/internal/icloud"
@@ -100,18 +102,20 @@ func (s *Service) payload(e *store.OutboxEntry) (map[string]any, error) {
 	return payload, nil
 }
 
-func (s *Service) uploadFrom(ctx context.Context, payload map[string]any) (local string, waits bool, err error) {
+// uploadFrom is the file on this device that payload uploads, fetching what it copies first; read, if given, is
+// stamped as the fetch takes each part, so that an upload's stall watch sees the fetch move.
+func (s *Service) uploadFrom(ctx context.Context, payload map[string]any, read *atomic.Int64) (local string, waits bool, err error) {
 	if local := s.st.Path(store.S(payload, "local_path")); store.OnDevice(local) {
 		return local, false, nil
 	}
-	local, err = s.fetchCopied(ctx, payload)
+	local, err = s.fetchCopied(ctx, payload, read)
 	if errors.Is(err, icloud.ErrNotReady) {
 		return "", true, nil
 	}
 	return local, false, err
 }
 
-func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (string, error) {
+func (s *Service) fetchCopied(ctx context.Context, payload map[string]any, read *atomic.Int64) (string, error) {
 	from := store.S(payload, "from_path")
 	if from == "" {
 		return "", nil
@@ -129,11 +133,15 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 	if err != nil {
 		return "", err
 	}
+	var body io.Reader = data
+	if read != nil {
+		body = timedReader{data, read}
+	}
 	var local string
 	if recID := store.S(payload, "recording_id"); recID != "" {
-		local, err = s.st.DownloadedAudioFrom(recID, data)
+		local, err = s.st.DownloadedAudioFrom(recID, body)
 	} else {
-		local, err = s.st.DownloadedFileFrom(store.S(payload, "file_id"), data)
+		local, err = s.st.DownloadedFileFrom(store.S(payload, "file_id"), body)
 	}
 	if store.IsNotFound(err) {
 		return "", nil

@@ -719,3 +719,37 @@ func TestTitleRenamedElsewhereIsKept(t *testing.T) {
 		t.Errorf("saved twice before the pages were read again, the title is %q", a.page.title)
 	}
 }
+
+func TestEnterAndALineBreakInTheTitleWithoutAWindow(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		ctx = c
+		a.view(c)
+	}, 1300, 800)
+	a.focusTitle(false)
+	for range 3 {
+		tt.Frame()
+	}
+	if !a.page.titleIn.Focused(ctx) {
+		t.Fatal("the title didn't take the focus")
+	}
+	a.page.title = "Trip\nplan"
+	tt.Type(" ")
+	tt.Frame()
+	if strings.ContainsAny(a.page.title, "\r\n") {
+		t.Errorf("the title keeps a line break: %q", a.page.title)
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if a.page.titleIn.Focused(ctx) {
+		t.Error("Enter left the focus in the title")
+	}
+}

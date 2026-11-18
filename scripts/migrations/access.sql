@@ -1642,6 +1642,80 @@ begin
 end;
 $$;
 
+-- A page deleted before its members had it: they see its row, and write
+-- nothing to it or under it; to a page they have, they write as before.
+do $$
+declare
+  v_root constant uuid := 'fb000000-0000-0000-0000-000000000001';
+  v_gone constant uuid := 'fb000000-0000-0000-0000-000000000002';
+  v_under constant uuid := 'fb000000-0000-0000-0000-000000000003';
+  v_mine constant uuid := 'fb000000-0000-0000-0000-000000000004';
+  v_space uuid;
+  v_page uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_root, v_space, 'Shared root');
+  insert into public.pages (id, space_id, parent_id, title) values
+    (v_gone, v_space, v_root, 'Deleted before'),
+    (v_under, v_space, v_gone, 'Under it'),
+    (v_mine, v_space, v_root, 'Mine');
+  update public.pages set deleted_at = now() - interval '1 hour' where id = v_gone;
+  perform public.share_page(v_root, 'editor@example.com', 'editor');
+  perform public.share_page(v_root, 'viewer@example.com', 'viewer');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_root);
+  perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
+  perform public.accept_page_invite(v_root);
+
+  foreach v_page in array array[v_gone, v_under] loop
+    perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
+    if pg_temp.seen(format('select 1 from public.pages where id = %L', v_page)) <> 1 then
+      raise exception 'the viewer does not see the row of %', v_page;
+    end if;
+    perform pg_temp.refused(format('insert into public.comments (page_id, block_id, body) values (%L, ''b1'', ''Hi'')', v_page));
+
+    perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+    if public.can_edit_page(v_page) or public.can_view_page(v_page) then
+      raise exception 'the editor may write to %, deleted before they had it', v_page;
+    end if;
+    perform pg_temp.refused(format('insert into public.comments (page_id, block_id, body) values (%L, ''b1'', ''Hi'')', v_page));
+    perform pg_temp.refused(format('insert into public.page_content (page_id) values (%L)', v_page));
+    perform pg_temp.refused(format(
+      'insert into public.page_history (page_id, content, reason, created_by) values (%L, ''{}'', ''manual'', auth.uid())', v_page));
+    perform pg_temp.refused(format('insert into public.recordings (page_id, audio_path) values (%L, null)', v_page));
+    perform pg_temp.refused(format(
+      'insert into public.pages (id, space_id, parent_id, title) values (gen_random_uuid(), %L, %L, ''Sub'')', v_space, v_page));
+    perform pg_temp.refused(format('select public.lease_public_link(%L)', v_page), 'forbidden_public_link');
+  end loop;
+  perform pg_temp.refused(format('update public.pages set parent_id = %L where id = %L', v_gone, v_mine), 'forbidden_move');
+  perform pg_temp.refused(format('update public.pages set deleted_at = null where id = %L', v_gone), 'forbidden_restore');
+
+  -- On the page they have, as before.
+  insert into public.comments (page_id, block_id, body) values (v_mine, 'b1', 'Hi');
+  insert into public.page_content (page_id) values (v_mine);
+  insert into public.page_history (page_id, content, reason, created_by) values (v_mine, '{}', 'manual', auth.uid());
+  insert into public.pages (id, space_id, parent_id, title) values (gen_random_uuid(), v_space, v_mine, 'Sub');
+  if public.lease_public_link(v_mine) is null then
+    raise exception 'the editor could not lease the link of a page they have';
+  end if;
+  update public.pages set title = 'Renamed' where id = v_mine;
+  if not found then
+    raise exception 'the editor could not rename a page they have';
+  end if;
+  perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
+  insert into public.comments (page_id, block_id, body) values (v_mine, 'b1', 'Hi');
+
+  -- The owner writes to their deleted page as before.
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.comments (page_id, block_id, body) values (v_gone, 'b1', 'Mine');
+  update public.pages set title = 'Still mine' where id = v_gone;
+  if not found or public.lease_public_link(v_gone) is null then
+    raise exception 'the owner could not write to their deleted page';
+  end if;
+end;
+$$;
+
 -- A walk of the tree ends on a cycle, should one ever get past
 -- pages_guard: the page moved under Ideas made its parent. It stops 1,000
 -- pages up, as deep as a tree may go; one that went round for good would

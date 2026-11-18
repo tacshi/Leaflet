@@ -667,7 +667,9 @@ between it and the shared one, was deleted: what was taken off before it
 was shared with them is not theirs. The page's own row stays readable, so
 its deletion syncs, and the client simply finds nothing on it. Only
 someone who may read what is on a deleted page restores it, or changes
-its `deleted_at` (`forbidden_restore`). A page, comment and recording keep
+its `deleted_at` (`forbidden_restore`), and writes to it or under it:
+its content, comments, history, recordings and files, a page made or
+moved under it, and its public link. A page, comment and recording keep
 their `id`, and a `page_content` row its `page_id`, on update
 (`page_id_immutable`, `comment_immutable`, `recording_id_immutable`,
 `content_page_immutable`). A tree is at most 256 pages deep, a page and

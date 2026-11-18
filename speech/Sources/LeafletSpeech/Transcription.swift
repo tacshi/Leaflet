@@ -22,24 +22,32 @@ public enum Transcription {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (buffers, analyze) = AsyncStream.makeStream(of: AnalyzerInput.self)
         let heard = Task { try await collect(transcriber, text: text, beat: beat) }
-        do {
-            try await analyzer.start(inputSequence: buffers)
-        } catch {
-            heard.cancel()
-            throw error
-        }
-        for await pcm in audio {
-            if let buffer = buffer(pcm, from: from, with: converter, to: format) {
-                analyze.yield(AnalyzerInput(buffer: buffer))
+        return try await withTaskCancellationHandler {
+            do {
+                try await analyzer.start(inputSequence: buffers)
+                for await pcm in audio {
+                    if let buffer = buffer(pcm, from: from, with: converter, to: format) {
+                        analyze.yield(AnalyzerInput(buffer: buffer))
+                    }
+                }
+                try Task.checkCancellation()
+                for buffer in drain(converter, to: format) {
+                    analyze.yield(AnalyzerInput(buffer: buffer))
+                }
+                analyze.finish()
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+                return try await heard.value
+            } catch {
+                analyze.finish()
+                heard.cancel()
+                await analyzer.cancelAndFinishNow()
+                throw error
             }
+        } onCancel: {
+            analyze.finish()
+            heard.cancel()
+            Task { await analyzer.cancelAndFinishNow() }
         }
-        analyze.finish()
-        if Task.isCancelled {
-            await analyzer.cancelAndFinishNow()
-        } else {
-            try await analyzer.finalizeAndFinishThroughEndOfInput()
-        }
-        return try await heard.value
     }
 
     public static func file(
@@ -111,10 +119,11 @@ public enum Transcription {
             if result.isFinal {
                 let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
+                    let start = ms(result.range.start)
                     segments.append(
                         SpeechSegment(
-                            startMs: Int(result.range.start.seconds * 1000),
-                            endMs: Int(result.range.end.seconds * 1000), text: trimmed))
+                            startMs: start, endMs: max(ms(result.range.end), start),
+                            text: trimmed))
                 }
                 final += words
                 text?(final)
@@ -123,6 +132,35 @@ public enum Transcription {
             }
         }
         return segments
+    }
+
+    /// The time in milliseconds, or 0 for a time that is not one, such as an invalid or
+    /// indefinite one.
+    static func ms(_ time: CMTime) -> Int {
+        let seconds = time.seconds
+        guard time.isNumeric, seconds.isFinite, seconds > 0 else { return 0 }
+        return Int(min(seconds * 1000, Double(Int.max / 2)))
+    }
+
+    /// What the converter still holds once the audio has all been given to it, such as the end
+    /// of the last block a change of sample rate keeps back.
+    static func drain(_ converter: AVAudioConverter, to format: AVAudioFormat)
+        -> [AVAudioPCMBuffer]
+    {
+        var out: [AVAudioPCMBuffer] = []
+        for _ in 0..<16 {
+            guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else {
+                break
+            }
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, status in
+                status.pointee = .endOfStream
+                return nil
+            }
+            if error == nil, output.frameLength > 0 { out.append(output) }
+            guard error == nil, status == .haveData else { break }
+        }
+        return out
     }
 
     static func buffer(

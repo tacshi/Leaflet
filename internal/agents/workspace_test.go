@@ -630,6 +630,35 @@ func TestPrivacyOfAllPagesIsEachPagesOwn(t *testing.T) {
 	}
 }
 
+func TestASubpageWhoseParentCannotBeReadIsNotPrivate(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	orphan, err := w.st.CreatePage(store.NewPageOptions{Title: "Orphan", ParentID: "unsynced-parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	under, err := w.st.CreatePage(store.NewPageOptions{Title: "Under mine", ParentID: w.mine.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orphan.SpaceID != w.st.Session().SpaceID {
+		t.Fatalf("the orphan is in space %q", orphan.SpaceID)
+	}
+	if !sharedWithOthers(w.st, orphan) || !OthersHave(w.st, orphan) || w.h.private(orphan) {
+		t.Error("a page under a parent that cannot be read counts as the user's alone")
+	}
+	if sharedWithOthers(w.st, under) || !w.h.private(under) {
+		t.Error("a page under the user's own page counts as shared")
+	}
+	pages, _ := w.st.Pages()
+	private, people := w.h.privacy(pages)
+	if private(orphan) || !people(orphan) {
+		t.Errorf("listed with all pages: private %v, had by others %v", private(orphan), people(orphan))
+	}
+	if !private(under) || people(under) {
+		t.Errorf("under mine listed with all pages: private %v, had by others %v", private(under), people(under))
+	}
+}
+
 func TestWorkspaceDraftsNoBlocks(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)

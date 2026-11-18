@@ -288,6 +288,52 @@ func TestRefusedTokenRenewsAndRetries(t *testing.T) {
 	}
 }
 
+func TestUploadRefusingATokenRenewsItForTheNext(t *testing.T) {
+	var refreshes atomic.Int32
+	var mu sync.Mutex
+	var sent []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			refreshes.Add(1)
+			_, _ = fmt.Fprintf(w, `{"access_token":"new%d","refresh_token":"r2","expires_in":3600}`, refreshes.Load())
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		auth := r.Header.Get("Authorization")
+		mu.Lock()
+		sent = append(sent, auth)
+		mu.Unlock()
+		if auth == "Bearer test" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"statusCode":"403","error":"Unauthorized","message":"invalid JWT: unable to parse or verify signature"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	once := func() io.Reader { return io.MultiReader(strings.NewReader("RIFF")) }
+	ctx := context.Background()
+	if err := c.Upload(ctx, "recordings", "u1/r.wav", once(), "audio/wav"); err == nil {
+		t.Fatal("an upload under a refused token went up")
+	}
+	if n := refreshes.Load(); n != 0 {
+		t.Errorf("%d refreshes while a body read once was refused", n)
+	}
+	if err := c.Upload(ctx, "recordings", "u1/r.wav", once(), "audio/wav"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"Bearer test", "Bearer new1"}; fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Errorf("sent %q, want %q", sent, want)
+	}
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("%d refreshes, want 1", n)
+	}
+}
+
 func TestCallsRenewATokenRunningOutFirst(t *testing.T) {
 	var refreshes atomic.Int32
 	var mu sync.Mutex

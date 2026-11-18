@@ -11,9 +11,10 @@ import (
 )
 
 type queue struct {
-	mu   sync.Mutex
-	wake *sync.Cond
-	fns  []func()
+	mu     sync.Mutex
+	wake   *sync.Cond
+	fns    []func()
+	closed bool
 }
 
 func newQueue() *queue {
@@ -26,8 +27,12 @@ func newQueue() *queue {
 func (q *queue) run() {
 	for {
 		q.mu.Lock()
-		for len(q.fns) == 0 {
+		for len(q.fns) == 0 && !q.closed {
 			q.wake.Wait()
+		}
+		if len(q.fns) == 0 {
+			q.mu.Unlock()
+			return
 		}
 		fn := q.fns[0]
 		q.fns[0] = nil
@@ -49,6 +54,15 @@ func (q *queue) call(fn func()) {
 func (q *queue) post(fn func()) {
 	q.mu.Lock()
 	q.fns = append(q.fns, fn)
+	q.mu.Unlock()
+	q.wake.Signal()
+}
+
+// close ends the queue's goroutine once the work posted to it is done. Nothing may be posted
+// after it.
+func (q *queue) close() {
+	q.mu.Lock()
+	q.closed = true
 	q.mu.Unlock()
 	q.wake.Signal()
 }

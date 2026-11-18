@@ -100,11 +100,18 @@ func (s *Service) passContext() context.Context {
 	return context.Background()
 }
 
-func (s *Service) startPass() (ctx context.Context, done func()) {
-	ctx, cancel := context.WithCancel(s.passContext())
+func (s *Service) startPass() (ctx context.Context, done func()) { return s.cuttable(s.passContext()) }
+
+// cuttable is the context of work done while holding running, from parent: Stop and Interrupt cut it short. Work
+// that took the hold while an Interrupt waited for it starts cut.
+func (s *Service) cuttable(parent context.Context) (ctx context.Context, done func()) {
+	ctx, cancel := context.WithCancel(parent)
 	s.mu.Lock()
 	s.cut = cancel
 	s.mu.Unlock()
+	if s.halted.Load() > 0 {
+		cancel()
+	}
 	return ctx, func() {
 		s.mu.Lock()
 		s.cut = nil
@@ -149,12 +156,14 @@ func (s *Service) watchOpen(loop context.Context) {
 		return
 	}
 	defer s.running.Unlock()
-	if loop.Err() != nil {
+	base, done := s.cuttable(loop)
+	defer done()
+	if base.Err() != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(loop, watchWait)
+	ctx, cancel := context.WithTimeout(base, watchWait)
 	defer cancel()
-	s.checkPages(loop, ctx, open)
+	s.checkPages(base, ctx, open)
 }
 
 func (s *Service) checkHeard(loop context.Context) {
@@ -166,15 +175,17 @@ func (s *Service) checkHeard(loop context.Context) {
 	s.running.Lock()
 	defer s.running.Unlock()
 	heard := s.takeHeard()
-	if loop.Err() != nil {
+	base, done := s.cuttable(loop)
+	defer done()
+	if base.Err() != nil {
 		return
 	}
 	s.mu.Lock()
 	heard = slices.DeleteFunc(heard, func(id string) bool { return !s.open[id] })
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(loop, watchWait)
+	ctx, cancel := context.WithTimeout(base, watchWait)
 	defer cancel()
-	s.checkPages(loop, ctx, heard)
+	s.checkPages(base, ctx, heard)
 }
 
 func (s *Service) checkPages(loop, ctx context.Context, ids []string) {
@@ -248,7 +259,12 @@ func (s *Service) SetOpen(pageID string, open bool) {
 		if !stillOpen {
 			return
 		}
-		ctx, cancel := context.WithTimeout(s.passContext(), openWait)
+		base, done := s.cuttable(s.passContext())
+		defer done()
+		if base.Err() != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(base, openWait)
 		defer cancel()
 		if _, server := s.target().(supabaseTarget); server {
 			if p, err := s.st.Page(pageID); err == nil && p.SpaceID == s.st.Session().SpaceID {
@@ -264,6 +280,9 @@ func (s *Service) SetOpen(pageID string, open bool) {
 }
 
 func (s *Service) CanSync() bool {
+	if s.halted.Load() > 0 {
+		return false
+	}
 	t := s.target()
 	if !t.ready() {
 		return false
@@ -278,6 +297,42 @@ func (s *Service) Hold(fn func()) {
 	s.running.Lock()
 	defer s.running.Unlock()
 	fn()
+}
+
+// Interrupt runs fn as Hold does, but cuts the work under way first rather than wait for it to end: the pass or page
+// check that holds the sync, and the upload. Until fn returns, CanSync is false, so that nothing starts meanwhile, and
+// the work being cut asks nothing more of the app, as whether it is online, which a caller on the app's main thread
+// could not answer while it waits here.
+func (s *Service) Interrupt(fn func()) {
+	s.halted.Add(1)
+	defer s.halted.Add(-1)
+	s.mu.Lock()
+	cut, up := s.cut, s.uploading
+	s.mu.Unlock()
+	if cut != nil {
+		cut()
+	}
+	if up != nil {
+		up.stop(context.Canceled)
+	}
+	s.Hold(fn)
+}
+
+// Forget drops what the passes learned of the account and server they ran against: when members were loaded, the
+// content that could not be read, how long the server asked it to wait, where the fetch of waiting content goes on,
+// the iCloud files merged, and the retries due. Another account's passes start afresh. It is called from within Hold
+// or Interrupt, as the passes read some of it without the lock.
+func (s *Service) Forget() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clear(s.membersAt)
+	clear(s.unread)
+	clear(s.pageFiles)
+	clear(s.retryAt)
+	s.busyUntil, s.watchAfter, s.waitingAfter = time.Time{}, time.Time{}, ""
+	s.contentsAt, s.contentsAsked, s.contentsSlow = 0, false, false
+	s.ownLogChecked, s.stalled = false, 0
+	s.beat = every{}
 }
 
 // passFor is how long one pass may take, and pushFor how much of it the push may, so that a long outbox, as after the
@@ -331,7 +386,7 @@ func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
 	}
 	s.running.Lock()
 	defer s.running.Unlock()
-	if loop.Err() != nil {
+	if loop.Err() != nil || s.halted.Load() > 0 {
 		return nil
 	}
 	if ofLoop && s.busy() {

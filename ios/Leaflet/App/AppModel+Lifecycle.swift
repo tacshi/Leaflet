@@ -23,11 +23,12 @@ extension AppModel {
             let pages = agentPages
             let stopped = DispatchSemaphore(value: 0)
             Task.detached(priority: .userInitiated) {
+                await client.stop()
                 await Self.stopAgents(on: pages, client)
                 stopped.signal()
-                await client.stop()
             }
-            // The app is suspended once this returns, so the runs are stopped before it does.
+            // The app is suspended once this returns, so the sync and the runs are stopped before
+            // it does.
             _ = stopped.wait(timeout: .now() + AgentHold.lastWait)
         }
         BackgroundSync.schedule()

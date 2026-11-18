@@ -36,10 +36,42 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 		"192.0.0.1": false, "192.0.0.170": false, "240.0.0.1": false, "250.1.2.3": false, "255.255.255.255": false,
 		"::ffff:240.0.0.1": false, "64:ff9b::c000:aa": false, "2002:f000:1::1": false, "192.0.1.1": true,
 		"198.18.0.1": true, "198.19.255.254": true, "239.255.255.255": false,
+		"192.0.2.1": false, "198.51.100.7": false, "203.0.113.9": false, "::ffff:203.0.113.9": false,
+		"2001:0:4136:e378:8000:63bf:3fff:fdd2": false, "2001:2::1": false, "2001:10::1": false, "2001:20::1": false,
+		"2001:db8::1": false, "3fff::1": false, "100::1": false, "100::1:0:0:0:1": true,
+		"64:ff9b::c000:201": false, "2002:cb00:7109::1": false, "2001:4860:4860::8888": true,
 	} {
 		if got := publicAddr(netip.MustParseAddr(addr)); got != public {
 			t.Errorf("publicAddr(%s) = %v", addr, got)
 		}
+	}
+}
+
+func TestFetchOnlyWebPorts(t *testing.T) {
+	for _, link := range []string{"http://mail.test:25/", "https://mail.test:587/", "http://shell.test:22/",
+		"http://irc.test:6667/", "http://zero.test:0/", "http://big.test:70000/"} {
+		if _, err := Fetch(link); !errors.Is(err, ErrBadPort) {
+			t.Errorf("Fetch(%s) = %v", link, err)
+		}
+	}
+	for _, link := range []string{"http://a.test/", "https://a.test/", "http://a.test:8080/", "https://a.test:8443/"} {
+		u, _ := url.Parse(link)
+		if !webPort(u) {
+			t.Errorf("refused the port of %s", link)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://mail.test:25/", http.StatusFound)
+	}))
+	defer srv.Close()
+	client := &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "mail.test:25" {
+			return publicTransport{}.RoundTrip(r)
+		}
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	if _, err := client.Get(srv.URL); !errors.Is(err, ErrBadPort) {
+		t.Errorf("followed a redirect to a mail port: %v", err)
 	}
 }
 

@@ -24,7 +24,7 @@ enum PagePDF {
             .flatMap(\.windows)
         (windows.first(where: \.isKeyWindow) ?? windows.first)?.insertSubview(view, at: 0)
         defer { view.removeFromSuperview() }
-        let loading = Loading()
+        let loading = Loading(file)
         view.navigationDelegate = loading
         view.loadFileURL(file, allowingReadAccessTo: file)
         if await !loading.wait(upTo: loadWait) {
@@ -49,9 +49,12 @@ enum PagePDF {
 
     @MainActor
     private final class Loading: NSObject, WKNavigationDelegate {
+        private let file: URL
         private var waiting: CheckedContinuation<Void, Never>?
         private var done = false
         private var late = false
+
+        init(_ file: URL) { self.file = file }
 
         func wait(upTo limit: Duration) async -> Bool {
             let timeout = Task { @MainActor [weak self] in
@@ -88,7 +91,13 @@ enum PagePDF {
             _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
-            decisionHandler(action.navigationType == .other ? .allow : .cancel)
+            // Only the exported page loads, and frames it holds of its own.
+            let url = action.request.url
+            let ok =
+                url?.scheme == "about"
+                || (url?.isFileURL == true
+                    && url?.standardizedFileURL.path == file.standardizedFileURL.path)
+            decisionHandler(ok ? .allow : .cancel)
         }
     }
 }

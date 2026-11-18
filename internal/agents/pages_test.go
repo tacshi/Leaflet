@@ -278,6 +278,85 @@ func TestUndoOfAMoveOutOfAPageDeletedSince(t *testing.T) {
 	}
 }
 
+func TestUndoPassesOverAMoveItCannotMake(t *testing.T) {
+	st := openStore(t)
+	home, _ := st.CreatePage(store.NewPageOptions{Title: "Home"})
+	article, _ := st.CreatePage(store.NewPageOptions{Title: "Saved"})
+	notes, _ := st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	h := NewHub(st, nil, stubHost{})
+	h.Session(home.ID).Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{
+		{Op: "move_page", PageID: article.ID, Title: "Saved", Place: &doc.PagePlace{}, PrevPlace: &doc.PagePlace{ParentID: "never-here"}},
+		{Op: "move_page", PageID: notes.ID, Title: "Notes", Place: &doc.PagePlace{}, PrevPlace: &doc.PagePlace{ParentID: article.ID}},
+		{Op: "rename_page", PageID: article.ID, Title: "Saved", PrevTitle: "Article"},
+	}}}
+	if err := st.MovePage(article.ID, notes.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(home.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if !h.Session(home.ID).Run("r1").Undone {
+		t.Error("the run does not count as undone")
+	}
+	if got, _ := st.Page(article.ID); got.ParentID != notes.ID || got.Title != "Article" {
+		t.Errorf("article after Undo: %+v", got)
+	}
+	if got, _ := st.Page(notes.ID); got.ParentID != "" {
+		t.Errorf("notes after Undo: %+v", got)
+	}
+}
+
+func TestUndoThatFailsPartWayTakesItsChangesBack(t *testing.T) {
+	st := openStore(t)
+	home, err := st.CreatePage(store.NewPageOptions{Title: "Home", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	article, _ := st.CreatePage(store.NewPageOptions{Title: "Saved", Tags: []string{"read"}})
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(home.ID)
+	ops := []doc.Op{
+		insertAfter("p1", "x1", "one"),
+		{Op: "rename_page", PageID: article.ID, Title: "Saved", PrevTitle: "Article"},
+		{Op: "set_page_tags", PageID: article.ID, Title: "Saved", Tags: []string{"read"}},
+	}
+	if _, err := storeOps(st, home.ID, ops[:1], false, true, "r1", "test"); err != nil {
+		t.Fatal(err)
+	}
+	s.Runs = []*Run{{ID: "r1", Status: "done", Ops: ops}}
+	if _, err := st.DB().Exec(`CREATE TRIGGER no_rename BEFORE UPDATE OF title ON pages WHEN NEW.title = 'Article'
+		BEGIN SELECT RAISE(ABORT, 'renaming is off'); END`); err != nil {
+		t.Fatal(err)
+	}
+	before := ids(st.Content(home.ID))
+
+	if err := h.UndoRun(home.ID, "r1"); err == nil {
+		t.Fatal("undo said it reverted the run")
+	}
+	if s.Run("r1").Undone {
+		t.Error("the run counts as undone")
+	}
+	if got := ids(st.Content(home.ID)); got != before {
+		t.Errorf("the page went from %s to %s", before, got)
+	}
+	if got, _ := st.Page(article.ID); got.Title != "Saved" || !slices.Equal(got.Tags, []string{"read"}) {
+		t.Errorf("article %q tagged %q", got.Title, got.Tags)
+	}
+
+	if _, err := st.DB().Exec(`DROP TRIGGER no_rename`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(home.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Content(home.ID); got.Find("x1") != nil || !s.Run("r1").Undone {
+		t.Errorf("after a second Undo: page %s, undone %v", ids(got), s.Run("r1").Undone)
+	}
+	if got, _ := st.Page(article.ID); got.Title != "Article" || len(got.Tags) != 0 {
+		t.Errorf("after a second Undo: article %q tagged %q", got.Title, got.Tags)
+	}
+}
+
 func TestNoPagesOfTheirOwnFromSharedPages(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, readingHost{})

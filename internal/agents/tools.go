@@ -188,6 +188,7 @@ type ToolContext struct {
 	PageTitle     string
 	AgentName     string
 	ReadOnly      bool
+	OthersWrite   bool
 	Subpages      func() []map[string]any
 	Comments      func() []map[string]any
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
@@ -686,6 +687,9 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	bare, _, _ := strings.Cut(link, "#")
 	if x.found != nil && !x.given(link) && !x.given(bare) {
 		return nil, terr("After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which %s is not.", link)
+	}
+	if x.found == nil && !x.given(link) && !x.given(bare) && x.Ctx.OthersWrite {
+		return nil, terr("Other people write on this page, so read only a page the user gave or one on this page, or search the web first and read what it finds: %s is none of them, and an address you write yourself could carry what you were told here to whoever runs its site.", link)
 	}
 	if x.found == nil && !x.given(link) && !x.given(bare) && !plainAddress(link) {
 		return nil, terr("Read a page the user gave, one on this page, or one a search found: %s is none of them, and an address you write yourself has to be a short one without a query.", link)

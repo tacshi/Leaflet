@@ -46,7 +46,15 @@ func (c *Core) unsynced() int {
 	return n
 }
 
-func (c *Core) UseAccount(user *store.User, drop bool) error {
+// UseAccount makes user's the account this device syncs, as after a sign-in. It runs between sync passes: one under
+// way is cut short and waited for, so that it writes nothing of the account before into the store once that is
+// cleared. The app may call it on its main thread, as the cut pass asks nothing more of it.
+func (c *Core) UseAccount(user *store.User, drop bool) (err error) {
+	c.Sync.Interrupt(func() { err = c.useAccount(user, drop) })
+	return err
+}
+
+func (c *Core) useAccount(user *store.User, drop bool) error {
 	replaces := c.ReplacesAccount(user)
 	if replaces && (drop || c.Store.PendingCount() == 0) {
 		c.stopRuns()
@@ -55,6 +63,7 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 		if err := c.Store.ForgetAccount(); err != nil {
 			return err
 		}
+		c.Sync.Forget()
 	}
 	if s := c.settings(); c.Sync.ICloudOn() || s.ICloudSync {
 		c.Sync.SetICloud(false)
@@ -63,6 +72,9 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 		c.saveSettings(s)
 	}
 	_, err := c.Store.LoadSession(user)
+	if err == nil {
+		c.Sync.Forget()
+	}
 	if replaces && err == nil {
 		c.stopRuns()
 	}
@@ -86,6 +98,7 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 		c.revokeDevice(device)
 		c.Remote.SignOut()
 		c.ForgetProject()
+		c.Sync.Forget()
 	})
 	return unsynced, err
 }

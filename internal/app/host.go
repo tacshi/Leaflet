@@ -867,12 +867,17 @@ const (
 
 var errTooLarge = errors.New("picture too large")
 
+// checkPixels refuses a picture too large to decode. One whose size can't
+// be read isn't a bitmap ui.DecodeImage can decode, which reads bitmaps
+// with the same decoders, so it can only be drawn as an SVG, whose paths
+// take no pixels of its size.
 func checkPixels(data []byte) error {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil
 	}
-	if cfg.Width*cfg.Height > maxPixels {
+	// Divided rather than multiplied, so no claimed size overflows.
+	if cfg.Width > 0 && cfg.Height > maxPixels/cfg.Width {
 		return errTooLarge
 	}
 	if _, area := gifFrames(data); area > maxGIFPixels {

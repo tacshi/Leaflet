@@ -306,7 +306,9 @@ $KEEP_DRAFT"
 			read -r reply
 			case "$reply" in
 			y | Y) break ;;
-			e | E) "${VISUAL:-${EDITOR:-vi}}" "$NOTES_FILE" ;;
+			# Run through the shell, as git runs it, so an editor given with
+			# its flags ("code --wait") or a quoted path starts.
+			e | E) sh -c "${VISUAL:-${EDITOR:-vi}} \"\$1\"" editor "$NOTES_FILE" ;;
 			*) die "aborted. The draft is $NOTES_FILE.
 $KEEP_DRAFT" ;;
 			esac

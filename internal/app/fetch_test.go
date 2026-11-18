@@ -169,11 +169,12 @@ func TestHugePictureRefused(t *testing.T) {
 		data []byte
 		ok   bool
 	}{
-		"small png":           {png(64, 64), true},
-		"huge png":            {png(50000, 50000), false},
-		"gif":                 {gifOf(5000, 5000, 2), true},
-		"gif of 9 big frames": {gifOf(5000, 5000, 9), false},
-		"svg":                 {[]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"/>`), true},
+		"small png":                       {png(64, 64), true},
+		"huge png":                        {png(50000, 50000), false},
+		"gif of the most a header claims": {gifOf(65535, 65535, 1), false},
+		"gif":                             {gifOf(5000, 5000, 2), true},
+		"gif of 9 big frames":             {gifOf(5000, 5000, 9), false},
+		"svg":                             {[]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"/>`), true},
 	} {
 		if err := checkPixels(c.data); (err == nil) != c.ok {
 			t.Errorf("%s: %v", name, err)

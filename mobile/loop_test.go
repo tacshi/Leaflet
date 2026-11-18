@@ -1,12 +1,16 @@
 package mobile
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/locales"
 )
@@ -102,4 +106,45 @@ func catches(fd *ast.FuncDecl) bool {
 		return ok && len(last.Names) > 0 && x.Name == last.Names[len(last.Names)-1].Name
 	}
 	return false
+}
+
+func TestClosedQueueRunsWhatWasPosted(t *testing.T) {
+	q := newQueue()
+	ran := make(chan int, 2)
+	q.post(func() { ran <- 1 })
+	q.post(func() { ran <- 2 })
+	q.close()
+	for want := range 2 {
+		select {
+		case got := <-ran:
+			if got != want+1 {
+				t.Fatalf("ran %d, want %d", got, want+1)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("work posted before the queue closed did not run")
+		}
+	}
+}
+
+func TestFailedOpenLeavesNoWorkers(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "data")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := json.Marshal(config{DataDir: file, Locale: "en"})
+	p := &fakePlatform{t: t, secrets: map[string][]byte{}}
+	p.logUntilEnd()
+	before := runtime.NumGoroutine()
+	for range 10 {
+		if _, err := Open(string(cfg), p, &fakeEvents{}); err == nil {
+			t.Fatal("a core opened in a file")
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > before+2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines after failed opens, %d before", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

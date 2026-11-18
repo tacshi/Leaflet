@@ -341,6 +341,22 @@ func TestCancel(t *testing.T) {
 	}
 }
 
+func TestCancelForgetsOldTokens(t *testing.T) {
+	c, _ := open(t)
+	c.Cancel(1)
+	c.cancelMu.Lock()
+	c.cancelled[1] = time.Now().Add(-time.Hour)
+	c.cancelMu.Unlock()
+	c.Cancel(2)
+	c.cancelMu.Lock()
+	_, old := c.cancelled[1]
+	_, recent := c.cancelled[2]
+	c.cancelMu.Unlock()
+	if old || !recent {
+		t.Errorf("tokens given up on long ago kept: %v, the latest kept: %v", old, recent)
+	}
+}
+
 func TestDuplicateKeepsTheCopyWithoutItsCard(t *testing.T) {
 	c, ev := open(t)
 	parent := create(t, c, `{"title":"Trip"}`)

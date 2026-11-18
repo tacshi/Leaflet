@@ -261,11 +261,15 @@ if $WIN; then
 fi
 
 if $UPLOAD; then
-	NOTES="$(mktemp)"
-	changelog_notes "${CHANGELOG:-$ROOT_DIR/CHANGELOG.md}" "$VERSION" >"$NOTES"
-	check_unchanged "$COMMIT"
-	upload_release "$VERSION" "$OUT_DIR" "$NOTES" "$COMMIT" "${DIRS[@]}"
-	rm -f "$NOTES"
+	# In a subshell, whose EXIT trap removes the notes however it ends and
+	# leaves this shell's own (release_config) as it is.
+	(
+		NOTES="$(mktemp)"
+		trap 'rm -f "$NOTES"' EXIT
+		changelog_notes "${CHANGELOG:-$ROOT_DIR/CHANGELOG.md}" "$VERSION" >"$NOTES"
+		check_unchanged "$COMMIT"
+		upload_release "$VERSION" "$OUT_DIR" "$NOTES" "$COMMIT" "${DIRS[@]}"
+	)
 	info "uploaded to the draft release v$VERSION of $(config_value updates.github); publish it once every platform is there"
 fi
 

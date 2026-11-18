@@ -199,7 +199,9 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 			leave := k.Mods == 0 && (k.Key == ui.KeyEnter || k.Key == ui.KeyDown && ps.titleAtEnd)
 			if leave {
 				ps.titleLeave = true
-				a.win.Invalidate()
+				if a.win != nil {
+					a.win.Invalidate()
+				}
 			}
 			return leave || k.Key == ui.KeyEnter
 		})
@@ -217,7 +219,9 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	if in.Changed() {
 		if strings.ContainsAny(ps.title, "\r\n") {
 			ps.title = strings.Join(strings.Fields(ps.title), " ")
-			a.win.Invalidate()
+			if a.win != nil {
+				a.win.Invalidate()
+			}
 		}
 		a.saveTitleSoon()
 	}

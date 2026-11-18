@@ -851,7 +851,7 @@ func (a *App) toggleSettings() {
 func (a *App) closeSettings() {
 	a.settingsOpen = false
 	a.account.deleteOpen, a.account.confirm = false, ""
-	a.form.cancelSignIn()
+	a.form.end()
 	a.form = providerForm{}
 }
 

@@ -404,3 +404,62 @@ func TestPageMovedOutOfAShareLeavesTheDevice(t *testing.T) {
 		}
 	}
 }
+
+func TestSubpageMembersStayWhenTheirReloadFails(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		child = "00000000-0000-0000-0000-0000000000e2"
+		other = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	for _, p := range []map[string]any{
+		{"id": root, "space_id": other, "title": "Shared", "sort_key": "V", "created_at": old, "updated_at": old},
+		{"id": child, "parent_id": root, "space_id": other, "title": "Editable", "sort_key": "V", "created_at": old, "updated_at": old},
+	} {
+		if err := st.PutRemotePage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	editor := []store.Member{{PageID: child, UserID: "u2", Role: "owner", Accepted: true}, {PageID: child, UserID: "u1", Role: "editor", Accepted: true}}
+	if err := st.SetMembers(child, editor); err != nil {
+		t.Fatal(err)
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/v1/rpc/page_members":
+			var args struct {
+				PageID string `json:"p_page_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&args)
+			if args.PageID == child {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"message":"upstream connect error"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": "u2", "role": "owner", "accepted": true},
+				{"user_id": "u1", "role": "viewer", "accepted": true},
+			})
+		case "/rest/v1/pages":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": child}})
+		default:
+			_, _ = w.Write([]byte("[]"))
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc.pullMembers(context.Background())
+	if p, err := st.Page(root); err != nil || st.CanEdit(p) {
+		t.Errorf("the shared page to view is editable: %v", err)
+	}
+	if p, err := st.Page(child); err != nil || !st.CanEdit(p) {
+		t.Errorf("the page shared to edit is no longer editable: %v", err)
+	}
+	if got := st.MembersOrNil(child); len(got) != len(editor) {
+		t.Errorf("members %+v", got)
+	}
+}

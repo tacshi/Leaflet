@@ -645,13 +645,23 @@ type providerForm struct {
 }
 
 func (a *App) openForm(f providerForm) {
-	a.form.cancelSignIn()
+	a.form.end()
 	a.formGen++
 	f.gen = a.formGen
 	a.form = f
 }
 
 func (a *App) formIs(gen int) bool { return a.form.open && a.form.gen == gen }
+
+// end stops what a form left running: its sign-in, and the models it
+// would list once the key or the address stopped changing.
+func (f *providerForm) end() {
+	f.cancelSignIn()
+	if f.keyTimer != nil {
+		f.keyTimer.Stop()
+		f.keyTimer = nil
+	}
+}
 
 func (f *providerForm) cancelSignIn() {
 	if f.stopSignIn != nil {
@@ -746,7 +756,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 		a.removeAlert(c)
 	}
 	if !a.form.open {
-		a.form.cancelSignIn()
+		a.form.end()
 	}
 }
 
@@ -1015,7 +1025,12 @@ func (a *App) fetchModelsSoon() {
 	if a.form.keyTimer != nil {
 		a.form.keyTimer.Stop()
 	}
-	a.form.keyTimer = a.later(700*time.Millisecond, a.fetchModels)
+	gen := a.form.gen
+	a.form.keyTimer = a.later(700*time.Millisecond, func() {
+		if a.formIs(gen) {
+			a.fetchModels()
+		}
+	})
 }
 
 func (a *App) fetchModels() {

@@ -35,6 +35,8 @@ Deno.test("the redirect page sends the browser on to the app", async () => {
   assertEquals(res.status, 200);
   const page = await res.text();
   assertEquals(page.includes(`location.replace("http://127.0.0.1:51741/auth/callback" + location.search)`), true);
+  assertEquals(res.headers.get("content-security-policy"), "frame-ancestors 'none'");
+  assertEquals(res.headers.get("x-frame-options"), "DENY");
 });
 
 Deno.test("the site association names the iOS apps for their web sessions", async () => {
@@ -66,6 +68,26 @@ Deno.test("a code goes on with the secret, its verifier and the redirect URL", a
     assertEquals(sent.form?.get("code_verifier"), "v");
     assertEquals(sent.form?.get("redirect_uri"), `${ORIGIN}/auth/supabase`);
     assertEquals(sent.form?.has("client_secret"), false);
+  });
+});
+
+Deno.test("the form's media type is read in any case, with its parameters", async () => {
+  await withSupabase(async (env, sent) => {
+    const heard = () => sent.form?.get("refresh_token");
+    const send = async (type: string): Promise<[number, string | null | undefined]> => {
+      sent.form = undefined;
+      const req = post({ grant_type: "refresh_token", client_id: "leaflet-app", refresh_token: "r" });
+      req.headers.set("Content-Type", type);
+      const res = await worker.fetch(req, env);
+      await res.body?.cancel();
+      return [res.status, heard()];
+    };
+    for (const type of ["Application/X-WWW-Form-URLEncoded", "application/x-www-form-urlencoded; charset=UTF-8"]) {
+      assertEquals(await send(type), [200, "r"], type);
+    }
+    for (const type of ["application/json", "application/x-www-form-urlencodedx", ""]) {
+      assertEquals(await send(type), [415, undefined], type);
+    }
   });
 });
 

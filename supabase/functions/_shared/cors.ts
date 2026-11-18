@@ -28,9 +28,10 @@ export function errorResponse(error: unknown): Response {
   if (error instanceof HttpError) {
     return json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
   }
-  const message = error instanceof Error ? error.message : String(error);
+  // What failed inside, a query's or Storage's own words among it, goes to
+  // the function's logs; the caller is told only that it failed.
   console.error(error);
-  return json({ error: message }, 500);
+  return json({ error: "Something went wrong. Try again." }, 500);
 }
 
 export async function readJson<T>(req: Request): Promise<T> {

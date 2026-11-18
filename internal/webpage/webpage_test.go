@@ -214,3 +214,15 @@ func BenchmarkPrintAPhoto(b *testing.B) {
 		}
 	}
 }
+
+func TestDecodedBytesOfAHugeHeaderDoNotOverflow(t *testing.T) {
+	for _, m := range []color.Model{color.NRGBAModel, color.NRGBA64Model, color.GrayModel} {
+		cfg := image.Config{ColorModel: m, Width: 1<<31 - 1, Height: 1<<31 - 1}
+		if n := decodedBytes(cfg); n <= maxDecodedBytes {
+			t.Errorf("%T of %dx%d reads as %d bytes", m, cfg.Width, cfg.Height, n)
+		}
+	}
+	if n := decodedBytes(image.Config{ColorModel: color.NRGBAModel, Width: 3, Height: 2}); n != 24 {
+		t.Errorf("3x2 NRGBA reads as %d bytes", n)
+	}
+}

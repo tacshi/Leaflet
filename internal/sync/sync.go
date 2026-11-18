@@ -32,6 +32,7 @@ type Service struct {
 	Watched       func(pageID string) bool
 
 	cloudOn                     atomic.Bool
+	halted                      atomic.Int32
 	kick                        chan struct{}
 	mu                          gosync.Mutex
 	running                     gosync.Mutex

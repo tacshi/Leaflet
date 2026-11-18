@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +24,7 @@ type Core struct {
 	pages      map[string]*openPage
 	editors    int64
 	cards      map[string]doc.Position
-	locale     atomic.Value
+	locale     atomic.Pointer[string]
 	chatgpt    chatgptSignIn
 	micTesting bool
 	micHeard   string
@@ -32,7 +33,7 @@ type Core struct {
 	voiceNote  *voiceNote
 	cancelMu   sync.Mutex
 	cancels    map[int64]context.CancelFunc
-	cancelled  map[int64]bool
+	cancelled  map[int64]time.Time
 	linkAsked  map[string]bool
 	settled    map[string]string
 	copying    atomic.Bool
@@ -68,11 +69,15 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 		linkAsked: map[string]bool{},
 		settled:   map[string]string{},
 	}
-	var locale func() string
-	if cfg.Locale != "" {
-		c.locale.Store(cfg.Locale)
-		locale = func() string { return c.locale.Load().(string) }
-	}
+	c.locale.Store(&cfg.Locale)
+	locale := func() string { return *c.locale.Load() }
+	opened := false
+	defer func() {
+		if !opened {
+			c.q.close()
+			c.ev.q.close()
+		}
+	}()
 	c.q.do(func() {
 		c.core, err = core.Open(core.Config{
 			Platform: core.Platform{
@@ -102,6 +107,7 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 	if err != nil {
 		return nil, err
 	}
+	opened = true
 	return c, nil
 }
 
@@ -115,8 +121,8 @@ func (c *Core) sharingChanged() {
 
 func (c *Core) SetLocale(locale string) {
 	defer catch(nil)
-	if locale != "" && c.locale.Load() != nil {
-		c.locale.Store(locale)
+	if locale != "" {
+		c.locale.Store(&locale)
 	}
 }
 
@@ -132,7 +138,7 @@ func (c *Core) cancellable(token int64, d time.Duration) (ctx context.Context, d
 	}
 	c.cancelMu.Lock()
 	defer c.cancelMu.Unlock()
-	if c.cancelled[token] {
+	if _, ok := c.cancelled[token]; ok {
 		delete(c.cancelled, token)
 		cancel()
 		return ctx, cancel
@@ -157,11 +163,17 @@ func (c *Core) Cancel(token int64) {
 		cancel()
 		return
 	}
+	// A token is given up on before its call begins, or after it ends; the latter is never
+	// asked about again, so tokens are kept only as long as a call may wait to begin.
+	now := time.Now()
 	if c.cancelled == nil {
-		c.cancelled = map[int64]bool{}
+		c.cancelled = map[int64]time.Time{}
 	}
-	c.cancelled[token] = true
+	maps.DeleteFunc(c.cancelled, func(_ int64, at time.Time) bool { return now.Sub(at) > cancelKept })
+	c.cancelled[token] = now
 }
+
+const cancelKept = 10 * time.Minute
 
 func (c *Core) Stop() {
 	defer catch(nil)

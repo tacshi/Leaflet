@@ -40,7 +40,7 @@ var Functions = []string{"account"}
 
 var Retired = []string{"agent", "providers", "stt"}
 
-const FunctionsVersion = 20
+const FunctionsVersion = 21
 
 const hashSecret = "LEAFLET_FUNCTIONS_"
 

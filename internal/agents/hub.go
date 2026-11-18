@@ -310,6 +310,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 					tc = h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
 					if (tc.ListPages != nil || tc.CreatePage != nil) && h.publicElsewhere(ctx, pageID, online) {
 						tc.ListPages, tc.ReadOtherPage, tc.ListFolders, tc.CreatePage = nil, nil, nil, nil
+						tc.OthersWrite = true
 					}
 					if tc.ReadOtherPage != nil {
 						tc.Alone = func(id string) bool { return h.alone(ctx, id, online) }

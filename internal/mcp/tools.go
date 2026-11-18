@@ -420,7 +420,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	delete(args, "limit")
 	var out map[string]any
 	var saved *doc.Content
-	snapped := false
+	snapped, inHistory := false, ""
 	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
 		if !kept {
 			return false, toolErr("The page's content is not kept on this device.")
@@ -444,10 +444,11 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 			}
 			snapped = true
 		}
-		if conflictSince(t.read[p.ID], before, x.Ops) {
-			if err := t.s.st.AddHistory(p.ID, before, "conflict", "", "Before "+t.s.agent); err != nil {
+		if read := before.Encode(); read != inHistory && conflictSince(t.read[p.ID], before, x.Ops) {
+			if err := t.s.st.AddHistoryEncoded(p.ID, read, "conflict", "", "Before "+t.s.agent); err != nil {
 				return false, err
 			}
+			inHistory = read
 		}
 		beforeSave(p.ID)
 		saved = content

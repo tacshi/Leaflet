@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	xhtml "golang.org/x/net/html"
+
 	"leaflet/internal/doc"
 )
 
@@ -389,6 +391,86 @@ const NoRTC = `(function () {
 })();`
 
 const EmbedNoRTC = "<script>" + NoRTC + "</script>"
+
+// NoRTCNested is NoRTC for a sandboxed page whose frames no preload
+// reaches, as a public link's embed. Each frame such a page makes has an
+// origin of its own, so the page can't reach into it, and its scripts run
+// without NoRTC where the browser ignores CSP's webrtc 'block'. Under
+// NestedCSP, which lets no policy but the default one make HTML, the
+// default policy NoRTCNested sets leads every srcdoc with NoRTCNested, and
+// refuses other HTML that names a srcdoc. Frames written in the page's
+// own HTML are led by LeadSrcdocs.
+const NoRTCNested = `(function noRTCNested() {
+  ` + NoRTC + `
+  try { Object.defineProperty(window, "XSLTProcessor", {value: undefined, writable: false, configurable: false}); } catch (e) {}
+  var tt = window.trustedTypes;
+  if (!tt || !tt.createPolicy) return;
+  // The page's scripts may change the builtins by the time a sink calls
+  // the policy, so it keeps its own.
+  var call = Function.prototype.call, str = String;
+  var lower = call.bind(String.prototype.toLowerCase), find = call.bind(String.prototype.indexOf), cut = call.bind(String.prototype.slice);
+  var tag = "<script>(" + noRTCNested + ")();<\/script>";
+  function lead(s) {
+    var i = 0;
+    while (i < s.length && find(" \t\r\n\f", s[i]) >= 0) i++;
+    if (lower(cut(s, i, i + 9)) === "<!doctype") {
+      var end = find(s, ">", i);
+      if (end >= 0) return cut(s, 0, end + 1) + tag + cut(s, end + 1);
+    }
+    return tag + s;
+  }
+  try {
+    tt.createPolicy("default", {
+      createHTML: function (s, type, sink) {
+        s = str(s);
+        if (find(lower(str(sink)), "srcdoc") >= 0) return lead(s);
+        return find(lower(s), "srcdoc") >= 0 ? null : s;
+      },
+      createScript: function (s) { return s; },
+      createScriptURL: function (s) { return s; }
+    });
+    var proto = Object.getPrototypeOf(tt), d = Object.getOwnPropertyDescriptor(proto, "defaultPolicy");
+    if (d && d.configurable) {
+      Object.defineProperty(proto, "defaultPolicy", {configurable: false, enumerable: d.enumerable, get: function () { return null; }});
+    }
+  } catch (e) {}
+})();`
+
+const EmbedNoRTCNested = "<script>" + NoRTCNested + "</script>"
+
+// NestedCSP is what a page led by NoRTCNested adds to its policy: no HTML
+// reaches a sink but through NoRTCNested's default policy.
+const NestedCSP = "require-trusted-types-for 'script'; trusted-types default"
+
+// LeadSrcdocs leads the srcdoc of each frame in src with EmbedNoRTCNested,
+// and those in theirs, for the frames the browser makes as it reads the
+// page, which reach no policy.
+func LeadSrcdocs(src string) string {
+	if !strings.Contains(strings.ToLower(src), "srcdoc") {
+		return src
+	}
+	root, err := xhtml.Parse(strings.NewReader(src))
+	if err != nil {
+		return ""
+	}
+	var lead func(n *xhtml.Node)
+	lead = func(n *xhtml.Node) {
+		for i, a := range n.Attr {
+			if strings.EqualFold(a.Key, "srcdoc") {
+				n.Attr[i].Val = LeadWith(EmbedNoRTCNested, LeadSrcdocs(a.Val))
+			}
+		}
+		for c := range n.ChildNodes() {
+			lead(c)
+		}
+	}
+	lead(root)
+	var b strings.Builder
+	if err := xhtml.Render(&b, root); err != nil {
+		return ""
+	}
+	return b.String()
+}
 
 const EmbedWheel = `<script>(function () {
   function scrolls(el, dy) {

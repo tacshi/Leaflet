@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -123,6 +125,29 @@ func open(t *testing.T) (*Core, *fakeEvents) {
 		_ = c.core.Store.Close()
 	})
 	return c, ev
+}
+
+func TestSetLocaleAfterOpeningWithoutOne(t *testing.T) {
+	cfg, _ := json.Marshal(config{DataDir: t.TempDir()})
+	p := &fakePlatform{t: t, secrets: map[string][]byte{}}
+	p.logUntilEnd()
+	c, err := Open(string(cfg), p, &fakeEvents{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c.Stop()
+		_ = c.core.Store.Close()
+		i18n.SetLocaleFunc(nil)
+	})
+	c.SetLocale("ja")
+	if got := i18n.Locale(); got != "ja" {
+		t.Errorf("the locale set after opening is %q", got)
+	}
+	c.SetLocale("")
+	if got := i18n.Locale(); got != "ja" {
+		t.Errorf("an empty locale replaced it with %q", got)
+	}
 }
 
 func paragraph(id, text string) *doc.Node {

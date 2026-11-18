@@ -375,7 +375,7 @@ func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEnt
 }
 
 func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any, read *atomic.Int64) (bool, error) {
-	local, waits, err := s.uploadFrom(ctx, payload)
+	local, waits, err := s.uploadFrom(ctx, payload, read)
 	if err != nil || waits || local == "" {
 		return err == nil && !waits, err
 	}

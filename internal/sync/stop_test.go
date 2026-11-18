@@ -1,11 +1,15 @@
 package sync
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"leaflet/internal/remote"
+	"leaflet/internal/store"
 )
 
 func TestStopAndStartAgain(t *testing.T) {
@@ -120,5 +124,83 @@ func TestStopEndsAPassWaitingToRun(t *testing.T) {
 	<-done
 	if n := runs.Load(); n != 0 {
 		t.Errorf("%d passes ran after Stop", n)
+	}
+}
+
+func TestInterruptCutsAPageCheckAndAsksNothingMeanwhile(t *testing.T) {
+	st := openStore(t)
+	page, err := st.CreatePage(store.NewPageOptions{Title: "Open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked := make(chan struct{}, 1)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/v1/rpc/page_members" {
+			_, _ = io.Copy(io.Discard, r.Body)
+			asked <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	var interrupting, askedMeanwhile atomic.Bool
+	svc.Online = func() bool {
+		if interrupting.Load() {
+			askedMeanwhile.Store(true)
+		}
+		return true
+	}
+	svc.SetOpen(page.ID, true)
+	select {
+	case <-asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the open page was never checked")
+	}
+	interrupting.Store(true)
+	ran := make(chan bool, 1)
+	go svc.Interrupt(func() { ran <- svc.CanSync() })
+	select {
+	case can := <-ran:
+		if can {
+			t.Error("sync could start while interrupted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Interrupt waited on the page check rather than cut it")
+	}
+	interrupting.Store(false)
+	if askedMeanwhile.Load() {
+		t.Error("the cut work asked whether the app is online")
+	}
+	if !svc.CanSync() {
+		t.Error("sync stayed off after Interrupt")
+	}
+}
+
+func TestForgetStartsAnotherAccountAfresh(t *testing.T) {
+	st := openStore(t)
+	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
+	svc.backOff(&remote.Error{Status: http.StatusTooManyRequests, RetryAfter: time.Minute})
+	svc.rest(nil)
+	svc.mu.Lock()
+	svc.membersAt[ownSwept] = time.Now()
+	svc.unread["p"] = 3
+	svc.waitingAfter = "p"
+	svc.retryAt[outboxKey{1, 1}] = time.Now().Add(time.Hour)
+	svc.mu.Unlock()
+	svc.ownLogChecked = true
+	if !svc.busy() || !svc.resting() {
+		t.Fatal("the server's wait was not kept")
+	}
+	svc.Hold(svc.Forget)
+	if svc.busy() || svc.resting() {
+		t.Error("the server's wait outlasted the account")
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if len(svc.membersAt) != 0 || len(svc.unread) != 0 || svc.waitingAfter != "" || len(svc.retryAt) != 0 || svc.ownLogChecked {
+		t.Errorf("kept members %v, unread %v, waiting after %q, retries %v, own log checked %v",
+			svc.membersAt, svc.unread, svc.waitingAfter, svc.retryAt, svc.ownLogChecked)
 	}
 }

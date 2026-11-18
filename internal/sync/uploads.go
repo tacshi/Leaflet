@@ -20,7 +20,7 @@ var uploadStall = 2 * time.Minute
 var drainWait = 5 * time.Minute
 
 var (
-	errUploadStalled = errors.New("the upload stopped: the server took none of it for too long")
+	errUploadStalled = errors.New("the upload stopped: none of it moved for too long")
 	errUploadGone    = errors.New("the upload is no longer wanted")
 )
 
@@ -94,6 +94,9 @@ func (s *Service) startUpload(uid string, e store.OutboxEntry, payload map[strin
 	}
 	ctx, stop := context.WithCancelCause(base)
 	up := &upload{entity: e.EntityID, stop: stop, done: make(chan struct{})}
+	// The stall is timed from the start, so that an upload that never takes a byte, as one whose copy waits on a
+	// download that stopped, gives way too.
+	up.read.Store(time.Now().UnixMilli())
 	s.uploading, s.lastUpload = up, up
 	guard.Go(func() { s.watchUpload(ctx, up, session, stall) })
 	guard.Go(func() { s.runUpload(ctx, up, uid, e, payload) })
@@ -149,7 +152,7 @@ func (s *Service) watchUpload(ctx context.Context, up *upload, session uint64, s
 			return
 		case <-tick.C:
 		}
-		if read := up.read.Load(); read != 0 && time.Since(time.UnixMilli(read)) >= stall {
+		if time.Since(time.UnixMilli(up.read.Load())) >= stall {
 			up.stop(errUploadStalled)
 			return
 		}

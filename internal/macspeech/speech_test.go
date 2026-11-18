@@ -22,6 +22,13 @@ fi
 if [ "$2" = dies ]; then
 	exit 3
 fi
+if [ "$2" = deaf ]; then
+	exec sleep 60
+fi
+if [ "$2" = loud ]; then
+	echo '{"error":"boom"}'
+	exec yes '{"text":"more"}'
+fi
 if [ "$2" = xx ]; then
 	echo '{"error":"unsupported language: xx","code":"language","language":"xx"}'
 	exit 1
@@ -234,5 +241,54 @@ func TestFileWaitFollowsTheAudio(t *testing.T) {
 	}
 	if got, other := fileWait(broken), fileWait(filepath.Join(dir, "a.m4a")); got != other || other < 3*time.Hour {
 		t.Errorf("an unreadable WAV given %v, another file %v", got, other)
+	}
+}
+
+func TestAHelperFarBehindIsEnded(t *testing.T) {
+	was := maxQueued
+	maxQueued = 64 << 10
+	t.Cleanup(func() { maxQueued = was })
+	rs, err := helper(t).Stream("deaf", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := rs.(*stream)
+	for range 1000 {
+		s.Send(make([]byte, 3200))
+		s.mu.Lock()
+		queued := s.queued
+		s.mu.Unlock()
+		if queued > maxQueued {
+			t.Fatalf("%d bytes queued for a helper that reads nothing", queued)
+		}
+	}
+	select {
+	case <-s.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a helper far behind was left running")
+	}
+	if s.Lost() == nil {
+		t.Error("a helper far behind reads as fine")
+	}
+}
+
+func TestAHelperThatKeepsTalkingAfterItsLastAnswerIsEnded(t *testing.T) {
+	was := exitWait
+	exitWait = 100 * time.Millisecond
+	t.Cleanup(func() { exitWait = was })
+	rs, err := helper(t).Stream("loud", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := rs.(*stream)
+	s.Send(make([]byte, 3200))
+	select {
+	case <-s.done:
+	case <-time.After(10 * time.Second):
+		_ = s.cmd.Process.Kill()
+		t.Fatal("waits on a helper that answered for the last time")
+	}
+	if s.Lost() == nil {
+		t.Error("a helper that failed reads as fine")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	"leaflet/internal/guard"
 	"leaflet/locales"
@@ -88,6 +89,7 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if e := v.Get("error"); e != "" {
 			_, _ = fmt.Fprint(w, page(locales.OauthCancelledTitle(), locales.OauthCloseTab()))
+			_ = http.NewResponseController(w).Flush()
 			msg := locales.OauthCancelled()
 			if e != "access_denied" {
 				msg = locales.OauthFailed(name, e)
@@ -96,6 +98,7 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 			return
 		}
 		_, _ = fmt.Fprint(w, page(locales.OauthSignedIn(), locales.OauthCloseTabBack()))
+		_ = http.NewResponseController(w).Flush()
 		finish(answer{query: v})
 	})}
 	guard.Go(func() { _ = l.srv.Serve(ln) })
@@ -113,8 +116,14 @@ func (l *Loopback) Wait(ctx context.Context) (url.Values, error) {
 	}
 }
 
+const closeWait = 2 * time.Second
+
 func (l *Loopback) Close() {
-	_ = l.srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), closeWait)
+	defer cancel()
+	if err := l.srv.Shutdown(ctx); err != nil {
+		_ = l.srv.Close()
+	}
 	_ = l.ln.Close()
 }
 

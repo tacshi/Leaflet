@@ -276,7 +276,24 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		go a.backend.SignOut()
 		return
 	}
-	if err := a.core().UseAccount(user, drop); err != nil {
+	if a.leaving {
+		return
+	}
+	// The switch waits for the sync to let go of the store, which an export may hold a while: it runs off the main
+	// thread, the page read-only meanwhile, as when signing out.
+	a.leaving = true
+	a.pageEditable()
+	c := a.core()
+	var err error
+	a.offMain(func() { err = c.UseAccount(user, drop) }, func() {
+		a.leaving = false
+		a.pageEditable()
+		a.usedAccount(user, replaces, err)
+	})
+}
+
+func (a *App) usedAccount(user *store.User, replaces bool, err error) {
+	if err != nil {
 		if errors.Is(err, store.ErrUnsynced) {
 			a.signIn.asking, a.signIn.lost = user, a.st.PendingCount()
 			return

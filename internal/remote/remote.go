@@ -673,9 +673,14 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 		}
 		data, _ := io.ReadAll(res.Body)
 		_ = res.Body.Close()
-		if again && staleToken(res.StatusCode, data) {
-			again = false
+		stale := staleToken(res.StatusCode, data)
+		if stale {
+			// Refused even when the request cannot go again, as an upload's body read once: the next request
+			// renews the token rather than send it again until it runs out.
 			c.refuse(tok)
+		}
+		if again && stale {
+			again = false
 			next := req.Clone(ctx)
 			if req.GetBody != nil {
 				if next.Body, err = req.GetBody(); err != nil {

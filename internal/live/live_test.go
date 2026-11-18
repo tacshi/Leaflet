@@ -81,7 +81,16 @@ func TestTypedAndOutsideEditsAreBothKept(t *testing.T) {
 	ed.typeIn("one, after closing")
 	p.Edited()
 	p.Close()
-	(<-posted)()
+	select {
+	case fn := <-posted:
+		t.Error("a closed page still waits to save")
+		fn()
+	case <-time.After(2 * SaveDelay):
+	}
+	p.Edited()
+	if p.timer.Stop() {
+		t.Error("a closed page waits to save an edit")
+	}
 	if strings.Contains(st.Content(pg.ID).PlainText(), "after closing") {
 		t.Error("a closed page saved")
 	}

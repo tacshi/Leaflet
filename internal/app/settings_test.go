@@ -881,3 +881,20 @@ func TestKeptKeyReadLateLeavesATypedKey(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+func TestAnEndedProviderFormListsNoModels(t *testing.T) {
+	a := templatesApp(t)
+	a.post = func(func()) {}
+	for name, end := range map[string]func(){
+		"closed Settings": a.closeSettings,
+		"another form":    func() { a.openForm(providerForm{open: true, preset: "ollama", name: "B"}) },
+	} {
+		a.openForm(providerForm{open: true, preset: "ollama", name: "A", baseURL: "http://127.0.0.1:1"})
+		a.fetchModelsSoon()
+		pending := a.form.keyTimer
+		end()
+		if pending == nil || pending.Stop() {
+			t.Errorf("%s: the models were still to be listed", name)
+		}
+	}
+}

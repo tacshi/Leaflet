@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/locales"
@@ -143,10 +144,10 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	}
 	w = get(h, "/tok/e/e1")
 	if csp := w.Header().Get("Content-Security-Policy"); w.Code != http.StatusOK || !strings.Contains(csp, "sandbox allow-scripts") ||
-		!strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "connect-src") {
+		!strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "connect-src") || !strings.Contains(csp, rendered.NestedCSP) {
 		t.Errorf("embed: %d %q", w.Code, csp)
 	}
-	if body := w.Body.String(); !strings.HasPrefix(body, `<meta charset`) || !strings.Contains(body, "RTCPeerConnection") || !strings.Contains(body, "play()") || !strings.Contains(body, "leafletSize") {
+	if body := w.Body.String(); !strings.HasPrefix(body, `<meta charset`) || !strings.Contains(body, rendered.EmbedNoRTCNested) || !strings.Contains(body, "play()") || !strings.Contains(body, "leafletSize") {
 		t.Errorf("embed page: %s", body)
 	}
 	if w := get(h, "/tok/e/nope"); w.Code != http.StatusNotFound {
@@ -841,5 +842,12 @@ func TestPubReadsPicturesAsAsked(t *testing.T) {
 	}
 	if w := get(h, "/tok/f/1.png"); w.Code != http.StatusOK || !strings.HasSuffix(w.Body.String(), "newer") {
 		t.Errorf("picture: %d %q", w.Code, w.Body)
+	}
+}
+
+func TestPubEmbedPageLeadsItsFrames(t *testing.T) {
+	page := pubEmbedPage(`<iframe srcdoc="<script>new RTCPeerConnection()</script>"></iframe>`)
+	if n := strings.Count(page, "function noRTCNested"); n != 2 {
+		t.Errorf("NoRTCNested is in the embed and its frame %d times: %s", n, page)
 	}
 }

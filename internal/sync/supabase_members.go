@@ -282,10 +282,12 @@ func (s *Service) reloadMembersUnder(ctx context.Context, topID string, pages []
 		if p.ID == topID || tree.Members(p.ID) == nil || !tree.IsDescendant(p.ID, topID) {
 			continue
 		}
+		// LoadMembers takes a share withdrawn from the page itself, so an error here is one the next reload may not
+		// meet: the rows kept stay, as without them the page would take its editability from the shared page above.
 		if err := s.LoadMembers(ctx, p.ID); err != nil {
 			log.Printf("members of %s: %v", p.ID, err)
-			if err := s.st.SetMembers(p.ID, nil); err != nil {
-				log.Printf("members of %s: %v", p.ID, err)
+			if ctx.Err() != nil {
+				return
 			}
 		}
 	}

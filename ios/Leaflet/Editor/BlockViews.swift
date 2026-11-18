@@ -817,6 +817,7 @@ struct WebPage: UIViewRepresentable {
         view.scrollView.backgroundColor = .clear
         view.scrollView.isScrollEnabled = interactive
         view.navigationDelegate = context.coordinator
+        context.coordinator.base = base
         context.coordinator.loaded = html
         context.coordinator.dark = context.environment.colorScheme == .dark
         context.coordinator.ran = script?.id
@@ -829,6 +830,7 @@ struct WebPage: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {
         let dark = context.environment.colorScheme == .dark
         if context.coordinator.loaded != html || context.coordinator.dark != dark {
+            context.coordinator.base = base
             context.coordinator.loaded = html
             context.coordinator.dark = dark
             view.loadHTMLString(themed(html, dark: dark), baseURL: base)
@@ -849,11 +851,20 @@ struct WebPage: UIViewRepresentable {
         var dark = false
         var ran: UUID?
 
+        var base: URL?
+
+        // The page loads only itself: the player it holds goes where it likes, in its own frame,
+        // but never takes the page away nor opens a window.
         func webView(
             _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
-            let ok = action.navigationType == .other || action.targetFrame?.isMainFrame == false
+            let ok =
+                switch action.targetFrame?.isMainFrame {
+                case false?: true
+                case true?: action.request.url == (base ?? URL(string: "about:blank"))
+                case nil: false
+                }
             decisionHandler(ok ? .allow : .cancel)
         }
     }
@@ -1124,12 +1135,13 @@ final class WebBlockView: WKWebView, WKNavigationDelegate {
 
     required init?(coder: NSCoder) { fatalError("not coded") }
 
+    // The page and the frame it holds the block's own HTML in load from about:blank and
+    // about:srcdoc; nothing the HTML does takes either anywhere else.
     func webView(
         _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        let ok = action.navigationType == .other || action.targetFrame?.isMainFrame == false
-        decisionHandler(ok ? .allow : .cancel)
+        decisionHandler(action.request.url?.scheme == "about" ? .allow : .cancel)
     }
 
     @MainActor

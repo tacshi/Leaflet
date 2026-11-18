@@ -169,6 +169,11 @@ final class EditorController: NSObject, UITextViewDelegate {
             Set(text.blocks().filter { $0.info.type == "file" }.map { $0.info.id }),
             in: players)
         textView.blocks.reset()
+        // Undo keeps its targets unowned, so nothing may be undone on them once they are gone.
+        if let undo = textView.undoManager {
+            undo.removeAllActions(withTarget: self)
+            undo.removeAllActions(withTarget: edits)
+        }
     }
 
     func stopPlaying(_ gone: [BlockInfo]) {

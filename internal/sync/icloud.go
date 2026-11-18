@@ -545,7 +545,7 @@ func (s *Service) cloudUpload(ctx context.Context, entry *store.OutboxEntry) (bo
 	if other, err := s.uploadOfOtherSpace(e); err != nil || other {
 		return err == nil, err
 	}
-	local, waits, err := s.uploadFrom(ctx, payload)
+	local, waits, err := s.uploadFrom(ctx, payload, nil)
 	if err != nil || waits || local == "" {
 		return err == nil && !waits, err
 	}

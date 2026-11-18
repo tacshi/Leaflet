@@ -212,7 +212,7 @@ func TestMoveTargets(t *testing.T) {
 
 func TestPictureReadsOnlyPublicAddresses(t *testing.T) {
 	c, _ := open(t)
-	if _, err := c.Picture("http://127.0.0.1:1/a.png"); !errors.Is(err, web.ErrNotPublic) {
+	if _, err := c.Picture("http://127.0.0.1/a.png"); !errors.Is(err, web.ErrNotPublic) {
 		t.Fatalf("read a local picture: %v", err)
 	}
 	if _, err := c.Picture("file:///etc/hosts"); err == nil {

@@ -752,6 +752,50 @@ func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 	}
 }
 
+func TestEditRunAgainOverTheSameChangeKeepsOneConflict(t *testing.T) {
+	st := newStore(t)
+	b1 := &doc.Node{ID: "b1", Type: "paragraph"}
+	b1.SetDelta(doc.Delta{{Text: "draft"}})
+	p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks([]*doc.Node{b1})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	if out := s.pages.call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	c := st.Content(p.ID)
+	c.Find("b1").SetDelta(doc.Delta{{Text: "the user's fix"}})
+	if _, _, err := st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	saves := 0
+	was := beforeSave
+	beforeSave = func(id string) {
+		if saves++; saves > 1 {
+			return
+		}
+		if _, err := st.DB().Exec(`UPDATE page_contents SET content = content || ' ' WHERE page_id = ?`, id); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeSave = was })
+	out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "agent's"}})
+	if out["error"] != nil {
+		t.Fatal(out)
+	}
+	h, _ := st.History(p.ID)
+	conflicts := 0
+	for _, e := range h {
+		if e.Reason == "conflict" {
+			conflicts++
+		}
+	}
+	if saves != 2 || conflicts != 1 {
+		t.Errorf("%d saves, %d conflict snapshots", saves, conflicts)
+	}
+}
+
 func TestLongPageComesInParts(t *testing.T) {
 	st := newStore(t)
 	var blocks []*doc.Node

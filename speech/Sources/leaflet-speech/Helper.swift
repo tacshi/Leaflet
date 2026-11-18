@@ -5,6 +5,8 @@ import Speech
 @main
 struct Helper {
     static func main() async {
+        // Leaflet closing the pipes ends the helper through a failed write, not a signal.
+        signal(SIGPIPE, SIG_IGN)
         let args = Array(CommandLine.arguments.dropFirst())
         guard #available(macOS 26, *) else { exit(1) }
         switch args.first {
@@ -18,8 +20,8 @@ struct Helper {
         case "file" where args.count == 3:
             await run { try await Transcription.file(args[2], language: args[1]) }
         default:
-            FileHandle.standardError.write(
-                Data(
+            try? FileHandle.standardError.write(
+                contentsOf: Data(
                     "usage: leaflet-speech available | stream <language> | file <language> <path>\n"
                         .utf8))
             exit(2)
@@ -39,9 +41,7 @@ struct Helper {
         let (stream, input) = AsyncStream.makeStream(of: Data.self)
         Thread.detachNewThread {
             var carry = Data()
-            while true {
-                let data = FileHandle.standardInput.availableData
-                if data.isEmpty { break }
+            while let data = readInput() {
                 var pcm = carry + data
                 carry = pcm.count % 2 == 1 ? Data(pcm.suffix(1)) : Data()
                 pcm.removeLast(carry.count)
@@ -50,6 +50,17 @@ struct Helper {
             input.finish()
         }
         return stream
+    }
+
+    /// The audio as it comes, rather than in whole blocks, or nil once it ends or cannot be read.
+    private static func readInput() -> Data? {
+        var bytes = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let n = read(STDIN_FILENO, &bytes, bytes.count)
+            if n > 0 { return Data(bytes[..<n]) }
+            if n < 0, errno == EINTR { continue }
+            return nil
+        }
     }
 }
 
@@ -60,7 +71,12 @@ enum Output {
         var line = answer
         line.append(0x0A)
         lock.lock()
-        FileHandle.standardOutput.write(line)
-        lock.unlock()
+        defer { lock.unlock() }
+        do {
+            try FileHandle.standardOutput.write(contentsOf: line)
+        } catch {
+            // No one reads the answers any more.
+            exit(1)
+        }
     }
 }

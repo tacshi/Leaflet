@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	xhtml "golang.org/x/net/html"
+
 	"leaflet/internal/doc"
 )
 
@@ -122,5 +124,58 @@ func TestFileSeekTo(t *testing.T) {
 	}
 	if got := FileSeekTo(-1); !strings.Contains(got, "el.currentTime = 0.000") {
 		t.Errorf("seek %s", got)
+	}
+}
+
+func TestLeadSrcdocsLeadsFramesWrittenInThePage(t *testing.T) {
+	plain := "<p>no frames</p><script>x = 1 < 2</script>"
+	if got := LeadSrcdocs(plain); got != plain {
+		t.Errorf("a page without frames changed: %s", got)
+	}
+	src := `<iframe SRCDOC="<iframe srcdoc='<script>b()</script>'></iframe><script>a()</script>"></iframe>` +
+		`<svg><style><p></p><iframe srcdoc="<script>c()</script>"></iframe></style></svg>`
+	root, err := xhtml.Parse(strings.NewReader(LeadSrcdocs(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var docs []string
+	var walk func(n *xhtml.Node)
+	walk = func(n *xhtml.Node) {
+		for _, a := range n.Attr {
+			if a.Key == "srcdoc" {
+				docs = append(docs, a.Val)
+				inner, err := xhtml.Parse(strings.NewReader(a.Val))
+				if err != nil {
+					t.Fatal(err)
+				}
+				walk(inner)
+			}
+		}
+		for c := range n.ChildNodes() {
+			walk(c)
+		}
+	}
+	walk(root)
+	if len(docs) != 3 {
+		t.Fatalf("%d frames found: %q", len(docs), docs)
+	}
+	for _, d := range docs {
+		if !strings.HasPrefix(d, EmbedNoRTCNested) {
+			t.Errorf("a frame starts without NoRTC: %.80s", d)
+		}
+	}
+}
+
+func TestNoRTCNestedLeadsFramesTheEmbedMakes(t *testing.T) {
+	for _, want := range []string{NoRTC, `createPolicy("default"`, "srcdoc", `"defaultPolicy"`, "XSLTProcessor"} {
+		if !strings.Contains(NoRTCNested, want) {
+			t.Errorf("NoRTCNested lacks %s", want)
+		}
+	}
+	if strings.Contains(NoRTCNested, "</script>") {
+		t.Error("NoRTCNested ends the script that holds it")
+	}
+	if !strings.Contains(NestedCSP, "require-trusted-types-for 'script'") || !strings.Contains(NestedCSP, "trusted-types default") || strings.Contains(NestedCSP, "allow-duplicates") {
+		t.Errorf("NestedCSP lets HTML past the default policy: %s", NestedCSP)
 	}
 }

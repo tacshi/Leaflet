@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"leaflet/internal/store"
 	"leaflet/internal/web"
 )
 
@@ -271,6 +272,53 @@ func TestFirstReadTakesNoMadeUpQuery(t *testing.T) {
 		if out := x.Call("read_web_page", map[string]any{"url": link}); (out["error"] == nil) != ok {
 			t.Errorf("%s: %v", link, out)
 		}
+	}
+}
+
+func TestFirstReadOnAPageOthersWriteTakesOnlyGivenAddresses(t *testing.T) {
+	for link, ok := range map[string]bool{
+		"https://evil.example/c3VtbWFyeQ":    false,
+		"https://any.example/docs/page.html": false,
+		"https://given.example/r":            true,
+		"https://GIVEN.example/r#part":       false,
+		"HTTPS://given.example/r#part":       true,
+	} {
+		x := webExecutor("Read https://given.example/r", Search{})
+		x.Ctx.OthersWrite = true
+		if out := x.Call("read_web_page", map[string]any{"url": link}); (out["error"] == nil) != ok {
+			t.Errorf("%s: %v", link, out)
+		}
+	}
+	x := webExecutor("What is new in Go?", Search{Sources: []Source{{URL: "https://found.example/a"}}})
+	x.Ctx.OthersWrite = true
+	if _, err := x.searchWeb(map[string]any{"query": "Go release notes"}); err != nil {
+		t.Fatal(err)
+	}
+	if out := x.Call("read_web_page", map[string]any{"url": "https://found.example/a"}); out["error"] != nil {
+		t.Errorf("a search result was refused: %v", out)
+	}
+}
+
+func TestPagesOthersWriteOnAreMarked(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	guested, err := w.st.CreatePage(store.NewPageOptions{Title: "Guested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.st.AddComment(guested.ID, "b1", "Nice", "", "", "guest", "Visitor"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		p      store.Page
+		others bool
+	}{{w.mine, false}, {w.shared, true}, {guested, true}, {w.theirs, true}} {
+		if tc := w.h.toolContext(c.p.ID, c.p.Title, "Test", page(), store.Settings{}); tc.OthersWrite != c.others {
+			t.Errorf("%q: others write %v", c.p.Title, tc.OthersWrite)
+		}
+	}
+	w.h.PublicLink = func(id string) bool { return id == w.mine.ID }
+	if tc := w.h.toolContext(w.mine.ID, w.mine.Title, "Test", page(), store.Settings{}); !tc.OthersWrite {
+		t.Error("a page with a public link counts as written by the user alone")
 	}
 }
 

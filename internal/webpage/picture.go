@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"slices"
 
 	_ "image/gif"
@@ -102,6 +103,13 @@ func decodedBytes(cfg image.Config) int {
 	}
 	if _, ok := cfg.ColorModel.(color.Palette); ok {
 		per = 1
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0
+	}
+	// A header can claim a size whose bytes overflow an int.
+	if cfg.Width > math.MaxInt/per/cfg.Height {
+		return math.MaxInt
 	}
 	return cfg.Width * cfg.Height * per
 }

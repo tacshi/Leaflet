@@ -73,7 +73,12 @@ func (p *Page) loadedContent() *doc.Content {
 
 func (p *Page) Attach(ed Editor) { p.ed = ed }
 
-func (p *Page) Close() { p.closed = true }
+func (p *Page) Close() {
+	p.closed = true
+	if p.timer != nil {
+		p.timer.Stop()
+	}
+}
 
 func (p *Page) Unreadable() bool { return p.unreadable }
 
@@ -122,6 +127,9 @@ func (p *Page) Edited() {
 func (p *Page) schedule() {
 	if p.timer != nil {
 		p.timer.Stop()
+	}
+	if p.closed {
+		return
 	}
 	p.timer = time.AfterFunc(SaveDelay, func() {
 		p.post(func() {

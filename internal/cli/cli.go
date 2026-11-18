@@ -450,8 +450,13 @@ func (r *runner) ls(_ []string) error {
 		}
 	}
 	var b strings.Builder
+	pageDone := map[string]bool{}
 	var tree func(p listedPage, depth int)
 	tree = func(p listedPage, depth int) {
+		if pageDone[p.ID] {
+			return
+		}
+		pageDone[p.ID] = true
 		line := shortID(p.ID) + "  " + strings.Repeat("  ", depth) + shown(p.Title)
 		for _, t := range p.Tags {
 			line += "  #" + shown(t)
@@ -499,6 +504,11 @@ func (r *runner) ls(_ []string) error {
 		folderTree(f, 0)
 	}
 	for _, p := range slices.Concat(top, shared) {
+		tree(p, 0)
+	}
+	// Pages each inside another, as two moves on two devices can leave
+	// them, have none at the top to start from.
+	for _, p := range l.Pages {
 		tree(p, 0)
 	}
 	return r.print(b.String())

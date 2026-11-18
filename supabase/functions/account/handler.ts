@@ -11,6 +11,11 @@ export async function handle(req: Request, clients: Clients): Promise<Response> 
     const user = await requireUser(req, clients.user(req));
     const sc = clients.service();
 
+    // Storage first and the user last: Auth deletes no user who still owns
+    // objects in Storage, and the user's rows, which tell which objects are
+    // whose, go with the user. Every step is one a second run does again or
+    // finds done, so an account whose deletion failed part way stays,
+    // signed in, for the app to ask again.
     const { data: spaces, error } = await sc.from("spaces").select("id").eq("owner_id", user.id);
     if (error) throw new Error(error.message);
 

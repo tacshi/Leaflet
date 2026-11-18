@@ -269,3 +269,35 @@ func TestDeleteFunction(t *testing.T) {
 		t.Errorf("asked %v", asked)
 	}
 }
+
+func TestCallsFollowNoRedirect(t *testing.T) {
+	elsewhere := 0
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		elsewhere++
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer other.Close()
+	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	})
+	if _, err := Resume("refresh-0").Organizations(context.Background()); !errors.Is(err, errRedirected) || elsewhere != 0 {
+		t.Errorf("a redirected call: %v, reached elsewhere %d times", err, elsewhere)
+	}
+}
+
+func TestAnAnswerTooLongIsRefused(t *testing.T) {
+	fakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[`+strings.Repeat(" ", maxAnswerBytes)+`]`)
+	})
+	if _, err := Resume("refresh-0").Organizations(context.Background()); !errors.Is(err, errTooLong) {
+		t.Errorf("an answer past the cap: %v", err)
+	}
+}
+
+func TestABadTokenAddressFailsTheSignIn(t *testing.T) {
+	fakeAPI(t, func(http.ResponseWriter, *http.Request) {})
+	Auth = "http://bad host"
+	if _, err := Resume("refresh-0").Organizations(context.Background()); err == nil || errors.Is(err, ErrSignedOut) {
+		t.Errorf("a token address that does not parse: %v", err)
+	}
+}

@@ -46,16 +46,13 @@ enum BackgroundSync {
         schedule()
         let done = Completion(task)
         let pass = Task {
-            guard let client = await opened(), !Task.isCancelled else {
+            guard let client = await opened() else {
                 done.complete(success: false)
                 return
             }
-            task.expirationHandler = { @Sendable in
-                Task { @MainActor in
-                    await outOfTime(inFront: inFront) { await client.stop() }
-                }
-                done.complete(success: false)
-            }
+            done.syncing(client)
+            // Given up on, the task is completed as the sync is stopped.
+            guard !Task.isCancelled else { return }
             do {
                 try await client.syncNow()
                 await Reminders.schedule(client, asking: false)
@@ -64,9 +61,18 @@ enum BackgroundSync {
                 done.complete(success: false)
             }
         }
+        // The task is completed only once the sync is stopped: the app may be suspended as soon
+        // as it is.
         task.expirationHandler = { @Sendable in
             pass.cancel()
-            done.complete(success: false)
+            guard let client = done.client else {
+                done.complete(success: false)
+                return
+            }
+            Task { @MainActor in
+                await outOfTime(inFront: inFront) { await client.stop() }
+                done.complete(success: false)
+            }
         }
     }
 }
@@ -74,8 +80,13 @@ enum BackgroundSync {
 private final class Completion: @unchecked Sendable {
     private let task: BGTask
     private let completed = Mutex(false)
+    private let syncer = Mutex<CoreClient?>(nil)
 
     init(_ task: BGTask) { self.task = task }
+
+    var client: CoreClient? { syncer.withLock { $0 } }
+
+    func syncing(_ client: CoreClient) { syncer.withLock { $0 = client } }
 
     func complete(success: Bool) {
         let first = completed.withLock { done in

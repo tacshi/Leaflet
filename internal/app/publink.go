@@ -786,7 +786,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				refuse(http.StatusNotFound)
 				return
 			}
-			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
+			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; "+rendered.NestedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
 			serve("text/html; charset=utf-8", pubEmbedPage(src))
 		case strings.HasPrefix(rest, "f/"):
 			f, ok := snap.files[strings.TrimPrefix(rest, "f/")]
@@ -1000,10 +1000,13 @@ var pubStatic = sync.OnceValue(func() pubAssets {
 
 var pubAnswerWait = 15 * time.Second
 
+// pubEmbedPage is served under rendered.NestedCSP, without the desktop's
+// preload, so NoRTC reaches the frames the embed makes through
+// rendered.NoRTCNested.
 func pubEmbedPage(src string) string {
-	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + rendered.EmbedNoRTC +
+	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + rendered.EmbedNoRTCNested +
 		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + rendered.EmbedFit
-	return rendered.LeadWith(meta, src)
+	return rendered.LeadWith(meta, rendered.LeadSrcdocs(src))
 }
 
 const recordingScript = `document.addEventListener("click", function (e) {

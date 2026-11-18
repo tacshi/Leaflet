@@ -20,7 +20,7 @@ func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, set
 	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
 	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
 	if err != nil || !h.private(p) {
-		tc.CreatePage = nil
+		tc.CreatePage, tc.OthersWrite = nil, true
 	}
 	return tc
 }
@@ -231,7 +231,7 @@ func (h *Hub) privacy(pages []store.Page) (private, people func(store.Page) bool
 			return p, nil
 		}
 		return h.st.Page(id)
-	})
+	}, true)
 	return func(p store.Page) bool {
 		return !shared(p) && !guested[p.ID] && (h.PublicLink == nil || !h.PublicLink(p.ID))
 	}, shared
@@ -242,7 +242,7 @@ func sharedWithOthers(st *store.Store, p store.Page) bool {
 	return sharing(st, func(id string) bool {
 		members, err := st.Members(id)
 		return err != nil || slices.ContainsFunc(members, func(m store.Member) bool { return m.UserID != me })
-	}, st.Page)(p)
+	}, st.Page, true)(p)
 }
 
 func ShowsToOthers(st *store.Store, p, parent store.Page) bool {
@@ -260,7 +260,7 @@ func othersSurelyHave(st *store.Store, p store.Page) bool {
 	if sharing(st, func(id string) bool {
 		members, err := st.Members(id)
 		return err == nil && slices.ContainsFunc(members, func(m store.Member) bool { return m.UserID != me })
-	}, st.Page)(p) {
+	}, st.Page, false)(p) {
 		return true
 	}
 	guested, err := st.HasGuestComments(p.ID)
@@ -272,7 +272,7 @@ func membersUnread(st *store.Store) bool {
 	return st.Session().SignedIn && known == ""
 }
 
-func sharing(st *store.Store, others func(id string) bool, page func(id string) (store.Page, error)) func(store.Page) bool {
+func sharing(st *store.Store, others func(id string) bool, page func(id string) (store.Page, error), unread bool) func(store.Page) bool {
 	sess := st.Session()
 	if membersUnread(st) {
 		return func(store.Page) bool { return true }
@@ -289,7 +289,9 @@ func sharing(st *store.Store, others func(id string) bool, page func(id string) 
 		found[p.ID] = false
 		v := p.SpaceID != sess.SpaceID || others(p.ID)
 		if !v && p.ParentID != "" {
-			if parent, err := page(p.ParentID); err == nil {
+			if parent, err := page(p.ParentID); err != nil {
+				v = unread
+			} else {
 				v = shared(parent)
 			}
 		}

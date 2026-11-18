@@ -368,6 +368,7 @@ var functionsHashes = map[int]string{
 	18: "bc9982d99067af9a8616cb61ebf6c856f9671890753d8eba8ee9cff68a8da3f0",
 	19: "8e0fc74e251d22b92a210ce1e93e4012985fd24ab850ca4c1810d6e0d679f8c4",
 	20: "8e0fc74e251d22b92a210ce1e93e4012985fd24ab850ca4c1810d6e0d679f8c4",
+	21: "1bb7d5d5f130aeb212d3c77d37786f5f92f08ed529af7179ad54f926d8c34d6d",
 }
 
 func TestFunctionsImportExactVersions(t *testing.T) {

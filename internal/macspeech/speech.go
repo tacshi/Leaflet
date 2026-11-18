@@ -50,10 +50,28 @@ func (h *Helper) File(path, language string) ([]store.Segment, error) {
 		return nil, err
 	}
 	segs, ferr := read(out, language, nil)
-	if err := cmd.Wait(); ferr == nil && err != nil {
+	if err := settle(cmd, out); ferr == nil && err != nil {
 		ferr = err
 	}
 	return recording.Tidy(segs), ferr
+}
+
+// exitWait is how long a helper that has given its last answer has to
+// exit before it is ended.
+var exitWait = 5 * time.Second
+
+// settle waits for a helper whose last answer has been read. What it
+// writes after that is discarded, so it can't block on a full pipe, and
+// one still running exitWait later is ended. It returns the exit's error,
+// or nil when the helper had to be ended.
+func settle(cmd *exec.Cmd, out io.Reader) error {
+	kill := time.AfterFunc(exitWait, func() { _ = cmd.Process.Kill() })
+	_, _ = io.Copy(io.Discard, out)
+	err := cmd.Wait()
+	if !kill.Stop() {
+		return nil
+	}
+	return err
 }
 
 func fileWait(path string) time.Duration {
@@ -144,26 +162,41 @@ func (h *Helper) Stream(language string, text func(string)) (recording.Stream, e
 	guard.Go(func() { s.write(in) })
 	guard.Go(func() {
 		segs, err := read(out, language, text)
-		if werr := cmd.Wait(); err == nil && werr != nil {
+		// Nothing more is sent to a helper that has answered for the last
+		// time, and its input ends, so it sees the end of the audio.
+		s.mu.Lock()
+		s.stopped, s.queue, s.queued = true, nil, 0
+		s.wake.Signal()
+		s.mu.Unlock()
+		_ = in.Close()
+		if werr := settle(cmd, out); err == nil && werr != nil {
 			err = werr
 		}
 		s.mu.Lock()
+		if s.behind {
+			segs, err = nil, errors.New(locales.RecErrOnDeviceStopped())
+		}
 		s.segs, s.err = segs, err
-		s.stopped, s.queue = true, nil
-		s.wake.Signal()
 		s.mu.Unlock()
 		close(s.done)
 	})
 	return s, nil
 }
 
+// maxQueued is the most audio, in bytes, kept for a helper that has fallen
+// behind: ten minutes. A helper further behind than that is ended, and the
+// recording keeps its audio to transcribe again.
+var maxQueued = 10 * 60 * 2 * recording.SampleRate
+
 type stream struct {
 	cmd     *exec.Cmd
 	mu      sync.Mutex
 	wake    *sync.Cond
 	queue   [][]byte
+	queued  int
 	ended   bool
 	stopped bool
+	behind  bool
 	sent    int
 	done    chan struct{}
 	segs    []store.Segment
@@ -172,11 +205,23 @@ type stream struct {
 
 func (s *stream) Send(pcm []byte) {
 	s.mu.Lock()
-	if !s.ended && !s.stopped {
-		s.queue = append(s.queue, pcm)
-		s.sent += len(pcm)
-		s.wake.Signal()
+	if s.ended || s.stopped {
+		s.mu.Unlock()
+		return
 	}
+	if s.queued+len(pcm) > maxQueued {
+		s.stopped, s.behind, s.queue, s.queued = true, true, nil, 0
+		s.wake.Signal()
+		s.mu.Unlock()
+		if s.cmd.Process != nil {
+			_ = s.cmd.Process.Kill()
+		}
+		return
+	}
+	s.queue = append(s.queue, pcm)
+	s.queued += len(pcm)
+	s.sent += len(pcm)
+	s.wake.Signal()
 	s.mu.Unlock()
 }
 
@@ -194,11 +239,12 @@ func (s *stream) write(in io.WriteCloser) {
 		pcm := s.queue[0]
 		s.queue[0] = nil
 		s.queue = s.queue[1:]
+		s.queued -= len(pcm)
 		s.mu.Unlock()
 		if _, err := in.Write(pcm); err != nil {
 			log.Printf("macspeech: %v", err)
 			s.mu.Lock()
-			s.stopped, s.queue = true, nil
+			s.stopped, s.queue, s.queued = true, nil, 0
 			s.mu.Unlock()
 			return
 		}
@@ -229,7 +275,7 @@ func (s *stream) Finish() ([]store.Segment, error) {
 
 func (s *stream) Close() {
 	s.mu.Lock()
-	s.ended, s.queue = true, nil
+	s.ended, s.queue, s.queued = true, nil, 0
 	s.wake.Signal()
 	s.mu.Unlock()
 	if s.cmd.Process != nil {

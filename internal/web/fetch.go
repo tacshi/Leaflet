@@ -12,13 +12,18 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
+	"strconv"
 	"syscall"
 	"time"
 
 	"leaflet/internal/remote"
 )
 
-var ErrNotPublic = errors.New("not a public address")
+var (
+	ErrNotPublic = errors.New("not a public address")
+	ErrBadPort   = errors.New("not a port for the web")
+)
 
 func Fetch(link string) ([]byte, error) {
 	return FetchContext(context.Background(), link)
@@ -96,6 +101,9 @@ var lookupIP = net.DefaultResolver.LookupNetIP
 type publicTransport struct{}
 
 func (publicTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if !webPort(r.URL) {
+		return nil, ErrBadPort
+	}
 	proxy, err := systemProxy(r)
 	if err != nil {
 		return nil, err
@@ -224,17 +232,50 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
+func webPort(u *url.URL) bool {
+	_, p, err := net.SplitHostPort(hostPort(u))
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(p)
+	return err == nil && n > 0 && n <= 65535 && !badPorts[n]
+}
+
+var badPorts = map[int]bool{
+	1: true, 7: true, 9: true, 11: true, 13: true, 15: true, 17: true, 19: true, 20: true, 21: true, 22: true, 23: true,
+	25: true, 37: true, 42: true, 43: true, 53: true, 69: true, 77: true, 79: true, 87: true, 95: true, 101: true,
+	102: true, 103: true, 104: true, 109: true, 110: true, 111: true, 113: true, 115: true, 117: true, 119: true,
+	123: true, 135: true, 137: true, 139: true, 143: true, 161: true, 179: true, 389: true, 427: true, 465: true,
+	512: true, 513: true, 514: true, 515: true, 526: true, 530: true, 531: true, 532: true, 540: true, 548: true,
+	554: true, 556: true, 563: true, 587: true, 601: true, 636: true, 989: true, 990: true, 993: true, 995: true,
+	1719: true, 1720: true, 1723: true, 2049: true, 3659: true, 4045: true, 4190: true, 5060: true, 5061: true,
+	6000: true, 6566: true, 6665: true, 6666: true, 6667: true, 6668: true, 6669: true, 6679: true, 6697: true,
+	10080: true,
+}
+
 var (
-	sharedSpace   = netip.MustParsePrefix("100.64.0.0/10")
-	thisNetwork   = netip.MustParsePrefix("0.0.0.0/8")
-	protocolSpace = netip.MustParsePrefix("192.0.0.0/24")
-	futureSpace   = netip.MustParsePrefix("240.0.0.0/4")
-	nat64         = netip.MustParsePrefix("64:ff9b::/96")
-	nat64Local    = netip.MustParsePrefix("64:ff9b:1::/48")
-	sixToFour     = netip.MustParsePrefix("2002::/16")
-	v4Compat      = netip.MustParsePrefix("::/96")
-	v4Translated  = netip.MustParsePrefix("::ffff:0:0:0/96")
-	siteLocal     = netip.MustParsePrefix("fec0::/10")
+	nat64        = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFour    = netip.MustParsePrefix("2002::/16")
+	v4Compat     = netip.MustParsePrefix("::/96")
+	v4Translated = netip.MustParsePrefix("::ffff:0:0:0/96")
+	notPublic    = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+		netip.MustParsePrefix("64:ff9b:1::/48"),
+		netip.MustParsePrefix("100::/64"),
+		netip.MustParsePrefix("2001::/32"),
+		netip.MustParsePrefix("2001:2::/48"),
+		netip.MustParsePrefix("2001:10::/28"),
+		netip.MustParsePrefix("2001:20::/28"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("3fff::/20"),
+		netip.MustParsePrefix("fec0::/10"),
+	}
 )
 
 func publicAddr(ip netip.Addr) bool {
@@ -246,9 +287,7 @@ func publicAddr(ip netip.Addr) bool {
 		ip = netip.AddrFrom4([4]byte(b[12:16]))
 	case sixToFour.Contains(ip):
 		ip = netip.AddrFrom4([4]byte(b[2:6]))
-	case nat64Local.Contains(ip), siteLocal.Contains(ip):
-		return false
 	}
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip) && !thisNetwork.Contains(ip) &&
-		!protocolSpace.Contains(ip) && !futureSpace.Contains(ip)
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() &&
+		!slices.ContainsFunc(notPublic, func(p netip.Prefix) bool { return p.Contains(ip) })
 }

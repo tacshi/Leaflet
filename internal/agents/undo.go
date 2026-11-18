@@ -18,15 +18,18 @@ func (h *Hub) UndoRun(pageID, runID string) error {
 	if run == nil || run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, run, doc.InvertRun(run.landed()), true); err != nil {
+	landed, err := h.apply(pageID, run, doc.InvertRun(run.landed()), true)
+	if err != nil {
 		log.Printf("undo run: %v", err)
-		return err
+		if !landed {
+			return err
+		}
 	}
 	run.Undone = true
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, nil)
 	h.markJob(runID, "reverted")
-	return nil
+	return err
 }
 
 func (h *Hub) RedoRun(pageID, runID string) error {
@@ -35,18 +38,21 @@ func (h *Hub) RedoRun(pageID, runID string) error {
 	if run == nil || !run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, run, run.landed(), false); err != nil {
+	landed, err := h.apply(pageID, run, run.landed(), false)
+	if err != nil {
 		log.Printf("redo run: %v", err)
-		return err
+		if !landed {
+			return err
+		}
 	}
 	run.Undone = false
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, run.BlockIDs())
 	h.markJob(runID, "done")
-	return nil
+	return err
 }
 
-func (h *Hub) apply(pageID string, run *Run, ops []doc.Op, undo bool) error {
+func (h *Hub) apply(pageID string, run *Run, ops []doc.Op, undo bool) (landed bool, err error) {
 	var blockOps, pageOps []doc.Op
 	var left []string
 	passed := map[string]bool{}
@@ -65,34 +71,67 @@ func (h *Hub) apply(pageID string, run *Run, ops []doc.Op, undo bool) error {
 				passed[o.Page.ID] = true
 			}
 		case h.awaited(run):
-			return errors.New(locales.PageRunPageNotHere())
+			return false, errors.New(locales.PageRunPageNotHere())
 		}
 	}
 	if len(passed) > 0 {
 		blockOps = withoutCards(blockOps, passed)
 	}
 	if len(blockOps) > 0 {
-		var err error
-		if ed := h.host.Live(pageID); ed != nil {
-			if err = applyAll(ed.Peek().Copy(), blockOps); err == nil {
-				err = ed.ApplyOps(blockOps)
-			}
-		} else {
-			_, err = storeOps(h.st, pageID, blockOps, false, true, run.ID, "undo run")
-		}
-		if err != nil {
-			return err
+		if err := h.applyBlocks(pageID, run, blockOps); err != nil {
+			return false, err
 		}
 	}
+	wasLeft := run.Left
 	if undo {
 		run.Left = left
 	}
-	var failed error
 	pages := h.pages()
-	for _, o := range pageOps {
-		failed = errors.Join(failed, h.applyPage(pages, run, o))
+	for i, o := range pageOps {
+		err := h.applyPage(pages, run, o)
+		if err == nil {
+			continue
+		}
+		run.Left = wasLeft
+		if len(blockOps) > 0 {
+			if back := h.applyBlocks(pageID, run, doc.InvertRun(blockOps)); back != nil {
+				if undo {
+					run.Left = left
+				}
+				return true, errors.Join(err, back)
+			}
+		}
+		for _, done := range slices.Backward(pageOps[:i]) {
+			for _, back := range takeBackPage(done) {
+				if berr := h.applyPage(pages, run, back); berr != nil {
+					log.Printf("take back %s: %v", back.Op, berr)
+				}
+			}
+		}
+		return false, err
 	}
-	return failed
+	return true, nil
+}
+
+func (h *Hub) applyBlocks(pageID string, run *Run, ops []doc.Op) error {
+	if ed := h.host.Live(pageID); ed != nil {
+		if err := applyAll(ed.Peek().Copy(), ops); err != nil {
+			return err
+		}
+		return ed.ApplyOps(ops)
+	}
+	_, err := storeOps(h.st, pageID, ops, false, true, run.ID, "undo run")
+	return err
+}
+
+func takeBackPage(o doc.Op) []doc.Op {
+	switch o.Op {
+	case "delete_page":
+		return []doc.Op{{Op: "create_page", Page: &doc.NewPage{ID: o.PageID}}}
+	case "delete_folder":
+		return []doc.Op{{Op: "create_folder", Folder: &doc.NewFolder{ID: o.FolderID}}}
+	}
+	return o.Invert()
 }
 
 type plan struct {
@@ -199,7 +238,7 @@ func (pl *plan) ready(o doc.Op) bool {
 	case "move_page":
 		was := doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID}
 		if o.Place != nil && o.Place.ParentID != "" {
-			if to := pl.page(o.Place.ParentID); to != nil && !to.DeletedAt.IsZero() {
+			if to := pl.page(o.Place.ParentID); to == nil || !to.DeletedAt.IsZero() || pl.pageUnder(o.Place.ParentID, id) {
 				return false
 			}
 		}
@@ -269,6 +308,22 @@ func (pl *plan) folderUnder(candidate, ancestor string) bool {
 			return false
 		}
 		cursor = f.ParentFolderID
+	}
+	return false
+}
+
+func (pl *plan) pageUnder(candidate, ancestor string) bool {
+	seen := map[string]bool{}
+	for cursor := candidate; cursor != "" && !seen[cursor]; {
+		if cursor == ancestor {
+			return true
+		}
+		seen[cursor] = true
+		p := pl.page(cursor)
+		if p == nil {
+			return false
+		}
+		cursor = p.ParentID
 	}
 	return false
 }

@@ -788,3 +788,21 @@ func TestNestedFolders(t *testing.T) {
 		t.Errorf("ls after mv --top:\n%s", ls)
 	}
 }
+
+func TestLsShowsPagesEachInsideAnother(t *testing.T) {
+	var out strings.Builder
+	r := &runner{o: Options{Out: &out}, list: &listing{Pages: []listedPage{
+		{ID: "aaaaaaaa-1", Title: "Top"},
+		{ID: "bbbbbbbb-1", Title: "One", ParentID: "cccccccc-1"},
+		{ID: "cccccccc-1", Title: "Two", ParentID: "bbbbbbbb-1"},
+		{ID: "dddddddd-1", Title: "Self", ParentID: "dddddddd-1"},
+	}}}
+	if err := r.ls(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"Top", "One", "Two", "Self"} {
+		if n := strings.Count(out.String(), "  "+title+"\n"); n != 1 {
+			t.Errorf("%s listed %d times:\n%s", title, n, out.String())
+		}
+	}
+}

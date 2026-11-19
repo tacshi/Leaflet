@@ -13,7 +13,7 @@ check:
 	@for tool in golangci-lint govulncheck gosec; do \
 		command -v $$tool >/dev/null || { echo "check needs $$tool on PATH" >&2; exit 1; }; \
 	done
-	@unformatted=$$(gofmt -l .); \
+	@unformatted=$$(find . -name '*.go' -not -path './.*' -exec gofmt -l {} +); \
 		if [ -n "$$unformatted" ]; then echo "gofmt would change:" >&2; echo "$$unformatted" >&2; exit 1; fi
 	golangci-lint run --no-config ./...
 	govulncheck ./...

@@ -438,17 +438,19 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if len(x.Ops) == 0 {
 			return false, nil
 		}
-		if !snapped {
+		// A change the agent never read makes the version before its edit a conflict,
+		// kept once and shown as one, rather than a second copy beside its snapshot.
+		switch read := before.Encode(); {
+		case read != inHistory && conflictSince(t.read[p.ID], before, x.Ops):
+			if err := t.s.st.AddHistoryEncoded(p.ID, read, "conflict", "", ""); err != nil {
+				return false, err
+			}
+			inHistory, snapped = read, true
+		case !snapped:
 			if err := t.snapshot(p.ID, before); err != nil {
 				return false, err
 			}
 			snapped = true
-		}
-		if read := before.Encode(); read != inHistory && conflictSince(t.read[p.ID], before, x.Ops) {
-			if err := t.s.st.AddHistoryEncoded(p.ID, read, "conflict", "", "Before "+t.s.agent); err != nil {
-				return false, err
-			}
-			inHistory = read
 		}
 		beforeSave(p.ID)
 		saved = content

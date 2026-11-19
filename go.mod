@@ -13,7 +13,7 @@ require (
 	github.com/caelyreth/untie v0.5.0
 	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.9.0
+	github.com/egoist/mygo v0.10.0
 	github.com/go-text/typesetting v0.3.5
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2

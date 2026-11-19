@@ -3733,6 +3733,52 @@ func (msgs Messages) DialogHistoryLines(count int) string {
 	return Catalog.Format(msgs.locale, "dialogHistoryLines", map[string]any{"count": count})
 }
 
+// DialogHistoryChangeOf says "{index} of {count}"
+// in the language the app shows.
+//
+// Page history: which change the caret is at, among the changes since the
+// version (2 of 5).
+func DialogHistoryChangeOf(index int, count int) string {
+	return In(i18n.Locale()).DialogHistoryChangeOf(index, count)
+}
+
+// DialogHistoryChangeOf says "{index} of {count}"
+// in the language of msgs.
+//
+// Page history: which change the caret is at, among the changes since the
+// version (2 of 5).
+func (msgs Messages) DialogHistoryChangeOf(index int, count int) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryChangeOf", map[string]any{"index": index, "count": count})
+}
+
+// DialogHistoryPreviousChange says "Previous change"
+// in the language the app shows.
+//
+// Page history: the button going to the change before.
+func DialogHistoryPreviousChange() string { return In(i18n.Locale()).DialogHistoryPreviousChange() }
+
+// DialogHistoryPreviousChange says "Previous change"
+// in the language of msgs.
+//
+// Page history: the button going to the change before.
+func (msgs Messages) DialogHistoryPreviousChange() string {
+	return Catalog.Format(msgs.locale, "dialogHistoryPreviousChange", nil)
+}
+
+// DialogHistoryNextChange says "Next change"
+// in the language the app shows.
+//
+// Page history: the button going to the change after.
+func DialogHistoryNextChange() string { return In(i18n.Locale()).DialogHistoryNextChange() }
+
+// DialogHistoryNextChange says "Next change"
+// in the language of msgs.
+//
+// Page history: the button going to the change after.
+func (msgs Messages) DialogHistoryNextChange() string {
+	return Catalog.Format(msgs.locale, "dialogHistoryNextChange", nil)
+}
+
 // DialogHistoryRestore says "Restore this version"
 // in the language the app shows.
 //

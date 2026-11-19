@@ -589,6 +589,8 @@ func (a *App) leave(clear func() error, synced bool) {
 				a.account.unsynced = unsynced
 				return
 			}
+			// The pictures of the account's pages go with them.
+			a.images.clear()
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}
@@ -1243,8 +1245,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		})
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
-				a.images.close()
-				a.images = newImageCache(a.images.root)
+				a.images.clear()
 				c.Toast(locales.SettingsImageCacheCleared())
 			}
 		})

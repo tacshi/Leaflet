@@ -191,3 +191,37 @@ func TestFetchEndsWithItsContext(t *testing.T) {
 		t.Errorf("the fetch went on %v after it was given up on", took)
 	}
 }
+
+// A client of Transport, as netimage's pictures are downloaded by, reaches
+// no service on this machine, not even by a redirect.
+func TestTransportOnlyThePublicWeb(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("secret"))
+	}))
+	defer srv.Close()
+	client := &http.Client{Transport: Transport()}
+	if _, err := client.Get(srv.URL); !errors.Is(err, ErrNotPublic) {
+		t.Errorf("reached a service on this machine: %v", err)
+	}
+	if _, err := client.Get("file:///etc/hosts"); err == nil {
+		t.Error("read a file")
+	}
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, srv.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+	// The first hop is let through, as a public one would be.
+	client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == redirect.Listener.Addr().String() {
+			return http.DefaultTransport.RoundTrip(r)
+		}
+		return Transport().RoundTrip(r)
+	})}
+	if _, err := client.Get(redirect.URL); !errors.Is(err, ErrNotPublic) {
+		t.Errorf("followed a redirect to this machine: %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

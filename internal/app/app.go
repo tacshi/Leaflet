@@ -286,12 +286,14 @@ func (a *App) launch() {
 	mygo.BindAs("Embeds", &embedScroll{a: a})
 	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
 	mygo.App.OnNotificationClick(a.notificationClicked)
+	a.keepDevState()
 	mygo.App.WhenReady(func() {
 		if err := a.start(); err != nil {
 			mygo.Dialog.Error(locales.AppStartFailed(), err.Error())
 			mygo.App.Quit()
 			return
 		}
+		a.restoreDevState(mygo.App.RestoredState())
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

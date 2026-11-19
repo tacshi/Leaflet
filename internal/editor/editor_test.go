@@ -30,7 +30,7 @@ type fakeHost struct {
 
 func (h *fakeHost) PageTitle(id string) string { return "Sub" }
 func (h *fakeHost) OpenPage(id string)         { h.opened = append(h.opened, id) }
-func (h *fakeHost) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
+func (h *fakeHost) Image(_ *ui.Context, n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	return nil, nil, h.imageFailed
 }
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}

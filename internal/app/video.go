@@ -13,6 +13,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/netimage"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
@@ -119,8 +120,8 @@ func (a *App) videoPlayer(c *ui.Context, n *doc.Node, v doc.Video, width float32
 		Background(ui.RGB(0, 0, 0)).Cursor(ui.CursorPointer).Label(locales.VideoPlay(title))
 	hovered := poster.Hovered()
 	poster.Children(func() {
-		if bmp := a.images.get(thumb, func() { a.update(func() {}) }); bmp != nil {
-			ui.Image(c, bmp).Absolute().Top(0).Left(0).Size(width, height).Fit(ui.Cover)
+		if _, failed := a.images.get(c, thumb, 0); thumb != "" && !failed {
+			netimage.Image(c, thumb, netimage.Options{Placeholder: ui.RGB(0, 0, 0)}).Absolute().Top(0).Left(0).Size(width, height)
 		}
 		if title != "" {
 			ui.Row(c).Absolute().Top(0).Left(0).Width(width).Padding(14, 16, 32).

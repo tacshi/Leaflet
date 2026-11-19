@@ -77,6 +77,21 @@ const fetchAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 
 var publicClient = &http.Client{Transport: publicTransport{}}
 
+// Transport reaches only public addresses on the web's ports, as Fetch does,
+// at every redirect of a client that uses it, and names Leaflet as Fetch does.
+func Transport() http.RoundTripper { return agentTransport{} }
+
+type agentTransport struct{}
+
+func (agentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Scheme != "http" && r.URL.Scheme != "https" {
+		return nil, errors.New("not a web link")
+	}
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", fetchAgent)
+	return publicTransport{}.RoundTrip(r)
+}
+
 var direct = &http.Transport{
 	DialContext:           publicDialer.DialContext,
 	ForceAttemptHTTP2:     true,

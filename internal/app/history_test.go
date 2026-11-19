@@ -186,3 +186,50 @@ func TestHistoryDayStaysInView(t *testing.T) {
 		t.Errorf("heading %v, then %v (shown %v)", before, after, ok)
 	}
 }
+
+func TestHistoryStepsThroughChanges(t *testing.T) {
+	a := templatesApp(t)
+	var blocks []*doc.Node
+	for i := range 120 {
+		n := &doc.Node{ID: "p" + strconv.Itoa(i), Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: "Line " + strconv.Itoa(i)}})
+		blocks = append(blocks, n)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks(blocks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openHistory(p.ID)
+	a.nameVersion("Before")
+	c := a.st.Content(p.ID)
+	c.Find("p3").SetDelta(doc.Delta{{Text: "Changed near the top"}})
+	c.Find("p118").SetDelta(doc.Delta{{Text: "Changed near the end"}})
+	if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	a.dialogs.historyView = 1
+	tt := ui.NewTester(func(c *ui.Context) { a.historyDialog(c) }, 1000, 700)
+	tt.Frame()
+	if n := len(a.dialogs.historyDiff.Hunks()); n != 2 {
+		t.Fatalf("%d changes", n)
+	}
+	if tt.HasText(locales.DialogHistoryChangeOf(1, 2)) {
+		t.Error("a change is counted before the caret reached one")
+	}
+	click := func(label string, want int) {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		tt.Frame()
+		if !tt.HasText(locales.DialogHistoryChangeOf(want, 2)) {
+			t.Errorf("after %s: %q", label, tt.Texts())
+		}
+	}
+	click(locales.DialogHistoryNextChange(), 1)
+	click(locales.DialogHistoryNextChange(), 2)
+	click(locales.DialogHistoryNextChange(), 2)
+	click(locales.DialogHistoryPreviousChange(), 1)
+}

@@ -17,9 +17,7 @@ const (
 func (a *App) view(c *ui.Context) {
 	defer func() {
 		if a.images != nil {
-			now := time.Now()
-			a.images.releasePlayers(now)
-			a.images.releasePictures(now)
+			a.images.release(time.Now())
 		}
 	}()
 	theme.Apply(c)

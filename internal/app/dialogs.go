@@ -630,6 +630,7 @@ func (a *App) historyDialog(c *ui.Context) {
 					ui.Spacer(c)
 					if d.historyView == 1 {
 						a.historyStats(c, h, content)
+						a.historySteps(c, h, content)
 						tools(c, func() {
 							side := ui.Toggle(c.Key("side-by-side"), &d.sideBySide, "").Label(locales.DialogHistorySideBySide()).Tooltip(locales.DialogHistorySideBySide())
 							side.Children(func() { ui.Icon(c, theme.Icon("columns-2")).FontSize(16) })
@@ -680,7 +681,9 @@ func (a *App) historyDiff(h store.HistoryEntry, content *doc.Content) *codeedito
 			Old:  codeeditor.NewBuffer(old),
 			New:  codeeditor.NewBuffer(cur),
 			Wrap: true, NoLineNumbers: true,
-			Font: ui.Font{Family: theme.PageFamily(old + cur), Size: 14},
+			// So stepping to the last change brings it to the middle too.
+			ScrollPastEnd: true,
+			Font:          ui.Font{Family: theme.PageFamily(old + cur), Size: 14},
 		}
 		d.historyDiffOf = h.ID
 	}
@@ -701,6 +704,41 @@ func (a *App) historyStats(c *ui.Context, h store.HistoryEntry, content *doc.Con
 		ui.Textf(c, "+%d", added).FontSize(12.5).FontWeight(600).TextColor(pal.OkText)
 		ui.Textf(c, "−%d", deleted).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText)
 		ui.Text(c, locales.DialogHistoryLines(added+deleted)).FontSize(12.5).TextColor(pal.TextMuted)
+	})
+}
+
+// historySteps goes from one change to the next, and says which one the
+// caret is at, as "2 of 5". The buttons give the keyboard back to the diff,
+// where ⌘F8 and ⇧⌘F8 step on.
+func (a *App) historySteps(c *ui.Context, h store.HistoryEntry, content *doc.Content) {
+	diff := a.historyDiff(h, content)
+	n := len(diff.Hunks())
+	if n == 0 {
+		return
+	}
+	pal := theme.Of(c)
+	ui.Box(c).Width(1).Height(16).Background(pal.Divider)
+	i, inside := diff.CurrentHunk()
+	if i >= 0 {
+		ui.Text(c, locales.DialogHistoryChangeOf(i+1, n)).FontSize(12.5).TextColor(pal.TextMuted).SingleLine()
+	}
+	step := func(to int) {
+		diff.GoToHunk(to)
+		diff.Focus()
+	}
+	tools(c, func() {
+		prev := i - 1
+		if !inside {
+			prev = i
+		}
+		up := iconButton(c, "previous-change", "chevron-up", locales.DialogHistoryPreviousChange()).KeepFocus().Disabled(prev < 0)
+		if up.Clicked() {
+			step(prev)
+		}
+		down := iconButton(c, "next-change", "chevron-down", locales.DialogHistoryNextChange()).KeepFocus().Disabled(i+1 >= n)
+		if down.Clicked() {
+			step(i + 1)
+		}
 	})
 }
 

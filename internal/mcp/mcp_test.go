@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 func newStore(t *testing.T) *store.Store {
@@ -748,6 +750,12 @@ func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
 		h, _ := st.History(p.ID)
 		if conflicts() != 1 || !strings.Contains(h[0].Content, "the user's fix") {
 			t.Errorf("%s: %d conflict snapshots, newest %q", op, conflicts(), h[0].Content)
+		}
+		if got := core.HistoryLabel(h[0]); got != locales.DialogHistoryConflict() {
+			t.Errorf("%s: the conflict shows as %q", op, got)
+		}
+		if n := len(slices.DeleteFunc(slices.Clone(h), func(e store.HistoryEntry) bool { return e.Content != h[0].Content })); n != 1 {
+			t.Errorf("%s: the version with the user's fix is kept %d times", op, n)
 		}
 	}
 }

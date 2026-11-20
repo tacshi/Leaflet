@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -801,6 +802,89 @@ func TestEditRunAgainOverTheSameChangeKeepsOneConflict(t *testing.T) {
 	}
 	if saves != 2 || conflicts != 1 {
 		t.Errorf("%d saves, %d conflict snapshots", saves, conflicts)
+	}
+}
+
+// TestChangeNotReadStaysAConflict has the user change b2 after the agent read
+// it, then the agent read or edit something else before it rewrites b2: only
+// reading b2 again makes its rewrite no conflict.
+func TestChangeNotReadStaysAConflict(t *testing.T) {
+	text := func(id, s string) map[string]any {
+		return map[string]any{"id": id, "block": map[string]any{"type": "paragraph", "text": s}}
+	}
+	type step struct {
+		tool string
+		args map[string]any
+	}
+	for _, c := range []struct {
+		name     string
+		between  []step
+		conflict bool
+	}{
+		{"an edit of another block", []step{{"replace_block", text("b1", "agent's b1")}}, true},
+		{"a part without it", []step{{"read_page", map[string]any{"offset": 0.0, "limit": 1.0}}}, true},
+		{"edits of other blocks", []step{
+			{"replace_block", text("b1", "agent's b1")},
+			{"insert_blocks", map[string]any{"position": "end", "blocks": []any{map[string]any{"type": "paragraph", "text": "new"}}}},
+		}, true},
+		{"a part with it", []step{{"read_page", map[string]any{"offset": 1.0, "limit": 1.0}}}, false},
+		{"the whole page", []step{{"read_page", map[string]any{}}}, false},
+	} {
+		st := newStore(t)
+		var blocks []*doc.Node
+		for _, id := range []string{"b1", "b2"} {
+			b := &doc.Node{ID: id, Type: "paragraph"}
+			b.SetDelta(doc.Delta{{Text: "draft " + id}})
+			blocks = append(blocks, b)
+		}
+		p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks(blocks)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := NewServer(st, "test")
+		call := func(name string, args map[string]any) {
+			args = maps.Clone(args)
+			args["page_id"] = p.ID
+			if out := s.pages.call(name, args); out["error"] != nil {
+				t.Fatalf("%s: %s: %v", c.name, name, out)
+			}
+		}
+		call("read_page", map[string]any{})
+		content := st.Content(p.ID)
+		content.Find("b2").SetDelta(doc.Delta{{Text: "the user's fix"}})
+		if _, _, err := st.SaveContent(p.ID, content); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range c.between {
+			call(s.tool, s.args)
+		}
+		call("replace_block", text("b2", "agent's b2"))
+		h, _ := st.History(p.ID)
+		if got := h[0].Reason == "conflict"; got != c.conflict || !strings.Contains(h[0].Content, "the user's fix") {
+			t.Errorf("after %s: newest history %q (%s), want conflict %v", c.name, h[0].Content, h[0].Reason, c.conflict)
+		}
+	}
+}
+
+func TestPartReturnsATablesCellsButNotNestedBlocks(t *testing.T) {
+	table, err := doc.TableNode([][]string{{"a", "b"}}, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &doc.Node{ID: "l1", Type: "bulleted_list", Children: []*doc.Node{{ID: "l2", Type: "bulleted_list"}}}
+	c := doc.FromBlocks([]*doc.Node{{ID: "p1", Type: "paragraph"}, table, item})
+	views := doc.BlockViews(c)
+	var part []map[string]any
+	for _, v := range views {
+		if v["id"] == "t1" || v["id"] == "l1" {
+			part = append(part, v)
+		}
+	}
+	got := returned(c, part)
+	want := map[string]bool{"t1": true, "l1": true}
+	doc.FromBlocks([]*doc.Node{table}).Walk(func(n, _ *doc.Node) { want[n.ID] = true })
+	if !maps.Equal(got, want) {
+		t.Errorf("returned %v, want %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
 }
 

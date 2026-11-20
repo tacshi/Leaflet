@@ -419,7 +419,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	delete(args, "offset")
 	delete(args, "limit")
 	var out map[string]any
-	var saved *doc.Content
+	var saved, unsaved *doc.Content
 	snapped, inHistory := false, ""
 	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
 		if !kept {
@@ -429,7 +429,8 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		tc.SiteInfo = true
 		if name == "read_page" {
 			out = tc.ReadPart(p.ID, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}, content, offset, limit)
-			t.keep(p.ID, content)
+			views, _ := out["blocks"].([]map[string]any)
+			t.keep(p.ID, seen(content, t.read[p.ID], returned(content, views)))
 			return false, nil
 		}
 		before := content.Copy()
@@ -453,7 +454,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 			snapped = true
 		}
 		beforeSave(p.ID)
-		saved = content
+		saved, unsaved = content, before
 		return true, nil
 	})
 	switch {
@@ -466,12 +467,72 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	}
 	if saved != nil {
 		t.edited[p.ID] = doc.NowMs()
-		t.keep(p.ID, saved.Copy())
+		t.keep(p.ID, seen(saved, t.read[p.ID], written(unsaved, saved)))
 		if err := st.SetValue(editedPrefix+p.ID, editMark(t.s.agent, saved)); err != nil {
 			log.Printf("mcp: %v", err)
 		}
 	}
 	return out, nil
+}
+
+// seen is the page now as the client has seen it: a block in fresh, or one it
+// had not seen, as it is now, and any other as it last saw it, so a change it
+// has not read since stays a change.
+func seen(now, last *doc.Content, fresh map[string]bool) *doc.Content {
+	c := now.Copy()
+	if last == nil {
+		return c
+	}
+	was := map[string]*doc.Node{}
+	last.Walk(func(n, _ *doc.Node) { was[n.ID] = n })
+	c.Walk(func(n, _ *doc.Node) {
+		if w := was[n.ID]; w != nil && !fresh[n.ID] {
+			own := (&doc.Node{Type: w.Type, Data: w.Data}).Clone()
+			n.Type, n.Data = own.Type, own.Data
+		}
+	})
+	return c
+}
+
+// returned is the blocks of c a read_page answer holds: those it lists, and
+// the rows and cells of a table it lists, which come with it.
+func returned(c *doc.Content, views []map[string]any) map[string]bool {
+	listed := map[string]bool{}
+	for _, v := range views {
+		if id, ok := v["id"].(string); ok {
+			listed[id] = true
+		}
+	}
+	out := map[string]bool{}
+	var visit func([]*doc.Node, bool)
+	visit = func(nodes []*doc.Node, in bool) {
+		for _, n := range nodes {
+			mine := in || listed[n.ID]
+			if mine {
+				out[n.ID] = true
+			}
+			visit(n.Children, mine && (in || n.Type == "table"))
+		}
+	}
+	visit(c.Children, false)
+	return out
+}
+
+// written is the blocks of after the client's edit made or changed.
+func written(before, after *doc.Content) map[string]bool {
+	own := func(n *doc.Node) string {
+		raw, _ := json.Marshal(&doc.Node{Type: n.Type, Data: n.Data})
+		return string(raw)
+	}
+	was := map[string]string{}
+	before.Walk(func(n, _ *doc.Node) { was[n.ID] = own(n) })
+	out := map[string]bool{}
+	after.Walk(func(n, _ *doc.Node) {
+		if w, ok := was[n.ID]; !ok || w != own(n) {
+			out[n.ID] = true
+		}
+	})
+	return out
 }
 
 func conflictSince(read, now *doc.Content, ops []doc.Op) bool {

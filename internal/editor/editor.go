@@ -70,6 +70,10 @@ type Editor struct {
 	Tinted   map[string]bool
 	OnChange func()
 	OnSelect func()
+	// ModClickLinks has a link open on a Cmd-click (Ctrl-click) only, a
+	// click placing the caret in it. Off, a click opens it. A page that
+	// can't be edited opens a link on a click either way.
+	ModClickLinks bool
 
 	anchor, focus Pos
 	affinity      ui.TextAffinity
@@ -101,6 +105,7 @@ type Editor struct {
 	focused bool
 
 	dragging   bool
+	pressed    string
 	desiredX   float32
 	hasDesired bool
 	reveal     string

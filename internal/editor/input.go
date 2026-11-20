@@ -694,25 +694,16 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 				return false
 			}
 		}
-		if ev.Clicks == 1 && (ev.Mods == 0 || ev.Mods == ui.Cmd) {
-			link := e.linkUnder(p.ID, wx, wy)
-			if id, ok := doc.PageLinkID(link); ok {
-				if block := doc.LinkBlock(link); block != "" {
-					at, moment := doc.LinkMoment(link)
-					if !moment {
-						at = -1
-					}
-					e.Host.OpenBlock(id, block, at)
-				} else {
-					e.Host.OpenPage(id)
+		e.pressed = ""
+		if ev.Clicks == 1 {
+			if link := e.linkUnder(p.ID, wx, wy); followable(link) {
+				if ev.Mods&ui.Cmd != 0 {
+					e.follow(link)
+					return true
 				}
-				return true
-			}
-		}
-		if ev.Mods&ui.Cmd != 0 {
-			if url := doc.SafeHref(e.linkUnder(p.ID, wx, wy)); url != "" {
-				e.services.OpenURL(url)
-				return true
+				if ev.Mods == 0 && (!e.ModClickLinks || e.ReadOnly) {
+					e.pressed = link
+				}
 			}
 		}
 		switch {
@@ -740,11 +731,19 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 			return false
 		}
 		if p, side, ok := e.hit(ev.X+e.root.X, ev.Y+e.root.Y); ok && (p != e.focus || side != e.affinity) {
+			e.pressed = ""
 			e.Select(e.anchor, p)
 			e.affinity = side
 		}
 		return true
 	case ui.InputPointerUp:
+		if link := e.pressed; link != "" {
+			e.pressed, e.dragging = "", false
+			if !ev.Canceled {
+				e.follow(link)
+			}
+			return true
+		}
 		if e.dragging {
 			e.dragging = false
 			return true
@@ -756,6 +755,31 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		return e.key(ev)
 	}
 	return false
+}
+
+// followable says whether a click can follow link: a link to a page or
+// to a block of one, or a web or mail address.
+func followable(link string) bool {
+	_, page := doc.PageLinkID(link)
+	return page || doc.SafeHref(link) != ""
+}
+
+func (e *Editor) follow(link string) {
+	if id, ok := doc.PageLinkID(link); ok {
+		if block := doc.LinkBlock(link); block != "" {
+			at, moment := doc.LinkMoment(link)
+			if !moment {
+				at = -1
+			}
+			e.Host.OpenBlock(id, block, at)
+		} else {
+			e.Host.OpenPage(id)
+		}
+		return
+	}
+	if url := doc.SafeHref(link); url != "" {
+		e.services.OpenURL(url)
+	}
 }
 
 func (e *Editor) linkUnder(id string, wx, wy float32) string {

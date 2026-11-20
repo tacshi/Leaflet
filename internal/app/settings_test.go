@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -896,5 +897,29 @@ func TestAnEndedProviderFormListsNoModels(t *testing.T) {
 		if pending == nil || pending.Stop() {
 			t.Errorf("%s: the models were still to be listed", name)
 		}
+	}
+}
+
+func TestOpenLinksWithAModifierClick(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.Theme = "system"
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(640).Children(func() { a.appearanceSettings(c) })
+	}, 700, 700)
+	key := "Ctrl"
+	if runtime.GOOS == "darwin" {
+		key = "⌘"
+	}
+	if err := tt.Click(locales.SettingsOpenLinksModClick(key)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.settings.ModClickLinks || !a.st.Settings().ModClickLinks {
+		t.Fatal("the choice was not kept")
+	}
+	if err := tt.Click(locales.SettingsOpenLinksClick()); err != nil {
+		t.Fatal(err)
+	}
+	if a.settings.ModClickLinks || a.st.Settings().ModClickLinks {
+		t.Error("a click opens no links again")
 	}
 }

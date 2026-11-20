@@ -12067,13 +12067,13 @@ func (msgs Messages) SettingsSectionOffline() string {
 	return Catalog.Format(msgs.locale, "settingsSectionOffline", nil)
 }
 
-// SettingsAppearanceDesc says "How Leaflet and your pages look."
+// SettingsAppearanceDesc says "How Leaflet and your pages look and behave."
 // in the language the app shows.
 //
 // Settings › Appearance: the description under the heading.
 func SettingsAppearanceDesc() string { return In(i18n.Locale()).SettingsAppearanceDesc() }
 
-// SettingsAppearanceDesc says "How Leaflet and your pages look."
+// SettingsAppearanceDesc says "How Leaflet and your pages look and behave."
 // in the language of msgs.
 //
 // Settings › Appearance: the description under the heading.
@@ -12249,6 +12249,54 @@ func SettingsTextSizeLarger() string { return In(i18n.Locale()).SettingsTextSize
 // Settings › Appearance › Page text size.
 func (msgs Messages) SettingsTextSizeLarger() string {
 	return Catalog.Format(msgs.locale, "settingsTextSizeLarger", nil)
+}
+
+// SettingsOpenLinks says "Open links with"
+// in the language the app shows.
+//
+// Settings › Appearance: the row choosing whether a click or a Cmd-click
+// (Ctrl-click) opens a link in a page.
+func SettingsOpenLinks() string { return In(i18n.Locale()).SettingsOpenLinks() }
+
+// SettingsOpenLinks says "Open links with"
+// in the language of msgs.
+//
+// Settings › Appearance: the row choosing whether a click or a Cmd-click
+// (Ctrl-click) opens a link in a page.
+func (msgs Messages) SettingsOpenLinks() string {
+	return Catalog.Format(msgs.locale, "settingsOpenLinks", nil)
+}
+
+// SettingsOpenLinksClick says "Click"
+// in the language the app shows.
+//
+// Settings › Appearance › Open links with: a plain click opens a link.
+func SettingsOpenLinksClick() string { return In(i18n.Locale()).SettingsOpenLinksClick() }
+
+// SettingsOpenLinksClick says "Click"
+// in the language of msgs.
+//
+// Settings › Appearance › Open links with: a plain click opens a link.
+func (msgs Messages) SettingsOpenLinksClick() string {
+	return Catalog.Format(msgs.locale, "settingsOpenLinksClick", nil)
+}
+
+// SettingsOpenLinksModClick says "{key}-click"
+// in the language the app shows.
+//
+// Settings › Appearance › Open links with: only a click holding the key
+// opens a link; a plain click places the caret in it.
+func SettingsOpenLinksModClick(key string) string {
+	return In(i18n.Locale()).SettingsOpenLinksModClick(key)
+}
+
+// SettingsOpenLinksModClick says "{key}-click"
+// in the language of msgs.
+//
+// Settings › Appearance › Open links with: only a click holding the key
+// opens a link; a plain click places the caret in it.
+func (msgs Messages) SettingsOpenLinksModClick(key string) string {
+	return Catalog.Format(msgs.locale, "settingsOpenLinksModClick", map[string]any{"key": key})
 }
 
 // SettingsFonts says "Fonts"

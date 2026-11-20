@@ -74,8 +74,14 @@ func toolList() []map[string]any {
 		props["page_id"] = pageID
 		required := append([]string{"page_id"}, params["required"].([]string)...)
 		desc := fn["description"].(string)
-		if name == "read_page" {
-			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads. A long page comes in parts: total_blocks says how many blocks it has, and next_offset, while there are more, is the offset to read on from; more_subpages and more_comments count the subpages and comment threads a very long list leaves out. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole."
+		switch name {
+		case "read_page":
+			desc = "Read a page: its tags, every block with its ID and version, subpage titles, and comment threads. A long page comes in parts: total_blocks says how many blocks it has, and next_offset, while there are more, is the offset to read on from; more_subpages and more_comments count the subpages and comment threads a very long list leaves out. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole. Give a block's version to replace_block or delete_blocks to leave the block as it is if someone changes it after you read it."
+		case "replace_block":
+			props["version"] = map[string]any{"type": "string", "description": "The block's version from read_page. If the block has changed since, the page is left as it is, and the answer shows what the block holds now, with its new version."}
+		case "delete_blocks":
+			props["versions"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
+				"description": "Each block's version from read_page, by its ID. If one has changed since, nothing is deleted, and the answer shows what it holds now, with its new version."}
 		}
 		add(name, desc, object(props, required...))
 	}
@@ -415,11 +421,15 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	delete(args, "page_id")
-	delete(args, "offset")
-	delete(args, "limit")
+	want, err := givenVersions(name, args)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range []string{"page_id", "offset", "limit", "version", "versions"} {
+		delete(args, k)
+	}
 	var out map[string]any
-	var saved, unsaved *doc.Content
+	var saved, unsaved, known *doc.Content
 	snapped, inHistory := false, ""
 	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
 		if !kept {
@@ -430,8 +440,25 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if name == "read_page" {
 			out = tc.ReadPart(p.ID, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}, content, offset, limit)
 			views, _ := out["blocks"].([]map[string]any)
+			now := blockVersions(content)
+			for _, v := range views {
+				id, _ := v["id"].(string)
+				v["version"] = now[id]
+			}
 			t.keep(p.ID, seen(content, t.read[p.ID], returned(content, views)))
 			return false, nil
+		}
+		// A version that still matches shows the client has seen that block as
+		// it is now; one that does not leaves the page as it is.
+		known = t.read[p.ID]
+		if len(want) > 0 {
+			now := blockVersions(content)
+			for _, id := range slices.Sorted(maps.Keys(want)) {
+				if cur, ok := now[id]; ok && cur != want[id] {
+					return false, changedSinceRead(tc, p.ID, content, id, cur)
+				}
+			}
+			known = seen(content, known, want.ids())
 		}
 		before := content.Copy()
 		x := &agents.Executor{Ctx: tc}
@@ -440,13 +467,18 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 			return false, nil
 		}
 		// A change the agent never read makes the version before its edit a conflict,
-		// kept once and shown as one, rather than a second copy beside its snapshot.
+		// kept once and shown as one, rather than a second copy beside its snapshot,
+		// and the agent is told, to tell the user or work the change back in.
+		changed := conflictSince(known, before, x.Ops)
 		switch read := before.Encode(); {
-		case read != inHistory && conflictSince(t.read[p.ID], before, x.Ops):
-			if err := t.s.st.AddHistoryEncoded(p.ID, read, "conflict", "", ""); err != nil {
-				return false, err
+		case len(changed) > 0:
+			if read != inHistory {
+				if err := t.s.st.AddHistoryEncoded(p.ID, read, "conflict", "", ""); err != nil {
+					return false, err
+				}
 			}
 			inHistory, snapped = read, true
+			out["conflict"] = conflictNote(changed)
 		case !snapped:
 			if err := t.snapshot(p.ID, before); err != nil {
 				return false, err
@@ -467,7 +499,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	}
 	if saved != nil {
 		t.edited[p.ID] = doc.NowMs()
-		t.keep(p.ID, seen(saved, t.read[p.ID], written(unsaved, saved)))
+		t.keep(p.ID, seen(saved, known, written(unsaved, saved)))
 		if err := st.SetValue(editedPrefix+p.ID, editMark(t.s.agent, saved)); err != nil {
 			log.Printf("mcp: %v", err)
 		}
@@ -535,32 +567,124 @@ func written(before, after *doc.Content) map[string]bool {
 	return out
 }
 
-func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
+// conflictSince is the blocks ops replace or delete that someone changed after
+// the client read them, in the order of the ops.
+func conflictSince(read, now *doc.Content, ops []doc.Op) []string {
 	if read == nil {
-		return false
+		return nil
 	}
-	changed := func(id string) bool {
+	var out []string
+	check := func(id string) {
 		was, is := read.Find(id), now.Find(id)
-		if was == nil || is == nil {
-			return false
+		if was == nil || is == nil || slices.Contains(out, id) {
+			return
 		}
 		a, _ := json.Marshal(was)
 		b, _ := json.Marshal(is)
-		return string(a) != string(b)
+		if string(a) != string(b) {
+			out = append(out, id)
+		}
 	}
 	for _, op := range ops {
 		switch op.Op {
 		case "replace":
-			if changed(op.ID) {
-				return true
-			}
+			check(op.ID)
 		case "delete":
-			if slices.ContainsFunc(op.IDs, changed) {
-				return true
+			for _, id := range op.IDs {
+				check(id)
 			}
 		}
 	}
-	return false
+	return out
+}
+
+func conflictNote(ids []string) string {
+	blocks := "Block " + ids[0] + " had"
+	if len(ids) > 1 {
+		blocks = "Blocks " + strings.Join(ids, ", ") + " had"
+	}
+	return blocks + " changed since you read the page, and this edit replaced that change. The page as it was before the edit is kept in its history, as a conflict. Read the page to see what changed, then tell the user or work the change back in."
+}
+
+// versionSet is the versions a call gives, by block ID: those it read the
+// blocks at.
+type versionSet map[string]string
+
+func (v versionSet) ids() map[string]bool {
+	out := map[string]bool{}
+	for id := range v {
+		out[id] = true
+	}
+	return out
+}
+
+func givenVersions(name string, args map[string]any) (versionSet, error) {
+	switch name {
+	case "replace_block":
+		raw, ok := args["version"]
+		if !ok || raw == nil {
+			return nil, nil
+		}
+		v, _ := raw.(string)
+		id, _ := args["id"].(string)
+		if v == "" || id == "" {
+			return nil, toolErr("version must be the block's version from read_page.")
+		}
+		return versionSet{id: v}, nil
+	case "delete_blocks":
+		raw, ok := args["versions"]
+		if !ok || raw == nil {
+			return nil, nil
+		}
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, toolErr("versions must be an object: each block's version from read_page, by its ID.")
+		}
+		out := versionSet{}
+		for id, raw := range m {
+			v, _ := raw.(string)
+			if v == "" {
+				return nil, toolErr("versions must be an object: each block's version from read_page, by its ID.")
+			}
+			out[id] = v
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
+// blockVersions is each block's version, as read_page gives it: a hash of what
+// read_page shows of the block, without where it sits, so a move keeps it.
+func blockVersions(c *doc.Content) map[string]string {
+	out := map[string]string{}
+	for _, v := range doc.BlockViews(c) {
+		id, _ := v["id"].(string)
+		out[id] = versionOf(v)
+	}
+	return out
+}
+
+func versionOf(v map[string]any) string {
+	shown := maps.Clone(v)
+	for _, k := range []string{"id", "depth", "parent_id", "version"} {
+		delete(shown, k)
+	}
+	raw, _ := json.Marshal(shown)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:5])
+}
+
+func changedSinceRead(tc agents.ToolContext, pageID string, c *doc.Content, id, version string) error {
+	for _, v := range doc.BlockViews(c) {
+		if v["id"] != id {
+			continue
+		}
+		tc.Finish(pageID, v)
+		v["version"] = version
+		raw, _ := json.Marshal(v)
+		return toolErr("Block " + id + " has changed since you read it, so the page was left as it is. It now reads " + string(raw) + ". Work that in, and try again with its new version.")
+	}
+	return toolErr("Block " + id + " has changed since you read it, so the page was left as it is. Read the page again.")
 }
 
 var beforeSave = func(pageID string) {}

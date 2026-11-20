@@ -117,6 +117,15 @@ loop with the same tools, on the device (§4). Tool definitions live in
 `internal/agents/tools.go`.
 `leaflet mcp` (`internal/mcp`) offers the same page tools, each with a
 `page_id`, to agents outside the app.
+Its `read_page` gives each BlockView a `version`: a hash of what the view
+shows, apart from where the block sits, so a move keeps it. `replace_block`
+takes `version?` and `delete_blocks` `versions?: {id: version}`. A block
+whose version no longer matches leaves the page as it is, and the error gives
+the block's view now, with its new version. A matching version counts as
+having seen the block as it is. An edit that replaces or deletes a block
+someone changed since the client last saw it (the blocks a `read_page`
+returned, a table with its cells, and those it wrote) keeps the page before
+it in history as a `conflict`, and its result says so in `conflict`.
 
 ### BlockSpec (what a model writes)
 

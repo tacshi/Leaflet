@@ -1668,13 +1668,13 @@ func (msgs Messages) HostEmbedError(error string) string {
 // SettingsLanguage says "Language"
 // in the language the app shows.
 //
-// Settings › Appearance: the row choosing the app's language.
+// Settings › General: the row choosing the app's language.
 func SettingsLanguage() string { return In(i18n.Locale()).SettingsLanguage() }
 
 // SettingsLanguage says "Language"
 // in the language of msgs.
 //
-// Settings › Appearance: the row choosing the app's language.
+// Settings › General: the row choosing the app's language.
 func (msgs Messages) SettingsLanguage() string {
 	return Catalog.Format(msgs.locale, "settingsLanguage", nil)
 }
@@ -1682,13 +1682,13 @@ func (msgs Messages) SettingsLanguage() string {
 // SettingsLanguageSystem says "System"
 // in the language the app shows.
 //
-// Settings › Appearance › Language: follow the system's languages.
+// Settings › General › Language: follow the system's languages.
 func SettingsLanguageSystem() string { return In(i18n.Locale()).SettingsLanguageSystem() }
 
 // SettingsLanguageSystem says "System"
 // in the language of msgs.
 //
-// Settings › Appearance › Language: follow the system's languages.
+// Settings › General › Language: follow the system's languages.
 func (msgs Messages) SettingsLanguageSystem() string {
 	return Catalog.Format(msgs.locale, "settingsLanguageSystem", nil)
 }
@@ -11997,6 +11997,20 @@ func (msgs Messages) SettingsSectionAccount() string {
 	return Catalog.Format(msgs.locale, "settingsSectionAccount", nil)
 }
 
+// SettingsSectionGeneral says "General"
+// in the language the app shows.
+//
+// Settings: the section and heading of the language and how pages respond.
+func SettingsSectionGeneral() string { return In(i18n.Locale()).SettingsSectionGeneral() }
+
+// SettingsSectionGeneral says "General"
+// in the language of msgs.
+//
+// Settings: the section and heading of the language and how pages respond.
+func (msgs Messages) SettingsSectionGeneral() string {
+	return Catalog.Format(msgs.locale, "settingsSectionGeneral", nil)
+}
+
 // SettingsSectionAppearance says "Appearance"
 // in the language the app shows.
 //
@@ -12067,13 +12081,27 @@ func (msgs Messages) SettingsSectionOffline() string {
 	return Catalog.Format(msgs.locale, "settingsSectionOffline", nil)
 }
 
-// SettingsAppearanceDesc says "How Leaflet and your pages look and behave."
+// SettingsGeneralDesc says "Leaflet's language, and how your pages respond."
+// in the language the app shows.
+//
+// Settings › General: the description under the heading.
+func SettingsGeneralDesc() string { return In(i18n.Locale()).SettingsGeneralDesc() }
+
+// SettingsGeneralDesc says "Leaflet's language, and how your pages respond."
+// in the language of msgs.
+//
+// Settings › General: the description under the heading.
+func (msgs Messages) SettingsGeneralDesc() string {
+	return Catalog.Format(msgs.locale, "settingsGeneralDesc", nil)
+}
+
+// SettingsAppearanceDesc says "How Leaflet and your pages look."
 // in the language the app shows.
 //
 // Settings › Appearance: the description under the heading.
 func SettingsAppearanceDesc() string { return In(i18n.Locale()).SettingsAppearanceDesc() }
 
-// SettingsAppearanceDesc says "How Leaflet and your pages look and behave."
+// SettingsAppearanceDesc says "How Leaflet and your pages look."
 // in the language of msgs.
 //
 // Settings › Appearance: the description under the heading.
@@ -12254,14 +12282,14 @@ func (msgs Messages) SettingsTextSizeLarger() string {
 // SettingsOpenLinks says "Open links with"
 // in the language the app shows.
 //
-// Settings › Appearance: the row choosing whether a click or a Cmd-click
+// Settings › General: the row choosing whether a click or a Cmd-click
 // (Ctrl-click) opens a link in a page.
 func SettingsOpenLinks() string { return In(i18n.Locale()).SettingsOpenLinks() }
 
 // SettingsOpenLinks says "Open links with"
 // in the language of msgs.
 //
-// Settings › Appearance: the row choosing whether a click or a Cmd-click
+// Settings › General: the row choosing whether a click or a Cmd-click
 // (Ctrl-click) opens a link in a page.
 func (msgs Messages) SettingsOpenLinks() string {
 	return Catalog.Format(msgs.locale, "settingsOpenLinks", nil)
@@ -12270,13 +12298,13 @@ func (msgs Messages) SettingsOpenLinks() string {
 // SettingsOpenLinksClick says "Click"
 // in the language the app shows.
 //
-// Settings › Appearance › Open links with: a plain click opens a link.
+// Settings › General › Open links with: a plain click opens a link.
 func SettingsOpenLinksClick() string { return In(i18n.Locale()).SettingsOpenLinksClick() }
 
 // SettingsOpenLinksClick says "Click"
 // in the language of msgs.
 //
-// Settings › Appearance › Open links with: a plain click opens a link.
+// Settings › General › Open links with: a plain click opens a link.
 func (msgs Messages) SettingsOpenLinksClick() string {
 	return Catalog.Format(msgs.locale, "settingsOpenLinksClick", nil)
 }
@@ -12284,7 +12312,7 @@ func (msgs Messages) SettingsOpenLinksClick() string {
 // SettingsOpenLinksModClick says "{key}-click"
 // in the language the app shows.
 //
-// Settings › Appearance › Open links with: only a click holding the key
+// Settings › General › Open links with: only a click holding the key
 // opens a link; a plain click places the caret in it.
 func SettingsOpenLinksModClick(key string) string {
 	return In(i18n.Locale()).SettingsOpenLinksModClick(key)
@@ -12293,7 +12321,7 @@ func SettingsOpenLinksModClick(key string) string {
 // SettingsOpenLinksModClick says "{key}-click"
 // in the language of msgs.
 //
-// Settings › Appearance › Open links with: only a click holding the key
+// Settings › General › Open links with: only a click holding the key
 // opens a link; a plain click places the caret in it.
 func (msgs Messages) SettingsOpenLinksModClick(key string) string {
 	return Catalog.Format(msgs.locale, "settingsOpenLinksModClick", map[string]any{"key": key})

@@ -176,8 +176,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
 - To-do reminders, a menu bar icon, light and dark themes, and updates
   from GitHub Releases.
 - In English, Simplified Chinese and Japanese: Leaflet follows the
-  system's language, or the one chosen in Settings › Appearance, and its
-  welcome guide is written in the language of the first run.
+  system's language, or the one chosen in Settings › General (Settings ›
+  Appearance on iPhone and iPad), and its welcome guide is written in the
+  language of the first run.
 
 ## Requirements
 

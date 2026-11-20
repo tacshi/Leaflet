@@ -25,6 +25,7 @@ func (a *App) pageView(c *ui.Context) {
 	}
 	ps.editor.SetWidth(a.contentWidth(c))
 	ps.editor.Size = float32(a.settings.TextSize)
+	ps.editor.ModClickLinks = a.settings.ModClickLinks
 	a.titleBar(c, func() {
 		a.breadcrumbs(c, *p)
 		ui.Spacer(c)

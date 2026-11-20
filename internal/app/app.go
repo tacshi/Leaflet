@@ -983,6 +983,7 @@ func (a *App) loadPage(id string) {
 	ps := &pageState{id: id, title: p.Title, savedTitle: p.Title, live: lp, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
+	ed.ModClickLinks = a.settings.ModClickLinks
 	ed.Tinted = ps.tinted
 	ed.OnChange = func() {
 		a.scheduleSave()

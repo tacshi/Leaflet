@@ -1317,6 +1317,83 @@ func TestCmdClickOpensOnlyWebLinks(t *testing.T) {
 	}
 }
 
+func linkBlocks(e *Editor, tt *ui.Tester, hrefs ...string) []ui.Rect {
+	var blocks []*doc.Node
+	for _, href := range hrefs {
+		blocks = append(blocks, newText("paragraph", doc.Delta{{Text: "link link link", Attrs: doc.Attrs{Href: href}}}))
+	}
+	e.Edit(func(c *doc.Content) { c.Children = blocks })
+	tt.Frame()
+	var boxes []ui.Rect
+	for _, n := range blocks {
+		boxes = append(boxes, boxOf(e, n.ID))
+	}
+	return boxes
+}
+
+func TestClickOpensLinks(t *testing.T) {
+	e, tt, host := setup(t)
+	boxes := linkBlocks(e, tt, "https://x.dev", doc.PageLink("p1"), "file:///tmp/run.command")
+	for _, r := range boxes {
+		tt.ClickAt(r.X+10, r.Y+r.H/2)
+		tt.Frame()
+	}
+	if got := tt.OpenedURLs(); !slices.Equal(got, []string{"https://x.dev"}) {
+		t.Errorf("opened %q", got)
+	}
+	if !slices.Equal(host.opened, []string{"p1"}) {
+		t.Errorf("opened pages %q", host.opened)
+	}
+	if e.focus.ID != e.Content.Children[2].ID {
+		t.Errorf("a link that can't open took no caret: %v", e.focus)
+	}
+}
+
+func TestDragFromALinkSelects(t *testing.T) {
+	e, tt, _ := setup(t)
+	r := linkBlocks(e, tt, "https://x.dev")[0]
+	tt.Press(r.X+4, r.Y+r.H/2)
+	tt.Move(r.X+60, r.Y+r.H/2)
+	tt.Release(r.X+60, r.Y+r.H/2)
+	tt.Frame()
+	if got := tt.OpenedURLs(); len(got) > 0 {
+		t.Errorf("opened %q", got)
+	}
+	if e.anchor == e.focus {
+		t.Errorf("selected nothing: %v", e.focus)
+	}
+}
+
+func TestModClickLinks(t *testing.T) {
+	e, tt, host := setup(t)
+	e.ModClickLinks = true
+	boxes := linkBlocks(e, tt, "https://x.dev", doc.PageLink("p1"), "https://y.dev", doc.PageLink("p2"))
+	for _, r := range boxes[:2] {
+		tt.ClickAt(r.X+10, r.Y+r.H/2)
+		tt.Frame()
+	}
+	if got := tt.OpenedURLs(); len(got) > 0 || len(host.opened) > 0 {
+		t.Errorf("a click opened %q, pages %q", got, host.opened)
+	}
+	if e.focus.ID != e.Content.Children[1].ID {
+		t.Errorf("caret at %v", e.focus)
+	}
+	for _, r := range boxes[2:] {
+		tt.ClickAtWith(ui.Cmd, r.X+10, r.Y+r.H/2)
+		tt.Frame()
+	}
+	if got := tt.OpenedURLs(); !slices.Equal(got, []string{"https://y.dev"}) || !slices.Equal(host.opened, []string{"p2"}) {
+		t.Errorf("a Cmd-click opened %q, pages %q", got, host.opened)
+	}
+	e.ReadOnly = true
+	tt.Frame()
+	tt.ClickAt(boxes[0].X+10, boxes[0].Y+boxes[0].H/2)
+	tt.Frame()
+	if got := tt.OpenedURLs(); !slices.Equal(got, []string{"https://y.dev", "https://x.dev"}) {
+		t.Errorf("a click on a page that can't be edited opened %q", got)
+	}
+}
+
 func TestNoUndoStepsThatChangeNothing(t *testing.T) {
 	div := &doc.Node{ID: "D", Type: "divider"}
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div, para("B", "b")}), &fakeHost{})

@@ -48,6 +48,7 @@ type Settings struct {
 	Theme                   string      `json:"theme"`
 	Accent                  string      `json:"accent,omitempty"`
 	TextSize                float64     `json:"text_size"`
+	ModClickLinks           bool        `json:"mod_click_links,omitempty"`
 	Fonts                   Fonts       `json:"fonts"`
 	Language                string      `json:"language,omitempty"`
 	DefaultModel            string      `json:"default_model,omitempty"`

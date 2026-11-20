@@ -4308,7 +4308,7 @@
   "@settingsSectionOffline": {
     "description": "Settings: the section and heading of offline use and storage."
   },
-  "settingsAppearanceDesc": "How Leaflet and your pages look.",
+  "settingsAppearanceDesc": "How Leaflet and your pages look and behave.",
   "@settingsAppearanceDesc": {
     "description": "Settings › Appearance: the description under the heading."
   },
@@ -4365,6 +4365,24 @@
   "settingsTextSizeLarger": "Larger",
   "@settingsTextSizeLarger": {
     "description": "Settings › Appearance › Page text size."
+  },
+  "settingsOpenLinks": "Open links with",
+  "@settingsOpenLinks": {
+    "description": "Settings › Appearance: the row choosing whether a click or a Cmd-click (Ctrl-click) opens a link in a page."
+  },
+  "settingsOpenLinksClick": "Click",
+  "@settingsOpenLinksClick": {
+    "description": "Settings › Appearance › Open links with: a plain click opens a link."
+  },
+  "settingsOpenLinksModClick": "{key}-click",
+  "@settingsOpenLinksModClick": {
+    "description": "Settings › Appearance › Open links with: only a click holding the key opens a link; a plain click places the caret in it.",
+    "placeholders": {
+      "key": {
+        "type": "String",
+        "example": "⌘"
+      }
+    }
   },
   "settingsFonts": "Fonts",
   "@settingsFonts": {

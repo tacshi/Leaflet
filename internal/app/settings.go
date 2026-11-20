@@ -179,6 +179,20 @@ func (a *App) appearanceSettings(c *ui.Context) {
 				a.saveSettings()
 			}
 		})
+		settingRow(c, "links", locales.SettingsOpenLinks(), "", false, func() {
+			key := "Ctrl"
+			if runtime.GOOS == "darwin" {
+				key = "⌘"
+			}
+			how := 0
+			if a.settings.ModClickLinks {
+				how = 1
+			}
+			if ui.Segmented(c.Key("links"), &how, locales.SettingsOpenLinksClick(), locales.SettingsOpenLinksModClick(key)); (how == 1) != a.settings.ModClickLinks {
+				a.settings.ModClickLinks = how == 1
+				a.saveSettings()
+			}
+		})
 	})
 	label(c, locales.SettingsFonts())
 	card(c, "fonts", func() {

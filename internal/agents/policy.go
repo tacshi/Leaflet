@@ -66,22 +66,24 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	h.leases[pageID]++
 	gen := h.leases[pageID]
 	h.linksMu.Unlock()
-	ctx, cancel := context.WithCancel(context.Background())
+	// Stopping lets a lease on its way finish rather than cutting it off: the
+	// server may have taken it already, and only its answer says what to end.
+	stopped := make(chan struct{})
 	done := make(chan struct{})
 	var held string
 	go func() {
 		defer guard.Recover()
 		defer close(done)
 		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if until, err := h.be.RPC(ctx, "lease_public_link", map[string]any{"p_page_id": pageID}); err != nil {
-				if ctx.Err() == nil {
-					log.Printf("public link: %v", err)
-				}
+				log.Printf("public link: %v", err)
 			} else if s, ok := until.(string); ok {
 				held = s
 			}
+			cancel()
 			select {
-			case <-ctx.Done():
+			case <-stopped:
 				return
 			case <-time.After(publicLinkLease):
 			}
@@ -90,7 +92,7 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			cancel()
+			close(stopped)
 			go func() {
 				defer guard.Recover()
 				<-done

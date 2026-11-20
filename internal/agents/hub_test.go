@@ -1392,6 +1392,9 @@ type leaseServer struct {
 	live  bool
 	given int
 	calls []string
+	// hold, when set, keeps a lease's answer until it is closed, after the
+	// lease is counted.
+	hold chan struct{}
 }
 
 func (l *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1407,6 +1410,11 @@ func (l *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		l.given++
 		l.calls = append(l.calls, fmt.Sprintf("renew %v", args["p_page_id"]))
+		if hold := l.hold; hold != nil {
+			l.mu.Unlock()
+			<-hold
+			l.mu.Lock()
+		}
 		_, _ = fmt.Fprintf(w, `"2026-11-05T12:00:00.%06d+00:00"`, l.given)
 		return
 	}
@@ -1528,7 +1536,9 @@ func TestShowsToOthersWhenThePageIsUnread(t *testing.T) {
 
 func TestPublicLinkLeases(t *testing.T) {
 	st := openStore(t)
-	l := &leaseServer{}
+	// The link stops while its first lease is on its way back: the lease
+	// still ends, once it comes.
+	l := &leaseServer{hold: make(chan struct{})}
 	hs := httptest.NewServer(l)
 	defer hs.Close()
 	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
@@ -1536,6 +1546,7 @@ func TestPublicLinkLeases(t *testing.T) {
 	l.wait(t, 1)
 	stop()
 	stop()
+	close(l.hold)
 	if calls := l.wait(t, 2); !slices.Equal(calls, []string{"renew p1", "end p1 2026-11-05T12:00:00.000001+00:00"}) {
 		t.Errorf("calls %q", calls)
 	}

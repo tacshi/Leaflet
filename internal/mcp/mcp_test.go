@@ -842,12 +842,14 @@ func TestChangeNotReadStaysAConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := NewServer(st, "test")
-		call := func(name string, args map[string]any) {
+		call := func(name string, args map[string]any) map[string]any {
 			args = maps.Clone(args)
 			args["page_id"] = p.ID
-			if out := s.pages.call(name, args); out["error"] != nil {
+			out := s.pages.call(name, args)
+			if out["error"] != nil {
 				t.Fatalf("%s: %s: %v", c.name, name, out)
 			}
+			return out
 		}
 		call("read_page", map[string]any{})
 		content := st.Content(p.ID)
@@ -858,10 +860,13 @@ func TestChangeNotReadStaysAConflict(t *testing.T) {
 		for _, s := range c.between {
 			call(s.tool, s.args)
 		}
-		call("replace_block", text("b2", "agent's b2"))
+		out := call("replace_block", text("b2", "agent's b2"))
 		h, _ := st.History(p.ID)
 		if got := h[0].Reason == "conflict"; got != c.conflict || !strings.Contains(h[0].Content, "the user's fix") {
 			t.Errorf("after %s: newest history %q (%s), want conflict %v", c.name, h[0].Content, h[0].Reason, c.conflict)
+		}
+		if note, _ := out["conflict"].(string); (note != "") != c.conflict || c.conflict && !strings.Contains(note, "b2") {
+			t.Errorf("after %s: the answer's conflict note is %q", c.name, note)
 		}
 	}
 }
@@ -885,6 +890,142 @@ func TestPartReturnsATablesCellsButNotNestedBlocks(t *testing.T) {
 	doc.FromBlocks([]*doc.Node{table}).Walk(func(n, _ *doc.Node) { want[n.ID] = true })
 	if !maps.Equal(got, want) {
 		t.Errorf("returned %v, want %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+}
+
+// versionPage makes a page of paragraphs b1 and b2 and reads it over s,
+// returning each block's version.
+func versionPage(t *testing.T) (*store.Store, *Server, store.Page, map[string]string) {
+	t.Helper()
+	st := newStore(t)
+	var blocks []*doc.Node
+	for _, id := range []string{"b1", "b2"} {
+		b := &doc.Node{ID: id, Type: "paragraph"}
+		b.SetDelta(doc.Delta{{Text: "draft " + id}})
+		blocks = append(blocks, b)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks(blocks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	return st, s, p, readVersions(t, s, p.ID)
+}
+
+func readVersions(t *testing.T, s *Server, pageID string) map[string]string {
+	t.Helper()
+	out := s.pages.call("read_page", map[string]any{"page_id": pageID})
+	if out["error"] != nil {
+		t.Fatal(out)
+	}
+	got := map[string]string{}
+	for _, v := range out["blocks"].([]map[string]any) {
+		version, _ := v["version"].(string)
+		if len(version) != 10 {
+			t.Fatalf("block %v has version %q", v["id"], version)
+		}
+		got[v["id"].(string)] = version
+	}
+	return got
+}
+
+func userEdits(t *testing.T, st *store.Store, pageID, id, text string) {
+	t.Helper()
+	c := st.Content(pageID)
+	c.Find(id).SetDelta(doc.Delta{{Text: text}})
+	if _, _, err := st.SaveContent(pageID, c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVersionLeavesABlockChangedSinceRead(t *testing.T) {
+	st, s, p, read := versionPage(t)
+	userEdits(t, st, p.ID, "b2", "the user's fix")
+	history := func() int { h, _ := st.History(p.ID); return len(h) }
+	had := history()
+	replace := func(version string) map[string]any {
+		return s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b2", "version": version,
+			"block": map[string]any{"type": "paragraph", "text": "agent's b2"}})
+	}
+	out := replace(read["b2"])
+	msg, _ := out["error"].(string)
+	if !strings.Contains(msg, "has changed since you read it") || !strings.Contains(msg, "the user's fix") {
+		t.Fatalf("answer %v", out)
+	}
+	if got := st.Content(p.ID).Find("b2").Delta().Plain(); got != "the user's fix" || history() != had {
+		t.Fatalf("b2 %q, %d history entries, had %d", got, history(), had)
+	}
+	now := readVersions(t, s, p.ID)
+	if now["b2"] == read["b2"] || now["b1"] != read["b1"] || !strings.Contains(msg, now["b2"]) {
+		t.Fatalf("versions %v, then %v; answer %q", read, now, msg)
+	}
+	if out := replace(now["b2"]); out["error"] != nil || out["conflict"] != nil {
+		t.Fatalf("with the new version: %v", out)
+	}
+	if got := st.Content(p.ID).Find("b2").Delta().Plain(); got != "agent's b2" {
+		t.Errorf("b2 %q", got)
+	}
+}
+
+func TestVersionReadElsewhereIsNoConflict(t *testing.T) {
+	st, s, p, _ := versionPage(t)
+	userEdits(t, st, p.ID, "b2", "the user's fix")
+	other := readVersions(t, NewServer(st, "test"), p.ID)
+	out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b2", "version": other["b2"],
+		"block": map[string]any{"type": "paragraph", "text": "agent's b2"}})
+	if out["error"] != nil || out["conflict"] != nil {
+		t.Fatalf("answer %v", out)
+	}
+	if h, _ := st.History(p.ID); h[0].Reason == "conflict" {
+		t.Errorf("a conflict kept for a block read as it is")
+	}
+}
+
+func TestDeleteWithAChangedVersionDeletesNothing(t *testing.T) {
+	st, s, p, read := versionPage(t)
+	userEdits(t, st, p.ID, "b2", "the user's fix")
+	out := s.pages.call("delete_blocks", map[string]any{"page_id": p.ID, "ids": []any{"b1", "b2"},
+		"versions": map[string]any{"b1": read["b1"], "b2": read["b2"]}})
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "Block b2 has changed") {
+		t.Fatalf("answer %v", out)
+	}
+	c := st.Content(p.ID)
+	if c.Find("b1") == nil || c.Find("b2") == nil {
+		t.Errorf("blocks deleted: %s", c.PlainText())
+	}
+	for _, bad := range []any{"v", map[string]any{"b1": 1.0}} {
+		if out := s.pages.call("delete_blocks", map[string]any{"page_id": p.ID, "ids": []any{"b1"}, "versions": bad}); out["error"] == nil {
+			t.Errorf("versions %v taken: %v", bad, out)
+		}
+	}
+	if out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "version": 1.0,
+		"block": map[string]any{"type": "paragraph", "text": "x"}}); out["error"] == nil {
+		t.Errorf("a number taken as a version: %v", out)
+	}
+}
+
+func TestMovingABlockKeepsItsVersion(t *testing.T) {
+	st := newStore(t)
+	var items []*doc.Node
+	for _, id := range []string{"l1", "l2"} {
+		n := &doc.Node{ID: id, Type: "bulleted_list"}
+		n.SetDelta(doc.Delta{{Text: "item " + id}})
+		items = append(items, n)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks(items)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	read := readVersions(t, s, p.ID)
+	if out := s.pages.call("move_block", map[string]any{"page_id": p.ID, "id": "l2", "position": map[string]any{"parent": "l1"}}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if st.Content(p.ID).Find("l1").Children == nil {
+		t.Fatal("l2 was not moved into l1")
+	}
+	if now := readVersions(t, s, p.ID); !maps.Equal(now, read) {
+		t.Errorf("versions %v, after the move %v", read, now)
 	}
 }
 

@@ -327,6 +327,35 @@ func TestSettingsSections(t *testing.T) {
 	if a.settingsSection != "offline" {
 		t.Errorf("section %q", a.settingsSection)
 	}
+	if err := tt.Click("General"); err != nil {
+		t.Fatal(err)
+	}
+	if a.settingsSection != "general" {
+		t.Errorf("section %q", a.settingsSection)
+	}
+}
+
+func TestGeneralSettingsHoldLanguageAndLinks(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.Theme = "system"
+	a.settingsSection = "general"
+	tt := ui.NewTester(func(c *ui.Context) { a.settingsBody(c) }, 700, 600)
+	tt.Frame()
+	for _, s := range []string{locales.SettingsLanguage(), locales.SettingsOpenLinks()} {
+		if !tt.HasText(s) {
+			t.Errorf("General lacks %q", s)
+		}
+	}
+	a.settingsSection = "appearance"
+	tt.Frame()
+	for _, s := range []string{locales.SettingsLanguage(), locales.SettingsOpenLinks()} {
+		if tt.HasText(s) {
+			t.Errorf("Appearance still shows %q", s)
+		}
+	}
+	if !tt.HasText(locales.SettingsTheme()) {
+		t.Error("Appearance lacks the theme")
+	}
 }
 
 func TestSettingsModal(t *testing.T) {

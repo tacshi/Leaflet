@@ -27,6 +27,7 @@ import (
 func settingsSections() []struct{ id, icon, label string } {
 	return []struct{ id, icon, label string }{
 		{"account", "user", locales.SettingsSectionAccount()},
+		{"general", "settings", locales.SettingsSectionGeneral()},
 		{"appearance", "palette", locales.SettingsSectionAppearance()},
 		{"providers", "sparkles", locales.SettingsSectionProviders()},
 		{"external", "bot", locales.SettingsSectionExternal()},
@@ -78,6 +79,8 @@ func (a *App) settingsBody(c *ui.Context) {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(24, settingsPadX, 40).Children(func() {
 			ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
 				switch a.settingsSection {
+				case "general":
+					a.generalSettings(c)
 				case "appearance":
 					a.appearanceSettings(c)
 				case "providers":
@@ -138,19 +141,10 @@ type accountState struct {
 	unsynced      int
 }
 
-func (a *App) appearanceSettings(c *ui.Context) {
-	heading(c, locales.SettingsSectionAppearance(), locales.SettingsAppearanceDesc())
-	themeIdx := map[string]int{"system": 0, "light": 1, "sepia": 2, "dark": 3}[a.settings.Theme]
-	card(c, "appearance", func() {
-		settingRow(c, "theme", locales.SettingsTheme(), "", true, func() {
-			ui.Segmented(c.Key("theme"), &themeIdx, locales.SettingsSystem(), locales.SettingsThemeLight(), locales.SettingsThemeSepia(), locales.SettingsThemeDark())
-			if want := []string{"system", "light", "sepia", "dark"}[themeIdx]; want != a.settings.Theme {
-				a.settings.Theme = want
-				a.saveSettings()
-				a.applyTheme()
-			}
-		})
-		settingRow(c, "language", locales.SettingsLanguage(), "", false, func() {
+func (a *App) generalSettings(c *ui.Context) {
+	heading(c, locales.SettingsSectionGeneral(), locales.SettingsGeneralDesc())
+	card(c, "general", func() {
+		settingRow(c, "language", locales.SettingsLanguage(), "", true, func() {
 			tags := append([]string{""}, mygo.App.Languages()...)
 			lang := a.settings.Language
 			selectBox(c, "language", &lang, tags, func(tag string) string {
@@ -165,20 +159,6 @@ func (a *App) appearanceSettings(c *ui.Context) {
 				mygo.App.SetLocale(lang)
 			}
 		})
-		settingRow(c, "accent", locales.SettingsAccent(), "", false, func() { a.accentDots(c) })
-		settingRow(c, "size", locales.SettingsTextSize(), "", false, func() {
-			sizes := []float64{15, 17, 19, 21}
-			chosen := 1
-			for k, v := range sizes {
-				if v == a.settings.TextSize {
-					chosen = k
-				}
-			}
-			if ui.Segmented(c.Key("size"), &chosen, locales.SettingsTextSizeSmall(), locales.SettingsTextSizeDefault(), locales.SettingsTextSizeLarge(), locales.SettingsTextSizeLarger()); sizes[chosen] != a.settings.TextSize {
-				a.settings.TextSize = sizes[chosen]
-				a.saveSettings()
-			}
-		})
 		settingRow(c, "links", locales.SettingsOpenLinks(), "", false, func() {
 			key := "Ctrl"
 			if runtime.GOOS == "darwin" {
@@ -190,6 +170,35 @@ func (a *App) appearanceSettings(c *ui.Context) {
 			}
 			if ui.Segmented(c.Key("links"), &how, locales.SettingsOpenLinksClick(), locales.SettingsOpenLinksModClick(key)); (how == 1) != a.settings.ModClickLinks {
 				a.settings.ModClickLinks = how == 1
+				a.saveSettings()
+			}
+		})
+	})
+}
+
+func (a *App) appearanceSettings(c *ui.Context) {
+	heading(c, locales.SettingsSectionAppearance(), locales.SettingsAppearanceDesc())
+	themeIdx := map[string]int{"system": 0, "light": 1, "sepia": 2, "dark": 3}[a.settings.Theme]
+	card(c, "appearance", func() {
+		settingRow(c, "theme", locales.SettingsTheme(), "", true, func() {
+			ui.Segmented(c.Key("theme"), &themeIdx, locales.SettingsSystem(), locales.SettingsThemeLight(), locales.SettingsThemeSepia(), locales.SettingsThemeDark())
+			if want := []string{"system", "light", "sepia", "dark"}[themeIdx]; want != a.settings.Theme {
+				a.settings.Theme = want
+				a.saveSettings()
+				a.applyTheme()
+			}
+		})
+		settingRow(c, "accent", locales.SettingsAccent(), "", false, func() { a.accentDots(c) })
+		settingRow(c, "size", locales.SettingsTextSize(), "", false, func() {
+			sizes := []float64{15, 17, 19, 21}
+			chosen := 1
+			for k, v := range sizes {
+				if v == a.settings.TextSize {
+					chosen = k
+				}
+			}
+			if ui.Segmented(c.Key("size"), &chosen, locales.SettingsTextSizeSmall(), locales.SettingsTextSizeDefault(), locales.SettingsTextSizeLarge(), locales.SettingsTextSizeLarger()); sizes[chosen] != a.settings.TextSize {
+				a.settings.TextSize = sizes[chosen]
 				a.saveSettings()
 			}
 		})

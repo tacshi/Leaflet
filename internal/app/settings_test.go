@@ -904,7 +904,7 @@ func TestOpenLinksWithAModifierClick(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.Theme = "system"
 	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(640).Children(func() { a.appearanceSettings(c) })
+		ui.Column(c).Width(640).Children(func() { a.generalSettings(c) })
 	}, 700, 700)
 	key := "Ctrl"
 	if runtime.GOOS == "darwin" {

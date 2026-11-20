@@ -588,11 +588,11 @@
   },
   "settingsLanguage": "Language",
   "@settingsLanguage": {
-    "description": "Settings › Appearance: the row choosing the app's language."
+    "description": "Settings › General: the row choosing the app's language."
   },
   "settingsLanguageSystem": "System",
   "@settingsLanguageSystem": {
-    "description": "Settings › Appearance › Language: follow the system's languages."
+    "description": "Settings › General › Language: follow the system's languages."
   },
   "commonCancel": "Cancel",
   "@commonCancel": {
@@ -4288,6 +4288,10 @@
   "@settingsSectionAccount": {
     "description": "Settings: the section and heading of the account."
   },
+  "settingsSectionGeneral": "General",
+  "@settingsSectionGeneral": {
+    "description": "Settings: the section and heading of the language and how pages respond."
+  },
   "settingsSectionAppearance": "Appearance",
   "@settingsSectionAppearance": {
     "description": "Settings: the section and heading of the appearance."
@@ -4308,7 +4312,11 @@
   "@settingsSectionOffline": {
     "description": "Settings: the section and heading of offline use and storage."
   },
-  "settingsAppearanceDesc": "How Leaflet and your pages look and behave.",
+  "settingsGeneralDesc": "Leaflet's language, and how your pages respond.",
+  "@settingsGeneralDesc": {
+    "description": "Settings › General: the description under the heading."
+  },
+  "settingsAppearanceDesc": "How Leaflet and your pages look.",
   "@settingsAppearanceDesc": {
     "description": "Settings › Appearance: the description under the heading."
   },
@@ -4368,15 +4376,15 @@
   },
   "settingsOpenLinks": "Open links with",
   "@settingsOpenLinks": {
-    "description": "Settings › Appearance: the row choosing whether a click or a Cmd-click (Ctrl-click) opens a link in a page."
+    "description": "Settings › General: the row choosing whether a click or a Cmd-click (Ctrl-click) opens a link in a page."
   },
   "settingsOpenLinksClick": "Click",
   "@settingsOpenLinksClick": {
-    "description": "Settings › Appearance › Open links with: a plain click opens a link."
+    "description": "Settings › General › Open links with: a plain click opens a link."
   },
   "settingsOpenLinksModClick": "{key}-click",
   "@settingsOpenLinksModClick": {
-    "description": "Settings › Appearance › Open links with: only a click holding the key opens a link; a plain click places the caret in it.",
+    "description": "Settings › General › Open links with: only a click holding the key opens a link; a plain click places the caret in it.",
     "placeholders": {
       "key": {
         "type": "String",

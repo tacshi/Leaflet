@@ -102,6 +102,19 @@ func TestHandshake(t *testing.T) {
 			t.Errorf("no tool %s", n)
 		}
 	}
+	createProps := names["create_page"]["inputSchema"].(map[string]any)["properties"].(map[string]any)
+	if desc, _ := names["create_page"]["description"].(string); !strings.Contains(desc, "at the top level unless") {
+		t.Errorf("create_page description %q", desc)
+	}
+	if desc, _ := createProps["parent_id"].(map[string]any)["description"].(string); !strings.Contains(desc, "not because it is open") {
+		t.Errorf("create_page parent_id description %q", desc)
+	}
+	if desc, _ := createProps["folder_id"].(map[string]any)["description"].(string); !strings.Contains(desc, "the user asks for it in") {
+		t.Errorf("create_page folder_id description %q", desc)
+	}
+	if inst, _ := init["instructions"].(string); !strings.Contains(inst, "at the top level unless") {
+		t.Errorf("instructions %q", inst)
+	}
 	required := names["insert_blocks"]["inputSchema"].(map[string]any)["required"].([]any)
 	if required[0] != "page_id" {
 		t.Errorf("insert_blocks requires %v", required)

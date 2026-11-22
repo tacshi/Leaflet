@@ -86,13 +86,13 @@ func toolList() []map[string]any {
 		add(name, desc, object(props, required...))
 	}
 	made := agents.Properties(defs["create_page"]["parameters"].(map[string]any))
-	add("create_page", "Create a page, optionally with content. With parent_id it goes inside that page, and a link to it is added at the end of the parent.",
+	add("create_page", "Create a page, optionally with content, at the top level unless the user asks for it in a folder or inside a page. With parent_id it goes inside that page, and a link to it is added at the end of the parent.",
 		object(map[string]any{
 			"title":     made["title"],
 			"markdown":  made["markdown"],
 			"blocks":    made["blocks"],
-			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside; none for the top level."},
-			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
+			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside, only when the user asks for a subpage or a page in or under that one, not because it is open; none for the top level."},
+			"folder_id": map[string]any{"type": "string", "description": "The folder the user asks for it in, from list_pages, at the top level; not with parent_id."},
 		}, "title"))
 	add("rename_page", "Change a page's title.", object(map[string]any{"page_id": pageID, "title": map[string]any{"type": "string"}}, "page_id", "title"))
 	add("set_page_tags", "Set a page's tags, replacing the ones it has: an empty list takes them all off. Tags are short words or phrases, without #; reuse the ones list_pages shows where they fit.",

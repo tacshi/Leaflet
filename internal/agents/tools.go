@@ -152,10 +152,12 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 }
 
 func pageSchema(place ...prop) ordered {
-	o := append(ordered{{"title", map[string]any{"type": "string"}}}, place...)
-	return append(o,
-		prop{"markdown", map[string]any{"type": "string", "description": "The page's content in Markdown, as write_markdown writes it: the way to write text. Not with blocks."}},
-		prop{"blocks", map[string]any{"type": "array", "items": blockSchema}})
+	o := ordered{
+		{"title", map[string]any{"type": "string"}},
+		{"markdown", map[string]any{"type": "string", "description": "The page's content in Markdown, the way to write text: a block a line, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers. Not with blocks."}},
+		{"blocks", map[string]any{"type": "array", "items": blockSchema}},
+	}
+	return append(o, place...)
 }
 
 func WebToolDefinitions(search bool) []map[string]any {

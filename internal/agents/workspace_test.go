@@ -423,7 +423,8 @@ func TestWorkspaceRun(t *testing.T) {
 
 func TestWorkspacePromptHasTheServersRules(t *testing.T) {
 	p := WorkspacePrompt("Claude", true, true, true, true)
-	for _, rule := range []string{"You do not change what a page says", "you leave as it is", "you cannot read either", "not a summary, unless", "Read the web first", "list_pages and search_pages"} {
+	for _, rule := range []string{"You do not change what a page says", "you leave as it is", "you cannot read either", "not a summary, unless", "Read the web first", "list_pages and search_pages",
+		"not where new pages go", "It goes at the top level of the user's pages", "does not put the new page inside it"} {
 		if !strings.Contains(p, rule) {
 			t.Errorf("no %q in the prompt", rule)
 		}
@@ -431,6 +432,24 @@ func TestWorkspacePromptHasTheServersRules(t *testing.T) {
 	if p := WorkspacePrompt("Claude", false, true, false, false); !strings.Contains(p, "does not let agents read their pages") || strings.Contains(p, "read_web_page") {
 		t.Errorf("reading and the web off:\n%s", p)
 	}
+}
+
+func TestWorkspaceNewPageGoesToTheTopLevelUnlessAsked(t *testing.T) {
+	for _, d := range WorkspaceToolDefinitions(true) {
+		f := d["function"].(map[string]any)
+		if f["name"] != "create_page" {
+			continue
+		}
+		parent, _ := Properties(f["parameters"].(map[string]any))["parent_id"].(map[string]any)
+		if desc, _ := f["description"].(string); !strings.Contains(desc, "where \"a new page\" goes") {
+			t.Errorf("create_page doesn't send a new page to the top level: %s", desc)
+		}
+		if desc, _ := parent["description"].(string); !strings.Contains(desc, "never because it is open") {
+			t.Errorf("parent_id lets the open page take a new page: %s", desc)
+		}
+		return
+	}
+	t.Fatal("no create_page")
 }
 
 func TestWorkspaceJobRequest(t *testing.T) {

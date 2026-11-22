@@ -59,9 +59,9 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 	}
 	return append(out,
 		tool("list_folders", "List the user's folders: their names and IDs, and the folder each is in.", map[string]any{}),
-		tool("create_page", "Create a page, optionally with content: at the top level of the user's pages, in one of their folders, or inside one of their pages, at whose end a link to it goes.",
-			pageSchema(prop{"parent_id", map[string]any{"type": "string", "description": "The page to put it inside; none for the top level."}},
-				prop{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."}}), "title"),
+		tool("create_page", "Create a page, optionally with content. With neither parent_id nor folder_id it goes at the top level of the user's pages, where \"a new page\" goes. Put it in a folder or inside a page only when the user asks for that.",
+			pageSchema(prop{"folder_id", map[string]any{"type": "string", "description": "The folder the user asks for it in, from list_folders, at the top level; not with parent_id."}},
+				prop{"parent_id", map[string]any{"type": "string", "description": "The page to put it inside, at whose end a link to it goes: only when the user asks for a subpage or a page in or under that one, never because it is open. None for the top level."}}), "title"),
 		tool("move_page", "Move a page, with its subpages: inside another page, at whose end a link to it goes; into a folder; or with neither to the top level outside folders.",
 			ordered{{"page_id", pageID}, {"parent_id", map[string]any{"type": "string", "description": "The page to put it inside."}},
 				{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."}}}, "page_id"),

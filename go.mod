@@ -10,7 +10,7 @@ tool (
 )
 
 require (
-	github.com/caelyreth/untie v0.5.0
+	github.com/caelyreth/untie v0.5.1
 	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.10.0

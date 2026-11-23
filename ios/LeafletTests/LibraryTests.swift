@@ -133,6 +133,35 @@ struct LibraryTests {
         #expect(!scene.canGoBack)
     }
 
+    @Test func aDaysToDosStayInTheHistory() {
+        let scene = SceneModel()
+        scene.open("a")
+        scene.open(SceneModel.dayPrefix + "2026-11-23")
+        #expect(scene.day == "2026-11-23")
+        #expect(scene.pageID == nil)
+        scene.open("b")
+        #expect(scene.day == nil)
+        #expect(scene.pageID == "b")
+        scene.goBack()
+        scene.keep(["b"])
+        #expect(scene.day == "2026-11-23")
+        #expect(scene.canGoForward)
+        #expect(!scene.canGoBack)
+    }
+
+    @Test func aDaysToDosGoUnderTheirPages() {
+        func todo(_ page: String, _ text: String) -> Todo {
+            Todo(
+                pageID: page, pageTitle: page.uppercased(), blockID: text, text: text, due: 0,
+                timed: false)
+        }
+        let pages = TodoDayScreen.byPage([
+            todo("list", "Listen"), todo("work", "Invoice"), todo("list", "Retell"),
+        ])
+        #expect(pages.map(\.title) == ["LIST", "WORK"])
+        #expect(pages.map { $0.todos.map(\.text) } == [["Listen", "Retell"], ["Invoice"]])
+    }
+
     @Test func jsonValuesRoundTrip() throws {
         let value = JSONValue.object([
             "n": .null, "b": .bool(true), "i": .int(42), "d": .double(1.5), "s": .string("é"),

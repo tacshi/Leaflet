@@ -92,7 +92,7 @@ final class WorkspaceAgentModel: AgentChat {
     }
 
     func send(_ text: String, client: CoreClient, scene: SceneModel) async {
-        await client.workspaceChat(text, openPageID: scene.selection ?? "")
+        await client.workspaceChat(text, openPageID: scene.pageID ?? "")
     }
 
     private func handle(_ event: CoreEvent) {

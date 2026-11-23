@@ -50,7 +50,9 @@ struct RootView: View {
                             min: 240, ideal: scene.sidebarToFold ?? 300,
                             max: scene.sidebarToFold ?? 420)
                 } detail: {
-                    if let selection = scene.selection {
+                    if let day = scene.day {
+                        TodoDayScreen(key: day).id(day)
+                    } else if let selection = scene.selection {
                         PageScreen(pageID: selection).id(selection)
                             .ignoresSafeArea(.keyboard, edges: .bottom)
                     } else {

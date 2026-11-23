@@ -72,6 +72,8 @@ type App struct {
 	todos         []store.PageTodo
 	todosStale    bool
 	todoState     ui.ListState
+	todoRow       int
+	todoIn        treeInput
 	folders       []store.Folder
 	files         []store.File
 	providers     []store.Provider
@@ -842,6 +844,8 @@ func (r Route) path() string {
 	switch r.Kind {
 	case "page":
 		return "/page/" + r.ID
+	case "day":
+		return "/day/" + r.ID
 	case "signin":
 		return "/" + r.Kind
 	}
@@ -851,8 +855,8 @@ func (r Route) path() string {
 func routeAt(path string) Route {
 	kind, rest, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
 	switch kind {
-	case "page":
-		return Route{Kind: "page", ID: rest}
+	case "page", "day":
+		return Route{Kind: kind, ID: rest}
 	case "signin":
 		return Route{Kind: kind}
 	}
@@ -863,6 +867,9 @@ func (a *App) routeTitle() string {
 	switch a.route.Kind {
 	case "page":
 		return a.pageTitleOf(a.route.ID)
+	case "day":
+		now := time.Now()
+		return todoDayTitle(todoDayAt(todoDays(a.todoList(), now), a.route.ID, now), now)
 	case "signin":
 		return locales.CommonSignIn()
 	}

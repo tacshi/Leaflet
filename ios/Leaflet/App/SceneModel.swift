@@ -3,6 +3,8 @@ import SwiftUI
 @MainActor
 @Observable
 final class SceneModel {
+    /// What the detail column shows: a page's ID, or `dayPrefix` and a day's key for that day's
+    /// to-dos.
     private(set) var selection: String?
     private var back: [String] = []
     private var forward: [String] = []
@@ -111,6 +113,19 @@ final class SceneModel {
         (target, targetAt) = (blockID, moment)
     }
 
+    /// The start of a selection that shows a day's to-dos, before the day's key: the day as
+    /// 2026-11-20, or "no-date".
+    static let dayPrefix = "day:"
+
+    /// The key of the day whose to-dos are shown, if a day's are.
+    var day: String? {
+        guard let selection, selection.hasPrefix(Self.dayPrefix) else { return nil }
+        return String(selection.dropFirst(Self.dayPrefix.count))
+    }
+
+    /// The ID of the page shown, if a page is.
+    var pageID: String? { day == nil ? selection : nil }
+
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 
@@ -146,14 +161,16 @@ final class SceneModel {
         speakerEdit = nil
     }
 
+    /// Forgets the pages no longer in ids, going back from one shown. A day's to-dos stay.
     func keep(_ ids: Set<String>) {
-        back.removeAll { !ids.contains($0) }
-        forward.removeAll { !ids.contains($0) }
-        if let id = selection, !ids.contains(id) { show(back.popLast()) }
+        let kept = { (id: String) in ids.contains(id) || id.hasPrefix(Self.dayPrefix) }
+        back.removeAll { !kept($0) }
+        forward.removeAll { !kept($0) }
+        if let id = selection, !kept(id) { show(back.popLast()) }
     }
 
     func showPanel(_ tab: InspectorTab) {
-        guard selection != nil else {
+        guard pageID != nil else {
             if tab == .agent, stacked {
                 workspaceShown.toggle()
             } else if tab == .agent {

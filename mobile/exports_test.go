@@ -256,12 +256,12 @@ func TestTodosComeADayAtATime(t *testing.T) {
 		for _, t := range g.Todos {
 			texts = append(texts, t.Text)
 		}
-		got = append(got, fmt.Sprintf("%s %s %v: %s", g.Key, g.Section, g.Folded, strings.Join(texts, ", ")))
+		got = append(got, fmt.Sprintf("%s %s: %s", g.Key, g.Section, strings.Join(texts, ", ")))
 	}
 	day := func(d int) string { return now.AddDate(0, 0, d).Format(time.DateOnly) }
 	want := []string{
-		day(-3) + " overdue true: late", day(0) + " today false: today",
-		day(2) + " upcoming false: soon, also soon", day(9) + " upcoming false: later",
+		day(-3) + " overdue: late", day(0) + " today: today",
+		day(2) + " upcoming: soon, also soon", day(9) + " upcoming: later",
 	}
 	if !slices.Equal(got, want) || groups[1].Title != "Today" || !groups[0].Todos[0].Overdue || groups[1].Todos[0].Overdue {
 		t.Fatalf("days %s", raw)
@@ -294,5 +294,73 @@ func TestInFolderKeepsToTheDataFolder(t *testing.T) {
 		if InFolder(root, path) {
 			t.Errorf("%s is taken for a file of the folder", path)
 		}
+	}
+}
+
+func TestCheckTodoChecksItOffInItsPage(t *testing.T) {
+	c, ev := open(t)
+	page := create(t, c, `{"title":"11/23 To-do list"}`)
+	todo := &doc.Node{ID: "listen", Type: "todo_list", Data: map[string]any{"checked": false}}
+	todo.SetDelta(doc.Delta{{Text: "Listen for an hour"}})
+	todo.SetDue(time.Now(), false)
+	note := &doc.Node{ID: "note", Type: "paragraph"}
+	note.SetDelta(doc.Delta{{Text: "Notes"}})
+	var err error
+	c.q.do(func() {
+		err = c.editContent(page.ID, func(content *doc.Content) bool {
+			content.Children = []*doc.Node{todo, note}
+			return true
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := func() int {
+		raw, err := c.Todos(time.Local.String(), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var groups []todoGroup
+		_ = json.Unmarshal([]byte(raw), &groups)
+		n := 0
+		for _, g := range groups {
+			n += len(g.Todos)
+		}
+		return n
+	}
+	if listed() != 1 {
+		t.Fatal("the to-do isn't listed")
+	}
+	if err := c.CheckTodo(page.ID, "listen", true); err != nil {
+		t.Fatal(err)
+	}
+	if listed() != 0 {
+		t.Error("the to-do is still listed once checked off")
+	}
+	if err := c.CheckTodo(page.ID, "note", true); err != nil {
+		t.Fatal(err)
+	}
+	if c.core.Store.Content(page.ID).Find("note").Data["checked"] != nil {
+		t.Error("a paragraph was checked")
+	}
+	if _, err := c.OpenPage(page.ID); err != nil {
+		t.Fatal(err)
+	}
+	for len(ev.updates) > 0 {
+		<-ev.updates
+	}
+	if err := c.CheckTodo(page.ID, "listen", false); err != nil {
+		t.Fatal(err)
+	}
+	if listed() != 1 {
+		t.Error("the to-do isn't listed again once unchecked")
+	}
+	select {
+	case u := <-ev.updates:
+		if u.pageID != page.ID || !strings.Contains(u.content, `"checked":false`) {
+			t.Errorf("the open page was shown %+v", u)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the page open in an editor wasn't shown the to-do unchecked")
 	}
 }

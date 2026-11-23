@@ -80,7 +80,10 @@ struct SidebarView: View {
             selection: Binding(
                 get: { scene.selection },
                 set: { id in
-                    if id == nil || app.library.page(id ?? "") != nil { scene.open(id) }
+                    guard let id else { return scene.open(nil) }
+                    if id.hasPrefix(SceneModel.dayPrefix) || app.library.page(id) != nil {
+                        scene.open(id)
+                    }
                 })
         ) {
             if !query.isEmpty {
@@ -293,89 +296,27 @@ struct SidebarView: View {
         .selectionDisabled()
     }
 
-    private func foldHeader(_ group: TodoGroup, open: Binding<Bool>) -> some View {
-        Button {
-            withAnimation(.snappy) { open.wrappedValue.toggle() }
-        } label: {
-            HStack {
-                Text(group.title)
-                Spacer()
-                Text(group.todos.count, format: .number)
-                    .monospacedDigit()
-                    .foregroundStyle(group.overdue ? Color.red : Color.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    /// Whether what key names shows what is in it: as it was last left, or else as open says. A
-    /// key folded is kept as itself, and one opened against its default as itself after a +.
-    private func expanded(_ key: String, open byDefault: Bool = true) -> Binding<Bool> {
+    private func expanded(_ key: String) -> Binding<Bool> {
         Binding(
-            get: {
-                let keys = collapsed.split(separator: "\n")
-                if keys.contains(Substring(key)) { return false }
-                return byDefault || keys.contains(Substring("+" + key))
-            },
+            get: { !collapsed.split(separator: "\n").contains(Substring(key)) },
             set: { open in
-                let activeTodoKeys: Set<String>? =
-                    key.hasPrefix("todo:")
-                    ? Set(app.todos.map { "todo:\($0.key)" })
-                    : nil
-                var keys = collapsed.split(separator: "\n").map(String.init).filter { entry in
-                    let base = entry.hasPrefix("+") ? String(entry.dropFirst()) : entry
-                    if base == key { return false }
-                    if let activeTodoKeys, base.hasPrefix("todo:") {
-                        return activeTodoKeys.contains(base)
-                    }
-                    return true
-                }
-                if !open && byDefault {
-                    keys.append(key)
-                } else if open && !byDefault {
-                    keys.append("+" + key)
-                }
+                var keys = collapsed.split(separator: "\n").map(String.init).filter { $0 != key }
+                if !open { keys.append(key) }
                 collapsed = keys.joined(separator: "\n")
             })
     }
 
+    /// The days with to-dos left on them, with how many: choosing one shows its to-dos.
     @ViewBuilder private var todosTab: some View {
         let groups = app.todos
         if groups.isEmpty {
             ContentUnavailableView(
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
-        if groups.count == 1, groups[0].section == "no_date" {
-            Section {
-                todoRows(groups[0])
-            }
-            .withoutTopLine()
-        } else {
-            ForEach(groups, id: \.key) { group in
-                let open = expanded("todo:\(group.key)", open: group.folded != true)
-                Section {
-                    if open.wrappedValue {
-                        todoRows(group)
-                    }
-                } header: {
-                    foldHeader(group, open: open)
-                }
-                .withoutTopLine()
-            }
+        Section {
+            ForEach(groups, id: \.key) { TodoDayRowView(group: $0) }
         }
-    }
-
-    private func todoRows(_ group: TodoGroup) -> some View {
-        ForEach(group.todos, id: \.self) { todo in
-            TodoRowView(todo: todo) {
-                scene.open(todo.pageID, at: todo.blockID)
-            }
-        }
+        .withoutTopLine()
     }
 
     private var searchResults: some View {
@@ -444,7 +385,7 @@ struct SidebarView: View {
         if scene.workspace.agents.running {
             scene.workspace.chatDraft = q
         } else {
-            Task { [scene] in await client.workspaceChat(q, openPageID: scene.selection ?? "") }
+            Task { [scene] in await client.workspaceChat(q, openPageID: scene.pageID ?? "") }
         }
     }
 
@@ -651,27 +592,22 @@ struct FolderRowView: View {
     }
 }
 
-/// A to-do under its day's header, with its page and its time of day if it has one.
-struct TodoRowView: View {
-    let todo: Todo
-    let open: () -> Void
+/// A day in the To-dos tab, with how many to-dos are left on it, in red for a day gone by.
+struct TodoDayRowView: View {
+    let group: TodoGroup
 
     var body: some View {
-        Button(action: open) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(todo.text.isEmpty ? L.todosUntitled : todo.text).lineLimit(2)
-                HStack(spacing: 6) {
-                    Text(todo.pageTitle.isEmpty ? L.commonUntitled : todo.pageTitle)
-                    if todo.timed, let due = todo.dueDate {
-                        Text(due, format: .dateTime.hour().minute())
-                            .foregroundStyle(todo.overdue == true ? Color.red : Color.secondary)
-                    }
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
+        HStack(spacing: 8) {
+            Label(group.title, systemImage: "calendar")
+            Spacer(minLength: 0)
+            Text(group.todos.count, format: .number)
+                .monospacedDigit()
+                .foregroundStyle(group.overdue ? Color.red : Color.secondary)
+                .accessibilityHidden(true)
         }
-        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(L.todosDayLeft(count: group.todos.count))
+        .tag(SceneModel.dayPrefix + group.key)
     }
 }
 

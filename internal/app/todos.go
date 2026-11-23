@@ -19,33 +19,35 @@ import (
 
 type todoDay = doc.TodoDay[store.PageTodo]
 
-// todoRow is a row of the To-dos tab: a day's header, or a to-do.
-type todoRow struct {
-	day  *todoDay
-	open bool
-	todo store.PageTodo
+// noDateKey is the key of the day of the to-dos with no date.
+const noDateKey = "no-date"
+
+// todoDays lists the to-dos of every page a day at a time.
+func todoDays(todos []store.PageTodo, now time.Time) []todoDay {
+	return doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
 }
 
-// todoRows lists the to-dos a day at a time, each day under its header with only its header
-// shown while it is folded; open tells whether a day shows its to-dos. To-dos all with no date
-// are listed with no header.
-func todoRows(todos []store.PageTodo, now time.Time, open func(todoDay) bool) []todoRow {
-	days := doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
-	var out []todoRow
-	for i := range days {
-		d := &days[i]
-		shown := true
-		if len(days) > 1 || d.Section != doc.TodoNoDate {
-			shown = open(*d)
-			out = append(out, todoRow{day: d, open: shown})
-		}
-		if shown {
-			for _, t := range d.Todos {
-				out = append(out, todoRow{todo: t})
-			}
+// todoDayAt is the day key names among days, or that day with no to-dos when none is left on
+// it, as when the last of them was just checked off.
+func todoDayAt(days []todoDay, key string, now time.Time) todoDay {
+	for _, d := range days {
+		if d.Key() == key {
+			return d
 		}
 	}
-	return out
+	day, err := time.ParseInLocation(time.DateOnly, key, time.Local)
+	if err != nil {
+		return todoDay{Section: doc.TodoNoDate}
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	section := doc.TodoUpcoming
+	switch day.Compare(today) {
+	case -1:
+		section = doc.TodoOverdue
+	case 0:
+		section = doc.TodoToday
+	}
+	return todoDay{Day: day, Section: section}
 }
 
 // todoDayTitle names a day of to-dos, as Today, Tomorrow or Nov 20.
@@ -56,33 +58,27 @@ func todoDayTitle(d todoDay, now time.Time) string {
 	return editor.DueLabel(d.Day, false, now)
 }
 
-// todoDayOpen tells whether a day shows its to-dos: as it was last left, or else open unless it
-// has gone by.
-func (a *App) todoDayOpen(d todoDay) bool {
-	if open, ok := a.settings.TodoDaysOpen[d.Key()]; ok {
-		return open
-	}
-	return !d.Folded()
+// pageTodos is a page's to-dos on a day.
+type pageTodos struct {
+	id, title string
+	todos     []store.PageTodo
 }
 
-// foldTodoDay opens or folds a day of to-dos and keeps that for the next launch, forgetting the
-// days no longer listed.
-func (a *App) foldTodoDay(key string, open bool) {
-	kept := map[string]bool{}
-	for _, d := range doc.TodoDays(a.todoList(), func(t store.PageTodo) doc.Todo { return t.Todo }, time.Now()) {
-		k := d.Key()
-		if k == key {
-			if open == d.Folded() {
-				kept[k] = open
-			}
-			continue
+// todosByPage puts a day's to-dos under their pages, each page where its first to-do is and its
+// to-dos in the day's order.
+func todosByPage(todos []store.PageTodo) []pageTodos {
+	var out []pageTodos
+	at := map[string]int{}
+	for _, t := range todos {
+		i, ok := at[t.PageID]
+		if !ok {
+			i = len(out)
+			at[t.PageID] = i
+			out = append(out, pageTodos{id: t.PageID, title: t.PageTitle})
 		}
-		if v, ok := a.settings.TodoDaysOpen[k]; ok {
-			kept[k] = v
-		}
+		out[i].todos = append(out[i].todos, t)
 	}
-	a.settings.TodoDaysOpen = kept
-	a.saveSettings()
+	return out
 }
 
 func (a *App) todoList() []store.PageTodo {
@@ -96,90 +92,163 @@ func (a *App) todoList() []store.PageTodo {
 	return a.todos
 }
 
+// openDay shows the to-dos due on the day key names, from every page.
+func (a *App) openDay(key string) {
+	a.closePreview()
+	if a.route.Kind == "day" && a.route.ID == key {
+		a.closeSettings()
+		return
+	}
+	a.navigate(Route{Kind: "day", ID: key})
+}
+
+// todosList is the To-dos tab: the days with to-dos left on them, with how many, a click on one
+// showing its to-dos.
 func (a *App) todosList(c *ui.Context) {
 	pal := theme.Of(c)
 	now := time.Now()
-	rows := todoRows(a.todoList(), now, a.todoDayOpen)
-	if len(rows) == 0 {
+	days := todoDays(a.todoList(), now)
+	if len(days) == 0 {
 		ui.Column(c).Grow(1).Padding(2, 18).Gap(4).Children(func() {
 			ui.Text(c, locales.TodosEmptyTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text)
 			ui.Text(c, locales.TodosEmptyBody()).FontSize(13).TextColor(pal.TextMuted).Pretty()
 		})
 		return
 	}
-	opaque := opaqueSidebar(c, pal)
-	a.todoState.Header = nil
-	if opaque {
-		a.todoState.Header = func(i int) bool { return rows[i].day != nil }
-	}
-	a.todoState.Key = func(i int) any {
-		if d := rows[i].day; d != nil {
-			return "day:" + d.Key()
+	if a.todoIn.follows(a.route.Kind + ":" + a.route.ID) {
+		a.todoRow = -1
+		for i, d := range days {
+			if a.route.Kind == "day" && d.Key() == a.route.ID {
+				a.todoRow = i
+			}
 		}
-		return rows[i].todo.PageID + "#" + rows[i].todo.BlockID
 	}
-	ui.List(c, &a.todoState, len(rows), func(i int) {
-		r := rows[i]
-		if r.day != nil {
-			a.todoDayHeader(c, *r.day, r.open, opaque, now, pal)
-			return
-		}
-		a.todoRowView(c, r.todo, now, pal)
+	a.todoState.Selected = &a.todoRow
+	a.todoState.Key = func(i int) any { return days[i].Key() }
+	a.todoState.Label = func(i int) string { return todoDayTitle(days[i], now) }
+	list := ui.List(c, &a.todoState, len(days), func(i int) {
+		a.todoDayItem(c, days[i], i == a.todoRow, now, pal)
 	}).Grow(1).Padding(0, 8, 12)
+	a.todoIn.after(list)
+	if (list.Changed() || list.Submitted()) && a.todoRow >= 0 && a.todoRow < len(days) {
+		a.openDay(days[a.todoRow].Key())
+	}
 }
 
-// todoDayHeader is a day's header, with how many to-dos are left on it: clicking it opens or
-// folds the day.
-func (a *App) todoDayHeader(c *ui.Context, d todoDay, open, opaque bool, now time.Time, pal *theme.Palette) {
+// todoDayItem is a day in the To-dos tab, with how many to-dos are left on it, in red for a day
+// gone by.
+func (a *App) todoDayItem(c *ui.Context, d todoDay, chosen bool, now time.Time, pal *theme.Palette) {
 	title := todoDayTitle(d, now)
-	h := ui.ButtonBase(c.Key("day:"+d.Key())).Label(title).Expanded(open).Padding(6, 8, 4).Gap(6).Radius(6).
-		AlignItems(ui.Center).Justify(ui.Start).FillWidth()
-	switch {
-	case opaque && h.Hovered():
-		h.Background(pal.Sidebar.Mix(pal.Text, 0.05))
-	case h.Hovered():
-		h.Background(pal.Hover)
-	case opaque:
-		h.Background(pal.Sidebar)
-	}
-	h.Children(func() {
-		turn := float32(0)
-		if open {
-			turn = 90
-		}
-		ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.TextMuted).Rotate(turn).Shrink(0)
-		ui.Text(c, title).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).SingleLine().Grow(1).Shrink(1)
-		count := ui.Text(c, strconv.Itoa(len(d.Todos))).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted).Shrink(0)
-		if d.Section == doc.TodoOverdue {
+	ui.Row(c.Key("day:" + d.Key())).Grow(1).Height(26).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, theme.Icon("calendar")).FontSize(15)
+		ui.Text(c, title).FontSize(13.5).Grow(1).SingleLine().Tooltip(title)
+		count := ui.Text(c, strconv.Itoa(len(d.Todos))).FontSize(12).FontWeight(600).Shrink(0).
+			Label(locales.TodosDayLeft(len(d.Todos)))
+		switch {
+		case chosen:
+		case d.Section == doc.TodoOverdue:
 			count.TextColor(pal.DangerText)
+		default:
+			count.TextColor(pal.TextMuted)
 		}
 	})
-	key := d.Key()
-	h.OnClick(func() { a.foldTodoDay(key, !open) })
 }
 
-// todoRowView is a to-do under its day, with its time of day if it has one.
-func (a *App) todoRowView(c *ui.Context, t store.PageTodo, now time.Time, pal *theme.Palette) {
-	row := ui.ButtonBase(c.Key("todo:"+t.PageID+"#"+t.BlockID)).Padding(5, 8).Gap(8).Radius(6).AlignItems(ui.Start).Justify(ui.Start).FillWidth()
+// dayView is a day's to-dos, from every page, under their pages: a click on a page opens it, and
+// one on a to-do opens its page at it.
+func (a *App) dayView(c *ui.Context) {
+	pal := theme.Of(c)
+	now := time.Now()
+	key := a.route.ID
+	d := todoDayAt(todoDays(a.todoList(), now), key, now)
+	title := todoDayTitle(d, now)
+	a.titleBar(c, func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
+			ui.Icon(c, theme.Icon("calendar")).FontSize(14).TextColor(pal.TextMuted).Shrink(0)
+			ui.Text(c, title).FontSize(13).TextColor(pal.Text).SingleLine().Shrink(1)
+		})
+		ui.Spacer(c)
+		a.syncStatus(c)
+		if a.rec.Active() {
+			a.recordingPill(c)
+		}
+		tools(c, func() { a.panelToggle(c) })
+	})
+	size := float32(a.settings.TextSize)
+	ui.Scroll(c.Key("day-scroll:" + key)).Fill().Children(func() {
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(40, pagePadX, 160).Children(func() {
+			ui.Column(c).Width(a.contentWidth(c)).Children(func() {
+				ui.Text(c, title).Font(theme.PageFamily(title)).FontSize(size*2.15).FontWeight(700).TextColor(pal.Text).Margin(0, 0, 6)
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Margin(0, 0, 18).Children(func() {
+					if !d.Day.IsZero() {
+						ui.Text(c, locales.TodosDayDate(d.Day)).FontSize(13).TextColor(pal.TextMuted)
+					}
+					if len(d.Todos) > 0 {
+						left := ui.Text(c, locales.TodosDayLeft(len(d.Todos))).FontSize(13).TextColor(pal.TextMuted)
+						if d.Section == doc.TodoOverdue {
+							left.TextColor(pal.DangerText)
+						}
+					}
+				})
+				if len(d.Todos) == 0 {
+					ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(48, 0).Gap(10).Children(func() {
+						ui.Icon(c, theme.Icon("square-check")).FontSize(32).TextColor(pal.ChartMuted)
+						ui.Text(c, locales.TodosDayDoneTitle()).FontSize(16).FontWeight(650).TextColor(pal.Text)
+						ui.Text(c, locales.TodosDayDoneBody()).TextColor(pal.TextMuted).Balance()
+					})
+					return
+				}
+				for _, g := range todosByPage(d.Todos) {
+					a.dayPageHeader(c, g, size, pal)
+					for _, t := range g.todos {
+						a.dayTodoRow(c, t, size, now, pal)
+					}
+				}
+			})
+		})
+	})
+}
+
+// dayPageHeader names a page over its to-dos on a day: a click on it opens the page.
+func (a *App) dayPageHeader(c *ui.Context, g pageTodos, size float32, pal *theme.Palette) {
+	title := g.title
+	if strings.TrimSpace(title) == "" {
+		title = locales.CommonUntitled()
+	}
+	h := ui.ButtonBase(c.Key("day-page:"+g.id)).Label(title).Tooltip(title).Padding(4, 6).Margin(14, 0, 2).Gap(6).Radius(6).
+		AlignItems(ui.Center).Justify(ui.Start).TextColor(pal.TextMuted)
+	if h.Hovered() {
+		h.Background(pal.Hover).TextColor(pal.Text)
+	}
+	h.Children(func() {
+		ui.Icon(c, theme.Icon("file-text")).FontSize(14).Shrink(0)
+		ui.Text(c, title).FontSize(size * 0.8).FontWeight(650).SingleLine().Shrink(1)
+	})
+	id := g.id
+	h.OnClick(func() { a.openPage(id) })
+}
+
+// dayTodoRow is a to-do on its day's page of to-dos, with its owner and its time of day if it
+// has them.
+func (a *App) dayTodoRow(c *ui.Context, t store.PageTodo, size float32, now time.Time, pal *theme.Palette) {
+	row := ui.ButtonBase(c.Key("day-todo:"+t.PageID+"#"+t.BlockID)).Padding(6, 6).Gap(10).Radius(6).AlignItems(ui.Start).Justify(ui.Start).FillWidth()
 	if row.Hovered() {
 		row.Background(pal.Hover)
 	}
 	row.Children(func() {
 		done := false
-		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(1, 0, 0).Disabled(!a.canEdit(t.PageID)).Changed() {
+		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(size*0.15, 0, 0).Disabled(!a.canEdit(t.PageID)).Changed() {
 			a.finishTodo(t)
 		}
-		ui.Column(c).Grow(1).Shrink(1).Gap(1).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).Gap(2).Children(func() {
 			text := t.Text
 			if strings.TrimSpace(text) == "" {
 				text = locales.TodosUntitled()
 			}
-			ui.Text(c, text).FontSize(13.5).TextColor(pal.Text).SingleLine().Tooltip(text)
-			sub := t.PageTitle
+			ui.Text(c, text).FontSize(size).TextColor(pal.Text)
 			if t.Owner != "" {
-				sub = locales.TodosPageAndOwner(sub, t.Owner)
+				ui.Text(c, t.Owner).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 			}
-			ui.Text(c, sub).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 		})
 		if t.Timed && !t.Due.IsZero() {
 			due := ui.Badge(c, locales.TodosDueTime(t.Due)).FontSize(11).Shrink(0)

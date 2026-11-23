@@ -140,6 +140,13 @@ extension CoreClient {
         try await call { try $0.appendBlock(pageID, node: json) }
     }
 
+    /// Checks off a to-do in its page, or back on with checked false.
+    nonisolated(nonsending) func checkTodo(_ pageID: String, _ blockID: String, checked: Bool)
+        async throws
+    {
+        try await call { try $0.checkTodo(pageID, blockID: blockID, checked: checked) }
+    }
+
     nonisolated(nonsending) func picture(_ link: String) async throws -> Data {
         try await Downloads.pictures.run {
             try await self.cancellable { core, token in

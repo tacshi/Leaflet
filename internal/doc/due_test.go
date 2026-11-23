@@ -31,14 +31,14 @@ func TestTodoDays(t *testing.T) {
 		for _, t := range d.Todos {
 			ids = append(ids, t.BlockID)
 		}
-		got = append(got, fmt.Sprintf("%s %d %v %v", d.Key(), d.Section, d.Folded(), ids))
+		got = append(got, fmt.Sprintf("%s %d %v", d.Key(), d.Section, ids))
 	}
 	want := []string{
-		"2026-10-27 0 true [last week last week too]",
-		"2026-11-03 1 false [today this morning tonight]",
-		"2026-11-04 2 false [soon also soon]",
-		"2026-11-09 2 false [later]",
-		"no-date 3 false [owner b owner a]",
+		"2026-10-27 0 [last week last week too]",
+		"2026-11-03 1 [today this morning tonight]",
+		"2026-11-04 2 [soon also soon]",
+		"2026-11-09 2 [later]",
+		"no-date 3 [owner b owner a]",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("days\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

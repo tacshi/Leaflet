@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"leaflet/internal/agents"
@@ -139,8 +140,14 @@ func (t *pageTools) uploads(raw any) ([]upload, error) {
 		if err != nil {
 			return nil, err
 		}
-		if t.app && !mediaFile(path) {
-			return nil, toolErr(filepath.Base(path) + " is not a picture, an audio or video file, or a PDF, the files an agent adds. The user can add it themselves, in the app.")
+		if t.app {
+			real, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil, toolErr("Could not open " + path + ": " + err.Error())
+			}
+			if !mediaFile(path) || !mediaFile(real) {
+				return nil, toolErr(filepath.Base(path) + " is not a picture, an audio or video file, or a PDF, the files an agent adds. The user can add it themselves, in the app.")
+			}
 		}
 		u.path = path
 		out[i] = u
@@ -155,14 +162,14 @@ func localFile(path string) (string, error) {
 	if path == "" {
 		return "", toolErr("Each file needs its path.")
 	}
-	if strings.HasPrefix(path, "file://") {
-		u, err := url.Parse(path)
-		if err != nil || u.Host != "" && u.Host != "localhost" {
-			return "", toolErr(path + " is not a file on this computer.")
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		p, err := fileURLPath(path, runtime.GOOS == "windows")
+		if err != nil {
+			return "", err
 		}
-		path = u.Path
+		path = p
 	}
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	if rest, ok := cutHomePrefix(path, runtime.GOOS == "windows"); ok {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
@@ -185,6 +192,35 @@ func localFile(path string) (string, error) {
 		return "", toolErr(path + " is not a file.")
 	}
 	return path, nil
+}
+
+func fileURLPath(raw string, windows bool) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		return "", toolErr(raw + " is not a file on this computer.")
+	}
+	p := u.Path
+	if windows {
+		if len(p) >= 3 && p[0] == '/' && isDriveLetter(p[1]) && p[2] == ':' {
+			p = p[1:]
+		}
+		p = strings.ReplaceAll(p, "/", `\`)
+	}
+	return p, nil
+}
+
+func isDriveLetter(b byte) bool {
+	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+func cutHomePrefix(path string, windows bool) (string, bool) {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		return rest, true
+	}
+	if windows {
+		return strings.CutPrefix(path, `~\`)
+	}
+	return "", false
 }
 
 func mediaFile(path string) bool {

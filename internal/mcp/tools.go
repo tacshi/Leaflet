@@ -490,7 +490,7 @@ func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.
 		} else {
 			out = x.Call(name, args)
 		}
-		if len(x.Ops) == 0 {
+		if len(x.Ops) == 0 || out["error"] != nil {
 			return false, nil
 		}
 		// A change the agent never read makes the version before its edit a conflict,

@@ -231,4 +231,122 @@ func TestCornerWindowGoesWhereBlocksWereTakenOut(t *testing.T) {
 	if got := editSummary(w.act, "Plan"); got != locales.AgentEditDeleted(1) {
 		t.Errorf("it says %q", got)
 	}
+	if w.firstEdit() != "p2" {
+		t.Errorf("firstEdit %q, want p2", w.firstEdit())
+	}
+	a.openWatched()
+	if a.page == nil || a.page.id != p.ID || a.page.scrollTo != "p2" || w.shown {
+		t.Errorf("openWatched after delete: page %v, scrollTo %q, shown %v", a.page != nil && a.page.id == p.ID, a.page.scrollTo, w.shown)
+	}
+}
+
+func TestCornerWindowReopensCleanlyAfterHiding(t *testing.T) {
+	a, s, p := watchApp(t)
+	out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "a1\n\na2"})
+	if out["error"] != nil {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	a.watch.jump = false
+	a.watch.next = time.Now().Add(-time.Minute)
+	a.hideWatch()
+
+	out = s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "b1\n\nb2"})
+	added, _ := out["inserted_ids"].([]string)
+	if out["error"] != nil || len(added) != 2 {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	w := &a.watch
+	if !w.shown || !w.jump || !slices.Equal(w.pending, added) {
+		t.Fatalf("after reopen: shown %v, jump %v, pending %v, want %v", w.shown, w.jump, w.pending, added)
+	}
+	w.advance(w.next)
+	if !slices.Equal(w.pending, added[1:]) {
+		t.Errorf("first step after reopen left pending %v, want %v", w.pending, added[1:])
+	}
+}
+
+func TestOpeningWatchedPageInFrontHidesCornerWindow(t *testing.T) {
+	was := appInFront
+	appInFront = func(*App) bool { return true }
+	defer func() { appInFront = was }()
+
+	a, s, p := watchApp(t)
+	other, err := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(other.ID)
+
+	if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "more"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	if !a.watch.shown {
+		t.Fatal("corner window did not show for another page")
+	}
+	a.openPage(p.ID)
+	if a.watch.shown {
+		t.Error("corner window stayed visible after opening its page in front")
+	}
+}
+
+func TestResetWatchClearsState(t *testing.T) {
+	a, s, p := watchApp(t)
+	if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "more"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	a.hushWatch()
+	a.resetWatch()
+	w := &a.watch
+	if w.shown || w.ed != nil || w.target != nil || len(w.pending) != 0 || w.hushed || w.seen == nil || len(w.seen) != 0 {
+		t.Errorf("resetWatch left state: shown=%v ed=%v target=%v pending=%v hushed=%v seen=%v",
+			w.shown, w.ed != nil, w.target != nil, w.pending, w.hushed, w.seen)
+	}
+}
+
+func TestCornerWindowRevealsCollapsedBlocks(t *testing.T) {
+	a, s, _ := watchApp(t)
+	para := func(id, text string) *doc.Node {
+		n := &doc.Node{ID: id, Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	toggle := &doc.Node{ID: "toggle", Type: "toggle_list", Children: []*doc.Node{para("t1", "inside")}}
+	toggle.SetDelta(doc.FromMarkdown("Toggle"))
+	toggle.Set("collapsed", true)
+	head := &doc.Node{ID: "head", Type: "heading"}
+	head.SetDelta(doc.FromMarkdown("Section"))
+	head.Set("level", 1)
+	head.Set("collapsed", true)
+
+	p, err := a.st.CreatePage(store.NewPageOptions{
+		Title:   "Folded",
+		Content: doc.FromBlocks([]*doc.Node{toggle, head, para("h1", "under heading")}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+
+	if out := s.Call("replace_block", map[string]any{"page_id": p.ID, "id": "t1", "block": map[string]any{"type": "paragraph", "text": "inside, updated"}}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	a.watch.reveal(a.watch.follow)
+	if a.watch.ed.Content.Find("toggle").Bool("collapsed") {
+		t.Error("collapsed toggle ancestor stayed collapsed")
+	}
+
+	if out := s.Call("replace_block", map[string]any{"page_id": p.ID, "id": "h1", "block": map[string]any{"type": "paragraph", "text": "under heading, updated"}}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	a.agentsEdited()
+	a.watch.reveal(a.watch.follow)
+	if a.watch.ed.Content.Find("head").Bool("collapsed") {
+		t.Error("collapsed heading stayed collapsed")
+	}
 }

@@ -178,7 +178,7 @@ func (a *App) lightBlocks(ids []string) {
 // take shows the page as act left it: what it changed lit, and what it added
 // to come in one by one, after those of an edit before still to come.
 func (w *agentWatch) take(act mcp.Activity, c *doc.Content, now time.Time, host editor.Host) {
-	same := w.ed != nil && w.act.PageID == act.PageID
+	same := w.shown && w.ed != nil && w.act.PageID == act.PageID
 	wait := map[string]bool{}
 	if same {
 		for _, id := range w.pending {
@@ -206,7 +206,7 @@ func (w *agentWatch) take(act mcp.Activity, c *doc.Content, now time.Time, host 
 	for _, id := range act.Changed {
 		w.tinted[id], w.lit[id] = true, time.Time{}
 	}
-	if len(w.pending) == 0 || !same {
+	if len(w.pending) == 0 || !same || w.next.Before(now) {
 		w.next = now
 	}
 	if n := len(pending); n > 0 {
@@ -274,7 +274,8 @@ func (w *agentWatch) left() time.Duration {
 	return time.Duration(len(w.pending)) * w.step
 }
 
-// firstEdit is the first block of the page the last edit added or changed.
+// firstEdit is the first block of the page the last edit added or changed,
+// or where it took blocks out.
 func (w *agentWatch) firstEdit() string {
 	edited := map[string]bool{}
 	for _, id := range slices.Concat(w.act.Added, w.act.Changed) {
@@ -287,6 +288,9 @@ func (w *agentWatch) firstEdit() string {
 				first = n.ID
 			}
 		})
+	}
+	if first == "" {
+		return w.act.Near
 	}
 	return first
 }
@@ -361,6 +365,7 @@ func (a *App) watchIdled() {
 func (a *App) hideWatch() {
 	w := &a.watch
 	w.shown = false
+	w.pending = nil
 	if w.idle != nil {
 		w.idle.Stop()
 		w.idle = nil
@@ -368,6 +373,17 @@ func (a *App) hideWatch() {
 	if w.win != nil && !w.win.IsDestroyed() {
 		w.win.Hide()
 	}
+}
+
+// resetWatch hides the corner window and drops what it held, as when leaving
+// or switching accounts.
+func (a *App) resetWatch() {
+	a.hideWatch()
+	w := &a.watch
+	w.act, w.at, w.target, w.ed = mcp.Activity{}, time.Time{}, nil, nil
+	w.tinted, w.lit, w.pending = nil, nil, nil
+	w.follow, w.jump, w.hushed = "", false, false
+	w.seen = map[string]int64{}
 }
 
 // hushWatch hides the window as the user closed it: it stays away until the
@@ -498,6 +514,18 @@ func (w *agentWatch) followTo(id string) {
 	w.follow, w.followWait, w.settle = id, 0, watchSettle
 }
 
+func (w *agentWatch) reveal(id string) {
+	if w.ed == nil || id == "" {
+		return
+	}
+	for loc := w.ed.Content.Locate(id); loc != nil && loc.Parent != nil; loc = w.ed.Content.Locate(loc.Parent.ID) {
+		if p := loc.Parent; p.Type == "toggle_list" && p.Bool("collapsed") {
+			w.ed.ToggleCollapsed(p.ID)
+		}
+	}
+	w.ed.Reveal(id)
+}
+
 // followEdit scrolls the block to follow to watchAt of the view: at once for
 // a page the window has just taken up, smoothly after, and again as the
 // editor lays it out and knows better where it is.
@@ -508,6 +536,7 @@ func (w *agentWatch) followEdit(c *ui.Context) {
 		}
 		return
 	}
+	w.reveal(w.follow)
 	top, ok := w.ed.BlockTop(w.follow)
 	view := w.view.Bounds(c)
 	if !ok || view.H == 0 {
@@ -589,7 +618,9 @@ func (h watchHost) Video(c *ui.Context, n *doc.Node, _ float32) {
 	blockCard(c, n, "play", cmp.Or(n.Str("title"), locales.HostSlashVideo()), n.Str("url"))
 }
 
-func (h watchHost) Card(c *ui.Context, n *doc.Node) { h.a.linkPreviewBlock(c, n) }
+func (h watchHost) Card(c *ui.Context, n *doc.Node) {
+	h.a.linkPreviewBlockFor(c, n, h.a.watch.act.PageID, h.a.redrawWatch)
+}
 
 func (h watchHost) File(c *ui.Context, n *doc.Node, _ float32) {
 	blockCard(c, n, "file", cmp.Or(n.Str("name"), locales.HostSlashFile()), "")

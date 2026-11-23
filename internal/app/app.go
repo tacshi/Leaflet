@@ -1022,6 +1022,9 @@ func (a *App) openPage(id string) {
 	a.closePreview()
 	if a.route.Kind == "page" && a.route.ID == id {
 		a.closeSettings()
+		if appInFront(a) {
+			a.watchFront()
+		}
 		return
 	}
 	for _, p := range a.ancestors(id) {
@@ -1081,6 +1084,9 @@ func (a *App) loadPage(id string) {
 	ps.setThreads(a.st.Threads(id))
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
+	if appInFront(a) {
+		a.watchFront()
+	}
 	a.pageEditable()
 	a.sync.SetOpen(id, true)
 	_ = a.st.SetValue(store.LastPageKey, id)

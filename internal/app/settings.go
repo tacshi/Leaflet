@@ -651,6 +651,7 @@ func (a *App) leave(clear func() error, synced bool) {
 			}
 			// The pictures of the account's pages go with them.
 			a.images.clear()
+			a.resetWatch()
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}

@@ -64,13 +64,22 @@ func (a *App) linkInfoOf(link string) web.LinkInfo {
 	if a.page != nil {
 		pageID = a.page.id
 	}
+	return a.linkInfoFor(pageID, link, nil)
+}
+
+func (a *App) linkInfoFor(pageID, link string, redraw func()) web.LinkInfo {
 	return a.linkInfo.get(a, link, func() (web.LinkInfo, error) {
 		info, err := web.LookUp(link)
 		if err != nil {
 			log.Printf("link %s: %v", link, err)
 		}
 		return info, err
-	}, func(info web.LinkInfo) { a.keepLinkInfo(pageID, link, info) })
+	}, func(info web.LinkInfo) {
+		a.keepLinkInfo(pageID, link, info)
+		if redraw != nil {
+			redraw()
+		}
+	})
 }
 
 func (a *App) keepLinkInfo(pageID, link string, info web.LinkInfo) {
@@ -111,11 +120,19 @@ func cardButton(c *ui.Context, key, label string) ui.Element {
 }
 
 func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
+	pageID := ""
+	if a.page != nil {
+		pageID = a.page.id
+	}
+	a.linkPreviewBlockFor(c, n, pageID, nil)
+}
+
+func (a *App) linkPreviewBlockFor(c *ui.Context, n *doc.Node, pageID string, redraw func()) {
 	pal := theme.Of(c)
 	link := n.Str("url")
 	info := web.LinkInfo{Title: n.Str("title"), Description: n.Str("description"), Image: n.Str("image"), Site: n.Str("site")}
 	if info.Title == "" {
-		info = a.linkInfoOf(link)
+		info = a.linkInfoFor(pageID, link, redraw)
 	}
 	site := info.Site
 	if u, err := url.Parse(link); err == nil && site == "" {

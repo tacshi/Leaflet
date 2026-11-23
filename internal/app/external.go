@@ -64,12 +64,10 @@ func (a *App) externalSettings(c *ui.Context) {
 		})
 	}
 	card(c, "live-edits", func() {
-		on := a.settings.LiveAgentEdits
 		settingRow(c, "live", locales.ExternalLiveEdits(), locales.ExternalLiveEditsDesc(), true, func() {
-			if ui.Switch(c.Key("live"), &on).Label(locales.ExternalLiveEdits()).Changed() {
-				a.settings.LiveAgentEdits = on
+			if ui.Switch(c.Key("live"), &a.settings.LiveAgentEdits).Label(locales.ExternalLiveEdits()).Changed() {
 				a.saveSettings()
-				if !on {
+				if !a.settings.LiveAgentEdits {
 					a.hideWatch()
 				}
 			}

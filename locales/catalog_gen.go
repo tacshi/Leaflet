@@ -8745,22 +8745,6 @@ func (msgs Messages) TodosUntitled() string {
 	return Catalog.Format(msgs.locale, "todosUntitled", nil)
 }
 
-// TodosPageAndOwner says "{page} · {owner}"
-// in the language the app shows.
-//
-// To-dos view: the line under a to-do, its page and owner.
-func TodosPageAndOwner(page string, owner string) string {
-	return In(i18n.Locale()).TodosPageAndOwner(page, owner)
-}
-
-// TodosPageAndOwner says "{page} · {owner}"
-// in the language of msgs.
-//
-// To-dos view: the line under a to-do, its page and owner.
-func (msgs Messages) TodosPageAndOwner(page string, owner string) string {
-	return Catalog.Format(msgs.locale, "todosPageAndOwner", map[string]any{"page": page, "owner": owner})
-}
-
 // TodosFinished says "Done: {text}"
 // in the language the app shows.
 //

@@ -103,9 +103,12 @@ struct CoreClientTests {
         }.filter { !$0.1.isEmpty }
         #expect(mine.map(\.0.key) == ["2001-01-01", "2999-01-01", "2999-01-02"])
         #expect(mine.map(\.0.section) == ["overdue", "upcoming", "upcoming"])
-        #expect(mine.map { $0.0.folded == true } == [true, false, false])
         #expect(mine.first?.0.todos.first?.overdue == true)
         #expect(mine.map(\.1) == [["Late"], ["Sooner", "Also sooner"], ["Later"]])
+
+        try await client.checkTodo(page.id, "b", checked: true)
+        let left = try await client.todos().flatMap(\.todos).filter { $0.pageID == page.id }
+        #expect(left.map(\.text) == ["Sooner", "Also sooner", "Later"])
     }
 
     @Test func aSignInWithSeveralProjectsAsksWhichToUse() throws {

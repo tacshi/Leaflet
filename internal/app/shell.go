@@ -156,6 +156,9 @@ func (a *App) main(c *ui.Context) {
 			a.pageView(c)
 			return
 		}
+	case "day":
+		a.dayView(c)
+		return
 	case "signin":
 		a.signInView(c)
 		return

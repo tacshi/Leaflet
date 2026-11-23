@@ -498,9 +498,7 @@ type todoGroup struct {
 	// "no_date".
 	Section string `json:"section"`
 	Title   string `json:"title"`
-	// Folded tells whether the day shows only its header until it is opened.
-	Folded bool   `json:"folded,omitempty"`
-	Todos  []todo `json:"todos"`
+	Todos   []todo `json:"todos"`
 }
 
 var todoSections = [...]string{doc.TodoOverdue: "overdue", doc.TodoToday: "today", doc.TodoUpcoming: "upcoming", doc.TodoNoDate: "no_date"}
@@ -530,7 +528,7 @@ func (c *Core) todosAt(now time.Time, loc *time.Location) (string, error) {
 		if !d.Day.IsZero() {
 			title = doc.DueLabel(m, d.Day, false, clock)
 		}
-		group := todoGroup{Key: d.Key(), Section: todoSections[d.Section], Title: title, Folded: d.Folded(), Todos: make([]todo, 0, len(d.Todos))}
+		group := todoGroup{Key: d.Key(), Section: todoSections[d.Section], Title: title, Todos: make([]todo, 0, len(d.Todos))}
 		for _, t := range d.Todos {
 			due := t.Due
 			if !due.IsZero() {
@@ -544,6 +542,23 @@ func (c *Core) todosAt(now time.Time, loc *time.Location) (string, error) {
 		out = append(out, group)
 	}
 	return encode(out)
+}
+
+// CheckTodo checks off the to-do blockID of a page, or back on with checked false, as its
+// checkbox on its day's list of to-dos does: the page open in an editor shows it at once.
+func (c *Core) CheckTodo(pageID, blockID string, checked bool) (err error) {
+	defer catch(&err)
+	c.q.do(func() {
+		err = c.editContent(pageID, func(content *doc.Content) bool {
+			n := content.Find(blockID)
+			if n == nil || n.Type != "todo_list" || n.Bool("checked") == checked {
+				return false
+			}
+			n.Set("checked", checked)
+			return true
+		})
+	})
+	return err
 }
 
 func (c *Core) Settings() (_ string, err error) {

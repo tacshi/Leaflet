@@ -3103,11 +3103,37 @@
   },
   "todosSectionNoDate": "No date",
   "@todosSectionNoDate": {
-    "description": "To-dos view section header."
+    "description": "To-dos view: the day of the to-dos with no date, in the sidebar's list of days and as the heading of its page of to-dos."
+  },
+  "todosDayDate": "{day, date, ::yMMMMEEEEd}",
+  "@todosDayDate": {
+    "description": "To-dos view: a day's full date under its heading (Today, Tomorrow, Nov 20) on the page of that day's to-dos, as Monday, November 23, 2026.",
+    "placeholders": {
+      "day": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "todosDayLeft": "{count, plural, one {# to-do left} other {# to-dos left}}",
+  "@todosDayLeft": {
+    "description": "To-dos view: how many to-dos are left on a day, under the heading of its page of to-dos and read out on its row in the sidebar.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "todosDayDoneTitle": "All done",
+  "@todosDayDoneTitle": {
+    "description": "To-dos view: heading of a day's page of to-dos once none is left on it."
+  },
+  "todosDayDoneBody": "Nothing is left to do on this day.",
+  "@todosDayDoneBody": {
+    "description": "To-dos view: explanation on a day's page of to-dos once none is left on it."
   },
   "todosDueTime": "{due, time, ::jm}",
   "@todosDueTime": {
-    "description": "To-dos view: a to-do's time of day, beside it under its day's header, as 3:00 PM.",
+    "description": "To-dos view: a to-do's time of day, beside it on its day's page of to-dos, as 3:00 PM.",
     "placeholders": {
       "due": {
         "type": "DateTime"
@@ -3117,18 +3143,6 @@
   "todosUntitled": "To-do",
   "@todosUntitled": {
     "description": "A to-do with no text."
-  },
-  "todosPageAndOwner": "{page} · {owner}",
-  "@todosPageAndOwner": {
-    "description": "To-dos view: the line under a to-do, its page and owner.",
-    "placeholders": {
-      "page": {
-        "type": "String"
-      },
-      "owner": {
-        "type": "String"
-      }
-    }
   },
   "todosFinished": "Done: {text}",
   "@todosFinished": {

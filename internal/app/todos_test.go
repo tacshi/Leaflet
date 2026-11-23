@@ -16,38 +16,32 @@ import (
 	"leaflet/locales"
 )
 
-func TestTodoRowsAndReminders(t *testing.T) {
+func TestTodoDaysAndReminders(t *testing.T) {
 	now := time.Date(2026, 10, 26, 10, 0, 0, 0, time.Local)
 	day := func(d int) time.Time { return time.Date(2026, 10, 26+d, 0, 0, 0, 0, time.Local) }
 	todo := func(id string, due time.Time) store.PageTodo {
 		return store.PageTodo{Todo: doc.Todo{BlockID: id, Text: id, Due: due, Owner: "Sam"}, PageID: "p"}
 	}
 	todos := []store.PageTodo{todo("later", day(3)), todo("owned", time.Time{}), todo("today", day(0)), todo("late", day(-2)), todo("soon", day(1))}
-	ids := func(rows []todoRow) string {
-		var got []string
-		for _, r := range rows {
-			if r.day != nil {
-				got = append(got, fmt.Sprintf("# %s %d", r.day.Key(), len(r.day.Todos)))
-			} else {
-				got = append(got, r.todo.BlockID)
-			}
-		}
-		return fmt.Sprint(got)
+	var got []string
+	for _, d := range todoDays(todos, now) {
+		got = append(got, fmt.Sprintf("%s %s %d", d.Key(), todoDayTitle(d, now), len(d.Todos)))
 	}
-	unfolded := func(d todoDay) bool { return !d.Folded() }
-	want := "[# 2026-10-24 1 # 2026-10-26 1 today # 2026-10-27 1 soon # 2026-10-29 1 later # no-date 1 owned]"
-	if s := ids(todoRows(todos, now, unfolded)); s != want {
-		t.Errorf("rows %s, want %s", s, want)
+	if want := "[2026-10-24 Oct 24 1 2026-10-26 Today 1 2026-10-27 Tomorrow 1 2026-10-29 Oct 29 1 no-date No date 1]"; fmt.Sprint(got) != want {
+		t.Errorf("days %v, want %s", got, want)
 	}
-	all := func(todoDay) bool { return true }
-	if s, want := ids(todoRows(todos, now, all)), "[# 2026-10-24 1 late # 2026-10-26 1 today # 2026-10-27 1 soon # 2026-10-29 1 later # no-date 1 owned]"; s != want {
-		t.Errorf("rows with every day open %s, want %s", s, want)
+	days := todoDays(todos, now)
+	if d := todoDayAt(days, "2026-10-27", now); len(d.Todos) != 1 || d.Todos[0].BlockID != "soon" {
+		t.Errorf("tomorrow %+v", d)
 	}
-	if s := ids(todoRows(todos[1:2], now, all)); s != "[owned]" {
-		t.Errorf("rows of a to-do with no date %s", s)
+	if d := todoDayAt(days, "2026-10-25", now); len(d.Todos) != 0 || d.Section != doc.TodoOverdue || todoDayTitle(d, now) != "Yesterday" {
+		t.Errorf("a day with nothing left on it %+v", d)
 	}
-	if s := ids(todoRows(todos[:1], now, all)); s != "[# 2026-10-29 1 later]" {
-		t.Errorf("rows of one day %s", s)
+	if d := todoDayAt(days, "2026-10-30", now); d.Section != doc.TodoUpcoming {
+		t.Errorf("a day to come with nothing on it %+v", d)
+	}
+	if d := todoDayAt(nil, noDateKey, now); d.Section != doc.TodoNoDate || todoDayTitle(d, now) != "No date" {
+		t.Errorf("no date with nothing on it %+v", d)
 	}
 	reminded := map[string]bool{"late": true}
 	var due []string
@@ -77,11 +71,10 @@ func TestTimedTodos(t *testing.T) {
 	}
 	todos := []store.PageTodo{todo("meet", at(15, 0)), todo("call", at(8, 30))}
 	var got []string
-	for _, r := range todoRows(todos, at(10, 0), func(todoDay) bool { return true }) {
-		if r.day != nil {
-			got = append(got, todoDayTitle(*r.day, at(10, 0)))
-		} else {
-			got = append(got, r.todo.BlockID)
+	for _, d := range todoDays(todos, at(10, 0)) {
+		got = append(got, todoDayTitle(d, at(10, 0)))
+		for _, t := range d.Todos {
+			got = append(got, t.BlockID)
 		}
 	}
 	if want := "[Today call meet]"; fmt.Sprint(got) != want {
@@ -96,27 +89,51 @@ func TestTimedTodos(t *testing.T) {
 	}
 }
 
-func TestTodosView(t *testing.T) {
-	a := templatesApp(t)
-	n := &doc.Node{ID: "t1", Type: "todo_list"}
-	n.SetDelta(doc.Delta{{Text: "Send the draft"}})
+func todoNode(id, text string, due time.Time) *doc.Node {
+	n := &doc.Node{ID: id, Type: "todo_list"}
+	n.SetDelta(doc.Delta{{Text: text}})
 	n.Set("checked", false)
-	n.SetDue(time.Now(), false)
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{n})})
+	if !due.IsZero() {
+		n.SetDue(due, false)
+	}
+	return n
+}
+
+// windowApp is an app to build its whole window in a test.
+func windowApp(t *testing.T) *App {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
+	return a
+}
+
+func TestTodosView(t *testing.T) {
+	a := windowApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{todoNode("t1", "Send the draft", time.Now())})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	a.settings.SidebarOpen = true
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
-	}, 260, 600)
+	a.settings.SidebarTab = tabPages
+	tt := ui.NewTester(a.view, 1300, 700)
 	tt.Frame()
 	if err := tt.Click("To-dos"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	for _, s := range []string{"Today", "Send the draft", "PRD"} {
+	if !tt.HasText("Today") || tt.HasText("Send the draft") {
+		t.Errorf("the tab lists more than the days: %v", tt.Texts())
+	}
+	if err := tt.Click("Today"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.route != (Route{Kind: "day", ID: time.Now().Format(time.DateOnly)}) {
+		t.Fatalf("route %+v", a.route)
+	}
+	for _, s := range []string{"Send the draft", "PRD", "1 to-do left", locales.TodosDayDate(time.Now())} {
 		if !tt.HasText(s) {
 			t.Errorf("no %q in %v", s, tt.Texts())
 		}
@@ -128,48 +145,13 @@ func TestTodosView(t *testing.T) {
 		t.Error("the to-do was not checked off in its page")
 	}
 	tt.Frame()
-	if !tt.HasText("Nothing to do") {
+	if !tt.HasText("Nothing to do") || !tt.HasText("All done") || tt.HasText("1 to-do left") {
 		t.Errorf("still listed: %v", tt.Texts())
 	}
 }
 
-func TestTodoHeaderStaysOnAnOpaqueSidebar(t *testing.T) {
-	a := templatesApp(t)
-	n := &doc.Node{ID: "t1", Type: "todo_list"}
-	n.SetDelta(doc.Delta{{Text: "Send the draft"}})
-	n.Set("checked", false)
-	n.SetDue(time.Now(), false)
-	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{n})}); err != nil {
-		t.Fatal(err)
-	}
-	a.reloadAll()
-	a.settings.SidebarOpen = true
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
-	}, 260, 600)
-	tt.Frame()
-	if err := tt.Click("To-dos"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if a.todoState.Header == nil {
-		t.Error("no header held on an opaque sidebar")
-	}
-	tt.SetVibrancy(true)
-	tt.Frame()
-	if a.todoState.Header != nil {
-		t.Error("a header held over the window's vibrancy")
-	}
-	if !tt.HasText("Today") {
-		t.Errorf("no section in %v", tt.Texts())
-	}
-}
-
 func TestTodoClickScrollsItsPageToIt(t *testing.T) {
-	a := templatesApp(t)
-	a.rec = recording.NewController(a.st, a.backend)
-	a.hub = agents.NewHub(a.st, a.backend, a)
-	a.settings.TextSize = 16
+	a := windowApp(t)
 	var blocks []*doc.Node
 	for i := range 80 {
 		blocks = append(blocks, textNode(fmt.Sprintf("Line %d.", i)))
@@ -189,12 +171,15 @@ func TestTodoClickScrollsItsPageToIt(t *testing.T) {
 	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("Hello")})})
 	a.reloadAll()
 	a.openPage(notes.ID)
-	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
 	var ctx *ui.Context
 	tt := ui.NewTester(func(c *ui.Context) {
 		ctx = c
 		a.view(c)
 	}, 1300, 700)
+	tt.Frame()
+	if err := tt.Click("Today"); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 	if err := tt.Click("Join the team call"); err != nil {
 		t.Fatal(err)
@@ -213,7 +198,7 @@ func TestTodoClickScrollsItsPageToIt(t *testing.T) {
 }
 
 func TestTodosOfAPageToView(t *testing.T) {
-	a := templatesApp(t)
+	a := windowApp(t)
 	const id = "00000000-0000-0000-0000-0000000000bb"
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
@@ -231,10 +216,8 @@ func TestTodosOfAPageToView(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
-	}, 260, 600)
+	a.openDay(time.Now().Format(time.DateOnly))
+	tt := ui.NewTester(a.view, 1300, 700)
 	tt.Frame()
 	if !tt.HasText("Review the budget") {
 		t.Fatalf("not listed: %v", tt.Texts())
@@ -330,73 +313,88 @@ func TestRemindersOfTheUsersOwnTodos(t *testing.T) {
 	}
 }
 
-func TestTodoDaysFoldAndUnfold(t *testing.T) {
-	a := templatesApp(t)
-	todo := func(id, text string, due time.Time) *doc.Node {
-		n := &doc.Node{ID: id, Type: "todo_list"}
-		n.SetDelta(doc.Delta{{Text: text}})
-		n.Set("checked", false)
-		n.SetDue(due, false)
-		return n
-	}
+func TestTodoDayView(t *testing.T) {
+	a := windowApp(t)
 	now := time.Now()
+	yesterday := now.AddDate(0, 0, -1)
 	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Yesterday's list", Content: doc.FromBlocks([]*doc.Node{
-		todo("old", "Read for 40 minutes", now.AddDate(0, 0, -1)),
+		todoNode("old", "Read for 40 minutes", yesterday),
 	})}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Today's list", Content: doc.FromBlocks([]*doc.Node{
-		todo("new", "Listen for an hour", now),
+		todoNode("new", "Listen for an hour", now),
+		todoNode("retell", "Retell for 30 minutes", now),
 	})}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Work", Content: doc.FromBlocks([]*doc.Node{
-		todo("work", "Send the invoice", now),
-	})}); err != nil {
+	work, err := a.st.CreatePage(store.NewPageOptions{Title: "Work", Content: doc.FromBlocks([]*doc.Node{
+		todoNode("work", "Send the invoice", now),
+		todoNode("trip", "Plan the trip", now.AddDate(0, 0, 1)),
+	})})
+	if err != nil {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
-	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
-	}, 260, 600)
+	tt := ui.NewTester(a.view, 1300, 700)
 	tt.Frame()
-	for _, s := range []string{"Yesterday", "Today", "Listen for an hour", "Send the invoice", "Today's list", "Work"} {
+	for _, s := range []string{"Yesterday", "Today", "Tomorrow"} {
 		if !tt.HasText(s) {
-			t.Errorf("no %q in %v", s, tt.Texts())
+			t.Errorf("no day %q in %v", s, tt.Texts())
 		}
 	}
-	if tt.HasText("Read for 40 minutes") {
-		t.Errorf("yesterday's to-do shows before its day is opened: %v", tt.Texts())
+	for _, s := range []string{"Read for 40 minutes", "Listen for an hour", "Send the invoice", "Plan the trip"} {
+		if tt.HasText(s) {
+			t.Errorf("to-do %q listed in the tab: %v", s, tt.Texts())
+		}
+	}
+	if err := tt.Click("Today"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	for _, s := range []string{"Today's list", "Listen for an hour", "Retell for 30 minutes", "Work", "Send the invoice", "3 to-dos left"} {
+		if !tt.HasText(s) {
+			t.Errorf("no %q on today's page in %v", s, tt.Texts())
+		}
+	}
+	for _, s := range []string{"Read for 40 minutes", "Plan the trip", "Yesterday's list"} {
+		if tt.HasText(s) {
+			t.Errorf("%q, not due today, on today's page: %v", s, tt.Texts())
+		}
+	}
+	if a.todoRow != 1 {
+		t.Errorf("row %d chosen, want today's", a.todoRow)
 	}
 	if err := tt.Click("Yesterday"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("Read for 40 minutes") {
-		t.Errorf("yesterday's to-do isn't shown once its day is opened: %v", tt.Texts())
+	if !tt.HasText("Read for 40 minutes") || tt.HasText("Listen for an hour") {
+		t.Errorf("yesterday's page: %v", tt.Texts())
 	}
-	if err := tt.Click("Today"); err != nil {
+	a.openDay(now.Format(time.DateOnly))
+	tt.Frame()
+	if err := tt.Click("Work"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if tt.HasText("Listen for an hour") || tt.HasText("Send the invoice") {
-		t.Errorf("today's to-dos show with the day folded: %v", tt.Texts())
+	if a.page == nil || a.page.id != work.ID {
+		t.Fatalf("a click on a page's name didn't open it: %+v", a.route)
 	}
-	day := func(d time.Time) string { return d.Format(time.DateOnly) }
-	saved := a.st.Settings().TodoDaysOpen
-	if len(saved) != 2 || !saved[day(now.AddDate(0, 0, -1))] || saved[day(now)] {
-		t.Errorf("days kept open or folded %v", saved)
+	if a.todoRow != -1 {
+		t.Errorf("a day still chosen, row %d, with a page open", a.todoRow)
 	}
-	if err := tt.Click("Today"); err != nil {
-		t.Fatal(err)
+}
+
+func TestTodoDayRoutes(t *testing.T) {
+	for _, r := range []Route{{Kind: "day", ID: "2026-11-23"}, {Kind: "day", ID: noDateKey}, {Kind: "page", ID: "p"}} {
+		if got := routeAt(r.path()); got != r {
+			t.Errorf("route %+v comes back as %+v", r, got)
+		}
 	}
-	tt.Frame()
-	if !tt.HasText("Listen for an hour") || !tt.HasText("Send the invoice") {
-		t.Errorf("today's to-dos aren't shown once re-opened: %v", tt.Texts())
-	}
-	saved = a.st.Settings().TodoDaysOpen
-	if _, ok := saved[day(now)]; ok {
-		t.Errorf("re-opened default-open day still kept in %v", saved)
+	a := templatesApp(t)
+	a.route = Route{Kind: "day", ID: noDateKey}
+	if a.routeTitle() != "No date" || a.gone(a.route) {
+		t.Errorf("title %q, gone %v", a.routeTitle(), a.gone(a.route))
 	}
 }

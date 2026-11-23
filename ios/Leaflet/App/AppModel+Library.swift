@@ -84,6 +84,37 @@ extension AppModel {
         }
     }
 
+    /// Whether the to-dos of a page can be checked off here.
+    func canCheck(_ todo: Todo) -> Bool { library.page(todo.pageID)?.canEdit == true }
+
+    /// Checks off a to-do in its page, with a toast to undo it, telling whether it did.
+    @discardableResult func finish(_ todo: Todo) async -> Bool {
+        guard let client, canCheck(todo) else { return false }
+        do {
+            try await client.checkTodo(todo.pageID, todo.blockID, checked: true)
+            await reload(.todos)
+            show(
+                Toast(
+                    message: L.todosFinished(text: todo.text.isEmpty ? L.todosUntitled : todo.text),
+                    actionLabel: L.commonUndo,
+                    action: { [weak self] in
+                        do {
+                            try await client.checkTodo(todo.pageID, todo.blockID, checked: false)
+                        } catch {
+                            self?.show(
+                                Toast(
+                                    message: L.sidebarCouldNotSave(
+                                        error: error.localizedDescription)))
+                        }
+                        await self?.reload(.todos)
+                    }))
+            return true
+        } catch {
+            show(Toast(message: L.sidebarCouldNotSave(error: error.localizedDescription)))
+            return false
+        }
+    }
+
     func deleteFolder(_ folder: FolderRow) async {
         do {
             try await client?.deleteFolder(folder.id)

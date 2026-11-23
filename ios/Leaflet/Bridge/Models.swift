@@ -255,8 +255,6 @@ struct TodoGroup: Codable, Hashable, Sendable {
     var key: String
     var section: String
     var title: String
-    /// Whether the day shows only its header until it is opened, as the days gone by do.
-    var folded: Bool?
     var todos: [Todo]
 
     var overdue: Bool { section == "overdue" }

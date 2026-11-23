@@ -70,9 +70,6 @@ type Settings struct {
 	// TreeOpen is the sidebar's folders and pages showing what is in them,
 	// as "folder:" or "page:" and their ID.
 	TreeOpen []string `json:"tree_open,omitempty"`
-	// TodoDaysOpen is the days of the To-dos tab opened or folded, by
-	// their dates as 2026-11-20, or "no-date".
-	TodoDaysOpen map[string]bool `json:"todo_days_open,omitempty"`
 }
 
 func DefaultSettings() Settings {

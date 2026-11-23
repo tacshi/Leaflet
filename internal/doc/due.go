@@ -69,10 +69,6 @@ func (d TodoDay[T]) Key() string {
 	return d.Day.Format(time.DateOnly)
 }
 
-// Folded tells whether the day shows only its header until it is opened: the days gone by do,
-// so what was left undone on them doesn't push today down.
-func (d TodoDay[T]) Folded() bool { return d.Section == TodoOverdue }
-
 // TodoDays puts the to-dos in a group a day by their due dates in the local time zone, the days
 // in order and the to-dos with no date last. A day's to-dos are in order of their times, and
 // otherwise in the order given.

@@ -8640,29 +8640,93 @@ func (msgs Messages) TodosEmptyBody() string {
 // TodosSectionNoDate says "No date"
 // in the language the app shows.
 //
-// To-dos view section header.
+// To-dos view: the day of the to-dos with no date, in the sidebar's list of
+// days and as the heading of its page of to-dos.
 func TodosSectionNoDate() string { return In(i18n.Locale()).TodosSectionNoDate() }
 
 // TodosSectionNoDate says "No date"
 // in the language of msgs.
 //
-// To-dos view section header.
+// To-dos view: the day of the to-dos with no date, in the sidebar's list of
+// days and as the heading of its page of to-dos.
 func (msgs Messages) TodosSectionNoDate() string {
 	return Catalog.Format(msgs.locale, "todosSectionNoDate", nil)
+}
+
+// TodosDayDate says "{day, date, ::yMMMMEEEEd}"
+// in the language the app shows.
+//
+// To-dos view: a day's full date under its heading (Today, Tomorrow, Nov
+// 20) on the page of that day's to-dos, as Monday, November 23, 2026.
+func TodosDayDate(day time.Time) string { return In(i18n.Locale()).TodosDayDate(day) }
+
+// TodosDayDate says "{day, date, ::yMMMMEEEEd}"
+// in the language of msgs.
+//
+// To-dos view: a day's full date under its heading (Today, Tomorrow, Nov
+// 20) on the page of that day's to-dos, as Monday, November 23, 2026.
+func (msgs Messages) TodosDayDate(day time.Time) string {
+	return Catalog.Format(msgs.locale, "todosDayDate", map[string]any{"day": day})
+}
+
+// TodosDayLeft says "{count, plural, one {# to-do left} other {# to-dos left}}"
+// in the language the app shows.
+//
+// To-dos view: how many to-dos are left on a day, under the heading of its
+// page of to-dos and read out on its row in the sidebar.
+func TodosDayLeft(count int) string { return In(i18n.Locale()).TodosDayLeft(count) }
+
+// TodosDayLeft says "{count, plural, one {# to-do left} other {# to-dos left}}"
+// in the language of msgs.
+//
+// To-dos view: how many to-dos are left on a day, under the heading of its
+// page of to-dos and read out on its row in the sidebar.
+func (msgs Messages) TodosDayLeft(count int) string {
+	return Catalog.Format(msgs.locale, "todosDayLeft", map[string]any{"count": count})
+}
+
+// TodosDayDoneTitle says "All done"
+// in the language the app shows.
+//
+// To-dos view: heading of a day's page of to-dos once none is left on it.
+func TodosDayDoneTitle() string { return In(i18n.Locale()).TodosDayDoneTitle() }
+
+// TodosDayDoneTitle says "All done"
+// in the language of msgs.
+//
+// To-dos view: heading of a day's page of to-dos once none is left on it.
+func (msgs Messages) TodosDayDoneTitle() string {
+	return Catalog.Format(msgs.locale, "todosDayDoneTitle", nil)
+}
+
+// TodosDayDoneBody says "Nothing is left to do on this day."
+// in the language the app shows.
+//
+// To-dos view: explanation on a day's page of to-dos once none is left on
+// it.
+func TodosDayDoneBody() string { return In(i18n.Locale()).TodosDayDoneBody() }
+
+// TodosDayDoneBody says "Nothing is left to do on this day."
+// in the language of msgs.
+//
+// To-dos view: explanation on a day's page of to-dos once none is left on
+// it.
+func (msgs Messages) TodosDayDoneBody() string {
+	return Catalog.Format(msgs.locale, "todosDayDoneBody", nil)
 }
 
 // TodosDueTime says "{due, time, ::jm}"
 // in the language the app shows.
 //
-// To-dos view: a to-do's time of day, beside it under its day's header, as
-// 3:00 PM.
+// To-dos view: a to-do's time of day, beside it on its day's page of
+// to-dos, as 3:00 PM.
 func TodosDueTime(due time.Time) string { return In(i18n.Locale()).TodosDueTime(due) }
 
 // TodosDueTime says "{due, time, ::jm}"
 // in the language of msgs.
 //
-// To-dos view: a to-do's time of day, beside it under its day's header, as
-// 3:00 PM.
+// To-dos view: a to-do's time of day, beside it on its day's page of
+// to-dos, as 3:00 PM.
 func (msgs Messages) TodosDueTime(due time.Time) string {
 	return Catalog.Format(msgs.locale, "todosDueTime", map[string]any{"due": due})
 }

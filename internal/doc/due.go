@@ -43,45 +43,81 @@ func DueToday(due, now time.Time) bool {
 	return y == ny && m == nm && d == nd
 }
 
+// TodoSection is where a day of to-dos falls from today.
 type TodoSection int
 
 const (
-	TodoOverdue TodoSection = iota
+	TodoOverdue TodoSection = iota // a day before today
 	TodoToday
 	TodoUpcoming
 	TodoNoDate
 )
 
-func (t Todo) Section(now time.Time) TodoSection {
-	switch {
-	case t.Due.IsZero():
-		return TodoNoDate
-	case Overdue(t.Due, t.Timed, now):
-		return TodoOverdue
-	case DueToday(t.Due, now):
-		return TodoToday
-	}
-	return TodoUpcoming
-}
-
-type TodoGroup[T any] struct {
+// TodoDay is the to-dos due on one day, from every page, or the to-dos with no date.
+type TodoDay[T any] struct {
+	// Day is the day's midnight in the local time zone, zero for the to-dos with no date.
+	Day     time.Time
 	Section TodoSection
 	Todos   []T
 }
 
-func TodoGroups[T any](todos []T, todo func(T) Todo, now time.Time) []TodoGroup[T] {
-	var by [TodoNoDate + 1][]T
-	for _, t := range todos {
-		s := todo(t).Section(now)
-		by[s] = append(by[s], t)
+// Key names the day to remember it by, as 2026-11-20, or "no-date".
+func (d TodoDay[T]) Key() string {
+	if d.Day.IsZero() {
+		return "no-date"
 	}
-	var out []TodoGroup[T]
-	for s, ts := range by {
-		if len(ts) == 0 {
+	return d.Day.Format(time.DateOnly)
+}
+
+// Folded tells whether the day shows only its header until it is opened: the days gone by do,
+// so what was left undone on them doesn't push today down.
+func (d TodoDay[T]) Folded() bool { return d.Section == TodoOverdue }
+
+// TodoDays puts the to-dos in a group a day by their due dates in the local time zone, the days
+// in order and the to-dos with no date last. A day's to-dos are in order of their times, and
+// otherwise in the order given.
+func TodoDays[T any](todos []T, todo func(T) Todo, now time.Time) []TodoDay[T] {
+	by := map[string]*TodoDay[T]{}
+	var days []*TodoDay[T]
+	var undated []T
+	for _, t := range todos {
+		due := todo(t).Due
+		if due.IsZero() {
+			undated = append(undated, t)
 			continue
 		}
-		slices.SortStableFunc(ts, func(a, b T) int { return todo(a).Due.Compare(todo(b).Due) })
-		out = append(out, TodoGroup[T]{Section: TodoSection(s), Todos: ts})
+		day := localDay(due)
+		key := day.Format(time.DateOnly)
+		d := by[key]
+		if d == nil {
+			d = &TodoDay[T]{Day: day}
+			by[key] = d
+			days = append(days, d)
+		}
+		d.Todos = append(d.Todos, t)
+	}
+	slices.SortFunc(days, func(a, b *TodoDay[T]) int { return a.Day.Compare(b.Day) })
+	today := localDay(now)
+	out := make([]TodoDay[T], 0, len(days)+1)
+	for _, d := range days {
+		switch d.Day.Compare(today) {
+		case -1:
+			d.Section = TodoOverdue
+		case 0:
+			d.Section = TodoToday
+		default:
+			d.Section = TodoUpcoming
+		}
+		slices.SortStableFunc(d.Todos, func(a, b T) int { return todo(a).Due.Compare(todo(b).Due) })
+		out = append(out, *d)
+	}
+	if len(undated) > 0 {
+		out = append(out, TodoDay[T]{Section: TodoNoDate, Todos: undated})
 	}
 	return out
+}
+
+func localDay(t time.Time) time.Time {
+	y, m, d := t.In(time.Local).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.Local)
 }

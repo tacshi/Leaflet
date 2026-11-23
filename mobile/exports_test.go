@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -220,7 +221,7 @@ func TestPictureReadsOnlyPublicAddresses(t *testing.T) {
 	}
 }
 
-func TestTodosComeInSections(t *testing.T) {
+func TestTodosComeADayAtATime(t *testing.T) {
 	c, _ := open(t)
 	page := create(t, c, `{"title":"Chores"}`)
 	todo := func(id, text string, due time.Time) *doc.Node {
@@ -235,7 +236,7 @@ func TestTodosComeInSections(t *testing.T) {
 		err = c.editContent(page.ID, func(content *doc.Content) bool {
 			content.Children = []*doc.Node{
 				todo("a", "later", now.AddDate(0, 0, 9)), todo("b", "late", now.AddDate(0, 0, -3)),
-				todo("c", "soon", now.AddDate(0, 0, 2)), todo("d", "today", now),
+				todo("c", "soon", now.AddDate(0, 0, 2)), todo("d", "today", now), todo("e", "also soon", now.AddDate(0, 0, 2)),
 			}
 			return true
 		})
@@ -255,10 +256,15 @@ func TestTodosComeInSections(t *testing.T) {
 		for _, t := range g.Todos {
 			texts = append(texts, t.Text)
 		}
-		got = append(got, g.Section+": "+strings.Join(texts, ", "))
+		got = append(got, fmt.Sprintf("%s %s %v: %s", g.Key, g.Section, g.Folded, strings.Join(texts, ", ")))
 	}
-	if strings.Join(got, "; ") != "overdue: late; today: today; upcoming: soon, later" || groups[0].Title != "Overdue" {
-		t.Fatalf("sections %s", raw)
+	day := func(d int) string { return now.AddDate(0, 0, d).Format(time.DateOnly) }
+	want := []string{
+		day(-3) + " overdue true: late", day(0) + " today false: today",
+		day(2) + " upcoming false: soon, also soon", day(9) + " upcoming false: later",
+	}
+	if !slices.Equal(got, want) || groups[1].Title != "Today" || !groups[0].Todos[0].Overdue || groups[1].Todos[0].Overdue {
+		t.Fatalf("days %s", raw)
 	}
 }
 

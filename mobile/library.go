@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	libtree "leaflet/internal/library"
@@ -485,25 +487,25 @@ type todo struct {
 	Due       int64  `json:"due"`
 	Timed     bool   `json:"timed"`
 	Owner     string `json:"owner,omitempty"`
+	Overdue   bool   `json:"overdue,omitempty"`
 }
 
+// todoGroup is a day's to-dos, or those with no date.
 type todoGroup struct {
+	// Key names the day to remember it by, as 2026-11-20, or "no-date".
+	Key string `json:"key"`
+	// Section is where the day falls: "overdue" for a day gone by, "today", "upcoming", or
+	// "no_date".
 	Section string `json:"section"`
 	Title   string `json:"title"`
-	Todos   []todo `json:"todos"`
+	// Folded tells whether the day shows only its header until it is opened.
+	Folded bool   `json:"folded,omitempty"`
+	Todos  []todo `json:"todos"`
 }
 
-var todoSections = [...]struct {
-	key   string
-	title func() string
-}{
-	doc.TodoOverdue:  {"overdue", locales.TodosSectionOverdue},
-	doc.TodoToday:    {"today", locales.CommonToday},
-	doc.TodoUpcoming: {"upcoming", locales.TodosSectionUpcoming},
-	doc.TodoNoDate:   {"no_date", locales.TodosSectionNoDate},
-}
+var todoSections = [...]string{doc.TodoOverdue: "overdue", doc.TodoToday: "today", doc.TodoUpcoming: "upcoming", doc.TodoNoDate: "no_date"}
 
-// Todos lists the to-dos in their sections, each due at its time in zone, the zone the device is
+// Todos lists the to-dos a day at a time, each due at its time in zone, the zone the device is
 // in now, or one offset seconds east of UTC: a due is a time on the clock wherever the device
 // is, and the core keeps the zone it opened in.
 func (c *Core) Todos(zone string, offset int) (_ string, err error) {
@@ -518,20 +520,25 @@ func (c *Core) todosAt(now time.Time, loc *time.Location) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The dues are read in the zone the core opened in, so the sections are made at the time
+	// The dues are read in the zone the core opened in, so the days are made at the time
 	// there that the device's clock shows.
 	clock := core.OnClock(now.In(loc), time.Local)
+	m := locales.In(i18n.Locale())
 	out := []todoGroup{}
-	for _, g := range doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, clock) {
-		section := todoSections[g.Section]
-		group := todoGroup{Section: section.key, Title: section.title(), Todos: make([]todo, 0, len(g.Todos))}
-		for _, t := range g.Todos {
+	for _, d := range doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, clock) {
+		title := m.TodosSectionNoDate()
+		if !d.Day.IsZero() {
+			title = doc.DueLabel(m, d.Day, false, clock)
+		}
+		group := todoGroup{Key: d.Key(), Section: todoSections[d.Section], Title: title, Folded: d.Folded(), Todos: make([]todo, 0, len(d.Todos))}
+		for _, t := range d.Todos {
 			due := t.Due
 			if !due.IsZero() {
 				due = core.OnClock(due, loc)
 			}
 			group.Todos = append(group.Todos, todo{
 				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(due), Timed: t.Timed, Owner: t.Owner,
+				Overdue: !t.Due.IsZero() && doc.Overdue(t.Due, t.Timed, clock),
 			})
 		}
 		out = append(out, group)

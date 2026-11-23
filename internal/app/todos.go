@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,39 +17,72 @@ import (
 	"leaflet/locales"
 )
 
+type todoDay = doc.TodoDay[store.PageTodo]
+
+// todoRow is a row of the To-dos tab: a day's header, or a to-do.
 type todoRow struct {
-	header string
-	todo   store.PageTodo
+	day  *todoDay
+	open bool
+	todo store.PageTodo
 }
 
-func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
-	groups := doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
+// todoRows lists the to-dos a day at a time, each day under its header with only its header
+// shown while it is folded; open tells whether a day shows its to-dos. To-dos all with no date
+// are listed with no header.
+func todoRows(todos []store.PageTodo, now time.Time, open func(todoDay) bool) []todoRow {
+	days := doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
 	var out []todoRow
-	for _, g := range groups {
-		if len(groups) > 1 {
-			out = append(out, todoRow{header: todoHeaders[g.Section]})
+	for i := range days {
+		d := &days[i]
+		shown := true
+		if len(days) > 1 || d.Section != doc.TodoNoDate {
+			shown = open(*d)
+			out = append(out, todoRow{day: d, open: shown})
 		}
-		for _, t := range g.Todos {
-			out = append(out, todoRow{todo: t})
+		if shown {
+			for _, t := range d.Todos {
+				out = append(out, todoRow{todo: t})
+			}
 		}
 	}
 	return out
 }
 
-var todoHeaders = [...]string{doc.TodoOverdue: "Overdue", doc.TodoToday: "Today", doc.TodoUpcoming: "Upcoming", doc.TodoNoDate: "No date"}
-
-func todoSection(header string) string {
-	switch header {
-	case "Overdue":
-		return locales.TodosSectionOverdue()
-	case "Today":
-		return locales.CommonToday()
-	case "Upcoming":
-		return locales.TodosSectionUpcoming()
-	case "No date":
+// todoDayTitle names a day of to-dos, as Today, Tomorrow or Nov 20.
+func todoDayTitle(d todoDay, now time.Time) string {
+	if d.Day.IsZero() {
 		return locales.TodosSectionNoDate()
 	}
-	return header
+	return editor.DueLabel(d.Day, false, now)
+}
+
+// todoDayOpen tells whether a day shows its to-dos: as it was last left, or else open unless it
+// has gone by.
+func (a *App) todoDayOpen(d todoDay) bool {
+	if open, ok := a.settings.TodoDaysOpen[d.Key()]; ok {
+		return open
+	}
+	return !d.Folded()
+}
+
+// foldTodoDay opens or folds a day of to-dos and keeps that for the next launch, forgetting the
+// days no longer listed.
+func (a *App) foldTodoDay(key string, open bool) {
+	kept := map[string]bool{}
+	for _, d := range doc.TodoDays(a.todoList(), func(t store.PageTodo) doc.Todo { return t.Todo }, time.Now()) {
+		k := d.Key()
+		if k == key {
+			if open == d.Folded() {
+				kept[k] = open
+			}
+			continue
+		}
+		if v, ok := a.settings.TodoDaysOpen[k]; ok {
+			kept[k] = v
+		}
+	}
+	a.settings.TodoDaysOpen = kept
+	a.saveSettings()
 }
 
 func (a *App) todoList() []store.PageTodo {
@@ -64,7 +98,8 @@ func (a *App) todoList() []store.PageTodo {
 
 func (a *App) todosList(c *ui.Context) {
 	pal := theme.Of(c)
-	rows := todoRows(a.todoList(), time.Now())
+	now := time.Now()
+	rows := todoRows(a.todoList(), now, a.todoDayOpen)
 	if len(rows) == 0 {
 		ui.Column(c).Grow(1).Padding(2, 18).Gap(4).Children(func() {
 			ui.Text(c, locales.TodosEmptyTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text)
@@ -75,29 +110,56 @@ func (a *App) todosList(c *ui.Context) {
 	opaque := opaqueSidebar(c, pal)
 	a.todoState.Header = nil
 	if opaque {
-		a.todoState.Header = func(i int) bool { return rows[i].header != "" }
+		a.todoState.Header = func(i int) bool { return rows[i].day != nil }
 	}
 	a.todoState.Key = func(i int) any {
-		if rows[i].header != "" {
-			return "section:" + rows[i].header
+		if d := rows[i].day; d != nil {
+			return "day:" + d.Key()
 		}
 		return rows[i].todo.PageID + "#" + rows[i].todo.BlockID
 	}
 	ui.List(c, &a.todoState, len(rows), func(i int) {
 		r := rows[i]
-		if r.header != "" {
-			h := ui.Text(c, todoSection(r.header)).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).
-				Padding(6, 8, 4).FillWidth().Radius(6)
-			if opaque {
-				h.Background(pal.Sidebar)
-			}
+		if r.day != nil {
+			a.todoDayHeader(c, *r.day, r.open, opaque, now, pal)
 			return
 		}
-		a.todoRowView(c, r.todo, pal)
+		a.todoRowView(c, r.todo, now, pal)
 	}).Grow(1).Padding(0, 8, 12)
 }
 
-func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
+// todoDayHeader is a day's header, with how many to-dos are left on it: clicking it opens or
+// folds the day.
+func (a *App) todoDayHeader(c *ui.Context, d todoDay, open, opaque bool, now time.Time, pal *theme.Palette) {
+	title := todoDayTitle(d, now)
+	h := ui.ButtonBase(c.Key("day:"+d.Key())).Label(title).Expanded(open).Padding(6, 8, 4).Gap(6).Radius(6).
+		AlignItems(ui.Center).Justify(ui.Start).FillWidth()
+	switch {
+	case opaque && h.Hovered():
+		h.Background(pal.Sidebar.Mix(pal.Text, 0.05))
+	case h.Hovered():
+		h.Background(pal.Hover)
+	case opaque:
+		h.Background(pal.Sidebar)
+	}
+	h.Children(func() {
+		turn := float32(0)
+		if open {
+			turn = 90
+		}
+		ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.TextMuted).Rotate(turn).Shrink(0)
+		ui.Text(c, title).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).SingleLine().Grow(1).Shrink(1)
+		count := ui.Text(c, strconv.Itoa(len(d.Todos))).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted).Shrink(0)
+		if d.Section == doc.TodoOverdue {
+			count.TextColor(pal.DangerText)
+		}
+	})
+	key := d.Key()
+	h.OnClick(func() { a.foldTodoDay(key, !open) })
+}
+
+// todoRowView is a to-do under its day, with its time of day if it has one.
+func (a *App) todoRowView(c *ui.Context, t store.PageTodo, now time.Time, pal *theme.Palette) {
 	row := ui.ButtonBase(c.Key("todo:"+t.PageID+"#"+t.BlockID)).Padding(5, 8).Gap(8).Radius(6).AlignItems(ui.Start).Justify(ui.Start).FillWidth()
 	if row.Hovered() {
 		row.Background(pal.Hover)
@@ -119,9 +181,8 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 			}
 			ui.Text(c, sub).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 		})
-		if !t.Due.IsZero() {
-			now := time.Now()
-			due := ui.Badge(c, editor.DueLabel(t.Due, t.Timed, now)).FontSize(11).Shrink(0)
+		if t.Timed && !t.Due.IsZero() {
+			due := ui.Badge(c, locales.TodosDueTime(t.Due)).FontSize(11).Shrink(0)
 			if editor.Overdue(t.Due, t.Timed, now) {
 				due.Background(pal.DangerBg).TextColor(pal.DangerText)
 			}

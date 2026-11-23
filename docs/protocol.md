@@ -138,6 +138,21 @@ rewrites with nested blocks of its own, a nested block the client never saw,
 as someone added it since, or one changed since it saw it, whatever the
 block's version; a rewrite that keeps the nested blocks, as one of a list
 item's text does, replaces nothing of them.
+It also has `upload_files`: `page_id`, `files: [{path, alt?, position?}]`,
+at most 100, returning `{ inserted_ids }`. It copies each file on this
+computer into the page as the app's Upload does (`store.AddFile`, its
+`files` row and upload queued), as a picture or a file card, each after the
+one before it, the first at the end of the page, or where its `position`
+says; the edit then goes as `insert_blocks`' does, with its snapshot. The
+files are copied once the page takes every position and taken off again
+when the page is not saved. Agents add pictures, audio, video and PDFs only,
+and none to a page other people have or with a public link, as this
+device's record or the app's last read of the other devices' leases says,
+nor move a page into one. With pages syncing and no read of the leases from
+the last 5 minutes, they add no file, but still move pages, which only
+shows a title. `leaflet upload`, the user's own command, adds any file, as
+the app does. `replace_block` keeps an uploaded
+picture, its `alt` changed, given the `file://` url `read_page` shows.
 
 ### BlockSpec (what a model writes)
 
@@ -784,7 +799,18 @@ other devices, which ask the server as they start, read none of the user's
 other pages into the page. A change of
 it alone leaves the page's `updated_at` as it was, and pages sync without
 it. Signed out, syncing through iCloud Drive, the app says so in its
-device.json instead (§8).
+device.json instead (§8). Whichever way pages sync, or with none, the app
+also keeps the page it serves in its own database (`key_values`
+`public_link.served`, `<page id>|<ms>`), renewed every 15 minutes for an
+hour and cleared as the link stops, for `leaflet mcp`, which runs in a
+process of its own and never asks the server. For it too, the desktop app
+reads the leases it can see, every 2 minutes while pages sync and as the
+way they sync changes, as a run does as it starts (signed in, the pages
+with `public_link_until=gt.now`; through iCloud Drive, the other devices'
+leases, 15 minutes' drift added), into `public_link.elsewhere`
+(`{space, checked, pages: {id: ms}}`). A read that fails leaves the last
+one, which counts for 5 minutes from when it was made, and then says
+nothing.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,

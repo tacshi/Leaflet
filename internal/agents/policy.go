@@ -150,6 +150,75 @@ func (h *Hub) lastLease(pageID string) bool {
 
 const iCloudLinkDrift = 15 * time.Minute
 
+// WatchPublicLinks keeps in the database the public links the user's other
+// devices serve, for the agents outside the app, which run in processes of
+// their own and cannot ask the server: read as a run reads them as it starts,
+// from the server signed in or from iCloud Drive, every
+// store.PublicLinksEvery and as KickPublicLinks asks, while can says pages
+// sync. It returns as ctx ends.
+func (h *Hub) WatchPublicLinks(ctx context.Context, can func() bool) {
+	for {
+		if can == nil || can() {
+			if err := h.recordPublicLinks(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("public links: %v", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.linksKick:
+		case <-time.After(store.PublicLinksEvery):
+		}
+	}
+}
+
+// KickPublicLinks has WatchPublicLinks read the public links again now, as
+// the way pages sync changes.
+func (h *Hub) KickPublicLinks() {
+	if h == nil {
+		return
+	}
+	select {
+	case h.linksKick <- struct{}{}:
+	default:
+	}
+}
+
+func (h *Hub) recordPublicLinks(ctx context.Context) error {
+	links := map[string]time.Time{}
+	switch {
+	case h.be != nil && h.be.SignedIn():
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		rows, err := h.be.Select(ctx, "pages", remote.Query{Select: "id,public_link_until",
+			Filters: []string{remote.Gt("public_link_until", "now")}})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			id, _ := r["id"].(string)
+			s, _ := r["public_link_until"].(string)
+			// The server lists a page only while its lease is to come.
+			until, err := time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				until = time.Now().Add(store.ServedLinkLease)
+			}
+			if id != "" {
+				links[id] = until
+			}
+		}
+	case h.ICloudLinks != nil:
+		leases, err := h.ICloudLinks()
+		if err != nil {
+			return err
+		}
+		for id, until := range leases {
+			links[id] = until.Add(iCloudLinkDrift)
+		}
+	}
+	return h.st.KeepPublicLinks(links)
+}
+
 func (h *Hub) iCloudLinked() (linked map[string]bool, known bool) {
 	linked = map[string]bool{}
 	if h.ICloudLinks == nil {

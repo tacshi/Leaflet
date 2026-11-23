@@ -205,6 +205,19 @@ func fileUpload(dir string, f File) map[string]any {
 // other devices and people read.
 func FileURL(id, name string) string { return "file://" + id + "/" + name }
 
+// FileBlock is the block that puts a file the app keeps in a page: a picture
+// for an image, a file card for any other file.
+func FileBlock(f File) *doc.Node {
+	if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
+		return &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
+			"url": FileURL(f.ID, f.Name), "align": "center", "alt": f.Name, "file_id": f.ID,
+		}}
+	}
+	return &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
+		"url": FileURL(f.ID, f.Name), "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
+	}}
+}
+
 func fileName(name string) string {
 	name = filepath.Base(name)
 	if name == "." || name == ".." || name == string(filepath.Separator) {

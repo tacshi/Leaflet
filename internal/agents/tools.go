@@ -75,12 +75,12 @@ var blockSchema = map[string]any{
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer", "minimum": 120, "maximum": 1200}},
 			"required":   []string{"html"}},
-		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}, "required": []string{"url"}},
+		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string", "description": "The picture's web link, http or https, or the url read_page shows for it, to keep the picture."}, "alt": map[string]any{"type": "string"}}, "required": []string{"url"}},
 		"video": map[string]any{"type": "object", "description": "A video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a video file, that plays in the page.",
 			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's link on its site, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"},
 				"notes": map[string]any{"type": "string", "description": "Plain-text notes shown under the video, a line each, no Markdown: a line that starts with a time, as 0:00 or 1:02:03, plays the video from there when clicked. For its summary, chapters or key moments."}},
 			"required": []string{"url"}},
-		"file": map[string]any{"type": "object", "description": "For replace_block on a file block, keeping the file itself: its notes. No tool makes a new file.",
+		"file": map[string]any{"type": "object", "description": "For replace_block on a file block, keeping the file itself: its notes. insert_blocks makes no file block.",
 			"properties": map[string]any{"notes": map[string]any{"type": "string", "description": "Plain-text notes shown under the file, a line each, no Markdown: for an audio or video file, a line that starts with a time, as 0:00 or 1:02:03, plays it from there when clicked."}}},
 	},
 	"required": []string{"type"},
@@ -1008,7 +1008,7 @@ func given(raw any) map[string]any {
 	return set
 }
 
-func (x *Executor) position(raw any) (doc.Position, error) {
+func (x *Executor) Position(raw any) (doc.Position, error) {
 	if s, ok := raw.(string); ok && (s == "start" || s == "end") {
 		return doc.Position{At: s}, nil
 	}
@@ -1074,7 +1074,7 @@ func (x *Executor) emit(op doc.Op, summary string, ids []string) error {
 }
 
 func (x *Executor) insert(args map[string]any) (map[string]any, error) {
-	p, err := x.position(args["position"])
+	p, err := x.Position(args["position"])
 	if err != nil {
 		return nil, err
 	}
@@ -1085,6 +1085,16 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 	if err := x.checkURLs(nodes); err != nil {
 		return nil, err
 	}
+	ids, err := x.Insert(p, nodes)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"inserted_ids": ids}, nil
+}
+
+// Insert puts nodes at p as insert_blocks puts the blocks it makes: for the
+// blocks a caller makes itself, as the files an agent outside the app adds.
+func (x *Executor) Insert(p doc.Position, nodes []*doc.Node) ([]string, error) {
 	if err := x.room(nodes); err != nil {
 		return nil, err
 	}
@@ -1097,7 +1107,7 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	x.written += countNodes(nodes)
-	return map[string]any{"inserted_ids": ids}, nil
+	return ids, nil
 }
 
 func (x *Executor) write(args map[string]any) (map[string]any, error) {
@@ -1170,6 +1180,14 @@ func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, 
 		}
 		return n, nil
 	}
+	if spec["type"] == "image" {
+		if n, ok := doc.KeptImage(prev, spec); ok {
+			if err := x.checkURLs([]*doc.Node{n}); err != nil {
+				return nil, err
+			}
+			return n, nil
+		}
+	}
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -1197,7 +1215,7 @@ func (x *Executor) move(args map[string]any) (map[string]any, error) {
 	if !x.has(id) {
 		return nil, noBlock(id)
 	}
-	p, err := x.position(args["position"])
+	p, err := x.Position(args["position"])
 	if err != nil {
 		return nil, err
 	}

@@ -109,7 +109,7 @@ func (x *Executor) newDraft(raw any, replace bool) (*draft, error) {
 		d.into, d.prev = id, n.Clone()
 		return d, nil
 	}
-	pos, err := x.position(raw)
+	pos, err := x.Position(raw)
 	if err != nil {
 		return nil, err
 	}

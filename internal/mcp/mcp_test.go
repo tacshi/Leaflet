@@ -97,7 +97,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "current_page", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder", "move_folder"} {
+	for _, n := range []string{"list_pages", "search_pages", "current_page", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder", "move_folder", "upload_files"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}

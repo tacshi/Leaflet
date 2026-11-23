@@ -976,3 +976,35 @@ func TestPubFilesKeepTheirAddresses(t *testing.T) {
 		t.Errorf("the address the minutes had serves %q", w.Body)
 	}
 }
+
+func TestPublicLinkIsRecordedForAgentsOutsideTheApp(t *testing.T) {
+	a, p, _, pg := pubTest(t)
+	if a.st.ServesLink(pg.ID) {
+		t.Fatal("recorded before the link is leased")
+	}
+	// With no account and no iCloud sync, nothing else knows of the link.
+	a.leasePub()
+	a.leasePub()
+	if !a.st.ServesLink(pg.ID) || p.lease != nil {
+		t.Fatalf("the link served on this device alone is not recorded")
+	}
+	a.pubFailed(p, "gone")
+	if a.st.ServesLink(pg.ID) {
+		t.Error("a failed link is still recorded")
+	}
+	a.leasePub()
+	if a.st.ServesLink(pg.ID) {
+		t.Error("a failed link is recorded again")
+	}
+
+	next := &pubLink{page: pg.ID, token: "tok2", state: "starting", threads: map[string]bool{}, posts: map[string][]time.Time{}}
+	a.setPub(next)
+	a.leasePub()
+	if !a.st.ServesLink(pg.ID) {
+		t.Error("a link starting again is not recorded")
+	}
+	a.stopPub()
+	if a.st.ServesLink(pg.ID) {
+		t.Error("a stopped link is still recorded")
+	}
+}

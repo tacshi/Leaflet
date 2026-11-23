@@ -104,6 +104,7 @@ it; a folder by its name or ID.`,
 			"  " + name + ` new "Meeting notes" --folder Work --stdin < notes.md`,
 			"  make test 2>&1 | " + name + ` append "CI log"`,
 			"  " + name + " append Inbox call the dentist",
+			"  " + name + " upload Trip ~/Pictures/beach.jpg ~/Documents/tickets.pdf",
 			"  " + name + " tag Roadmap work q4",
 		}, "\n"),
 		Version:       o.Version,
@@ -184,6 +185,22 @@ what is piped in is added, as --stdin asks for by name. After the page, --json,
 	}
 	appendTo.Flags().SetInterspersed(false)
 	appendTo.Flags().BoolVar(&r.stdin, "stdin", false, "add what is piped in")
+	upload := &cobra.Command{
+		Use:   "upload PAGE FILE...",
+		Short: "Add files to the end of a page, as the app's Upload does",
+		Long: `Add files to the end of a page, in the order given, as the app's Upload
+does: a picture shows in the page, and any other file as a card that opens
+it, audio and video playing there. The page keeps a copy of each file,
+which syncs like the rest of it.`,
+		Args: cobra.MinimumNArgs(2),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+			return r.completePage(cmd, args, toComplete)
+		},
+		RunE: r.with(r.upload),
+	}
 	rename := &cobra.Command{
 		Use:               "rename PAGE TITLE",
 		Short:             "Change a page's title",
@@ -264,7 +281,7 @@ given. --clear takes them all off.`,
 		},
 		RunE: r.with(r.renameFolder),
 	})
-	for _, c := range []*cobra.Command{ls, search, current, cat, newPage, appendTo, rename, mv, tag, folders} {
+	for _, c := range []*cobra.Command{ls, search, current, cat, newPage, appendTo, upload, rename, mv, tag, folders} {
 		c.GroupID = "pages"
 		r.root.AddCommand(c)
 	}
@@ -897,6 +914,39 @@ func renumbered(md string) string {
 		at += len(line)
 	}
 	return b.String() + md[at:]
+}
+
+func (r *runner) upload(args []string) error {
+	p, err := r.page(args[0])
+	if err != nil {
+		return err
+	}
+	files := []any{}
+	for _, path := range args[1:] {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		files = append(files, map[string]any{"path": abs})
+	}
+	ids := []string{}
+	for part := range slices.Chunk(files, mcp.MaxUploads) {
+		out, err := r.call("upload_files", map[string]any{"page_id": p.ID, "files": part})
+		if err != nil {
+			if len(ids) > 0 {
+				err = fmt.Errorf("%d of %d files added: %w", len(ids), len(files), err)
+			}
+			return err
+		}
+		var added struct {
+			IDs []string `json:"inserted_ids"`
+		}
+		if err := decode(out, &added); err != nil {
+			return err
+		}
+		ids = append(ids, added.IDs...)
+	}
+	return r.changed(map[string]any{"inserted_ids": ids}, nil)
 }
 
 func (r *runner) rename(args []string) error {

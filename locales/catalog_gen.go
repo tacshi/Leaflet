@@ -15573,6 +15573,112 @@ func (msgs Messages) ExternalCommandRemoveFailed(command string, error string) s
 	return Catalog.Format(msgs.locale, "externalCommandRemoveFailed", map[string]any{"command": command, "error": error})
 }
 
+// ExternalLiveEdits says "Show their edits as they happen"
+// in the language the app shows.
+//
+// Settings › External agents: a switch, on at first, for the small window
+// in a corner of the screen that shows the page an AI app outside Leaflet
+// is changing, as it changes it.
+func ExternalLiveEdits() string { return In(i18n.Locale()).ExternalLiveEdits() }
+
+// ExternalLiveEdits says "Show their edits as they happen"
+// in the language of msgs.
+//
+// Settings › External agents: a switch, on at first, for the small window
+// in a corner of the screen that shows the page an AI app outside Leaflet
+// is changing, as it changes it.
+func (msgs Messages) ExternalLiveEdits() string {
+	return Catalog.Format(msgs.locale, "externalLiveEdits", nil)
+}
+
+// ExternalLiveEditsDesc says "While Leaflet is open, a small window in a corner of the screen shows the part of a page an AI app is changing, as it…"
+// in the language the app shows.
+//
+// Settings › External agents: under externalLiveEdits, what the switch
+// does.
+func ExternalLiveEditsDesc() string { return In(i18n.Locale()).ExternalLiveEditsDesc() }
+
+// ExternalLiveEditsDesc says "While Leaflet is open, a small window in a corner of the screen shows the part of a page an AI app is changing, as it…"
+// in the language of msgs.
+//
+// Settings › External agents: under externalLiveEdits, what the switch
+// does.
+func (msgs Messages) ExternalLiveEditsDesc() string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsDesc", nil)
+}
+
+// ExternalLiveEditsTitle says "Live edits"
+// in the language the app shows.
+//
+// The name of the small window in a corner of the screen that shows an AI
+// app's edits as it makes them, for screen readers and the system's window
+// lists.
+func ExternalLiveEditsTitle() string { return In(i18n.Locale()).ExternalLiveEditsTitle() }
+
+// ExternalLiveEditsTitle says "Live edits"
+// in the language of msgs.
+//
+// The name of the small window in a corner of the screen that shows an AI
+// app's edits as it makes them, for screen readers and the system's window
+// lists.
+func (msgs Messages) ExternalLiveEditsTitle() string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsTitle", nil)
+}
+
+// ExternalLiveEditsEditing says "{agent} is editing"
+// in the language the app shows.
+//
+// The small window in a corner of the screen, above the page's title, while
+// an AI app outside Leaflet changes the page; agent is its name.
+func ExternalLiveEditsEditing(agent string) string {
+	return In(i18n.Locale()).ExternalLiveEditsEditing(agent)
+}
+
+// ExternalLiveEditsEditing says "{agent} is editing"
+// in the language of msgs.
+//
+// The small window in a corner of the screen, above the page's title, while
+// an AI app outside Leaflet changes the page; agent is its name.
+func (msgs Messages) ExternalLiveEditsEditing(agent string) string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsEditing", map[string]any{"agent": agent})
+}
+
+// ExternalLiveEditsEdited says "{agent} edited"
+// in the language the app shows.
+//
+// The small window in a corner of the screen, above the page's title, once
+// the AI app stopped changing the page for a moment; agent is its name.
+func ExternalLiveEditsEdited(agent string) string {
+	return In(i18n.Locale()).ExternalLiveEditsEdited(agent)
+}
+
+// ExternalLiveEditsEdited says "{agent} edited"
+// in the language of msgs.
+//
+// The small window in a corner of the screen, above the page's title, once
+// the AI app stopped changing the page for a moment; agent is its name.
+func (msgs Messages) ExternalLiveEditsEdited(agent string) string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsEdited", map[string]any{"agent": agent})
+}
+
+// ExternalLiveEditsOpen says "Open in Leaflet"
+// in the language the app shows.
+//
+// The small window in a corner of the screen that shows an AI app's edits:
+// a button that opens the page in Leaflet's window, at the block it
+// changed.
+func ExternalLiveEditsOpen() string { return In(i18n.Locale()).ExternalLiveEditsOpen() }
+
+// ExternalLiveEditsOpen says "Open in Leaflet"
+// in the language of msgs.
+//
+// The small window in a corner of the screen that shows an AI app's edits:
+// a button that opens the page in Leaflet's window, at the block it
+// changed.
+func (msgs Messages) ExternalLiveEditsOpen() string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsOpen", nil)
+}
+
 // SigninTitle says "Sync with Supabase"
 // in the language the app shows.
 //

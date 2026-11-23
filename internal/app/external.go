@@ -63,6 +63,18 @@ func (a *App) externalSettings(c *ui.Context) {
 			}
 		})
 	}
+	card(c, "live-edits", func() {
+		on := a.settings.LiveAgentEdits
+		settingRow(c, "live", locales.ExternalLiveEdits(), locales.ExternalLiveEditsDesc(), true, func() {
+			if ui.Switch(c.Key("live"), &on).Label(locales.ExternalLiveEdits()).Changed() {
+				a.settings.LiveAgentEdits = on
+				a.saveSettings()
+				if !on {
+					a.hideWatch()
+				}
+			}
+		})
+	})
 	ui.Collapsible(c.Key("by-hand"), locales.ExternalByHand(), &a.external.byHand, func() {
 		a.setupByHand(c, exe, dir)
 	})

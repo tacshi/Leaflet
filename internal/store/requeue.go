@@ -77,7 +77,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 		if err := requeueRow(tx, "files", f.ID, old, adopting(FileToRemote(f), f.UpdatedAt), "file", f.PageID); err != nil {
 			return err
 		}
-		if !f.DeletedAt.IsZero() || !OnDevice(f.LocalPath) {
+		if f.Gone() || !OnDevice(f.LocalPath) {
 			return nil
 		}
 		return queue(tx, "storage", "files/"+f.ID, fileUpload(s.Dir, f), "file waiting to upload", f.PageID)
@@ -85,7 +85,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 	if err != nil || f.ID == "" {
 		return err
 	}
-	if !f.DeletedAt.IsZero() {
+	if f.Gone() {
 		s.removeCopy(f.ID)
 	}
 	s.Notify("outbox", f.PageID)
@@ -93,7 +93,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 }
 
 func requeuedKey(f File, spaceID string) string {
-	if f.StoragePath == "" || f.DeletedAt.IsZero() && OnDevice(f.LocalPath) {
+	if f.StoragePath == "" || !f.Gone() && OnDevice(f.LocalPath) {
 		return StorageKey(spaceID, f.ID, f.Name)
 	}
 	return spaceID + "/" + f.ID + "/" + path.Base(f.StoragePath)

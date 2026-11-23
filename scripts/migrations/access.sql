@@ -74,6 +74,7 @@ begin
       ('page_permissions', 'authenticated', 'DELETE,SELECT'),
       ('pages', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('profiles', 'authenticated', 'INSERT,SELECT,UPDATE'),
+      ('purged_objects', 'authenticated', 'SELECT'),
       ('recordings', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('spaces', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE')
     union all
@@ -109,7 +110,8 @@ begin
       'can_view_image_path',
       'can_view_page',
       'can_write_file_path', 'claim_starter_pages',
-      'decline_page_invite', 'has_space_access', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
+      'decline_page_invite', 'has_space_access', 'is_space_owner', 'lease_public_link', 'may_remove_purged',
+      'owns_recording_path',
       'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_role',
       'share_page', 'shares_page_with', 'sign_out_device', 'tags_in_bounds',
       'unshare_page'
@@ -1730,6 +1732,196 @@ begin
   end if;
 end;
 $$;
+
+-- The bin. A file put in it keeps its row and object, to be restored,
+-- and one deleted without it, as by an app from before the bin, keeps
+-- nothing, as before; a restore takes it out of the bin. Deleted for good,
+-- a file keeps nothing, comes back no more, and takes no other change.
+do $$
+declare
+  v_kept constant uuid := 'fc000000-0000-0000-0000-0000000000f1';
+  v_old constant uuid := 'fc000000-0000-0000-0000-0000000000f2';
+  v_space uuid;
+  r record;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.files (id, space_id, name, storage_path, mime_type, size_bytes) values
+    (v_kept, v_space, 'kept.txt', v_space || '/' || v_kept || '/kept.txt', 'text/plain', 4),
+    (v_old, v_space, 'old.txt', v_space || '/' || v_old || '/old.txt', 'text/plain', 3);
+  update public.files set deleted_at = now(), kept = true where id = v_kept;
+  update public.files set deleted_at = now() where id = v_old;
+  select * into r from public.files where id = v_kept;
+  if r.name <> 'kept.txt' or r.storage_path is null or r.size_bytes is null or not r.kept then
+    raise exception 'a file put in the bin kept "%" at %, kept %', r.name, r.storage_path, r.kept;
+  end if;
+  select * into r from public.files where id = v_old;
+  if r.name <> '' or r.storage_path is not null or r.kept then
+    raise exception 'a file deleted without the bin kept "%" at %', r.name, r.storage_path;
+  end if;
+  update public.files set deleted_at = null where id = v_kept;
+  select * into r from public.files where id = v_kept;
+  if r.deleted_at is not null or r.kept is not null or r.name <> 'kept.txt' then
+    raise exception 'a file restored is "%", kept %', r.name, r.kept;
+  end if;
+
+  update public.files set deleted_at = now(), kept = true where id = v_kept;
+  update public.files set purged_at = now() where id = v_kept;
+  select * into r from public.files where id = v_kept;
+  if r.purged_at is null or r.deleted_at is null or r.name <> '' or r.storage_path is not null then
+    raise exception 'a file deleted for good kept "%" at %', r.name, r.storage_path;
+  end if;
+  perform pg_temp.refused(format('update public.files set deleted_at = null where id = %L', v_kept), 'file_purged');
+  perform pg_temp.refused(format('update public.files set purged_at = null where id = %L', v_kept), 'file_purged');
+  update public.files set name = 'back.txt' where id = v_kept;
+  if (select name from public.files where id = v_kept) <> '' then
+    raise exception 'a file deleted for good took a change';
+  end if;
+end;
+$$;
+
+-- A page deleted for good, by its space's owner only, keeps no title,
+-- icon or tags, and what was on it goes, but for its shares: those it was
+-- shared with read its deletion, and nothing else of it. It comes back no
+-- more, and any other change of its row leaves it as it was.
+do $$
+declare
+  v_root constant uuid := 'fc000000-0000-0000-0000-000000000001';
+  v_sub constant uuid := 'fc000000-0000-0000-0000-000000000002';
+  v_file constant uuid := 'fc000000-0000-0000-0000-0000000000f3';
+  v_space uuid;
+  r record;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title, icon, tags) values (v_root, v_space, 'Secret', 'x', '{work}');
+  insert into public.pages (id, space_id, parent_id, title) values (v_sub, v_space, v_root, 'Under it');
+  insert into public.page_content (page_id) values (v_root);
+  insert into public.page_history (page_id, content, reason, created_by) values (v_root, '{}', 'manual', auth.uid());
+  insert into public.comments (page_id, block_id, body) values (v_root, 'b1', 'A note');
+  insert into public.files (id, space_id, page_id, name, storage_path, mime_type, size_bytes)
+  values (v_file, v_space, v_root, 'on.txt', v_space || '/' || v_file || '/on.txt', 'text/plain', 2);
+  perform public.share_page(v_root, 'editor@example.com', 'editor');
+  perform public.share_page(v_root, 'nobody@example.com', 'viewer');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_root);
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set deleted_at = now() where id in (v_root, v_sub);
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform pg_temp.refused(format('update public.pages set purged_at = now() where id = %L', v_root), 'forbidden_purge');
+
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set purged_at = now() where id in (v_root, v_sub);
+  select * into r from public.pages where id = v_root;
+  if r.purged_at is null or r.deleted_at is null or r.title <> '' or r.icon is not null or r.tags <> '{}' then
+    raise exception 'a page deleted for good kept "%", %, %', r.title, r.icon, r.tags;
+  end if;
+  perform pg_temp.refused(format('update public.pages set deleted_at = null where id = %L', v_root), 'forbidden_restore');
+  perform pg_temp.refused(format('update public.pages set purged_at = null where id = %L', v_root), 'page_purged');
+  update public.pages set title = 'Back' where id = v_root;
+  if (select title from public.pages where id = v_root) <> '' then
+    raise exception 'a page deleted for good took a change';
+  end if;
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  if pg_temp.seen(format('select 1 from public.pages where id in (%L, %L) and purged_at is not null', v_root, v_sub)) <> 2 then
+    raise exception 'the editor does not read the deletion of a page shared with them';
+  end if;
+  if public.can_view_page(v_root) or public.can_edit_page(v_sub) then
+    raise exception 'the editor may still write to a page deleted for good';
+  end if;
+end;
+$$;
+
+-- What someone the page is shared with put on it, under their own space
+-- or account, its owner removes from storage once it is deleted for good,
+-- as purged_objects lists it, for them alone; the list forgets an object
+-- once it is gone, as the next page is deleted for good.
+do $$
+declare
+  v_page constant uuid := 'fc000000-0000-0000-0000-000000000003';
+  v_next constant uuid := 'fc000000-0000-0000-0000-000000000004';
+  v_file constant uuid := 'fc000000-0000-0000-0000-0000000000f4';
+  v_rec constant uuid := 'fc000000-0000-0000-0000-0000000000a4';
+  v_rec_path constant text := 'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a4.wav';
+  v_space uuid;
+  v_file_path text;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_page, v_space, 'Shared'), (v_next, v_space, 'Next');
+  perform public.share_page(v_page, 'editor@example.com', 'editor');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_page);
+  insert into public.files (id, space_id, page_id, name, storage_path)
+  select v_file, s.id, v_page, 'theirs.txt', s.id || '/' || v_file || '/theirs.txt'
+  from public.spaces s where s.owner_id = auth.uid()
+  returning storage_path into v_file_path;
+  insert into storage.objects (bucket_id, name, owner) values ('files', v_file_path, auth.uid());
+  insert into public.recordings (id, page_id, audio_path) values (v_rec, v_page, v_rec_path);
+  insert into storage.objects (bucket_id, name, owner) values ('recordings', v_rec_path, auth.uid());
+
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  delete from storage.objects where bucket_id = 'recordings' and name = v_rec_path;
+  if found then
+    raise exception 'the page''s owner removed an editor''s recording on a page not deleted for good';
+  end if;
+  update public.pages set deleted_at = now() where id = v_page;
+  update public.pages set purged_at = now() where id = v_page;
+  if pg_temp.seen('select 1 from public.purged_objects') <> 2 then
+    raise exception 'the page''s owner does not find what to remove of a page deleted for good';
+  end if;
+
+  perform pg_temp.act_as('a5000000-0000-0000-0000-000000000005');
+  if pg_temp.seen('select 1 from public.purged_objects') <> 0 then
+    raise exception 'a stranger reads what the page''s owner may remove';
+  end if;
+  delete from storage.objects where bucket_id = 'files' and name = v_file_path;
+  if found then
+    raise exception 'a stranger removed a file of a page deleted for good';
+  end if;
+
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  delete from storage.objects where bucket_id = 'files' and name = v_file_path;
+  if not found then
+    raise exception 'the page''s owner could not remove an editor''s file of a page deleted for good';
+  end if;
+  delete from storage.objects where bucket_id = 'recordings' and name = v_rec_path;
+  if not found then
+    raise exception 'the page''s owner could not remove an editor''s recording of a page deleted for good';
+  end if;
+
+  update public.pages set deleted_at = now() where id = v_next;
+  update public.pages set purged_at = now() where id = v_next;
+  if pg_temp.seen('select 1 from public.purged_objects') <> 0 then
+    raise exception 'the list keeps objects gone from storage';
+  end if;
+end;
+$$;
+
+-- What was on that page is gone, and its invitations with it, but not its
+-- shares.
+reset role;
+do $$
+declare
+  v_root constant uuid := 'fc000000-0000-0000-0000-000000000001';
+begin
+  if exists (select 1 from public.page_content where page_id = v_root)
+     or exists (select 1 from public.page_history where page_id = v_root)
+     or exists (select 1 from public.comments where page_id = v_root)
+     or exists (select 1 from public.files where page_id = v_root) then
+    raise exception 'what was on a page deleted for good is still there';
+  end if;
+  if exists (select 1 from public.page_email_invites where page_id = v_root) then
+    raise exception 'an invitation to a page deleted for good is still there';
+  end if;
+  if not exists (select 1 from public.page_permissions where page_id = v_root) then
+    raise exception 'the shares of a page deleted for good went, and its deletion with them, for those it was shared with';
+  end if;
+end;
+$$;
+set local role authenticated;
 
 -- A walk of the tree ends on a cycle, should one ever get past
 -- pages_guard: the page moved under Ideas made its parent. It stops 1,000

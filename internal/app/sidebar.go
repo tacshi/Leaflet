@@ -57,7 +57,6 @@ func (a *App) sidebar(c *ui.Context) {
 		}
 	}
 	a.sidebarFooter(c)
-	a.deleteFileAlert(c)
 }
 
 func (a *App) sidebarTab(tab int) {
@@ -466,27 +465,26 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				a.openFile(f)
 			}
 			if m.Item(locales.SidebarDeleteFile()).Danger().Chosen() {
-				a.fileToDelete = &f
+				a.trashFile(f)
 			}
 		})
 	}
 }
 
-func (a *App) deleteFileAlert(c *ui.Context) {
-	f := a.fileToDelete
-	if f == nil {
+// trashFile puts a file in the bin, with Undo.
+func (a *App) trashFile(f store.File) {
+	if err := a.st.TrashFile(f.ID); err != nil {
+		a.toast(locales.SidebarCouldNotDelete(err.Error()))
 		return
 	}
-	open := true
-	if ui.AlertDialog(c, &open, locales.SidebarDeleteFileTitle(f.Name), locales.SidebarDeleteFileMessage(),
-		locales.CommonCancel(), locales.CommonDelete()) == 1 {
-		if err := a.st.DeleteFile(*f); err != nil {
-			a.toast(locales.SidebarCouldNotDelete(err.Error()))
+	reread(&a.files, a.st.Files)
+	a.toastAction(locales.AppDeleted(f.Name), locales.CommonUndo(), func() {
+		if err := a.st.RestoreFile(f.ID); err != nil {
+			a.toast(locales.AppErrorRestore(err.Error()))
+			return
 		}
-	}
-	if !open {
-		a.fileToDelete = nil
-	}
+		reread(&a.files, a.st.Files)
+	})
 }
 
 type pageDrag struct{ id string }
@@ -923,6 +921,13 @@ func (a *App) sidebarFooter(c *ui.Context) {
 				if iconButton(c, "check-update", "circle-fading-arrow-up", locales.SidebarCheckForUpdates()).Clicked() {
 					a.findUpdate(true)
 				}
+			}
+			bin := iconButton(c, "bin", "trash", binName())
+			if a.route.Kind == "bin" {
+				bin.Background(pal.NavSelected).TextColor(pal.Text)
+			}
+			if bin.Clicked() {
+				a.toggleBin()
 			}
 			settings := iconButton(c, "settings", "settings", locales.SidebarSettings())
 			if a.settingsOpen {

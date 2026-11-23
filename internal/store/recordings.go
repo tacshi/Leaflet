@@ -60,6 +60,11 @@ func recordingIn(q querier, dir, id string) (Recording, error) {
 	return scanRecording(dir, q.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id))
 }
 
+func recordingsIn(q querier, dir, where string, args ...any) ([]Recording, error) {
+	rows, err := q.Query(`SELECT `+recordingCols+` FROM recordings WHERE `+where, args...) // #nosec G202
+	return collect(rows, err, func(sc scanner) (Recording, error) { return scanRecording(dir, sc) })
+}
+
 func (s *Store) Recordings() ([]Recording, error) {
 	rows, err := s.db.Query(`SELECT ` + recordingCols + ` FROM recordings ORDER BY created_at DESC`)
 	return collect(rows, err, func(sc scanner) (Recording, error) { return scanRecording(s.Dir, sc) })

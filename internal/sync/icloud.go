@@ -110,6 +110,14 @@ func (s *Service) cloudSteps(ctx context.Context, me string) error {
 	if err := s.compact(me); err != nil {
 		log.Printf("icloud: compact: %v", err)
 	}
+	if s.redactSoon.Load() {
+		switch whole, err := s.redactQuiet(me); {
+		case err != nil:
+			log.Printf("icloud: the logs of quiet devices: %v", err)
+		case whole:
+			s.redactSoon.Store(false)
+		}
+	}
 	return nil
 }
 
@@ -382,6 +390,9 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			if err := s.setVersion(d.e.Entity, d.e.EntityID, d.cols, d.version); err != nil {
 				return err
 			}
+			if d.e.Entity == "pages" {
+				s.dropPurgedPageFile(d.e.EntityID)
+			}
 		}
 		if c := d.content; c != nil {
 			if err := s.st.PutPeerContent(me, d.e.EntityID, c.Version, c.Content); err != nil {
@@ -414,7 +425,14 @@ func (s *Service) cloudRemove(entry *store.OutboxEntry) {
 		_ = s.st.Dequeue(e)
 		return
 	}
-	rel, err := blobPath(store.S(payload, "bucket"), store.S(payload, "path"))
+	bucket, p := store.S(payload, "bucket"), store.S(payload, "path")
+	var rel string
+	// A recording deleted before its audio_path came back has its blob under its id.
+	if recID := store.S(payload, "recording_id"); p == "" && bucket == "recordings" && recID != "" {
+		rel, err = icloud.RecordingBlobPath(recID)
+	} else {
+		rel, err = blobPath(bucket, p)
+	}
 	if err != nil {
 		_ = s.st.Dequeue(e)
 		return
@@ -534,6 +552,32 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 	}
 	return icloud.Entry{Kind: "content", PageID: pageID, Version: version},
 		&store.PeerContent{Peer: me, Version: version, Content: row.Content}, nil
+}
+
+// dropPurgedPageFile removes every device's version of a page deleted for good from the folder, once its deletion is
+// in a batch, sent or read, and has the next pass compact this device's log and those of devices gone quiet, which
+// then keep nothing that was on it: nothing of what the page was stays in iCloud Drive. A device that had not heard of
+// the deletion, and writes its version again, removes it itself once it does.
+func (s *Service) dropPurgedPageFile(pageID string) {
+	if !s.st.IsPurged(pageID) {
+		return
+	}
+	s.compactSoon.Store(true)
+	s.redactSoon.Store(true)
+	devices, err := s.folder().Devices()
+	if err != nil {
+		log.Printf("icloud: page %s: %v", pageID, err)
+		return
+	}
+	for _, d := range devices {
+		rel, err := icloud.PagePath(d, pageID)
+		if err == nil {
+			err = s.folder().Remove(rel)
+		}
+		if err != nil {
+			log.Printf("icloud: page %s of %s: %v", pageID, d, err)
+		}
+	}
 }
 
 func (s *Service) cloudUpload(ctx context.Context, entry *store.OutboxEntry) (bool, error) {

@@ -771,6 +771,9 @@ type Query struct {
 func Eq(col, v string) string   { return col + "=eq." + v }
 func Gt(col, v string) string   { return col + "=gt." + v }
 func NotNull(col string) string { return col + "=not.is.null" }
+
+// Like matches a column against a pattern, * standing for any run of characters.
+func Like(col, pattern string) string { return col + "=like." + pattern }
 func In(col string, vs []string) string {
 	quoted := make([]string, len(vs))
 	for i, v := range vs {

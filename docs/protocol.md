@@ -589,14 +589,56 @@ transcription run on the device (§4).
   owner's and each other writer's newest 50: a trigger prunes as each is
   inserted, only among the inserting writer's own, so one editor's
   snapshots never push out anyone else's.
-- Deleting a file cannot be undone, so its bytes go with it. The deleting
-  device removes its own copy (only one the app made in its data folder,
-  never the file the user added) and queues the removal of the stored
-  copy, which runs once the row with `deleted_at` has gone up: the object
-  in the `files` bucket through Storage's `DELETE /storage/v1/object/files`
-  (an object already gone counts as removed), or the blob in iCloud Drive
-  once a batch has the deletion. An upload still waiting is dropped. A
-  device that pulls a deleted file removes its copy in its data folder.
+- What the space's owner deletes waits in the bin for 30 days, to be
+  restored: a page with the pages under it deleted with it (no earlier
+  than it), or a file of the sidebar, its row with `deleted_at` and
+  `kept`, and its bytes, here and where they are stored. A file deleted
+  without `kept`, before the bin or by an app from before it, went with
+  its bytes, and is in no bin; a server without the bin knows no `kept`,
+  so a file put in the bin waits on its device until the server is
+  updated. Restoring a file clears `kept` with `deleted_at`. A file has
+  its 30 days from its deletion; a page deleted before a device first had
+  the bin has them, on that device, from then. Each device deletes for
+  good what has been in the bin 30 days, as the person can sooner, one
+  item or the whole bin: hourly, on a device that does not sync, and on
+  one that does, through either, at most hourly and only right after a
+  pull has brought every other device's changes in, so that it never
+  deletes for good, from what it knew before, a page another device has
+  restored since. Deleting for good sets `purged_at`, which stays, and
+  `deleted_at` with it, and sends them up as a change of those columns
+  with a page's `title` (empty), `icon`, `tags` and `default_template_id`
+  (none): the row stays, so the deletion reaches every device, with
+  nothing of what it was. Only a page of the space is deleted for good: a
+  page of someone else's space is its owner's to. The device takes
+  everything on such a page off itself (content, history, comments,
+  recordings, files, conflicts, what of them waits to go up, and the
+  copies in its data folder) and queues the removal of the stored copies
+  of its files and recordings, as for a file deleted for good, those that
+  people it was shared with put there too, which the server lists for it
+  as the page is deleted for good (`purged_objects`), a recording whose
+  `audio_path` has not come to it found there by its id. Through iCloud
+  Drive it removes every device's version of the page (§8) once a batch
+  has the deletion, sent or read, and compacts its log on its next pass,
+  leaving out what was on the page and keeping its row only as it is now;
+  it does the same to the batches of the devices not active for 30 days,
+  which compact theirs no more, keeping each batch as it was written but
+  for those entries. A device that pulls a page deleted for good does the
+  same, but for the removals, except, on a page of another space shared
+  with its account, those of the files and recordings that account put
+  there; and it keeps nothing that comes for the page later, from a device
+  that had not heard: rows on it, its content, or its row without
+  `purged_at`. Content saved, or a snapshot taken, of such a page here is
+  refused.
+- A file deleted for good goes with its bytes. The deleting device removes
+  its own copy (only one the app made in its data folder, never the file
+  the user added) and queues the removal of the stored copy, which runs
+  once the row with `purged_at` has gone up: the object in the `files`
+  bucket through Storage's `DELETE /storage/v1/object/files` (an object
+  already gone counts as removed), or the blob in iCloud Drive once a
+  batch has the deletion. An upload still waiting is dropped. A device
+  that pulls a file deleted for good, or deleted without `kept`, removes
+  its copy in its data folder; one in the bin keeps it, to come back with
+  it.
 - A file's row goes up after its contents, to the server as to iCloud
   Drive: a device that has the row can fetch them, and never takes a file
   still uploading for one that is gone. A recording's row goes first, as
@@ -723,7 +765,24 @@ value for either is ignored on update. A snapshot's `created_at` is never
 later than when it reached the server; each writer keeps their newest 50
 unnamed snapshots of a page, and each writer but the page's owner their
 newest 50 named (`manual`) ones.
-Pages are only soft-deleted. What is on a deleted page (its
+Pages are only soft-deleted, until they are deleted for good (§6): a
+page with `purged_at` keeps no title, icon, tags, default template or
+public link (`pages_purge`), and its content, history, comments,
+recordings, files and pending invitations go as it is set
+(`pages_purged`), but not its shares, so those it was shared with read
+its deletion; the objects of the files and recordings others put on it,
+under their own space or account, are listed for the space's owner to
+remove (`purged_objects`, which they alone read, and
+`purged_objects_remove`), the list forgetting each once it is gone from
+storage, as the next page is deleted for good; no one reads or writes anything on it after
+(`can_read_page`), nor clears its `purged_at` or `deleted_at`
+(`page_purged`, or `forbidden_restore`), and any other change of its row
+leaves it as it was. Only the space's owner sets it (`forbidden_purge`).
+A file is the same (`files_purge`): set by the space's owner, kept, and
+with it the row keeps none of what the file was (`scrub_deleted_file`),
+as it keeps none when deleted without `kept`; a file in the bin, deleted
+with `kept`, keeps its name, path and object, to be restored, and
+`kept` goes as `deleted_at` is cleared. What is on a deleted page (its
 `page_content`, `page_history`, comments, recordings, files and their
 objects, and its images) is the owner's to read, and anyone else's only
 if their view of it began, as their history of it does, no later than the
@@ -961,7 +1020,7 @@ Leaflet/
   that sends a file again keeps that part of the path unless the file goes
   up from it. A reader finds one an earlier version kept by the name it
   had. A device
-  that deletes a file removes its blob, whoever wrote it, with the copies
+  that deletes a file for good removes its blob, whoever wrote it, with the copies
   iCloud made of it beside it when two wrote it at once ("notes 2.pdf"),
   once a batch of its own has the deletion; one that sends everything
   again sends deleted files' rows too, so a deletion in a batch that was

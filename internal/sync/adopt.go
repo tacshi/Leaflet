@@ -158,7 +158,7 @@ func (s *Service) retryMoves(ctx context.Context) error {
 }
 
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
-	if f.DeletedAt.IsZero() {
+	if !f.Gone() {
 		data, err := s.fromICloud(ctx, "files", f.StoragePath, f.LocalPath)
 		if err != nil {
 			return fmt.Errorf("file %s: %w", f.Name, err)

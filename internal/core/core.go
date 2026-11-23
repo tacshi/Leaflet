@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/egoist/mygo/i18n"
 
@@ -55,6 +56,9 @@ type Core struct {
 	mgmtMu          sync.Mutex
 	mgmt            *supabaseapi.Client
 	signInEnded     atomic.Int32
+	binMu           sync.Mutex
+	binStop         chan struct{}
+	binSwept        time.Time
 
 	OpenURL func(url string)
 	// WatchICloud, Settings and SaveSettings are the app's own, which it reads and changes on its main thread: core
@@ -101,6 +105,7 @@ func Open(cfg Config) (*Core, error) {
 	c.Sync.Online, c.Sync.DeviceName, c.Sync.Watched = cfg.Online, cfg.DeviceName, cfg.Watched
 	c.Sync.OnState, c.Sync.OnPageContent = cfg.OnSyncState, cfg.OnPageContent
 	c.Sync.Updating = c.updatingProject.Load
+	c.Sync.Pulled = c.sweepPulled
 	c.Hub.ICloudLease, c.Hub.ICloudLinks = c.Sync.ICloudLease, c.Sync.ICloudLinksElsewhere
 	c.Sync.Offline = func() bool { return st.Settings().WorkOffline }
 	c.Sync.KeepAudio = func() string { return st.Settings().KeepAudioOnDevice }
@@ -131,6 +136,13 @@ func (c *Core) Start() {
 		})
 	}
 	c.Sync.Start()
+	c.sweepBin()
+}
+
+// Stop stops background sync and the periodic bin sweep.
+func (c *Core) Stop() {
+	c.stopBinSweep()
+	c.Sync.Stop()
 }
 
 func (c *Core) startICloud(root string) {

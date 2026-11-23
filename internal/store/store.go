@@ -70,7 +70,9 @@ func OpenPath(path, dir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, Dir: dir}, nil
+	s := &Store{db: db, Dir: dir}
+	s.startBin()
+	return s, nil
 }
 
 func fileURI(path, query string) (string, error) {

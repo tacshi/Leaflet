@@ -1964,7 +1964,7 @@ func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
 	}
 }
 
-func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
+func TestAPulledPurgeRemovesTheCopy(t *testing.T) {
 	s := open(t)
 	id := doc.NewRowID()
 	row := map[string]any{"id": id, "space_id": s.Session().SpaceID, "name": "plan.pdf", "storage_path": "space/" + id + "/plan.pdf",
@@ -1976,7 +1976,7 @@ func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row["deleted_at"], row["updated_at"] = "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z"
+	row["deleted_at"], row["purged_at"], row["updated_at"] = "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z"
 	if err := s.PutRemoteFile(row); err != nil {
 		t.Fatal(err)
 	}
@@ -3055,10 +3055,10 @@ func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
 	if cols := queued(); fmt.Sprint(cols) != "[folder_id]" {
 		t.Errorf("move queued %v", cols)
 	}
-	if err := s.DeleteFile(f); err != nil {
+	if err := s.TrashFile(f.ID); err != nil {
 		t.Fatal(err)
 	}
-	if cols := queued(); fmt.Sprint(cols) != "[deleted_at folder_id]" {
+	if cols := queued(); fmt.Sprint(cols) != "[deleted_at folder_id kept]" {
 		t.Errorf("move and delete queued %v", cols)
 	}
 	if got, _ := s.File(f.ID); got.DeletedAt.IsZero() || got.FolderID != "" {

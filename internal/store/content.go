@@ -147,6 +147,12 @@ func (s *Store) UpdateContent(pageID string, edit func(c *doc.Content, kept bool
 func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (Saved, error) {
 	var saved Saved
 	err := s.inTx(func(tx *sql.Tx) error {
+		if gone, err := isPurged(tx, pageID); err != nil || gone {
+			if gone {
+				return ErrPurged
+			}
+			return err
+		}
 		var stored string
 		var base sql.NullString
 		err := tx.QueryRow(`SELECT content, base_content FROM page_contents WHERE page_id = ?`, pageID).Scan(&stored, &base)
@@ -292,6 +298,10 @@ func putSyncedOver(q querier, pageID, over string, c *doc.Content, base string, 
 	var res sql.Result
 	var err error
 	if over == "" {
+		// Content that comes for a page deleted for good here is not kept.
+		if gone, err := isPurged(q, pageID); err != nil || gone {
+			return err
+		}
 		res, err = q.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
 			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO NOTHING`,
 			pageID, c.Encode(), c.PlainText(), ms(time.Now()), ns(base), nt(remoteAt), revision)

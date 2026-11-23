@@ -98,6 +98,8 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   to Markdown and PDF.
 - Page history with named versions, and what changed since any of them,
   inline or side by side.
+- A Trash (the Recycle Bin on Windows) that keeps deleted pages, with their
+  history, and files for 30 days, to restore them or delete them for good.
 
 ### Work with agents
 

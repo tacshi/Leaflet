@@ -162,7 +162,8 @@ struct ExportFile: FileDocument {
 }
 
 struct HistorySheet: View {
-    let page: PageRow
+    let pageID: String
+    let canEdit: Bool
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
@@ -197,7 +198,7 @@ struct HistorySheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L.commonClose) { dismiss() }
                 }
-                if page.canEdit {
+                if canEdit {
                     ToolbarItem(placement: .primaryAction) {
                         Button(L.dialogHistoryNameVersion, systemImage: "bookmark") {
                             name = ""
@@ -233,7 +234,7 @@ struct HistorySheet: View {
                 .navigationTitle(v.when)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    if page.canEdit {
+                    if canEdit {
                         ToolbarItem(placement: .primaryAction) {
                             Button(L.dialogHistoryRestore, systemImage: "clock.arrow.circlepath") {
                                 Task { await restore(v) }
@@ -253,8 +254,8 @@ struct HistorySheet: View {
     }
 
     private func load() async {
-        versions = (try? await app.client?.history(page.id)) ?? []
-        current = (try? await app.client?.currentMarkdown(page.id)) ?? ""
+        versions = (try? await app.client?.history(pageID)) ?? []
+        current = (try? await app.client?.currentMarkdown(pageID)) ?? ""
         chooseFirst()
     }
 
@@ -264,7 +265,7 @@ struct HistorySheet: View {
 
     private func keep() async {
         do {
-            try await app.client?.nameVersion(page.id, name: name)
+            try await app.client?.nameVersion(pageID, name: name)
             chosen = nil
             await load()
         } catch {
@@ -275,14 +276,14 @@ struct HistorySheet: View {
     private func restore(_ v: PageVersion) async {
         guard let client = app.client else { return }
         do {
-            let kept = try await client.restoreVersion(page.id, id: v.id)
+            let kept = try await client.restoreVersion(pageID, id: v.id)
             var toast = Toast(message: L.dialogHistoryRestored)
             if !kept.isEmpty {
-                let pageID = page.id
+                let id = pageID
                 toast.actionLabel = L.commonUndo
                 toast.action = { [app] in
                     do {
-                        try await client.restoreVersion(pageID, id: kept)
+                        try await client.restoreVersion(id, id: kept)
                     } catch {
                         let why = error.localizedDescription
                         app.show(Toast(message: L.dialogHistoryRestoreFailed(error: why)))

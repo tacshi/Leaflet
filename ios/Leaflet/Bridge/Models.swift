@@ -62,6 +62,27 @@ struct FileRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// A page, with the pages deleted with it, or a file in the Trash.
+struct BinItem: Codable, Hashable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable { case page, file }
+    var kind: Kind
+    var id: String
+    var title: String
+    var icon: String?
+    /// When it was deleted and how long it has left, as "Deleted Yesterday · 29 days left".
+    var when: String
+    var template: Bool
+    var pages: Int
+    var size: Int64
+
+    var symbol: String {
+        switch kind {
+        case .file: "doc"
+        case .page: template ? "rectangle.stack" : "doc.text"
+        }
+    }
+}
+
 struct TemplateRow: Codable, Hashable, Identifiable, Sendable {
     var key: String
     var title: String

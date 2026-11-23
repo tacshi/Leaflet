@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -66,11 +65,7 @@ func (s *Store) SettleStarterPages(joined bool) error {
 }
 
 func starterTaken(tx *sql.Tx, set starterSet) (bool, error) {
-	in := strings.TrimSuffix(strings.Repeat("?, ", len(set.Pages)), ", ")
-	ids := make([]any, len(set.Pages))
-	for i, id := range set.Pages {
-		ids[i] = id
-	}
+	in, ids := marks(len(set.Pages)), anys(set.Pages)
 	after := func(args ...any) []any { return append(slices.Clone(args), set.At) }
 	checks := []struct {
 		query string

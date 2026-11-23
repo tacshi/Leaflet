@@ -126,6 +126,9 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		return s.hold(e)
 	}
 	changed[e.Table] = true
+	if e.Table == "pages" {
+		s.dropPurgedPageFile(e.ID)
+	}
 	if e.Changed == nil {
 		return s.st.SetRowVersion(e.Table, e.ID, v)
 	}

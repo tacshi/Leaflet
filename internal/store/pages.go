@@ -17,18 +17,21 @@ import (
 // page whose content alone was edited here goes over no rename, move or deletion made on another device since its row
 // changed.
 type Page struct {
-	ID                string
-	SpaceID           string
-	ParentID          string
-	FolderID          string
-	Title             string
-	Icon              string
-	SortKey           string
-	CreatedBy         string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ChangedAt         time.Time
-	DeletedAt         time.Time
+	ID        string
+	SpaceID   string
+	ParentID  string
+	FolderID  string
+	Title     string
+	Icon      string
+	SortKey   string
+	CreatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ChangedAt time.Time
+	DeletedAt time.Time
+	// PurgedAt is when the page was deleted for good, out of the bin: its row stays, with nothing of what it was,
+	// so the deletion reaches every device.
+	PurgedAt          time.Time
 	KeepOffline       bool
 	Template          bool
 	Tags              []string
@@ -61,7 +64,7 @@ func clampChars(text string, limit int) string {
 
 // pageCols is a page's row: its updated_at is when the row last changed, here or where it came from, never moved by
 // a content save.
-const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags, default_template_id`
+const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags, default_template_id, purged_at`
 
 // pageRead is pageCols and edited_at, when the page's content was last edited on this device, which only the device
 // keeps.
@@ -71,13 +74,13 @@ func scanPage(sc scanner) (Page, error) {
 	var p Page
 	var parent, folder, icon, by, template sql.NullString
 	var created, updated int64
-	var deleted, edited sql.NullInt64
+	var deleted, purged, edited sql.NullInt64
 	var tags string
-	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template, &tags, &template, &edited)
+	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template, &tags, &template, &purged, &edited)
 	p.Tags = decodeTags(tags)
 	p.ParentID, p.FolderID, p.Icon, p.CreatedBy = parent.String, folder.String, icon.String, by.String
 	p.DefaultTemplateID = template.String
-	p.CreatedAt, p.ChangedAt, p.DeletedAt = time.UnixMilli(created), time.UnixMilli(updated), fromMs(deleted)
+	p.CreatedAt, p.ChangedAt, p.DeletedAt, p.PurgedAt = time.UnixMilli(created), time.UnixMilli(updated), fromMs(deleted), fromMs(purged)
 	p.UpdatedAt = p.ChangedAt
 	if edited.Valid && edited.Int64 > updated {
 		p.UpdatedAt = time.UnixMilli(edited.Int64)
@@ -122,14 +125,16 @@ func childrenIn(q querier, parentID, spaceID string) ([]Page, error) {
 }
 
 func writePage(q querier, p Page) error {
-	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
 		folder_id = excluded.folder_id, title = excluded.title, icon = excluded.icon, sort_key = excluded.sort_key,
 		created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at,
 		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline, is_template = excluded.is_template,
-		tags = excluded.tags, default_template_id = excluded.default_template_id`,
+		tags = excluded.tags, default_template_id = excluded.default_template_id,
+		purged_at = COALESCE(pages.purged_at, excluded.purged_at)`,
 		p.ID, p.SpaceID, ns(p.ParentID), ns(p.FolderID), p.Title, ns(p.Icon), p.SortKey, ns(p.CreatedBy),
-		ms(p.CreatedAt), ms(p.ChangedAt), nt(p.DeletedAt), p.KeepOffline, p.Template, encodeTags(p.Tags), ns(p.DefaultTemplateID))
+		ms(p.CreatedAt), ms(p.ChangedAt), nt(p.DeletedAt), p.KeepOffline, p.Template, encodeTags(p.Tags), ns(p.DefaultTemplateID),
+		nt(p.PurgedAt))
 	return err
 }
 
@@ -329,6 +334,9 @@ func (s *Store) RestorePages(ids []string) error {
 				continue
 			} else if err != nil {
 				return err
+			}
+			if !p.PurgedAt.IsZero() {
+				return ErrPurged
 			}
 			if p.SpaceID == own && p.ParentID != "" && !slices.Contains(ids, p.ParentID) {
 				switch parent, err := pageIn(tx, p.ParentID); {

@@ -585,7 +585,7 @@ func TestRenameAndDeleteTag(t *testing.T) {
 	}
 }
 
-func TestDeleteFileAsksFirst(t *testing.T) {
+func TestDeleteFilePutsItInTheBin(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
 	f, err := a.st.CreateFolder("Docs")
@@ -605,33 +605,24 @@ func TestDeleteFileAsksFirst(t *testing.T) {
 		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
 	}, 900, 600)
 	tt.Frame()
-	ask := func() {
-		t.Helper()
-		rightClickOn(t, tt, "budget.txt")
-		tt.Frame()
-		if err := tt.Click(locales.SidebarDeleteFile()); err != nil {
-			t.Fatal(err)
-		}
-		tt.Frame()
-		if !tt.HasText(locales.SidebarDeleteFileTitle("budget.txt")) {
-			t.Fatalf("no alert in %v", tt.Texts())
-		}
-	}
-	ask()
-	if err := tt.Click(locales.CommonCancel()); err != nil {
-		t.Fatal(err)
-	}
+	rightClickOn(t, tt, "budget.txt")
 	tt.Frame()
-	if files, _ := a.st.Files(); len(files) != 1 || a.fileToDelete != nil {
-		t.Fatalf("after Cancel, %d files, asking %v", len(files), a.fileToDelete)
-	}
-	ask()
-	if err := tt.Click(locales.CommonDelete()); err != nil {
+	if err := tt.Click(locales.SidebarDeleteFile()); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if files, _ := a.st.Files(); len(files) != 0 {
-		t.Errorf("after Delete, %d files", len(files))
+		t.Fatalf("after Delete, %d files", len(files))
+	}
+	if items, _ := a.st.Bin(); len(items) != 1 || items[0].Title != "budget.txt" {
+		t.Fatalf("bin %+v", items)
+	}
+	if len(a.toasts) == 0 || a.toasts[len(a.toasts)-1].fn == nil {
+		t.Fatal("no Undo")
+	}
+	a.toasts[len(a.toasts)-1].fn()
+	if files, _ := a.st.Files(); len(files) != 1 || files[0].FolderID != f.ID {
+		t.Errorf("after Undo, %+v", files)
 	}
 }
 

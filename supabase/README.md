@@ -294,6 +294,14 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
   without the path; only the recorder clears it, once the object is gone.
   No client deletes a recording's row: it goes with its page.
   A page's owner deletes a file someone else put on it only by its
-  `deleted_at`, never its row, which its space's owner keeps. A deleted
+  `deleted_at`, never its row, which its space's owner keeps. A file put
+  in the bin has `kept` with its `deleted_at`, and keeps its name, path
+  and object until it is restored or deleted for good; one deleted
+  without `kept` keeps none of them. A page or file deleted for good has
+  `purged_at`, which only the space's owner sets and which stays: what
+  was on such a page goes, but its shares, and the row keeps nothing of
+  what it was. The objects others put on it are listed in
+  `purged_objects` for the space's owner, who alone reads the list and
+  may remove them. A deleted
   file is read only by its space's owner and its page's owner, who may
   remove its object.

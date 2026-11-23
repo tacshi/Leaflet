@@ -398,7 +398,7 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	recID, _ := payload["recording_id"].(string)
 	path, _ := payload["path"].(string)
 	if path == "" {
-		path = uid + "/" + recID + ".wav"
+		path = recordingPath(uid, recID)
 	}
 	ct, _ := payload["content_type"].(string)
 	err = s.be.Upload(ctx, bucket, path, timedReader{f, read}, ct)
@@ -415,11 +415,25 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	return true, nil
 }
 
+// recordingPath is where a recording's audio is stored: under its recorder's id, by its own.
+func recordingPath(uid, recordingID string) string { return uid + "/" + recordingID + ".wav" }
+
 func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
 	if waits, stays := s.removal(payload); waits || stays {
 		return stays, nil
 	}
-	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
+	bucket, path := store.S(payload, "bucket"), store.S(payload, "path")
+	// A recording deleted before its audio_path came here is at the path its upload took: this account's, unless
+	// someone else made it on a page of this account deleted for good, whose path the server listed to remove.
+	if recID, uid := store.S(payload, "recording_id"), s.be.UserID(); path == "" && bucket == "recordings" && recID != "" && uid != "" {
+		path = recordingPath(uid, recID)
+		listed, err := s.be.SelectOne(ctx, "purged_objects", remote.Query{Select: "name",
+			Filters: []string{remote.Eq("bucket_id", bucket), remote.Like("name", "*/"+recID+".*")}})
+		if err == nil && listed != nil {
+			path = store.S(listed, "name")
+		}
+	}
+	err := s.be.Remove(ctx, bucket, path)
 	if remote.IsNotFound(err) || remote.IsInvalidKey(err) {
 		return true, nil
 	}

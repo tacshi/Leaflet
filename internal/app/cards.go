@@ -59,14 +59,6 @@ func (w *webAnswers[T]) settled(key string) bool {
 	return answered || failed
 }
 
-func (a *App) linkInfoOf(link string) web.LinkInfo {
-	pageID := ""
-	if a.page != nil {
-		pageID = a.page.id
-	}
-	return a.linkInfoFor(pageID, link, nil)
-}
-
 func (a *App) linkInfoFor(pageID, link string, redraw func()) web.LinkInfo {
 	return a.linkInfo.get(a, link, func() (web.LinkInfo, error) {
 		info, err := web.LookUp(link)

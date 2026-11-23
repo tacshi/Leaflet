@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/png"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,6 +63,14 @@ func liveFiles(t *testing.T, st *store.Store) []store.File {
 	return files
 }
 
+func fileURL(path string) string {
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
 func TestUploadFiles(t *testing.T) {
 	st := newStore(t)
 	p, paras := pageWith(t, st, "First question.\n\nSecond question.")
@@ -72,7 +81,7 @@ func TestUploadFiles(t *testing.T) {
 	got := session(t, s, initialize, call(2, "upload_files", map[string]any{"page_id": p.ID, "files": []any{
 		map[string]any{"path": one, "alt": "The first answer"},
 		map[string]any{"path": pdf},
-		map[string]any{"path": "file://" + two, "position": map[string]any{"after": paras[0]}},
+		map[string]any{"path": fileURL(two), "position": map[string]any{"after": paras[0]}},
 	}}))
 	out, failed := result(t, got[2])
 	if failed {
@@ -167,6 +176,44 @@ func TestUploadRefusals(t *testing.T) {
 	}
 	if history, _ := st.History(p.ID); len(history) != 0 {
 		t.Errorf("refused calls left history %+v", history)
+	}
+	link := filepath.Join(dir, "disguised.png")
+	if err := os.Symlink(key, link); err == nil {
+		got := session(t, s, call(2, "upload_files", map[string]any{"page_id": p.ID, "files": []any{link}}))
+		out, failed := result(t, got[2])
+		if msg, _ := out["error"].(string); !failed || !strings.Contains(msg, "not a picture") {
+			t.Errorf("symlink to key: %v", out)
+		}
+		if files := liveFiles(t, st); len(files) != 0 {
+			t.Errorf("symlink refusal kept files %+v", files)
+		}
+	}
+}
+
+func TestFileURLPath(t *testing.T) {
+	for _, c := range []struct {
+		raw     string
+		windows bool
+		want    string
+		wantErr bool
+	}{
+		{"file:///tmp/two.png", false, "/tmp/two.png", false},
+		{"file://localhost/tmp/two.png", false, "/tmp/two.png", false},
+		{"file:///C:/Users/me/My%20Docs/two.png", true, `C:\Users\me\My Docs\two.png`, false},
+		{"file://localhost/C:/Users/me/two.png", true, `C:\Users\me\two.png`, false},
+		{"file://server/share/two.png", false, "", true},
+		{"file://server/share/two.png", true, "", true},
+	} {
+		got, err := fileURLPath(c.raw, c.windows)
+		if (err != nil) != c.wantErr || got != c.want {
+			t.Errorf("fileURLPath(%q, win=%v) = (%q, %v), want (%q, err=%v)", c.raw, c.windows, got, err, c.want, c.wantErr)
+		}
+	}
+	if rest, ok := cutHomePrefix(`~\Pictures\a.png`, true); !ok || rest != `Pictures\a.png` {
+		t.Errorf("cutHomePrefix windows: (%q, %v)", rest, ok)
+	}
+	if _, ok := cutHomePrefix(`~\Pictures\a.png`, false); ok {
+		t.Error("cutHomePrefix unix matched backslash")
 	}
 }
 

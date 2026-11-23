@@ -9,6 +9,10 @@ struct SignInView: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var waiting: SignedIn?
+    /// The account's projects, when it has several to choose among.
+    @State private var choices: [SupabaseProject] = []
+    /// The project being signed in to, of those.
+    @State private var using: String?
 
     static let callback = ASWebAuthenticationSession.Callback.https(
         host: "leaflet-auth.capyvibe.app", path: "/auth/supabase")
@@ -29,20 +33,36 @@ struct SignInView: View {
                 .listRowBackground(Color.clear)
             }
             Section {
-                Button {
-                    Task { await signIn() }
-                } label: {
-                    if busy {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(L.signinSigningIn)
+                if choices.isEmpty {
+                    Button {
+                        Task { await signIn() }
+                    } label: {
+                        if busy {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text(L.signinSigningIn)
+                            }
+                        } else {
+                            Text(L.signinContinueSupabase)
                         }
-                    } else {
-                        Text(L.signinContinueSupabase)
+                    }
+                    .disabled(busy || app.client == nil)
+                    .listRowBackground(palette.surface)
+                } else {
+                    ForEach(choices) { project in
+                        ActionRow(label: project.name, desc: Self.desc(project)) {
+                            if using == project.ref {
+                                ProgressView()
+                            } else {
+                                Button(L.signinUseProject) { Task { await use(project) } }
+                                    .disabled(busy)
+                            }
+                        }
+                        .listRowBackground(palette.surface)
                     }
                 }
-                .disabled(busy || app.client == nil)
-                .listRowBackground(palette.surface)
+            } header: {
+                if !choices.isEmpty { Text(L.signinChooseProject) }
             } footer: {
                 if let failure {
                     Text(failure).foregroundStyle(palette.dangerText)
@@ -79,15 +99,46 @@ struct SignInView: View {
             let answer = try await webSession.authenticate(
                 using: begun.url, callback: Self.callback, additionalHeaderFields: [:])
             let done = try await client.finishSupabaseSignIn(begun, callback: answer)
-            if done.lost > 0 {
-                waiting = done
+            if let projects = done.projects, !projects.isEmpty {
+                choices = projects
                 return
             }
-            await signedIn(done.email)
+            await finish(done)
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
         } catch {
             failure = error.localizedDescription
         }
+    }
+
+    /// Signs in to the project chosen of the account's several.
+    private func use(_ project: SupabaseProject) async {
+        guard let client = app.client else { return }
+        busy = true
+        using = project.ref
+        failure = nil
+        defer {
+            busy = false
+            using = nil
+        }
+        do {
+            let done = try await client.useSupabaseProject(project.ref)
+            choices = []
+            await finish(done)
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    private func finish(_ done: SignedIn) async {
+        if done.lost > 0 {
+            waiting = done
+            return
+        }
+        await signedIn(done.email)
+    }
+
+    private static func desc(_ project: SupabaseProject) -> String {
+        project.paused ? L.signinProjectPaused : "\(project.ref) · \(project.region)"
     }
 
     private func confirm(_ asked: SignedIn, anyway: Bool) async {

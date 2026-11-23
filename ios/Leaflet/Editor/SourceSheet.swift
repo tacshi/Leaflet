@@ -1,13 +1,26 @@
 import LeafletCore
 import SwiftUI
 
+/// How a sheet saves its change to the block it opened on: into the block as
+/// the page has it now, which an agent or another device may have changed
+/// in the meantime. It throws when the block is gone, or the change can't
+/// be made of it.
+typealias BlockChange = (_ change: (DocNode) throws -> DocNode) throws -> Void
+
+/// The data keys a sheet's change goes into: those of the fields that are no
+/// longer as the sheet opened on them, each field's keys as given.
+func changedKeys(_ keys: [[String]], from original: [String], to fields: [String]) -> [String] {
+    zip(keys, zip(original, fields)).flatMap { keys, field in field.0 == field.1 ? [] : keys }
+}
+
 struct SourceSheet: View {
     let node: DocNode
-    let save: ([String: JSONValue]) -> Void
+    let save: BlockChange
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var text = ""
     @State private var original: String?
+    @State private var failure: String?
 
     private var diagram: Bool { node.type == "diagram" }
     private var key: String { MobileSourceKey(node.type) }
@@ -19,7 +32,11 @@ struct SourceSheet: View {
                     CodeTextEditor(text: $text, focused: true)
                         .frame(minHeight: 220)
                 } footer: {
-                    Text(diagram ? L.renderedDiagramHelp : L.renderedMathHelp)
+                    if let failure {
+                        Text(failure).foregroundStyle(palette.dangerText)
+                    } else {
+                        Text(diagram ? L.renderedDiagramHelp : L.renderedMathHelp)
+                    }
                 }
                 .listRowBackground(palette.surface)
             }
@@ -31,12 +48,7 @@ struct SourceSheet: View {
                     CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L.commonSave) {
-                        var data = node.data ?? [:]
-                        data[key] = .string(text.trimmingCharacters(in: .newlines))
-                        save(data)
-                        dismiss()
-                    }
+                    Button(L.commonSave, action: apply)
                 }
             }
         }
@@ -48,6 +60,17 @@ struct SourceSheet: View {
     }
 
     private var dirty: Bool { original.map { $0 != text } ?? false }
+
+    private func apply() {
+        guard dirty else { return dismiss() }
+        let source: [String: JSONValue] = [key: .string(text.trimmingCharacters(in: .newlines))]
+        do {
+            try save { $0.setting(source.keys, from: source) }
+            dismiss()
+        } catch {
+            failure = L.appErrorSave(error: error.localizedDescription)
+        }
+    }
 }
 
 struct CancelButton: View {

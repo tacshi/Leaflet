@@ -134,7 +134,7 @@ var sonioxPoll = 2 * time.Second
 
 const sonioxAsyncModel = "stt-async-v6"
 
-func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, size int64, name string, hints []string, speakers bool) ([]store.Segment, error) {
+func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, size int64, name string, hints []string, speakers bool, left Leftovers) ([]store.Segment, error) {
 	if !strings.HasPrefix(model, "stt-async") {
 		model = sonioxAsyncModel
 	}
@@ -148,11 +148,10 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 		}
 		return sonioxDo(req, key, out)
 	}
-	remove := func(path string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_ = call(ctx, "DELETE", path, nil, nil)
-	}
+	// What the transcription leaves with Soniox is noted as soon as Soniox
+	// names it, and deleted when the transcription ends, however it ends.
+	kept := func(path string) { left.keep("soniox", path) }
+	remove := func(path string) { left.remove("soniox", key, path) }
 
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
@@ -181,6 +180,7 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	if err != nil {
 		return nil, err
 	}
+	kept("/files/" + file.ID)
 	defer remove("/files/" + file.ID)
 
 	create, _ := json.Marshal(map[string]any{
@@ -195,6 +195,7 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	if err != nil {
 		return nil, err
 	}
+	kept("/transcriptions/" + job.ID)
 	defer remove("/transcriptions/" + job.ID)
 
 	wait, cancel := context.WithTimeout(ctx, fileWait(size))

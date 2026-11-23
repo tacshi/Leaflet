@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -426,6 +427,45 @@ func TestBackPassesADeletedPage(t *testing.T) {
 	a.follow()
 	if a.route.ID != three.ID {
 		t.Fatalf("Forward went to %+v", a.route)
+	}
+}
+
+// TestTheTitleBarPassesADeletedPage goes back and forward with the title
+// bar's buttons, which move the router themselves, over a page deleted
+// since: they pass it, as ⌘[ and ⌘] do, rather than stop at the home
+// screen in its place.
+func TestTheTitleBarPassesADeletedPage(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	one, _ := a.st.CreatePage(store.NewPageOptions{Title: "One"})
+	two, _ := a.st.CreatePage(store.NewPageOptions{Title: "Two"})
+	three, _ := a.st.CreatePage(store.NewPageOptions{Title: "Three"})
+	a.reloadAll()
+	a.route = Route{Kind: "page", ID: one.ID}
+	a.loadPage(one.ID)
+	a.router = ui.NewRouter(a.route.path())
+	a.router.Transition = ui.TransitionNone
+	a.routerAt = a.router.Path()
+	for _, p := range []store.Page{two, three} {
+		a.navigate(Route{Kind: "page", ID: p.ID})
+	}
+	if _, err := a.st.DeletePage(two.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
+	tt.Frame()
+	for _, step := range []struct {
+		button string
+		want   store.Page
+	}{{locales.ShellHistoryBack(), one}, {locales.ShellHistoryForward(), three}} {
+		if err := tt.Click(step.button); err != nil {
+			t.Fatalf("no %s button: %v", step.button, err)
+		}
+		tt.Frame()
+		if a.route != (Route{Kind: "page", ID: step.want.ID}) {
+			t.Errorf("%s went to %+v, not to %s", step.button, a.route, step.want.Title)
+		}
 	}
 }
 

@@ -21,7 +21,10 @@ final class PageModel {
     }
     private(set) var hasContent = false
     private(set) var rev: Int64 = 0
-    @ObservationIgnored var shown: Int64 = 0
+    @ObservationIgnored private(set) var shown: Int64 = 0
+    /// The rev the editor's edits are over and what the core keeps for them
+    /// there: the content the editor was shown at it, or its last edit over it.
+    @ObservationIgnored private var kept: (rev: Int64, content: DocContent)?
     private(set) var readOnly = true
     private(set) var unreadable = false
     private(set) var tinted: Set<String> = []
@@ -71,6 +74,7 @@ final class PageModel {
                 content = page.content
                 rev = page.rev
                 shown = rev
+                kept = (rev, page.content)
                 refreshOutline()
             } else if page.rev >= rev {
                 // An update that came first has an editor showing it: this
@@ -78,6 +82,7 @@ final class PageModel {
                 show(page.content, at: page.rev)
             }
             editor = page.editor
+            if let kept, kept.rev > page.rev { report(kept.rev, kept.content) }
             readOnly = page.readOnly
             unreadable = page.unreadable
             await refreshAgents()
@@ -107,6 +112,10 @@ final class PageModel {
     func edit(_ content: DocContent) {
         guard !readOnly, let client = app.client, let editor else { return }
         self.content = content
+        // An update the editor has not shown goes into the merge of this
+        // edit, which comes back as one more: the content is the editor's
+        // own, at the rev it shows.
+        if self.rev != shown { self.rev = shown }
         refreshOutline()
         let rev = shown
         let id = self.id
@@ -117,9 +126,45 @@ final class PageModel {
             do {
                 left = try await client.editPage(id, editor: editor, content: content, rev: rev)
             } catch {
-                app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+                // Should the core have let go of what the editor showed at
+                // rev, it is given that again, and the edit goes once more.
+                if let kept = self?.kept, kept.rev == rev,
+                    (try? await client.showedRev(
+                        id, editor: editor, rev: rev, content: kept.content)) != nil
+                {
+                    left = try? await client.editPage(
+                        id, editor: editor, content: content, rev: rev)
+                }
+                if left == nil {
+                    app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+                }
             }
+            if left != nil { self?.kept = (rev, content) }
             self?.sent(left)
+        }
+    }
+
+    /// The editor shows the content at rev now, which its next edits are
+    /// over: the core keeps that rev for them however many come after it.
+    func showed(_ rev: Int64) {
+        guard rev > shown, let content else { return }
+        shown = rev
+        kept = (rev, content)
+        report(rev, content)
+    }
+
+    private func report(_ rev: Int64, _ content: DocContent) {
+        guard let client = app.client, let editor else { return }
+        let id = self.id
+        editing = Task { [previous = editing] in
+            await previous?.value
+            do {
+                try await client.showedRev(id, editor: editor, rev: rev)
+            } catch {
+                // The rev went before the core heard the editor showed it,
+                // as when many came first: it keeps what the editor shows.
+                try? await client.showedRev(id, editor: editor, rev: rev, content: content)
+            }
         }
     }
 

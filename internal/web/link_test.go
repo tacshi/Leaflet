@@ -65,6 +65,27 @@ func TestLookUpReadsThePagesEncoding(t *testing.T) {
 	}
 }
 
+func TestLookUpFindsThePictureFromThePageRedirectedTo(t *testing.T) {
+	useServer(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/short":
+			http.Redirect(w, r, "/articles/2026/story", http.StatusFound)
+		case "/articles/2026/story":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<head><meta property="og:image" content="cover.jpg"><title>Story</title></head>`))
+		}
+	}))
+	defer srv.Close()
+	info, err := LookUp(srv.URL + "/short")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := srv.URL + "/articles/2026/cover.jpg"; info.Image != want || info.Title != "Story" {
+		t.Errorf("looked up %+v, want the picture %s", info, want)
+	}
+}
+
 func TestFillLinkCards(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{
 		{ID: "a", Type: "link_preview", Data: map[string]any{"url": "https://go.dev/"}},

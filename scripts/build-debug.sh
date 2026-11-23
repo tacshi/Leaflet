@@ -16,6 +16,7 @@
 # with its files, and "leaflet-debug-setup-<version>-<arch>.exe" when NSIS
 # is installed (brew install makensis). Neither is signed for release.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 cd "$ROOT_DIR"
 

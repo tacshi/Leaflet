@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS pages (
   title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
   keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
-  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT, pulled_at INTEGER);
+  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT, pulled_at INTEGER, edited_at INTEGER);
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
 CREATE TABLE IF NOT EXISTS page_contents (
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS page_members (
   email TEXT NOT NULL DEFAULT '', accepted INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (page_id, user_id));
 CREATE TABLE IF NOT EXISTS key_values (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS peer_contents (
-  peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
+  peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL, merged TEXT,
   PRIMARY KEY (peer_id, page_id));
 CREATE INDEX IF NOT EXISTS peer_contents_page ON peer_contents (page_id, peer_id);
 CREATE TABLE IF NOT EXISTS row_versions (
@@ -175,6 +175,27 @@ var migrations = []func(context.Context, *sql.Conn) error{
 		}
 		return execIfTable(ctx, c, "text_writes", `UPDATE text_writes SET indexed = NULL WHERE kind = 'recording'`)
 	},
+	func(ctx context.Context, c *sql.Conn) error {
+		if err := addColumns(ctx, c, [][3]string{{"pages", "edited_at", "INTEGER"}, {"peer_contents", "merged", "TEXT"}}); err != nil {
+			return err
+		}
+		return rowTimesBack(ctx, c)
+	},
+}
+
+// rowTimesBack takes the content saves out of the pages' updated_at, which they moved on before edited_at kept them
+// apart, where the time the row itself last changed is known: for a row pulled from the server and not changed here
+// since, the server's time it came with; for one synced through iCloud Drive with no change of it waiting, the newest
+// version of it a device sent. The page still shows as edited when it was.
+func rowTimesBack(ctx context.Context, c *sql.Conn) error {
+	if _, err := c.ExecContext(ctx, `UPDATE pages SET edited_at = updated_at, updated_at = pulled_at
+		WHERE pulled_at IS NOT NULL AND pulled_at < updated_at`); err != nil {
+		return err
+	}
+	return execIfTable(ctx, c, "row_versions", `UPDATE pages SET edited_at = pages.updated_at, updated_at = v.at
+		FROM (SELECT id, MAX(at) AS at FROM row_versions WHERE tbl = 'pages' OR tbl LIKE 'pages.%' GROUP BY id) AS v
+		WHERE v.id = pages.id AND pages.pulled_at IS NULL AND v.at < pages.updated_at
+		AND NOT EXISTS (SELECT 1 FROM outbox WHERE entity = 'pages' AND entity_id = pages.id)`)
 }
 
 func execIfTable(ctx context.Context, c *sql.Conn, table, query string) error {

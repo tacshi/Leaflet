@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -202,6 +203,141 @@ func TestEditorKeepsRevsBoundedByBytes(t *testing.T) {
 	e.saw(46, doc.Empty(), 2*keepBytes)
 	if len(e.seen) != 2 || e.seen[1] == nil || e.seen[46] == nil {
 		t.Fatalf("kept revs %v", e.sizes)
+	}
+}
+
+func TestEditorKeepsTheRevItShows(t *testing.T) {
+	e := &pageEditor{seen: map[int64]*doc.Content{}, last: 1}
+	for r := int64(1); r <= 5; r++ {
+		e.saw(r, doc.Empty(), 1000)
+	}
+	if err := e.showed(3, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if e.last != 3 || e.seen[2] != nil || e.seen[3] == nil || e.seen[5] == nil {
+		t.Fatalf("showing rev 3 kept revs %v from %d", e.sizes, e.last)
+	}
+	for r := int64(6); r <= 60; r++ {
+		e.saw(r, doc.Empty(), 1000)
+	}
+	if len(e.seen) != keepRevs+1 || e.seen[3] == nil || e.seen[60] == nil {
+		t.Fatalf("kept revs %v", e.sizes)
+	}
+	if err := e.showed(2, nil, 0); err != nil || e.last != 3 {
+		t.Fatalf("a rev before the one shown gave %v and moved it to %d", err, e.last)
+	}
+	if err := e.showed(10, nil, 0); !errors.Is(err, errRevGone) || e.last != 3 || e.seen[3] == nil {
+		t.Fatalf("a rev no longer kept gave %v, the editor at %d", err, e.last)
+	}
+	shown := doc.Empty()
+	if err := e.showed(10, shown, 100); err != nil || e.last != 10 || e.seen[10] != shown || e.seen[3] != nil {
+		t.Fatalf("what the editor shows at a rev no longer kept gave %v, the editor at %d", err, e.last)
+	}
+}
+
+func writer(t *testing.T, c *Core, ev *fakeEvents, page, block string) func(text string) update {
+	return func(text string) update {
+		t.Helper()
+		c.q.do(func() {
+			p := c.pages[page]
+			if err := p.ApplyOp(doc.Op{Op: "replace", ID: block, Node: paragraph(block, text)}, false); err != nil {
+				t.Error(err)
+			}
+			p.show()
+		})
+		return wait(t, ev, "agent")
+	}
+}
+
+// startShown opens a page of two paragraphs in an editor, and has an agent
+// write into the second once: the rev of that write is the one the editor
+// goes on to show.
+func startShown(t *testing.T) (*Core, *fakeEvents, string, openedPage, update) {
+	t.Helper()
+	c, ev := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	pg := openEditor(t, c, row.ID)
+	start := doc.FromBlocks([]*doc.Node{paragraph("a", "One"), paragraph("b", "Two")})
+	if _, err := c.EditPage(row.ID, pg.Editor, start.Encode(), pg.Rev); err != nil {
+		t.Fatal(err)
+	}
+	return c, ev, row.ID, pg, writer(t, c, ev, row.ID, "b")("Two v1")
+}
+
+func editOver(shown update) string {
+	edit := doc.MustDecode(shown.content)
+	edit.Find("a").SetDelta(doc.Delta{{Text: "One!"}})
+	return edit.Encode()
+}
+
+func mergedOnce(t *testing.T, c *Core, ev *fakeEvents, want string) {
+	t.Helper()
+	if got := texts(doc.MustDecode(wait(t, ev, "merge").content)); got != want {
+		t.Fatalf("merged %q, want %q", got, want)
+	}
+	if raw, err := c.Conflicts(); err != nil || raw != "[]" {
+		t.Fatalf("conflicts %s, %v", raw, err)
+	}
+}
+
+// While the app composes text, the agent's revs wait for it, and the next
+// edit is over the rev the editor showed before: however many revs come in
+// the meantime, the edit merges with all of them.
+func TestTheRevAnEditorShowsIsKeptForItsEdit(t *testing.T) {
+	c, ev, id, pg, shown := startShown(t)
+	if err := c.ShowedRev(id, pg.Editor, shown.rev, ""); err != nil {
+		t.Fatal(err)
+	}
+	write := writer(t, c, ev, id, "b")
+	for i := 2; i <= keepRevs+8; i++ {
+		write(fmt.Sprint("Two v", i))
+	}
+	if _, err := c.EditPage(id, pg.Editor, editOver(shown), shown.rev); err != nil {
+		t.Fatal(err)
+	}
+	mergedOnce(t, c, ev, fmt.Sprint("One!|Two v", keepRevs+8))
+}
+
+// Without the rev an edit is over, the page can't tell the editor's
+// changes from the ones it was shown: merging against an older rev would
+// undo every write in between, so the edit is refused.
+func TestAnEditOverARevNoLongerKeptIsRefused(t *testing.T) {
+	c, ev, id, pg, shown := startShown(t)
+	write := writer(t, c, ev, id, "b")
+	for i := 2; i <= keepRevs+8; i++ {
+		write(fmt.Sprint("Two v", i))
+	}
+	if _, err := c.EditPage(id, pg.Editor, editOver(shown), shown.rev); !errors.Is(err, errRevGone) {
+		t.Fatalf("the edit over a rev no longer kept gave %v", err)
+	}
+	c.q.do(func() {
+		if got := texts(c.pages[id].cur); got != fmt.Sprint("One|Two v", keepRevs+8) {
+			t.Errorf("the page holds %q", got)
+		}
+	})
+}
+
+// Revs may go before the editor says it shows one, when many come in the
+// while: the editor gives what it shows there, and its edit merges as if
+// the rev had been kept.
+func TestARevGoneBeforeTheEditorShowedItIsKeptFromWhatItShows(t *testing.T) {
+	c, ev, id, pg, shown := startShown(t)
+	write := writer(t, c, ev, id, "b")
+	for i := 2; i <= keepRevs+8; i++ {
+		write(fmt.Sprint("Two v", i))
+	}
+	if err := c.ShowedRev(id, pg.Editor, shown.rev, ""); !errors.Is(err, errRevGone) {
+		t.Fatalf("showing a rev no longer kept gave %v", err)
+	}
+	if err := c.ShowedRev(id, pg.Editor, shown.rev, shown.content); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EditPage(id, pg.Editor, editOver(shown), shown.rev); err != nil {
+		t.Fatal(err)
+	}
+	mergedOnce(t, c, ev, fmt.Sprint("One!|Two v", keepRevs+8))
+	if err := c.ShowedRev(id, pg.Editor+1, shown.rev, ""); !errors.Is(err, errNotOpen) {
+		t.Fatalf("another editor's rev gave %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -380,5 +381,135 @@ func TestEmailCodeSendsAgain(t *testing.T) {
 	tt.Frame()
 	if a.signIn.sent || a.signIn.err != "" || !tt.HasText(locales.SigninSendCode()) {
 		t.Errorf("sent %v, error %q, shows %v", a.signIn.sent, a.signIn.err, tt.Texts())
+	}
+}
+
+// TestASettingChangedDuringASignInStays hides the sidebar as the switch to the account signed in runs, with iCloud
+// sync on, which the sign-in ends: the switch leaves the settings to the main thread, so the change stays, and
+// iCloud sync goes off, in the app and the store, its folder no longer watched.
+func TestASettingChangedDuringASignInStays(t *testing.T) {
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
+	a.settings.ICloudSync, a.settings.SidebarOpen = true, true
+	a.saveSettings()
+	a.sync.SetICloud(true)
+	posted := make(chan func(), 16)
+	a.post = func(fn func()) { posted <- fn }
+	next := func() func() {
+		t.Helper()
+		select {
+		case fn := <-posted:
+			return fn
+		case <-time.After(5 * time.Second):
+			t.Fatal("the switch never ended")
+			return nil
+		}
+	}
+	// A switch that stops watching the folder itself does so between reading the settings and writing them back:
+	// it waits there for the sidebar to be hidden.
+	stopped, goOn := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var watching atomic.Bool
+	watching.Store(true)
+	a.core().WatchICloud = func(on bool) {
+		watching.Store(on)
+		once.Do(func() {
+			close(stopped)
+			<-goOn
+		})
+	}
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	var used func()
+	select {
+	case <-stopped:
+	case used = <-posted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the switch never ended")
+	}
+	a.toggleSidebar()
+	close(goOn)
+	if used == nil {
+		used = next()
+	}
+	used()
+	if !a.session.SignedIn {
+		t.Fatal("not signed in")
+	}
+	if a.settings.SidebarOpen || a.st.Settings().SidebarOpen {
+		t.Errorf("the sidebar hidden during the switch shows again: in the app %v, stored %v", a.settings.SidebarOpen, a.st.Settings().SidebarOpen)
+	}
+	if a.settings.ICloudSync || a.st.Settings().ICloudSync || a.sync.ICloudOn() || watching.Load() {
+		t.Errorf("iCloud sync: in the app %v, stored %v, syncing %v, watched %v",
+			a.settings.ICloudSync, a.st.Settings().ICloudSync, a.sync.ICloudOn(), watching.Load())
+	}
+}
+
+// signedInFromAPage signs in on the sign-in screen opened from a page, which goes back to the page, the sign-in
+// screen after it in the history.
+func signedInFromAPage(t *testing.T) (*App, *ui.Tester, store.Page) {
+	t.Helper()
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.route = Route{Kind: "page", ID: p.ID}
+	a.loadPage(p.ID)
+	a.router = ui.NewRouter(a.route.path())
+	a.router.Transition = ui.TransitionNone
+	a.routerAt = a.router.Path()
+	a.navigate(Route{Kind: "signin"})
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
+	tt.Frame()
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	tt.Frame()
+	if !a.session.SignedIn || a.route != (Route{Kind: "page", ID: p.ID}) {
+		t.Fatalf("signed in %v, at %+v", a.session.SignedIn, a.route)
+	}
+	return a, tt, p
+}
+
+// TestForwardPassesTheSignInScreenOnceSignedIn goes forward after signing in, by ⌘] and by the title bar's button:
+// the sign-in screen, whose forms would sign in over the account in use, does not come back.
+func TestForwardPassesTheSignInScreenOnceSignedIn(t *testing.T) {
+	for _, how := range []string{"key", "button"} {
+		a, tt, p := signedInFromAPage(t)
+		if how == "key" {
+			a.forward()
+		} else if err := tt.Click(locales.ShellHistoryForward()); err != nil {
+			t.Fatalf("%s: no Forward button: %v", how, err)
+		}
+		tt.Frame()
+		if a.route.Kind == "signin" || tt.HasText(locales.SigninContinueSupabase()) || tt.HasText(locales.SigninSendCode()) {
+			t.Errorf("%s: the sign-in screen is back while signed in, at %+v", how, a.route)
+		}
+		a.back()
+		tt.Frame()
+		if a.route != (Route{Kind: "page", ID: p.ID}) {
+			t.Errorf("%s: Back went to %+v", how, a.route)
+		}
+	}
+}
+
+// TestTheSignInScreenSignedInOffersNoSignIn shows the sign-in screen while signed in: it says who is signed in, and
+// has no way to sign in over that account.
+func TestTheSignInScreenSignedInOffersNoSignIn(t *testing.T) {
+	a := templatesApp(t)
+	if _, err := a.st.LoadSession(&store.User{ID: "u1", Email: "me@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	a.session = a.st.Session()
+	tt := ui.NewTester(func(c *ui.Context) { a.signInView(c) }, 900, 700)
+	tt.Frame()
+	if !tt.HasText(locales.SettingsSignedInAs("me@example.com")) {
+		t.Errorf("no word of the account in %v", tt.Texts())
+	}
+	for _, s := range []string{locales.SigninContinueSupabase(), locales.SigninSendCode(), locales.SigninContinueLocal()} {
+		if tt.HasText(s) {
+			t.Errorf("offers %q while signed in", s)
+		}
 	}
 }

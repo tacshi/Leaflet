@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 
 die() {
 	printf '%s: %s\n' "$(basename "$0")" "$*" >&2
@@ -51,9 +52,17 @@ version_after() {
 	return 1
 }
 
-CONFIG_LOCK="$ROOT_DIR/build/mygo.json.lock"
-CONFIG_KEPT="$ROOT_DIR/build/mygo.json.committed"
-CONFIG_RECOVER="$ROOT_DIR/build/mygo.json.recover"
+# A build that changes mygo.json for its run keeps a copy of the committed
+# one, and of what it wrote, to put the committed one back as it ends, and
+# a lock, so that one build of the checkout at a time changes it. They are
+# in the checkout's git folder, which make clean leaves alone (outside a
+# git checkout, in build/).
+CONFIG_DIR="$(git -C "$ROOT_DIR" rev-parse --absolute-git-dir 2>/dev/null)/leaflet-build" ||
+	CONFIG_DIR="$ROOT_DIR/build"
+CONFIG_LOCK="$CONFIG_DIR/mygo.json.lock"
+CONFIG_KEPT="$CONFIG_DIR/mygo.json.committed"
+CONFIG_WRITTEN="$CONFIG_DIR/mygo.json.written"
+CONFIG_RECOVER="$CONFIG_DIR/mygo.json.recover"
 CONFIG_HELD=false
 
 read_config() {
@@ -74,7 +83,7 @@ config_value() {
 
 hold_config() {
 	local holder said=false
-	mkdir -p "$ROOT_DIR/build"
+	mkdir -p "$CONFIG_DIR"
 	until (
 		set -o noclobber
 		printf '%s\n' "$$" >"$CONFIG_LOCK"
@@ -93,12 +102,33 @@ hold_config() {
 	trap release_config EXIT
 	cp -p "$ROOT_DIR/mygo.json" "$CONFIG_KEPT.$$"
 	mv -f "$CONFIG_KEPT.$$" "$CONFIG_KEPT"
+	cp -p "$CONFIG_KEPT" "$CONFIG_WRITTEN"
 }
 
 release_config() {
-	if [[ -f "$CONFIG_KEPT" ]]; then mv -f "$CONFIG_KEPT" "$ROOT_DIR/mygo.json"; fi
+	restore_config
 	rm -f "$CONFIG_LOCK"
 	CONFIG_HELD=false
+}
+
+# Puts the committed mygo.json that hold_config kept back, over what
+# patch_config wrote, saying $1 if it is given and they differ. A mygo.json
+# changed since, by hand or by another session, stays as it is, with the
+# committed one beside it to compare it with.
+restore_config() {
+	local config="$ROOT_DIR/mygo.json"
+	if [[ ! -f "$CONFIG_KEPT" ]]; then
+		if [[ -f "$CONFIG_WRITTEN" ]]; then
+			warn "the copy of the committed mygo.json kept to put back, $CONFIG_KEPT, is gone, so mygo.json may still have the build's changes; git diff mygo.json shows them"
+		fi
+	elif [[ ! -f "$config" ]] || cmp -s "$config" "$CONFIG_KEPT" || cmp -s "$config" "$CONFIG_WRITTEN"; then
+		if [[ -n "${1:-}" ]] && ! cmp -s "$config" "$CONFIG_KEPT"; then warn "$1"; fi
+		mv -f "$CONFIG_KEPT" "$config"
+	else
+		mv -f "$CONFIG_KEPT" "$config.committed"
+		warn "mygo.json changed while a build had it changed, so it stays as it is; the committed one is beside it, mygo.json.committed, to compare it with"
+	fi
+	rm -f "$CONFIG_WRITTEN"
 }
 
 recover_config() {
@@ -107,20 +137,20 @@ recover_config() {
 		: >"$CONFIG_RECOVER"
 	) 2>/dev/null || return 1
 	if [[ "$(cat "$CONFIG_LOCK" 2>/dev/null || true)" == "$1" ]]; then
-		if [[ -f "$CONFIG_KEPT" ]]; then
-			warn "a build that ended early left mygo.json changed; putting the committed one back"
-			mv -f "$CONFIG_KEPT" "$ROOT_DIR/mygo.json"
-		fi
+		restore_config "a build that ended early left mygo.json changed; putting the committed one back"
 		rm -f "$CONFIG_LOCK"
 	fi
 	rm -f "$CONFIG_RECOVER"
 }
 
+# Sets mygo.json's keys for the build's run, each key.sub=value, or removes
+# those given as -key.sub. What it writes goes to CONFIG_WRITTEN first, so
+# that mygo.json never holds it unrecorded.
 patch_config() {
 	$CONFIG_HELD || hold_config
-	python3 -I - "$ROOT_DIR/mygo.json" "$@" <<'EOF'
+	python3 -I - "$ROOT_DIR/mygo.json" "$CONFIG_WRITTEN" "$@" <<'EOF'
 import json, sys
-path, pairs = sys.argv[1], sys.argv[2:]
+path, written, pairs = sys.argv[1], sys.argv[2], sys.argv[3:]
 with open(path) as f:
     config = json.load(f)
 for pair in pairs:
@@ -134,9 +164,10 @@ for pair in pairs:
         node.pop(keys[-1], None)
     else:
         node[keys[-1]] = value
-with open(path, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
+text = json.dumps(config, indent=2) + "\n"
+for out in (written, path):
+    with open(out, "w") as f:
+        f.write(text)
 EOF
 }
 
@@ -202,6 +233,16 @@ EOF
 
 check_nsis() {
 	command -v makensis >/dev/null 2>&1 || die "Windows installers need NSIS (brew install makensis)"
+	[[ -n "${LEAFLET_WINDOWS_CERTIFICATE:-}" ]] || return 0
+	# MyGo signs the installer's uninstaller through NSIS 3.08 or later,
+	# and with an older one leaves it unsigned, which no check of the
+	# build's programs sees: it is inside the installer.
+	local version
+	version="$(makensis -VERSION 2>/dev/null || true)"
+	if ! [[ "$version" =~ ^v?([0-9]+)\.([0-9]+) ]] ||
+		((10#${BASH_REMATCH[1]} < 3 || (10#${BASH_REMATCH[1]} == 3 && 10#${BASH_REMATCH[2]} < 8))); then
+		die "a signed Windows build needs NSIS 3.08 or later, which signs the uninstaller, not ${version:-a makensis that gives no version} (brew upgrade makensis)"
+	fi
 }
 
 utf8_locale() {
@@ -254,16 +295,18 @@ check_draft_commit() {
 	fi
 }
 
-# Dies unless the checkout is still the commit $1 with no tracked file
-# changed. A build has mygo.json changed for its run, so while it does, the
-# copy it kept is the one compared.
+# Dies unless the checkout is still the commit $1 with no file changed or
+# added: one that git does not ignore may have gone into the build, as a
+# .go file or a migration would, and the tag would not have it. A build has
+# mygo.json changed for its run, so while it does, the copy it kept is the
+# one compared.
 check_unchanged() {
 	local changed
 	if $CONFIG_HELD; then
-		changed="$(git status --porcelain --untracked-files=no -- . ':(exclude)mygo.json')"
+		changed="$(git status --porcelain --untracked-files=normal -- . ':(exclude)mygo.json')"
 		[[ "$(git hash-object "$CONFIG_KEPT")" == "$(git rev-parse HEAD:mygo.json)" ]] || changed+=" mygo.json"
 	else
-		changed="$(git status --porcelain --untracked-files=no)"
+		changed="$(git status --porcelain --untracked-files=normal)"
 	fi
 	[[ "$(git rev-parse HEAD)" == "$1" && -z "$changed" ]] ||
 		die "the checkout changed while $1 was built, so the build is not of the commit its draft release would record; nothing was uploaded"
@@ -285,6 +328,59 @@ missing_manifests() {
 	while read -r name; do
 		grep -qxF "$name" <<<"$1" || printf '%s\n' "$name"
 	done < <(update_manifests)
+}
+
+# Prints, a line each, what is wrong with the files the update manifests
+# on the release v$1 name, but for the manifests named after it: each
+# archive and delta, at releases/download/v$1, must be a file of the
+# release, of the size the manifest gives. Installed copies download them
+# from there. Prints nothing with no such release.
+manifest_problems() {
+	local version="$1" repo tag dir status=0
+	shift
+	repo="$(config_value updates.github)"
+	tag="v$version"
+	find_release "$version" --json assets --jq '.assets[] | "\(.size) \(.name)"' || return 0
+	dir="$(mktemp -d)"
+	printf '%s\n' "$RELEASE" >"$dir/assets"
+	mkdir "$dir/manifests"
+	if grep -q ' update-.*\.json$' "$dir/assets" &&
+		! gh release download "$tag" --repo "$repo" --pattern 'update-*.json' --dir "$dir/manifests" >/dev/null; then
+		rm -rf "$dir"
+		die "could not download the update manifests of the release $tag of $repo"
+	fi
+	python3 -I - "$dir" "https://github.com/$repo/releases/download/$tag/" "$@" <<'EOF' || status=$?
+import json, os, sys
+from urllib.parse import unquote
+root, prefix, skip = sys.argv[1], sys.argv[2], set(sys.argv[3:])
+sizes = {}
+with open(os.path.join(root, "assets"), encoding="utf-8") as f:
+    for line in f:
+        size, _, name = line.rstrip("\n").partition(" ")
+        if name:
+            sizes[name] = int(size)
+for name in sorted(os.listdir(os.path.join(root, "manifests"))):
+    if name in skip:
+        continue
+    try:
+        with open(os.path.join(root, "manifests", name), encoding="utf-8") as f:
+            manifest = json.load(f)
+        entries = [manifest, *(manifest.get("deltas") or [])]
+        named = [(e.get("url") or "", e.get("size")) for e in entries]
+    except (ValueError, AttributeError):
+        print(f"{name} is no update manifest")
+        continue
+    for url, size in named:
+        file = unquote(url[len(prefix):]) if url.startswith(prefix) else None
+        if file is None:
+            print(f"{name} names {url or 'no file'}, not a file of this release")
+        elif file not in sizes:
+            print(f"{name} names {file}, which the release does not have")
+        elif sizes[file] != size:
+            print(f"{name} names {file} of {size} bytes, and the release has one of {sizes[file]}")
+EOF
+	rm -rf "$dir"
+	return "$status"
 }
 
 changelog_notes() {
@@ -363,6 +459,18 @@ upload_release() {
 			merge_checksums "$out/SHA256SUMS" "$earlier/SHA256SUMS"
 			rm -rf "$earlier"
 		fi
+		# The manifests of these platforms come off first, and go back on
+		# last: gh deletes each file before it uploads its replacement, so
+		# a run that stops part way would leave them naming files gone, or
+		# not those they were. Without them, the draft offers those
+		# platforms no update.
+		for f in ${manifests[@]+"${manifests[@]}"}; do
+			name="$(basename "$f")"
+			if grep -qxF "$name" <<<"$assets"; then
+				info "taking $name off $tag of $repo until the files it names are up"
+				gh release delete-asset "$tag" "$name" --repo "$repo" --yes >/dev/null
+			fi
+		done
 	else
 		info "creating the draft release $tag of $repo"
 		gh release create "$tag" --repo "$repo" --draft --target "$commit" --title "$tag" --notes-file "$notes" >/dev/null

@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode"
 
-	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
 
@@ -67,7 +66,7 @@ func (s *Server) markSeen() {
 
 func NewServer(st *store.Store, version string) *Server {
 	s := &Server{st: st, version: version, agent: "Agent"}
-	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]*doc.Content{}}
+	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]sight{}}
 	return s
 }
 

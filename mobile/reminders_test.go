@@ -5,9 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func todoPage(t *testing.T, c *Core, title string, due map[string]time.Time) store.Page {
@@ -29,7 +32,8 @@ func todoPage(t *testing.T, c *Core, title string, due map[string]time.Time) sto
 
 func reminders(t *testing.T, c *Core, now time.Time, limit int) []reminder {
 	t.Helper()
-	raw, err := c.Reminders(now.UnixMilli(), limit)
+	_, offset := now.Zone()
+	raw, err := c.Reminders(now.UnixMilli(), limit, now.Location().String(), offset)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,5 +124,93 @@ func TestRemindersLeaveOthersToDos(t *testing.T) {
 	}
 	if got := reminders(t, c, now, 10); len(got) != 0 {
 		t.Errorf("reminded of another's: %+v", got)
+	}
+}
+
+func dueOn(id, text, due string) *doc.Node {
+	n := &doc.Node{ID: id, Type: "todo_list"}
+	n.SetDelta(doc.Delta{{Text: text}})
+	n.Set("checked", false)
+	n.Set("due", due)
+	return n
+}
+
+// openIn opens a core in loc, the zone the device was in as the app opened.
+func openIn(t *testing.T, loc *time.Location, todos ...*doc.Node) *Core {
+	t.Helper()
+	old := time.Local
+	setLocal(loc)
+	t.Cleanup(func() { setLocal(old) })
+	c, _ := open(t)
+	if _, err := c.core.Store.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks(todos)}); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestRemindersComeAtTheirTimeInTheZoneTheDeviceIsIn(t *testing.T) {
+	c := openIn(t, time.FixedZone("New York", -5*3600),
+		dueOn("pack", "Pack", "2026-12-02"), dueOn("call", "Call home", "2026-12-02T15:00"))
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reminders(t, c, time.Date(2026, 12, 1, 12, 0, 0, 0, berlin), 10)
+	want := map[string]time.Time{
+		"pack": time.Date(2026, 12, 2, core.ReminderHour, 0, 0, 0, berlin),
+		"call": time.Date(2026, 12, 2, 15, 0, 0, 0, berlin),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("reminders %+v", got)
+	}
+	for _, r := range got {
+		if at := time.UnixMilli(r.At); !at.Equal(want[r.BlockID]) {
+			t.Errorf("%s reminds at %s, want %s", r.BlockID, at.In(berlin), want[r.BlockID])
+		}
+	}
+	got = reminders(t, c, time.Date(2026, 12, 2, 10, 0, 0, 0, berlin), 10)
+	if len(got) != 2 || got[0].BlockID != "pack" || got[0].At != 0 || got[1].BlockID != "call" {
+		t.Errorf("at 10:00 in Berlin, reminders %+v: want Pack's due, and the call's to come", got)
+	}
+}
+
+func TestTodosShowTheirDuesInTheZoneTheDeviceIsIn(t *testing.T) {
+	c := openIn(t, time.FixedZone("Tokyo", 9*3600),
+		dueOn("pack", "Pack", "2026-12-02"), dueOn("call", "Call home", "2026-12-02T15:00"))
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.todosAt(time.Date(2026, 12, 2, 8, 0, 0, 0, ny), ny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []todoGroup
+	if err := json.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]time.Time{
+		"pack": time.Date(2026, 12, 2, 0, 0, 0, 0, ny),
+		"call": time.Date(2026, 12, 2, 15, 0, 0, 0, ny),
+	}
+	if len(groups) != 1 || groups[0].Section != "today" || len(groups[0].Todos) != len(want) {
+		t.Fatalf("at 8:00 in New York, to-dos %+v: want both today", groups)
+	}
+	for _, td := range groups[0].Todos {
+		if due := time.UnixMilli(td.Due); !due.Equal(want[td.BlockID]) {
+			t.Errorf("%s is due %s, want %s", td.BlockID, due.In(ny), want[td.BlockID])
+		}
+	}
+}
+
+func TestAReminderTitleTellsTheDayOnTheDevicesClock(t *testing.T) {
+	c := openIn(t, time.FixedZone("Tokyo", 9*3600), dueOn("call", "Call home", "2026-12-02T15:00"))
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reminders(t, c, time.Date(2026, 12, 2, 16, 0, 0, 0, ny), 10)
+	if want := locales.In(i18n.Locale()).TodosDueToday(); len(got) != 1 || got[0].Title != want {
+		t.Errorf("an hour after a call due at 15:00 today, reminders %+v: want one titled %q", got, want)
 	}
 }

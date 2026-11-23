@@ -24,8 +24,12 @@ type reminder struct {
 	Due      string `json:"due"`
 }
 
-func (c *Core) Reminders(now int64, limit int) (_ string, err error) {
+// Reminders lists the reminders due by now and those to come, up to limit, at their times in
+// zone, the zone the device is in now, or one offset seconds east of UTC: the core keeps the
+// zone it opened in.
+func (c *Core) Reminders(now int64, limit int, zone string, offset int) (_ string, err error) {
 	defer catch(&err)
+	loc := location(zone, offset)
 	out := []reminder{}
 	c.q.do(func() {
 		st := c.core.Store
@@ -42,14 +46,14 @@ func (c *Core) Reminders(now int64, limit int) (_ string, err error) {
 		for _, p := range pages {
 			own[p.ID] = p.SpaceID == session.SpaceID
 		}
-		at := time.UnixMilli(now)
+		at := time.UnixMilli(now).In(loc)
 		var coming, mine []store.PageTodo
 		for _, t := range todos {
 			if t.Due.IsZero() || !core.RemindsOf(t, session.UserID, own[t.PageID]) {
 				continue
 			}
 			mine = append(mine, t)
-			if core.ReminderAt(t).After(at) {
+			if core.ReminderAt(t, loc).After(at) {
 				coming = append(coming, t)
 			}
 		}
@@ -58,17 +62,19 @@ func (c *Core) Reminders(now int64, limit int) (_ string, err error) {
 			return ok && v == core.ReminderValue(t)
 		})
 		slices.SortStableFunc(coming, func(a, b store.PageTodo) int {
-			return core.ReminderAt(a).Compare(core.ReminderAt(b))
+			return core.ReminderAt(a, loc).Compare(core.ReminderAt(b, loc))
 		})
 		for _, t := range slices.Concat(due, coming) {
 			if len(out) == limit {
 				break
 			}
 			shown, when := at, int64(0)
-			if r := core.ReminderAt(t); r.After(at) {
+			if r := core.ReminderAt(t, loc); r.After(at) {
 				shown, when = r, r.UnixMilli()
 			}
-			out = append(out, reminderOf(t, shown, when))
+			// A title tells the day as the dues are read, in the zone the core opened in, so it
+			// is given the time there that the device's clock shows.
+			out = append(out, reminderOf(t, core.OnClock(shown, time.Local), when))
 		}
 	})
 	if err != nil {

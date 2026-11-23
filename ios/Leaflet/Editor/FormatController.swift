@@ -1,3 +1,4 @@
+import LeafletCore
 import UIKit
 
 @MainActor
@@ -28,7 +29,7 @@ final class FormatController {
         typing = [.leafletBlock: info]
         let plain = sel.location == plainAt
         if !plain { plainAt = nil }
-        if sel.location > range.location, !plain {
+        if sel.location > range.location, !plain, info.type != "code" {
             let before = storage.attributes(at: sel.location - 1, effectiveRange: nil)
             for k in Self.formatKeys { typing[k] = before[k] }
         }
@@ -69,6 +70,31 @@ final class FormatController {
         storage.addAttributes(attributes, range: r)
     }
 
+    /// The parts of range formatting goes on: the text of its text blocks,
+    /// as a code block holds its code as plain text.
+    func formattable(_ range: NSRange) -> [NSRange] {
+        text.paragraphs(touching: range).compactMap { para, info in
+            guard info.isText, info.type != "code" else { return nil }
+            let r = NSIntersectionRange(para, range)
+            return r.length > 0 ? r : nil
+        }
+    }
+
+    /// Whether formatting takes in range: some of its text is out of code,
+    /// or, for a caret, the caret is.
+    func formats(_ range: NSRange) -> Bool {
+        if range.length == 0 { return text.paragraph(at: range.location).info.type != "code" }
+        var at = range.location
+        while at < NSMaxRange(range), at <= text.length {
+            let (para, info) = text.paragraph(at: at)
+            if info.isText, info.type != "code", NSIntersectionRange(para, range).length > 0 {
+                return true
+            }
+            at = NSMaxRange(para) + 1
+        }
+        return false
+    }
+
     func toggle(_ key: NSAttributedString.Key) {
         guard textView.isEditable else { return }
         let key: NSAttributedString.Key =
@@ -79,64 +105,91 @@ final class FormatController {
             }
         var sel = textView.selectedRange
         if sel.length == 0 {
+            guard formats(sel) else { return }
             typing[key] = typing[key] == nil ? true : nil
             return
         }
         sel = text.widenToMentions(sel)
+        let parts = formattable(sel)
+        guard !parts.isEmpty else { return }
         var all = true
-        storage.enumerateAttribute(key, in: sel) { v, _, stop in
-            if v == nil {
-                all = false
-                stop.pointee = true
+        for r in parts where all {
+            storage.enumerateAttribute(key, in: r) { v, _, stop in
+                if v == nil {
+                    all = false
+                    stop.pointee = true
+                }
             }
         }
         let undo = textView.undoManager
         let before = storage.attributedSubstring(from: sel)
-        if all {
-            storage.removeAttribute(key, range: sel)
-        } else {
-            storage.addAttribute(key, value: true, range: sel)
+        storage.beginEditing()
+        for r in parts {
+            if all {
+                storage.removeAttribute(key, range: r)
+            } else {
+                storage.addAttribute(key, value: true, range: r)
+            }
         }
+        storage.endEditing()
         editor.edits.registerUndo(undo, range: sel, before: before, trailing: text.trailing)
         editor.edited(sel)
     }
 
-    func set(_ key: NSAttributedString.Key, _ value: Any?) {
-        guard textView.isEditable else { return }
+    /// Sets an inline attribute on the selection, out of code: false when
+    /// none of it takes one.
+    @discardableResult
+    func set(_ key: NSAttributedString.Key, _ value: Any?) -> Bool {
+        guard textView.isEditable else { return false }
         let sel = text.widenToMentions(textView.selectedRange)
-        guard sel.length > 0 else { return }
+        let parts = formattable(sel)
+        guard !parts.isEmpty else { return false }
         let before = storage.attributedSubstring(from: sel)
-        if let value {
-            storage.addAttribute(key, value: value, range: sel)
-        } else {
-            storage.removeAttribute(key, range: sel)
-        }
-        if key == .leafletHref {
-            storage.enumerateAttribute(.leafletMention, in: sel) { v, r, _ in
-                if let m = v as? Mention, m.kind == "page",
-                    value as? String != "leaflet://page/\(m.id)"
+        storage.beginEditing()
+        for r in parts {
+            if let value {
+                storage.addAttribute(key, value: value, range: r)
+            } else {
+                storage.removeAttribute(key, range: r)
+            }
+            guard key == .leafletHref else { continue }
+            storage.enumerateAttribute(.leafletMention, in: r) { v, m, _ in
+                if let mention = v as? Mention, mention.kind == "page",
+                    value as? String != "leaflet://page/\(mention.id)"
                 {
-                    storage.removeAttribute(.leafletMention, range: r)
+                    storage.removeAttribute(.leafletMention, range: m)
                 }
             }
         }
+        storage.endEditing()
         editor.edits.registerUndo(
             textView.undoManager, range: sel, before: before, trailing: text.trailing)
         editor.edited(sel)
+        return true
     }
 
     func editLink() {
-        guard textView.isEditable else { return }
-        let sel = textView.selectedRange
-        guard sel.length > 0 else { return }
+        guard textView.isEditable,
+            let first = formattable(text.widenToMentions(textView.selectedRange)).first
+        else { return }
         let current =
-            storage.attribute(.leafletHref, at: sel.location, effectiveRange: nil) as? String
+            storage.attribute(.leafletHref, at: first.location, effectiveRange: nil) as? String
         let alert = UIAlertController(title: L.editorLink, message: nil, preferredStyle: .alert)
-        alert.addTextField { f in
+        let save = UIAlertAction(title: L.commonSave, style: .default) {
+            [weak self, weak alert] _ in
+            let href = Self.href(alert?.textFields?.first?.text ?? "")
+            guard href != "" else { return }
+            self?.set(.leafletHref, href)
+        }
+        save.isEnabled = Self.href(current ?? "") != ""
+        alert.addTextField { [weak save] f in
             f.text = current
             f.placeholder = L.editorPasteLink
             f.keyboardType = .URL
             f.autocapitalizationType = .none
+            f.addAction(
+                UIAction { [weak f] _ in save?.isEnabled = Self.href(f?.text ?? "") != "" },
+                for: .editingChanged)
         }
         alert.addAction(UIAlertAction(title: L.commonCancel, style: .cancel))
         if current != nil {
@@ -145,12 +198,15 @@ final class FormatController {
                     self?.set(.leafletHref, nil)
                 })
         }
-        alert.addAction(
-            UIAlertAction(title: L.commonSave, style: .default) { [weak self, weak alert] _ in
-                let link =
-                    alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? ""
-                self?.set(.leafletHref, link.isEmpty ? nil : link)
-            })
+        alert.addAction(save)
         textView.window?.rootViewController?.topmost.present(alert, animated: true)
+    }
+
+    /// Where a link goes for the address typed in the link dialog, as the
+    /// desktop has it: nil, for nothing typed, takes the link away, and ""
+    /// is for what makes no link that opens, which can't be saved.
+    static func href(_ typed: String) -> String? {
+        let s = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : MobileLinkHref(s)
     }
 }

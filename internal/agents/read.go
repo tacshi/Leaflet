@@ -44,22 +44,24 @@ func PartArgs(args map[string]any) (offset, limit int, err error) {
 // ReadPart reads the blocks of c from offset on that fit one tool result, with the page's
 // subpages and comments in the first part.
 func (tc ToolContext) ReadPart(pageID string, page map[string]any, c *doc.Content, offset, limit int) map[string]any {
-	out := map[string]any{"page": page}
-	size := jsonSize(page)
+	blocks := doc.BlockViews(c)
+	// The part without its blocks, next_offset as long as it can be, is sized
+	// whole, keys and all, so the blocks that fit keep the part to readBudget.
+	out := map[string]any{"page": page, "total_blocks": len(blocks), "next_offset": len(blocks), "blocks": []map[string]any{}}
 	if offset == 0 {
 		for key, list := range map[string]func() []map[string]any{"subpages": tc.Subpages, "comments": tc.Comments} {
 			if list == nil {
 				continue
 			}
 			all := list()
-			kept, cost := fitting(all, readListShare)
-			out[key], size = kept, size+cost
+			kept := fitting(all, readListShare)
+			out[key] = kept
 			if more := len(all) - len(kept); more > 0 {
 				out["more_"+key] = more
 			}
 		}
 	}
-	blocks := doc.BlockViews(c)
+	size := jsonSize(out)
 	start := min(offset, len(blocks))
 	end := start
 	for end < len(blocks) && (limit == 0 || end-start < limit) {
@@ -72,15 +74,16 @@ func (tc ToolContext) ReadPart(pageID string, page map[string]any, c *doc.Conten
 		end++
 	}
 	out["blocks"] = blocks[start:end]
-	out["total_blocks"] = len(blocks)
 	if end < len(blocks) {
 		out["next_offset"] = end
+	} else {
+		delete(out, "next_offset")
 	}
 	return out
 }
 
-func fitting(list []map[string]any, budget int) (kept []map[string]any, cost int) {
-	kept = []map[string]any{}
+func fitting(list []map[string]any, budget int) []map[string]any {
+	kept, cost := []map[string]any{}, 0
 	for _, v := range list {
 		n := jsonSize(v) + 1
 		if cost+n > budget {
@@ -88,7 +91,7 @@ func fitting(list []map[string]any, budget int) (kept []map[string]any, cost int
 		}
 		kept, cost = append(kept, v), cost+n
 	}
-	return kept, cost
+	return kept
 }
 
 func jsonSize(v any) int {

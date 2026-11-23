@@ -64,6 +64,10 @@
   "@appSavingRecording": {
     "description": "Toast when quitting waits for the recording under way to be saved."
   },
+  "appFinishingTranscription": "Finishing the transcription before Leaflet quits…",
+  "@appFinishingTranscription": {
+    "description": "Toast when quitting waits for an audio file's transcription under way to finish; one that takes too long is stopped."
+  },
   "appErrorSave": "Could not save: {error}",
   "@appErrorSave": {
     "description": "Toast when the open page could not be saved.",
@@ -1768,6 +1772,14 @@
   "pubBusy": "Too many comments right now. Try again in a minute.",
   "@pubBusy": {
     "description": "Public page (seen by visitors): the visitor or the link reached the comment limit."
+  },
+  "pubNameTaken": "Someone on this page goes by that name. Choose another.",
+  "@pubNameTaken": {
+    "description": "Public page (seen by visitors): the comment form, when the name typed is that of the page's owner, of an agent or of someone else who comments on the page, which a visitor can't take."
+  },
+  "pubPageOwner": "Page owner",
+  "@pubPageOwner": {
+    "description": "Public page (seen by visitors): beside the name on a comment of the page's owner, or in place of the name when the owner has set none."
   },
   "pubStarting": "This page is getting ready. Reload in a moment.",
   "@pubStarting": {
@@ -3655,6 +3667,18 @@
       }
     }
   },
+  "recMicDisconnected": "it was disconnected or turned off.",
+  "@recMicDisconnected": {
+    "description": "Why a recording paused on the computer: its microphone went away, as when it is unplugged or a Bluetooth headset disconnects. Resuming records from the microphone there is then. Follows 'The microphone stopped: '."
+  },
+  "recMicHeld": "the system or another app is holding it.",
+  "@recMicHeld": {
+    "description": "Why a recording paused on the computer: the system or another app holds the microphone, or stopped the app's sound, for now; the recording goes on by itself when it is given back. Follows 'The microphone stopped: '."
+  },
+  "recMicRecorderGone": "the part of Leaflet that records stopped.",
+  "@recMicRecorderGone": {
+    "description": "Why a recording paused on the computer, or did not start: the hidden web page that records from the microphone crashed or was ended. Resuming starts it again. Follows 'The microphone stopped: ' or 'The microphone did not start: '."
+  },
   "recErrLive": "Live transcript unavailable: {error}",
   "@recErrLive": {
     "description": "Error when the live transcript cannot connect.",
@@ -5367,6 +5391,20 @@
   "externalCouldNotChangeSafely": "could not change it safely",
   "@externalCouldNotChangeSafely": {
     "description": "Settings › External agents: why an AI app's settings file was left as it was, after its path and a colon, inside the externalConnectFailed toast. Lowercase, as part of a sentence."
+  },
+  "externalUnsafeInCommandPrompt": "{command} runs in the Windows command prompt, which cannot take {argument} safely; set it up by hand instead",
+  "@externalUnsafeInCommandPrompt": {
+    "description": "Settings › External agents, on Windows: why an AI app could not be connected, shown inside the externalConnectFailed toast, lowercase, as part of a sentence. Its command-line tool is a batch file, as npm installs claude.cmd, which runs in the command prompt; that would read a character of what Leaflet passes it, as & or % in a folder's path, as a command, so nothing was run. Set it up by hand is the section under the apps (externalByHand).",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "claude.cmd"
+      },
+      "argument": {
+        "type": "String",
+        "example": "LEAFLET_DATA_DIR=C:\\Users\\R&D\\AppData\\Roaming\\Leaflet"
+      }
+    }
   },
   "externalConnectFailed": "Could not connect {app}: {error}",
   "@externalConnectFailed": {

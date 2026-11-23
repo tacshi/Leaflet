@@ -41,10 +41,7 @@ func Read(ctx context.Context, link string) (Page, error) {
 		return Page{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	final := link
-	if res.Request != nil && res.Request.URL != nil {
-		final = res.Request.URL.String()
-	}
+	final := pageURL(res, link)
 	body := io.LimitReader(res.Body, maxPageBytes)
 	ctype := res.Header.Get("Content-Type")
 	var head []byte
@@ -71,6 +68,21 @@ func Read(ctx context.Context, link string) (Page, error) {
 	}
 	t, cut := truncate(strings.TrimSpace(src))
 	return Page{URL: final, Text: t, Truncated: cut, Links: urlsOf(t)}, nil
+}
+
+// pageURL is the address of the page res holds: where link's redirects led,
+// without a fragment, which names a place in a page and is never sent for it.
+func pageURL(res *http.Response, link string) string {
+	u, err := url.Parse(link)
+	if res.Request != nil && res.Request.URL != nil {
+		u, err = res.Request.URL, nil
+	}
+	if err != nil {
+		return link
+	}
+	page := *u
+	page.Fragment, page.RawFragment = "", ""
+	return page.String()
 }
 
 func pageText(data []byte, ctype string) string {

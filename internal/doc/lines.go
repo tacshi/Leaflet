@@ -462,6 +462,7 @@ func tableRow(line string) (cells []string, rule bool) {
 	s := []rune(strings.TrimPrefix(strings.TrimSpace(line), "|"))
 	var cell strings.Builder
 	spans := codeSpans[rune]{s: s}
+	maths := linkScan{s: s}
 	code := 0
 	for i := 0; i < len(s); i++ {
 		switch {
@@ -480,6 +481,10 @@ func tableRow(line string) (cells []string, rule bool) {
 			} else {
 				code = i + ticks(s[i:])
 			}
+			cell.WriteRune(s[i])
+		case s[i] == '$' && i >= code:
+			// A formula's backslashes are its TeX's, as code's are, and escape nothing but a pipe: \| is ‖.
+			code = i + maths.formula(i)
 			cell.WriteRune(s[i])
 		default:
 			cell.WriteRune(s[i])

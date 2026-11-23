@@ -154,6 +154,16 @@ func LinkTarget(href string) string {
 	return doc.SafeHref(href)
 }
 
+// LinkHref is where a link goes for the address typed in the link dialog,
+// as the desktop's link editor makes it: example.com goes to
+// https://example.com, and "" is for what makes no link that opens, as for
+// nothing typed.
+func LinkHref(typed string) string {
+	defer catch(nil)
+	href, _ := doc.LinkHref(typed)
+	return href
+}
+
 func TableText(node string) (_ string, err error) {
 	defer catch(&err)
 	var n doc.Node

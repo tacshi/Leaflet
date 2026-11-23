@@ -118,13 +118,13 @@ type pageTools struct {
 	s      *Server
 	app    bool
 	edited map[string]int64
-	read   map[string]*doc.Content
+	read   map[string]sight
 	order  []string
 }
 
 const keptReads = 16
 
-func (t *pageTools) keep(id string, c *doc.Content) {
+func (t *pageTools) keep(id string, c sight) {
 	t.read[id] = c
 	t.order = append(slices.DeleteFunc(t.order, func(k string) bool { return k == id }), id)
 	if len(t.order) > keptReads {
@@ -429,7 +429,8 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		delete(args, k)
 	}
 	var out map[string]any
-	var saved, unsaved, known *doc.Content
+	var saved, unsaved *doc.Content
+	var known sight
 	snapped, inHistory := false, ""
 	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
 		if !kept {
@@ -438,13 +439,11 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		tc := agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)
 		tc.SiteInfo = true
 		if name == "read_page" {
+			// Each view has its version as the part is sized, so the part, versions
+			// and all, keeps to what a part may hold.
+			tc.Versions = blockVersions(content)
 			out = tc.ReadPart(p.ID, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}, content, offset, limit)
 			views, _ := out["blocks"].([]map[string]any)
-			now := blockVersions(content)
-			for _, v := range views {
-				id, _ := v["id"].(string)
-				v["version"] = now[id]
-			}
 			t.keep(p.ID, seen(content, t.read[p.ID], returned(content, views)))
 			return false, nil
 		}
@@ -458,7 +457,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 					return false, changedSinceRead(tc, p.ID, content, id, cur)
 				}
 			}
-			known = seen(content, known, want.ids())
+			known = seen(content, known, withCells(content, want.ids()))
 		}
 		before := content.Copy()
 		x := &agents.Executor{Ctx: tc}
@@ -507,23 +506,36 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	return out, nil
 }
 
-// seen is the page now as the client has seen it: a block in fresh, or one it
-// had not seen, as it is now, and any other as it last saw it, so a change it
-// has not read since stays a change.
-func seen(now, last *doc.Content, fresh map[string]bool) *doc.Content {
-	c := now.Copy()
-	if last == nil {
-		return c
+// sight is what the client has seen of a page: each block it has seen, by ID,
+// as it last saw the block itself. The blocks nested in one are blocks of their
+// own, seen or not apart from it, as a version is of a block's own view.
+type sight map[string]string
+
+// own is the block itself as a sight keeps it: its type and data, and a
+// table's rows and cells, which its view shows, but no nested block.
+func own(n *doc.Node) string {
+	self := &doc.Node{Type: n.Type, Data: n.Data}
+	if n.Type == "table" {
+		self.Children = n.Children
 	}
-	was := map[string]*doc.Node{}
-	last.Walk(func(n, _ *doc.Node) { was[n.ID] = n })
-	c.Walk(func(n, _ *doc.Node) {
-		if w := was[n.ID]; w != nil && !fresh[n.ID] {
-			own := (&doc.Node{Type: w.Type, Data: w.Data}).Clone()
-			n.Type, n.Data = own.Type, own.Data
+	raw, _ := json.Marshal(self)
+	return string(raw)
+}
+
+// seen is what the client has seen of the page now: a block in fresh as it is
+// now, any other as it last saw it, so a change it has not read since stays a
+// change, and one it has never seen, as someone added it since, not at all. Its
+// first look at the page, read or edit, sees every block as it is then.
+func seen(now *doc.Content, last sight, fresh map[string]bool) sight {
+	out := sight{}
+	now.Walk(func(n, _ *doc.Node) {
+		if was, ok := last[n.ID]; ok && !fresh[n.ID] {
+			out[n.ID] = was
+		} else if last == nil || fresh[n.ID] {
+			out[n.ID] = own(n)
 		}
 	})
-	return c
+	return out
 }
 
 // returned is the blocks of c a read_page answer holds: those it lists, and
@@ -535,11 +547,17 @@ func returned(c *doc.Content, views []map[string]any) map[string]bool {
 			listed[id] = true
 		}
 	}
+	return withCells(c, listed)
+}
+
+// withCells is the blocks of c ids names, with the rows and cells of a table
+// among them, which its view and its version hold.
+func withCells(c *doc.Content, ids map[string]bool) map[string]bool {
 	out := map[string]bool{}
 	var visit func([]*doc.Node, bool)
 	visit = func(nodes []*doc.Node, in bool) {
 		for _, n := range nodes {
-			mine := in || listed[n.ID]
+			mine := in || ids[n.ID]
 			if mine {
 				out[n.ID] = true
 			}
@@ -552,10 +570,6 @@ func returned(c *doc.Content, views []map[string]any) map[string]bool {
 
 // written is the blocks of after the client's edit made or changed.
 func written(before, after *doc.Content) map[string]bool {
-	own := func(n *doc.Node) string {
-		raw, _ := json.Marshal(&doc.Node{Type: n.Type, Data: n.Data})
-		return string(raw)
-	}
 	was := map[string]string{}
 	before.Walk(func(n, _ *doc.Node) { was[n.ID] = own(n) })
 	out := map[string]bool{}
@@ -567,31 +581,51 @@ func written(before, after *doc.Content) map[string]bool {
 	return out
 }
 
-// conflictSince is the blocks ops replace or delete that someone changed after
-// the client read them, in the order of the ops.
-func conflictSince(read, now *doc.Content, ops []doc.Op) []string {
+// conflictSince is the blocks of now that ops replace or delete though someone
+// changed them since the client saw them, in the order of the ops: a block not
+// as the client last saw it, and, of the blocks nested in the one an op names
+// that go with it, one the client never saw, as someone added it since. A
+// nested block the op keeps, as a rewrite of a list item's text keeps its
+// nested items as they are, is not replaced.
+func conflictSince(read sight, now *doc.Content, ops []doc.Op) []string {
 	if read == nil {
 		return nil
 	}
 	var out []string
-	check := func(id string) {
-		was, is := read.Find(id), now.Find(id)
-		if was == nil || is == nil || slices.Contains(out, id) {
+	check := func(id string, named bool) {
+		is := now.Find(id)
+		if is == nil || slices.Contains(out, id) {
 			return
 		}
-		a, _ := json.Marshal(was)
-		b, _ := json.Marshal(is)
-		if string(a) != string(b) {
+		if was, ok := read[id]; ok && was != own(is) || !ok && !named {
 			out = append(out, id)
+		}
+	}
+	var takenOut func(n *doc.Node, kept map[string]bool)
+	takenOut = func(n *doc.Node, kept map[string]bool) {
+		if n.Type == "table" {
+			return
+		}
+		for _, k := range n.Children {
+			if !kept[k.ID] {
+				check(k.ID, false)
+			}
+			takenOut(k, kept)
 		}
 	}
 	for _, op := range ops {
 		switch op.Op {
 		case "replace":
-			check(op.ID)
+			check(op.ID, true)
+			if op.PrevNode != nil && op.Node != nil {
+				kept := map[string]bool{}
+				(&doc.Content{Children: op.Node.Children}).Walk(func(k, _ *doc.Node) { kept[k.ID] = true })
+				takenOut(op.PrevNode, kept)
+			}
 		case "delete":
-			for _, id := range op.IDs {
-				check(id)
+			for _, r := range op.Removed {
+				check(r.Node.ID, true)
+				takenOut(r.Node, nil)
 			}
 		}
 	}

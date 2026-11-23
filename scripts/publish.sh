@@ -36,8 +36,14 @@
 # builds, tags, pushes and uploads nothing, and leaves build/release alone.
 #
 # A release tags the commit it was built from, which must still be checked
-# out, unchanged, once the build is done, and is marked the latest: its
-# version must come after every v* tag's, here and on origin.
+# out, unchanged and with no file added that git does not ignore, once the
+# build is done, and is marked the latest: its version must come after
+# every v* tag's, here and on origin.
+#
+# Before the tag, every manifest on the draft must name files the draft
+# has, of the sizes it gives: a build uploaded again takes its platform's
+# manifests off the draft until its files are up, and a run that stopped
+# part way through leaves that platform to run again.
 #
 # A run that stops after the build, at the tag, its push or the publishing,
 # is finished by running it again from the same commit: with the tag made,
@@ -53,6 +59,7 @@
 # mygo.json and CHANGELOG.md are never edited: the build gets the version
 # and the notes for the run only.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 cd "$ROOT_DIR"
 
@@ -176,7 +183,8 @@ $NO_UPLOAD || check check_gh
 if [[ "$BRANCH" != "main" ]] && ! $ALLOW_BRANCH; then
 	problem "releases are cut from main, and this is ${BRANCH:-a detached HEAD} (--allow-branch to override)"
 fi
-[[ -z "$(git status --porcelain)" ]] || problem "the working tree has changes; commit or stash them first"
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] ||
+	problem "the working tree has changes, or files git neither tracks nor ignores; commit or stash them first"
 LOCAL_TAG="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)"
 REMOTE_TAG=""
 RESUME=false
@@ -211,6 +219,28 @@ check_resume() {
 	)"
 	[[ -z "$missing" ]] ||
 		die "the tag $TAG already exists $where, at $SHORT, and the draft release $TAG has no $(paste -sd ' ' - <<<"$missing" | sed 's/ /, /g'), so there is no finished build to publish; delete the tag and run again"
+	missing="$(manifest_problems "$VERSION")" || exit 1
+	[[ -z "$missing" ]] ||
+		die "the tag $TAG already exists $where, at $SHORT, and on the draft release $TAG $(problem_list "$missing"), so there is no finished build to publish; delete the tag and run again"
+}
+
+problem_list() { paste -sd ';' - <<<"$1" | sed 's/;/; /g'; }
+
+# Before the tag: the files the draft's manifests name, those of the
+# platforms this run did not build among them. A dry run leaves out the
+# manifests its build would replace.
+check_manifest_files() {
+	local skip=() name found
+	if $DRY_RUN; then
+		while read -r name; do
+			if { $MAC && [[ "$name" == *-darwin-* ]]; } || { $WIN && [[ "$name" == *-windows-* ]]; }; then
+				skip+=("$name")
+			fi
+		done < <(update_manifests)
+	fi
+	found="$(manifest_problems "$VERSION" ${skip[@]+"${skip[@]}"})" || exit 1
+	[[ -z "$found" ]] ||
+		die "on the draft release $TAG $(problem_list "$found"); run this again for the platforms of those manifests, which uploads their builds again"
 }
 if ! $NO_UPLOAD; then
 	if ! ORIGIN="$(git remote get-url origin 2>/dev/null)"; then
@@ -328,7 +358,7 @@ if ! $RESUME; then
 fi
 
 if ! $NO_UPLOAD; then
-	if ! $DRY_RUN && ! $RESUME && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
+	if ! $DRY_RUN && ! $RESUME && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; }; then
 		die "the checkout changed while Leaflet $VERSION was built from $SHORT, so which commit the draft release $TAG holds a build of is not known; delete the draft and run again"
 	fi
 	if $DRY_RUN; then
@@ -340,7 +370,10 @@ if ! $NO_UPLOAD; then
 		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
 	fi
 	check_manifests "$ASSETS"
-	if ! $RESUME; then run git tag -a "$TAG" --cleanup=whitespace -F "$STAGE_DIR/notes.md" "$COMMIT"; fi
+	if ! $RESUME; then
+		check check_manifest_files # as check_resume did for a resumed run
+		run git tag -a "$TAG" --cleanup=whitespace -F "$STAGE_DIR/notes.md" "$COMMIT"
+	fi
 	if ! $RESUME || [[ -z "$REMOTE_TAG" ]]; then run git push origin "$TAG"; fi
 	run gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Leaflet $VERSION" --notes-file "$STAGE_DIR/notes.md"
 fi

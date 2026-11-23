@@ -249,14 +249,27 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// The to-dos in their sections, each due at its time in the zone the device is in now: a due
+    /// is a time on the clock wherever the device is, and the core keeps the zone it opened in.
     nonisolated(nonsending) func todos() async throws -> [TodoGroup] {
-        try await call([TodoGroup].self) { core in try Self.answer { e in core.todos(e) } }
+        let zone = TimeZone.current
+        let (name, offset) = (zone.identifier, zone.secondsFromGMT())
+        return try await call([TodoGroup].self) { core in
+            try Self.answer { e in core.todos(name, offset: offset, error: e) }
+        }
     }
 
-    nonisolated(nonsending) func reminders(now: Date, limit: Int) async throws -> [Reminder] {
+    /// The reminders due by now and those to come, at their times in `zone`: a due is a time on
+    /// the clock wherever the device is, and the core keeps the zone it opened in.
+    nonisolated(nonsending) func reminders(now: Date, limit: Int, zone: TimeZone) async throws
+        -> [Reminder]
+    {
         let ms = Int64(now.timeIntervalSince1970 * 1000)
+        let (name, offset) = (zone.identifier, zone.secondsFromGMT(for: now))
         return try await call([Reminder].self) { core in
-            try Self.answer { e in core.reminders(ms, limit: limit, error: e) }
+            try Self.answer { e in
+                core.reminders(ms, limit: limit, zone: name, offset: offset, error: e)
+            }
         }
     }
 
@@ -298,6 +311,18 @@ final class CoreClient: Sendable {
             var left: Int64 = 0
             try core.editPage(id, editor: editor, content: json, rev: rev, left: &left)
             return left
+        }
+    }
+
+    /// Tells the core the rev an editor shows, which its next edits are over, for the core to
+    /// keep it for them. Should the core have let that rev go, `content` is what the editor
+    /// shows there, for it to keep instead.
+    nonisolated(nonsending) func showedRev(
+        _ id: String, editor: Int64, rev: Int64, content: DocContent? = nil
+    ) async throws {
+        try await call { core in
+            let json = try content.map { try self.encode($0) } ?? ""
+            try core.showedRev(id, editor: editor, rev: rev, content: json)
         }
     }
 

@@ -354,6 +354,60 @@ struct EditorTests {
         #expect(t.map(TableGrid.rows) == [["A", "B"], ["1", "2"]])
     }
 
+    @Test func aTableSheetSavesIntoTheTableAsItIsNow() throws {
+        func table(_ rows: [[String]]) -> DocNode {
+            var error: NSError?
+            let raw = MobileSetTableRows(
+                #"{"id":"t","type":"table","data":{"colsLen":1,"rowsLen":1}}"#,
+                String(decoding: (try? JSONEncoder().encode(rows)) ?? Data(), as: UTF8.self),
+                &error)
+            return (try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8)))
+                ?? DocNode(id: "t", type: "table", data: nil, children: nil)
+        }
+        let c = editor([block("a", "paragraph", "Plan"), table([["A", "B"], ["1", "2"]])])
+        let was = #"[["A","B"],["1","2"]]"#
+        let edited = #"[["A","Bee"],["1","2"]]"#
+        c.update(
+            content([
+                block("a", "paragraph", "Plan"), table([["A", "B"], ["1", "2"], ["3", "4"]]),
+            ]),
+            tinted: [])
+        try c.changeBlock("t", type: "table") { try TableSheet.change($0, from: was, to: edited) }
+        let t = blocks(c).first { $0.id == "t" }
+        #expect(t.map(TableGrid.rows) == [["A", "Bee"], ["1", "2"], ["3", "4"]])
+
+        c.update(content([block("a", "paragraph", "Plan")]), tinted: [])
+        #expect(throws: BlockGone.self) {
+            try c.changeBlock("t", type: "table") {
+                try TableSheet.change($0, from: was, to: edited)
+            }
+        }
+    }
+
+    @Test func aSheetSavesOnlyTheFieldsItChanged() throws {
+        #expect(
+            changedKeys(
+                ChartSheet.keys, from: ["Sales", "bar", "x, a\n1, 2", ""],
+                to: ["Sales", "line", "x, a\n1, 3", ""]) == ["chart_type", "labels", "series"])
+        #expect(
+            changedKeys(EmbedSheet.keys, from: ["E", "<p>", "320"], to: ["E", "<p>", "320"]).isEmpty
+        )
+        let chart = DocNode(
+            id: "c", type: "chart",
+            data: ["title": .string("Sales"), "chart_type": .string("bar")], children: nil)
+        let c = editor([block("a", "paragraph", "Plan"), chart])
+        var now = chart
+        now.data?["chart_type"] = .string("pie")
+        c.update(content([block("a", "paragraph", "Plan"), now]), tinted: [])
+        try c.changeBlock("c", type: "chart") {
+            $0.setting(
+                ["title"], from: ["title": .string("Revenue"), "chart_type": .string("bar")])
+        }
+        let saved = blocks(c).first { $0.id == "c" }
+        #expect(saved?.data?["title"] == .string("Revenue"))
+        #expect(saved?.data?["chart_type"] == .string("pie"))
+    }
+
     @Test func slashLeavesBlocksFromADialogToThePage() {
         let c = editor([block("a", "paragraph", "")])
         offer(c, [("embed", "Embed"), ("link_preview", "Link card")])
@@ -435,9 +489,36 @@ struct EditorTests {
         #expect(colors.count > 1)
     }
 
+    @Test func longCodeIsColoredOffTheMainThread() async throws {
+        let line = "function add(a, b) { return a + b }\n"
+        let code = String(repeating: line, count: CodeHighlighter.quick / line.utf16.count + 1)
+        let c = editor([block("a", "code", code, data: ["language": .string("javascript")])])
+        func colors() -> Int {
+            let text = c.textView.textStorage
+            var colors = Set<UIColor>()
+            text.enumerateAttribute(
+                .foregroundColor, in: NSRange(location: 0, length: text.length)
+            ) { v, _, _ in
+                if let color = v as? UIColor { colors.insert(color) }
+            }
+            return colors.count
+        }
+        #expect(colors() == 1)
+        for _ in 0..<100 where colors() == 1 { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(colors() > 1)
+
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.type("let x = 1\n")
+        #expect(colors() > 1)
+        let huge = String(repeating: line, count: CodeHighlighter.most / line.utf16.count + 1)
+        #expect(
+            CodeHighlighter.spans(huge, language: "javascript", dark: false, block: "h")?.isEmpty
+                == true)
+    }
+
     @Test func codeColorsCallsMembersAndTypesAsTheDesktop() {
         let code = "x.filter(Boolean).length"
-        let spans = CodeHighlighter.spans(code, language: "javascript", dark: false)
+        let spans = CodeHighlighter.spans(code, language: "javascript", dark: false) ?? []
         func color(_ word: String) -> UIColor? {
             let r = (code as NSString).range(of: word)
             return spans.first { NSIntersectionRange($0.0, r).length == r.length }?.1
@@ -612,6 +693,66 @@ struct EditorTests {
         let r = runs(blocks(c).first)
         #expect(r.map(\.0) == ["Hi ", "yo"])
         #expect(r.last?.1?["bold"]?.bool == true)
+    }
+
+    @Test func formattingLeavesCodeAsPlainText() throws {
+        let c = editor([
+            block("p", "paragraph", "Text"),
+            block("k", "code", "let a = 1", data: ["language": .string("swift")]),
+        ])
+        let (_, done) = try show(c)
+        defer { done() }
+        let bold = #selector(UIResponder.toggleBoldface(_:))
+        c.textView.selectedRange = NSRange(location: 0, length: 14)
+        #expect(c.textView.canPerformAction(bold, withSender: nil))
+        c.toggleInline(.leafletBold)
+        c.setInline(.leafletColor, "#ef4444ff")
+        c.setInline(.leafletHref, "https://example.com")
+        var b = blocks(c)
+        #expect(runs(b[0]).map(\.0) == ["Text"])
+        #expect(runs(b[0]).first?.1?["bold"]?.bool == true)
+        #expect(runs(b[0]).first?.1?["href"]?.string == "https://example.com")
+        #expect(runs(b[1]).map(\.1) == [nil])
+
+        c.textView.selectedRange = NSRange(location: 5, length: 3)
+        #expect(!c.format.formats(c.textView.selectedRange))
+        c.toggleInline(.leafletItalic)
+        c.setInline(.leafletBackground, "#ef444440")
+        c.textView.selectedRange = NSRange(location: 14, length: 0)
+        #expect(!c.textView.canPerformAction(bold, withSender: nil))
+        c.toggleInline(.leafletBold)
+        c.type(" + 1")
+        b = blocks(c)
+        #expect(runs(b[1]).map(\.0) == ["let a = 1 + 1"])
+        #expect(runs(b[1]).map(\.1) == [nil])
+    }
+
+    @Test func aLinkTypedInTheDialogIsOneThatOpens() {
+        #expect(FormatController.href("example.com") == "https://example.com")
+        #expect(FormatController.href(" ann@example.com ") == "mailto:ann@example.com")
+        #expect(FormatController.href("two words") == "")
+        #expect(FormatController.href("  ") == nil)
+        let href = FormatController.href("example.com") ?? ""
+        #expect(EditorStyle.linkTarget([.leafletHref: href]) == URL(string: "https://example.com"))
+    }
+
+    @Test func aFoldFromElsewhereTakesTheCaretOutOfWhatItHides() {
+        let c = editor([
+            block("t", "toggle_list", "Details", children: [block("in", "paragraph", "Hidden")]),
+            block("after", "paragraph", "After"),
+        ])
+        c.textView.selectedRange = NSRange(location: 10, length: 0)
+        c.update(
+            content([
+                block(
+                    "t", "toggle_list", "Details", data: ["collapsed": .bool(true)],
+                    children: [block("in", "paragraph", "Hidden")]),
+                block("after", "paragraph", "After"),
+            ]),
+            tinted: [])
+        #expect(c.textView.selectedRange == NSRange(location: 7, length: 0))
+        c.type("!")
+        #expect(blocks(c).map(\.text) == ["Details!", "Hidden", "After"])
     }
 
     @Test func aChangeThatOnlyNestsABlockShows() {
@@ -1739,6 +1880,126 @@ struct EditorTests {
         #expect(merged.content.blocks.map(\.text) == ["か", "Changed"])
         #expect(host.toasts.isEmpty)
         await client.closePage(model.id, editor: merged.editor)
+        await model.close()
+    }
+
+    /// Another editor of the page, writing into its second block: each write is a rev the
+    /// core makes, and the page's editor is shown only the ones it is handed.
+    @MainActor
+    private final class Writer {
+        let client: CoreClient
+        let page: OpenedPage
+        var rev: Int64
+
+        init(_ client: CoreClient, _ id: String) async throws {
+            self.client = client
+            page = try await client.openPage(id)
+            rev = page.rev
+        }
+
+        func write(_ text: String) async throws -> DocContent {
+            var changed = page.content
+            changed.document.children = [
+                DocNode(
+                    id: "a", type: "paragraph", data: ["delta": .array([])], children: nil),
+                DocNode(
+                    id: "b", type: "paragraph",
+                    data: ["delta": .array([.object(["insert": .string(text)])])], children: nil),
+            ]
+            rev = try await client.editPage(
+                page.id, editor: page.editor, content: changed, rev: rev)
+            return changed
+        }
+
+        func close() async { await client.closePage(page.id, editor: page.editor) }
+    }
+
+    private func merged(_ client: CoreClient, _ model: PageModel) async throws -> [String] {
+        let now = try await client.openPage(model.id)
+        await client.closePage(model.id, editor: now.editor)
+        return now.content.blocks.map(\.text)
+    }
+
+    @Test func aCompositionKeepsTheRevItIsOverThroughManyChanges() async throws {
+        let host = try PageTests.Host()
+        let client = host.core.client
+        let (model, c, coordinator) = try await editing(host)
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        let other = try await Writer(client, model.id)
+        let first = try await other.write("Other 1")
+        model.handle(
+            .pageUpdated(
+                pageID: model.id, content: first, rev: other.rev, reason: "agent", newStep: false))
+        coordinator.show(model)
+        #expect(model.shown == other.rev)
+        await model.flush()
+
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0))
+        c.edited(NSRange(location: 0, length: 1))
+        for i in 2...40 { _ = try await other.write("Other \(i)") }
+        c.textView.unmarkText()
+        c.send()
+        await model.flush()
+        #expect(try await merged(client, model) == ["か", "Other 40"])
+        #expect(host.toasts.isEmpty)
+        await other.close()
+        await model.close()
+    }
+
+    @Test func aChangeShownLongAfterItCameStillTakesTheEditOverIt() async throws {
+        let host = try PageTests.Host()
+        let client = host.core.client
+        let (model, c, coordinator) = try await editing(host)
+        let other = try await Writer(client, model.id)
+        let first = try await other.write("Other 1")
+        let rev = other.rev
+        for i in 2...40 { _ = try await other.write("Other \(i)") }
+        model.handle(
+            .pageUpdated(
+                pageID: model.id, content: first, rev: rev, reason: "agent", newStep: false))
+        coordinator.show(model)
+        #expect(model.shown == rev)
+        #expect(c.textView.text == "\nOther 1")
+
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.type("x")
+        c.send()
+        await model.flush()
+        #expect(try await merged(client, model) == ["x", "Other 40"])
+        #expect(host.toasts.isEmpty)
+        await other.close()
+        await model.close()
+    }
+
+    @Test func anEditBeforeAChangeIsShownLeavesItToTheMerge() async throws {
+        let host = try PageTests.Host()
+        let client = host.core.client
+        let (model, c, coordinator) = try await editing(host)
+        let rev = model.shown
+        let other = try await Writer(client, model.id)
+        let changed = try await other.write("Other 1")
+        model.handle(
+            .pageUpdated(
+                pageID: model.id, content: changed, rev: other.rev, reason: "agent",
+                newStep: false))
+
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.type("x")
+        c.send()
+        coordinator.show(model)
+        #expect(model.shown == rev)
+        #expect(c.textView.text == "x\nOther")
+        await model.flush()
+
+        c.type("y")
+        c.send()
+        await model.flush()
+        #expect(try await merged(client, model) == ["xy", "Other 1"])
+        #expect(host.toasts.isEmpty)
+        await other.close()
         await model.close()
     }
 

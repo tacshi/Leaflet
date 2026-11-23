@@ -45,7 +45,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
             c.controller.load(content, tinted: model.tinted)
             c.loaded = model.external
             c.tinted = model.tinted
-            model.shown = model.rev
+            model.showed(model.rev)
         }
         view.isEditable = !model.readOnly
         Task { @MainActor [onController] in onController(c.controller) }
@@ -122,7 +122,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
                 if loaded == nil {
                     controller.load(content, tinted: model.tinted)
                     tinted = model.tinted
-                    model.shown = model.rev
+                    model.showed(model.rev)
                 } else if controller.hasPendingEdit, !controller.composing, !model.readOnly {
                     controller.send()
                 } else {
@@ -130,7 +130,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
                         content, tinted: model.tinted, byAgent: model.byAgent,
                         notesOf: model.notesOf)
                     {
-                        model.shown = model.rev
+                        model.showed(model.rev)
                     }
                     tinted = model.tinted
                 }

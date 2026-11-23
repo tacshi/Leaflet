@@ -43,6 +43,15 @@ func (a *App) signInView(c *ui.Context) {
 					ui.Text(c, locales.SigninTitle()).FontSize(22).FontWeight(700).TextColor(pal.Text).Margin(10, 0, 0)
 					ui.Text(c, locales.SigninSubtitle()).FontSize(13.5).TextColor(pal.TextMuted).TextAlign(ui.Center)
 				})
+				if a.session.SignedIn {
+					// Signed in, there is nothing to sign in to here: a sign-in would replace the account in use.
+					who := locales.SettingsSignedIn()
+					if a.session.Email != "" {
+						who = locales.SettingsSignedInAs(a.session.Email)
+					}
+					notice(c, "ok", "check", who, nil)
+					return
+				}
 				if !a.hasServer() {
 					notice(c, "info", "info", locales.SigninNoServer(), nil)
 					return
@@ -280,7 +289,8 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		return
 	}
 	// The switch waits for the sync to let go of the store, which an export may hold a while: it runs off the main
-	// thread, the page read-only meanwhile, as when signing out.
+	// thread, the page read-only meanwhile, as when signing out. It leaves the settings to the main thread, which
+	// keeps the iCloud sync it turned off once it is done.
 	a.leaving = true
 	a.pageEditable()
 	c := a.core()
@@ -288,6 +298,7 @@ func (a *App) useAccount(user *store.User, drop bool) {
 	a.offMain(func() { err = c.UseAccount(user, drop) }, func() {
 		a.leaving = false
 		a.pageEditable()
+		c.KeepICloud(c.Sync.ICloudOn())
 		a.usedAccount(user, replaces, err)
 	})
 }

@@ -112,7 +112,10 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		tombstones[k] = max(tombstones[k], v)
 	}
 
-	waiting := map[string]bool{}
+	otherWins := func(id string, primaryChanged, otherChanged, otherGreater bool) bool {
+		pt, ot := timeOf(primary, id), timeOf(other, id)
+		return otherChanged && (!primaryChanged || ot > pt || ot == pt && otherGreater)
+	}
 	for _, n := range primary.All() {
 		id := n.ID
 		p := primaryFlat[id]
@@ -120,11 +123,11 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		if !ok {
 			continue
 		}
+		pt, ot := timeOf(primary, id), timeOf(other, id)
 		if p.signature == o.signature {
-			times[id] = max(timeOf(primary, id), timeOf(other, id))
+			times[id] = max(pt, ot)
 			continue
 		}
-		pt, ot := timeOf(primary, id), timeOf(other, id)
 		b := baseFlat[id]
 		primaryEdited, otherEdited := b == nil || p.own != b.own, b == nil || o.own != b.own
 		if primaryEdited && otherEdited && p.own != o.own && !onlyPlaced(p.node, o.node) {
@@ -136,29 +139,70 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				RemoteEditedAt: timeOf(remote, id),
 			})
 		}
-		otherWins := func(primaryChanged, otherChanged, otherGreater bool) bool {
-			return otherChanged && (!primaryChanged || ot > pt || ot == pt && otherGreater)
-		}
-		taken := false
-		if p.own != o.own && otherWins(primaryEdited, otherEdited, o.own > p.own) {
+		times[id] = pt
+		if p.own != o.own && otherWins(id, primaryEdited, otherEdited, o.own > p.own) {
 			repl := o.node.Clone()
 			repl.Children = result.Find(id).Children
 			_ = result.Replace(id, repl)
-			taken = true
-		}
-		if p.parent != o.parent || p.prev != o.prev {
-			if otherWins(moved(primary, id), moved(other, id), o.signature > p.signature) {
-				if o.parent != "" && result.Find(o.parent) == nil || o.prev != "" && primaryFlat[o.prev] == nil {
-					waiting[id] = true
-				} else if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
-					_ = result.Move(id, pos)
-					taken = true
-				}
-			}
-		}
-		times[id] = pt
-		if taken {
 			times[id] = max(pt, ot)
+		}
+	}
+
+	// A block goes where the other side has it when only that side moved it, whatever the times, as with an edit, or
+	// when both moved it to different places and the times give it that side. Its place there is after the block
+	// before it, but that block may have moved too, on either side, and sit somewhere else here: so it goes after the
+	// nearest block before it there that holds, sitting here as it does there, as one neither side moved does. The
+	// blocks go in the other side's order, so that one placed already holds for those after it.
+	placedByOther := func(id string) bool {
+		p, o := primaryFlat[id], otherFlat[id]
+		movedHere, movedThere := moved(primary, id), moved(other, id)
+		if movedHere && p.parent == o.parent && p.prev == o.prev {
+			return false
+		}
+		return otherWins(id, movedHere, movedThere, o.signature > p.signature)
+	}
+	placed := map[string]bool{}
+	// What holds, and where the blocks sit here, is found again for each block placed, which moves them.
+	var known map[string]bool
+	var sits map[string]spot
+	var holds func(id string) bool
+	holds = func(id string) bool {
+		if h, ok := known[id]; ok {
+			return h
+		}
+		p, o := primaryFlat[id], otherFlat[id]
+		h := false
+		switch {
+		case p == nil || o == nil:
+		case placed[id] || !moved(primary, id) && !moved(other, id):
+			h = true
+		case !placedByOther(id):
+			// One left where this side has it holds where it sits right after the block before it on the
+			// other side, which holds too: as when both sides moved it to the same place.
+			if sits == nil {
+				sits = spots(result)
+			}
+			at, ok := sits[id]
+			h = ok && at.parent == o.parent && at.prev == o.prev && (o.prev == "" || holds(o.prev))
+		}
+		known[id] = h
+		return h
+	}
+	waiting := map[string]bool{}
+	for _, n := range other.All() {
+		id := n.ID
+		if primaryFlat[id] == nil || !placedByOther(id) {
+			continue
+		}
+		o := otherFlat[id]
+		if o.parent != "" && result.Find(o.parent) == nil {
+			waiting[id] = true
+			continue
+		}
+		known, sits = map[string]bool{}, nil
+		if pos := placeIn(result, otherFlat, o, holds); !result.IsSelfOrAncestor(id, pos.Anchor()) && result.Move(id, pos) == nil {
+			placed[id] = true
+			times[id] = max(times[id], timeOf(other, id))
 		}
 	}
 
@@ -645,6 +689,55 @@ func inOrder(xs []int, stayed []bool) []bool {
 		kept[i] = true
 	}
 	return kept
+}
+
+// spot is where a block sits: its parent and the block before it, "" for none.
+type spot struct{ parent, prev string }
+
+func spots(c *Content) map[string]spot {
+	out := map[string]spot{}
+	var visit func(nodes []*Node, parent string)
+	visit = func(nodes []*Node, parent string) {
+		for i, n := range nodes {
+			s := spot{parent: parent}
+			if i > 0 {
+				s.prev = nodes[i-1].ID
+			}
+			out[n.ID] = s
+			visit(n.Children, n.ID)
+		}
+	}
+	visit(c.Children, "")
+	return out
+}
+
+// placeIn finds where in c the block f goes to sit as it does on its side, whose blocks are side: after the nearest
+// block before it there that holds, sitting in c as it does on that side, or else before the nearest after it that
+// holds; or, where none does, under its parent, first where nothing came before it there, or else last.
+func placeIn(c *Content, side map[string]*flat, f *flat, holds func(id string) bool) Position {
+	for id := f.prev; id != ""; id = side[id].prev {
+		if holds(id) {
+			return Position{After: id}
+		}
+	}
+	for id := f.next; id != ""; id = side[id].next {
+		if holds(id) {
+			return Position{Before: id}
+		}
+	}
+	switch {
+	case f.parent == "" && f.prev == "":
+		return Position{At: "start"}
+	case f.parent == "":
+		return Position{At: "end"}
+	case f.prev == "":
+		for _, k := range c.Find(f.parent).Children {
+			if k.ID != f.node.ID {
+				return Position{Before: k.ID}
+			}
+		}
+	}
+	return Position{Parent: f.parent}
 }
 
 func positionIn(c *Content, f *flat) (Position, bool) {

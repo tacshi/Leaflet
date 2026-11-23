@@ -89,3 +89,35 @@ func TestICloudStaysOffSignedIn(t *testing.T) {
 		t.Errorf("syncing %v, setting %v, watched %v", c.Sync.ICloudOn(), c.Store.Settings().ICloudSync, *watched)
 	}
 }
+
+// TestUsingAnAccountLeavesTheSettingsToTheApp signs in with iCloud sync on: UseAccount, which the app may run off its
+// main thread, turns iCloud sync off and neither reads nor writes the app's settings, nor stops the watch on the
+// iCloud folder. KeepICloud, which the app calls on its main thread once UseAccount returns, does.
+func TestUsingAnAccountLeavesTheSettingsToTheApp(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Leaflet")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	c, watched := iCloudCore(t, root)
+	if err := c.SwitchICloud(true); err != nil {
+		t.Fatal(err)
+	}
+	c.KeepICloud(true)
+	app, touched := c.Store.Settings(), 0
+	c.Settings = func() store.Settings { touched++; return app }
+	c.SaveSettings = func(s store.Settings) { touched++; app = s }
+	*watched = nil
+	if err := c.UseAccount(&store.User{ID: "u1", Email: "ada@example.com"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if c.Sync.ICloudOn() {
+		t.Error("iCloud sync stayed on for the account signed in")
+	}
+	if touched != 0 || len(*watched) != 0 {
+		t.Errorf("using the account touched the app's settings %d times, watched %v", touched, *watched)
+	}
+	c.KeepICloud(c.Sync.ICloudOn())
+	if app.ICloudSync || !slices.Equal(*watched, []bool{false}) {
+		t.Errorf("kept: setting %v, watched %v", app.ICloudSync, *watched)
+	}
+}

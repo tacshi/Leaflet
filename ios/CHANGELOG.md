@@ -1,7 +1,8 @@
 # Changelog: Leaflet for iPhone and iPad
 
-The iOS app's releases, tagged `ios-v<version>`, apart from the desktop
-app's `v<version>` releases.
+The iOS app's releases, apart from the desktop app's `v<version>` releases:
+`scripts/publish_testflight.sh` builds each from a commit on origin and
+gives it to TestFlight.
 
 ## Unreleased
 

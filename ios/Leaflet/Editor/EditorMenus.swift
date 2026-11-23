@@ -19,8 +19,8 @@ final class EditorMenus {
             ) { [weak self] _ in self?.editor.due.openAtCaret(info) }
             return UIMenu(children: [date] + suggested)
         }
-        return UIMenu(
-            children: [agentMenu(), formatMenu(), colorMenu()] + withCopyPlainText(suggested))
+        let formats = editor.format.formats(range) ? [formatMenu(), colorMenu()] : []
+        return UIMenu(children: [agentMenu()] + formats + withCopyPlainText(suggested))
     }
 
     private func agentMenu() -> UIMenu {
@@ -200,6 +200,9 @@ final class EditorMenus {
             UIMenu(children: [
                 UIDeferredMenuElement.uncached { [weak self] done in
                     guard let self else { return done([]) }
+                    guard self.editor.format.formats(self.textView.selectedRange) else {
+                        return done([self.blockMenu()])
+                    }
                     done([self.formatMenu(), self.blockMenu(), self.colorMenu()])
                 }
             ]))

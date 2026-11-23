@@ -84,7 +84,7 @@ func TestTranscribeMoss(t *testing.T) {
 		{"start":1.5,"end":1.75,"text":"[S02] [1.6]","speaker":"S02"},
 		{"start":1.75,"end":4.25,"text":" 欢迎。 ","speaker":"S02"}]}`)
 	src := struct{ io.Reader }{bytes.NewReader(audio)}
-	segs, err := TranscribeMoss(context.Background(), "mk", src, int64(len(audio)), "audio.m4a", true)
+	segs, err := TranscribeMoss(context.Background(), "mk", src, int64(len(audio)), "audio.m4a", true, Leftovers{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestTranscribeMoss(t *testing.T) {
 	if strings.Join(*removed, " ") != "/files/file-1" {
 		t.Errorf("removed %v", *removed)
 	}
-	segs, err = TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "audio.m4a", false)
+	segs, err = TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "audio.m4a", false, Leftovers{})
 	if err != nil || len(segs) != 2 || segs[0].Speaker != "" {
 		t.Errorf("without speakers: %+v, %v", segs, err)
 	}
@@ -106,13 +106,13 @@ func TestTranscribeMoss(t *testing.T) {
 
 func TestTranscribeMossTextAndFailure(t *testing.T) {
 	fakeMoss(t, nil, `{"status":"SUCCESS","duration":2.75,"text":"Short message","segments":[]}`)
-	segs, err := TranscribeMoss(context.Background(), "mk", strings.NewReader("x"), 1, "a.wav", true)
+	segs, err := TranscribeMoss(context.Background(), "mk", strings.NewReader("x"), 1, "a.wav", true, Leftovers{})
 	if err != nil || len(segs) != 1 || segs[0].Text != "Short message" || segs[0].EndMs != 2750 {
 		t.Fatalf("segments %+v, %v", segs, err)
 	}
 
 	_, removed := fakeMoss(t, nil, `{"status":"FAILED","error":{"error_code":16001,"error_msg":"billing error","internal_error_msg":"insufficient credits"}}`)
-	_, err = TranscribeMoss(context.Background(), "mk", strings.NewReader("x"), 1, "a.wav", true)
+	_, err = TranscribeMoss(context.Background(), "mk", strings.NewReader("x"), 1, "a.wav", true, Leftovers{})
 	if err == nil || err.Error() != locales.RecErrMossFailed("billing error") {
 		t.Fatalf("error %v", err)
 	}
@@ -149,7 +149,7 @@ func TestMossKeyAndLimits(t *testing.T) {
 	if err := TestMossKey(ctx, " "); err == nil || err.Error() != locales.RecErrPasteKey() {
 		t.Errorf("no key: %v", err)
 	}
-	if _, err := TranscribeMoss(ctx, "good", strings.NewReader(""), mossMaxBytes+1, "a.wav", false); err == nil || err.Error() != locales.RecErrMossTooLarge() {
+	if _, err := TranscribeMoss(ctx, "good", strings.NewReader(""), mossMaxBytes+1, "a.wav", false, Leftovers{}); err == nil || err.Error() != locales.RecErrMossTooLarge() {
 		t.Errorf("too large: %v", err)
 	}
 }

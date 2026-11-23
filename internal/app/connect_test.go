@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"leaflet/locales"
 )
 
 const (
@@ -564,5 +566,50 @@ func TestShellPathDoesNotWaitForever(t *testing.T) {
 	start = time.Now()
 	if p, ok := shellPath(shell("stuck", "exec sleep 30\n"), 200*time.Millisecond); ok || time.Since(start) > 4*time.Second {
 		t.Errorf("PATH %q, %v, after %v", p, ok, time.Since(start))
+	}
+}
+
+// TestConnectThroughABatchFileRefusesWhatCmdReads connects Claude Code and OpenCode through the .cmd shims npm
+// installs them as on Windows, which run in cmd.exe, with a data folder whose path holds an &: cmd.exe would run the
+// part after the & as a command of its own, so nothing runs, not even the removal of the entry before, and the setup
+// by hand is asked for. A path cmd.exe takes as it is, spaces and all, goes through.
+func TestConnectThroughABatchFileRefusesWhatCmdReads(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake tools are shell scripts")
+	}
+	env := testEnv(t)
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	for _, id := range []string{"claude", "opencode"} {
+		cli := filepath.Join(dir, id+".cmd")
+		script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\nexit 0\n"
+		if err := os.WriteFile(cli, []byte(script), 0o700); err != nil { // #nosec G306
+			t.Fatal(err)
+		}
+		folder := `C:\Users\R&D\AppData\Roaming\Leaflet`
+		err := connectAgent(id, cli, env, testExe, folder)
+		if want := locales.ExternalUnsafeInCommandPrompt(id+".cmd", "LEAFLET_DATA_DIR="+folder); err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", id, err, want)
+		}
+		if raw, _ := os.ReadFile(calls); len(raw) != 0 { // #nosec G304
+			t.Errorf("%s ran:\n%s", id, raw)
+		}
+		if err := connectAgent(id, cli, env, testExe, testDir); err != nil {
+			t.Errorf("%s with %q: %v", id, testDir, err)
+		}
+		if raw, _ := os.ReadFile(calls); !strings.Contains(string(raw), "mcp add") { // #nosec G304
+			t.Errorf("%s did not add the entry:\n%s", id, raw)
+		}
+		if err := os.Remove(calls); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, arg := range []string{`a"b`, "50%", "a!b", "a^b", "a|b", "a<b", "a>b", "(x86)", "a\nb"} {
+		if err := cmdRefuses(`C:\npm\claude.cmd`, []string{"mcp", arg}); err == nil {
+			t.Errorf("a batch file takes %q", arg)
+		}
+		if err := cmdRefuses(`C:\npm\claude.exe`, []string{"mcp", arg}); err != nil {
+			t.Errorf("a program refuses %q: %v", arg, err)
+		}
 	}
 }

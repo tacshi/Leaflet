@@ -205,6 +205,16 @@ final class BlockCommands {
         }
     }
 
+    /// Makes a change to a block as the page has it now: a sheet's, saved
+    /// after an agent or another device may have changed the block it
+    /// opened on. It throws when the block is gone, or the change can't be
+    /// made of it.
+    func changeBlock(_ id: String, type: String, _ change: (DocNode) throws -> DocNode) throws {
+        guard let now = editor.node(ofBlock: id), now.type == type else { throw BlockGone() }
+        let changed = try change(now)
+        if changed != now { replaceBlock(changed) }
+    }
+
     func removeBlock(_ id: String) {
         guard textView.isEditable else { return }
         let all = text.paragraphs()
@@ -316,5 +326,22 @@ final class BlockCommands {
     func restoreCaret(_ caret: BlockText.Position?) {
         guard let caret, let at = text.place(caret) else { return }
         textView.selectedRange = NSRange(location: at, length: 0)
+    }
+}
+
+/// The block a change was for is no longer in the page.
+struct BlockGone: LocalizedError {
+    var errorDescription: String? { L.outlineBlockGone }
+}
+
+extension DocNode {
+    /// The node with the values data has for keys, and none for those it
+    /// lacks: the rest stay as they are.
+    func setting(_ keys: some Sequence<String>, from data: [String: JSONValue]) -> DocNode {
+        var node = self
+        var kept = node.data ?? [:]
+        for k in keys { kept[k] = data[k] }
+        node.data = kept
+        return node
     }
 }

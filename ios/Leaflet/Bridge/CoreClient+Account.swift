@@ -7,9 +7,22 @@ struct SupabaseSignIn: Codable, Sendable {
     var verifier: String
 }
 
+/// What a sign-in comes to: the account's email, and how many pages not synced yet signing in
+/// would remove, which the person confirms first; or the projects to choose among before it
+/// signs in.
 struct SignedIn: Codable, Sendable {
     var email: String
     var lost: Int
+    var projects: [SupabaseProject]?
+}
+
+struct SupabaseProject: Codable, Hashable, Sendable, Identifiable {
+    var ref: String
+    var name: String
+    var region: String
+    var paused: Bool
+
+    var id: String { ref }
 }
 
 struct AccountInfo: Codable, Sendable {
@@ -76,6 +89,13 @@ extension CoreClient {
                 core.finishSupabaseSign(
                     in: url, state: begun.state, verifier: begun.verifier, error: e)
             }
+        }
+    }
+
+    /// Signs in to the project chosen of those `finishSupabaseSignIn` gave to choose among.
+    nonisolated(nonsending) func useSupabaseProject(_ ref: String) async throws -> SignedIn {
+        try await call(SignedIn.self, waiting: true) { core in
+            try Self.answer { e in core.useSupabaseProject(ref, error: e) }
         }
     }
 

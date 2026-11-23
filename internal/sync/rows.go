@@ -16,7 +16,7 @@ var syncedTables = map[string]syncedTable{
 	"pages": {
 		row: func(st *store.Store, id string) (map[string]any, time.Time, error) {
 			p, err := st.Page(id)
-			return store.PageToRemote(p), p.UpdatedAt, err
+			return store.PageToRemote(p), p.ChangedAt, err
 		},
 	},
 	"folders": {

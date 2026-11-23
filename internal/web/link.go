@@ -89,7 +89,7 @@ func LookUp(link string) (LinkInfo, error) {
 	if err != nil {
 		return LinkInfo{}, err
 	}
-	return ReadLinkInfo(link, pageText(data, ctype)), nil
+	return ReadLinkInfo(pageURL(res, link), pageText(data, ctype)), nil
 }
 
 func Lacking(n *doc.Node, link string) bool {

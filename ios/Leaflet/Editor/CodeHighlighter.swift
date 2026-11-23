@@ -4,9 +4,21 @@ import UIKit
 
 @MainActor
 enum CodeHighlighter {
-    enum Kind { case keyword, type, function, constant, string, comment, tag }
+    enum Kind: Sendable { case keyword, type, function, constant, string, comment, tag }
 
-    private static let kinds: [String: Kind] = [
+    typealias Span = (range: NSRange, kind: Kind)
+
+    /// Code up to this long, in UTF-16 units, is colored as it is styled. Longer code is
+    /// colored off the main thread, keeping the colors it has until then, and code longer
+    /// than `most` stays plain.
+    static let quick = 4_000
+    static let most = 100_000
+
+    /// Posted with a code block's ID as its object once colors worked out off the main thread
+    /// for it are kept: styled again, it takes them.
+    static let colored = Notification.Name("leaflet.codeColored")
+
+    nonisolated private static let kinds: [String: Kind] = [
         "a626a4": .keyword,
         "c18401": .type,
         "4078f2": .function,
@@ -37,49 +49,92 @@ enum CodeHighlighter {
         return h
     }()
 
-    static func spans(_ code: String, language: String, dark: Bool) -> [(NSRange, UIColor)] {
+    private struct Key: Hashable {
+        let code: String
+        let language: String
+    }
+
+    /// The colors of a code block's text: nil while they are worked out off the main thread,
+    /// as for a block longer than `quick`, after which `colored` is posted for the block and
+    /// they are given from then on.
+    static func spans(_ code: String, language: String, dark: Bool, block: String = "")
+        -> [(NSRange, UIColor)]?
+    {
         let lang = language.lowercased()
-        guard !code.isEmpty, !lang.isEmpty, languages.contains(lang) else { return [] }
-        let key = "\(dark ? 1 : 0)\(lang)\u{0}\(code)"
-        if let kept = made[key] { return kept }
-        let out = highlight(code, as: lang, dark: dark)
-        if made.count >= 64 { made.removeAll() }
-        made[key] = out
-        return out
+        let length = (code as NSString).length
+        guard length > 0, length <= most, !lang.isEmpty, languages.contains(lang) else {
+            return []
+        }
+        let key = Key(code: code, language: lang)
+        if let kept = made[key] { return painted(kept, dark: dark) }
+        guard length > quick, !block.isEmpty else {
+            let out = highlight(code, as: lang, with: highlighter)
+            keep(out, for: key)
+            return painted(out, dark: dark)
+        }
+        waiting[block] = key
+        work()
+        return nil
     }
 
     private static let languages = Set(highlighter?.supportedLanguages() ?? [])
-    private static var made: [String: [(NSRange, UIColor)]] = [:]
+    private static var made: [Key: [Span]] = [:]
+    /// The newest code asked for of each block whose colors wait for the worker.
+    private static var waiting: [String: Key] = [:]
+    private static var working = false
+    private static let worker = Worker()
 
-    private static func highlight(_ code: String, as lang: String, dark: Bool) -> [(
-        NSRange, UIColor
-    )] {
-        guard let h = highlighter,
-            let colored = h.highlight(code, as: lang, fastRender: true),
-            colored.length == (code as NSString).length
-        else { return [] }
-        var out: [(NSRange, UIColor)] = []
-        colored.enumerateAttribute(
-            .foregroundColor, in: NSRange(location: 0, length: colored.length)
-        ) { value, range, _ in
-            if let c = value as? UIColor, let kind = kinds[hex(c)] {
-                out.append((range, color(kind, dark: dark)))
+    private static func painted(_ spans: [Span], dark: Bool) -> [(NSRange, UIColor)] {
+        spans.map { ($0.range, color($0.kind, dark: dark)) }
+    }
+
+    private static func keep(_ spans: [Span], for key: Key) {
+        if made.count >= 64 { made.removeAll() }
+        made[key] = spans
+    }
+
+    private static func work() {
+        guard !working, let (block, key) = waiting.first else { return }
+        waiting[block] = nil
+        guard made[key] == nil else {
+            NotificationCenter.default.post(name: colored, object: block)
+            return work()
+        }
+        working = true
+        worker.highlight(key.code, as: key.language) { spans in
+            Task { @MainActor in
+                keep(spans, for: key)
+                working = false
+                NotificationCenter.default.post(name: colored, object: block)
+                work()
             }
         }
+    }
+
+    nonisolated fileprivate static func highlight(
+        _ code: String, as lang: String, with h: Highlightr?
+    ) -> [Span] {
+        guard let h, let marked = h.highlight(code, as: lang, fastRender: true),
+            marked.length == (code as NSString).length
+        else { return [] }
+        var out: [Span] = []
+        marked.enumerateAttribute(
+            .foregroundColor, in: NSRange(location: 0, length: marked.length)
+        ) { value, range, _ in
+            if let c = value as? UIColor, let kind = kinds[hex(c)] { out.append((range, kind)) }
+        }
         if codeLike.contains(lang) {
-            out += names(code, besides: out, dark: dark)
+            out += names(code, besides: out)
         }
         return out
     }
 
-    private static let codeLike: Set<String> = [
+    nonisolated private static let codeLike: Set<String> = [
         "c", "cpp", "csharp", "dart", "go", "java", "javascript", "kotlin", "lua", "php",
         "python", "r", "ruby", "rust", "scala", "swift", "typescript", "zig",
     ]
 
-    private static func names(_ code: String, besides colored: [(NSRange, UIColor)], dark: Bool)
-        -> [(NSRange, UIColor)]
-    {
+    nonisolated private static func names(_ code: String, besides colored: [Span]) -> [Span] {
         let units = Array(code.utf16)
         var taken = [Bool](repeating: false, count: units.count)
         for (r, _) in colored {
@@ -92,7 +147,7 @@ enum CodeHighlighter {
             default: false
             }
         }
-        var out: [(NSRange, UIColor)] = []
+        var out: [Span] = []
         var i = 0
         while i < units.count {
             let u = units[i]
@@ -110,9 +165,7 @@ enum CodeHighlighter {
                 let capital = u >= 0x41 && u <= 0x5A
                 let kind: Kind? =
                     called ? .function : member ? .constant : capital ? .type : nil
-                if let kind {
-                    out.append((NSRange(location: i, length: j - i), color(kind, dark: dark)))
-                }
+                if let kind { out.append((NSRange(location: i, length: j - i), kind)) }
                 i = j
                 continue
             }
@@ -121,7 +174,7 @@ enum CodeHighlighter {
                 while j < units.count, !taken[j], "=+-*/<>!&|?%^~".utf16.contains(units[j]) {
                     j += 1
                 }
-                out.append((NSRange(location: i, length: j - i), color(.keyword, dark: dark)))
+                out.append((NSRange(location: i, length: j - i), .keyword))
                 i = j
                 continue
             }
@@ -130,7 +183,7 @@ enum CodeHighlighter {
         return out
     }
 
-    private static func hex(_ c: UIColor) -> String {
+    nonisolated private static func hex(_ c: UIColor) -> String {
         var r: CGFloat = 0
         var g: CGFloat = 0
         var b: CGFloat = 0
@@ -138,6 +191,26 @@ enum CodeHighlighter {
         c.getRed(&r, green: &g, blue: &b, alpha: &a)
         return String(
             format: "%02x%02x%02x", Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
+    }
+}
+
+/// Colors long code on a queue of its own, one block at a time, with a highlighter of its own:
+/// a highlighter takes one thread at a time.
+private final class Worker: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "app.capyvibe.leaflet.code", qos: .userInitiated)
+    private var highlighter: Highlightr?
+
+    func highlight(
+        _ code: String, as language: String,
+        done: @escaping @Sendable ([CodeHighlighter.Span]) -> Void
+    ) {
+        queue.async {
+            if self.highlighter == nil {
+                self.highlighter = Highlightr()
+                _ = self.highlighter?.setTheme(to: "atom-one-light")
+            }
+            done(CodeHighlighter.highlight(code, as: language, with: self.highlighter))
+        }
     }
 }
 

@@ -102,6 +102,25 @@ func TestLinkTarget(t *testing.T) {
 	}
 }
 
+func TestATypedLinkOpens(t *testing.T) {
+	for typed, want := range map[string]string{
+		"example.com":        "https://example.com",
+		" ann@example.com ":  "mailto:ann@example.com",
+		"leaflet://page/abc": "leaflet://page/abc",
+		"two words":          "",
+		"javascript:alert()": "",
+		"   ":                "",
+	} {
+		got := LinkHref(typed)
+		if got != want {
+			t.Errorf("LinkHref(%q) = %q, want %q", typed, got, want)
+		}
+		if got != "" && LinkTarget(got) == "" {
+			t.Errorf("%q links %q, which opens nothing", typed, got)
+		}
+	}
+}
+
 func TestTableText(t *testing.T) {
 	table, _ := doc.TableNode([][]string{{"**A**", "B"}, {"", ""}}, "")
 	raw, _ := json.Marshal(table)

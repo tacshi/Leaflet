@@ -116,7 +116,10 @@ struct LinkSheet: View {
 struct EmbedSheet: View {
     let author: String
     var editing: DocNode?
-    let insert: (DocNode) -> Void
+    /// Takes the embed made, with the data keys of the fields changed from
+    /// those the sheet opened on: for the embed it edits, only those are
+    /// saved into it, as others may have changed the rest since.
+    let insert: (_ embed: DocNode, _ changed: [String]) throws -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var title = L.dialogEmbedTitle
@@ -126,6 +129,8 @@ struct EmbedSheet: View {
     @State private var original: [String]?
 
     private var fields: [String] { [title, html, height] }
+    /// The data keys each of the fields saves into.
+    static let keys = [["title"], ["html"], ["height"]]
     private var dirty: Bool { original.map { $0 != fields } ?? false }
 
     var body: some View {
@@ -178,6 +183,7 @@ struct EmbedSheet: View {
     }
 
     private func apply() {
+        if editing != nil, !dirty { return dismiss() }
         var error: NSError?
         let raw = MobileEmbedBlock(title, html, Int(height) ?? 0, author, &error)
         guard error == nil, var node = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
@@ -189,7 +195,11 @@ struct EmbedSheet: View {
             node.id = editing.id
             node.data?["author"] = editing.data?["author"]
         }
-        insert(node)
-        dismiss()
+        do {
+            try insert(node, changedKeys(Self.keys, from: original ?? [], to: fields))
+            dismiss()
+        } catch {
+            failure = L.appErrorSave(error: error.localizedDescription)
+        }
     }
 }

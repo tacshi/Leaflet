@@ -4,23 +4,25 @@ on:
   push:
     branches: [main]
     paths:
+      - "ios/**"
+      - "speech/**"
       - "mobile/**"
       - "internal/**"
       - "locales/**"
       - "supabase/**"
       - "go.mod"
       - "go.sum"
-      - "ios/scripts/check-core-deps.sh"
       - ".github/workflows/ios.yml"
   pull_request:
     paths:
+      - "ios/**"
+      - "speech/**"
       - "mobile/**"
       - "internal/**"
       - "locales/**"
       - "supabase/**"
       - "go.mod"
       - "go.sum"
-      - "ios/scripts/check-core-deps.sh"
       - ".github/workflows/ios.yml"
 
 permissions:
@@ -41,3 +43,27 @@ jobs:
           go-version-file: go.mod
       - name: Keep MyGo's windowing packages out of the iOS core
         run: ios/scripts/check-core-deps.sh
+
+  lint:
+    name: Swift lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # SwiftLint at the commit of its 0.65.1 tag, built as Homebrew builds it.
+      - name: Build SwiftLint 0.65.1
+        run: |
+          git clone --quiet --depth 1 --branch 0.65.1 -c advice.detachedHead=false \
+            https://github.com/realm/SwiftLint.git "$RUNNER_TEMP/SwiftLint"
+          test "$(git -C "$RUNNER_TEMP/SwiftLint" rev-parse HEAD)" = 6aba03e3d8302b33f106e0f922210f35ca4b52cf
+          swift build --package-path "$RUNNER_TEMP/SwiftLint" --configuration release --product swiftlint
+          echo "$RUNNER_TEMP/SwiftLint/.build/release" >>"$GITHUB_PATH"
+      # The files make ios-check lints.
+      - name: swift-format
+        working-directory: ios
+        run: |
+          find Leaflet Shared Widgets LeafletTests ../speech -name '*.swift' -not -path '*/Generated/*' \
+            -not -path '../speech/.build/*' -print0 |
+            xargs -0 xcrun swift-format lint --strict --configuration .swift-format
+      - name: SwiftLint
+        working-directory: ios
+        run: swiftlint lint --strict --quiet

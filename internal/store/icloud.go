@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -50,19 +51,34 @@ func (s *Store) RowUpdatedAt(table, id string) (time.Time, error) {
 	return time.UnixMilli(at), nil
 }
 
+// PeerContent is a device's page file as this one last merged it, or wrote it for itself. Merged is what the file said
+// its device had merged of each other device's, the version of their file; nil where that is not known, as for this
+// device's own and for a file merged before it was kept.
 type PeerContent struct {
 	Peer    string
 	Version int64
 	Content string
+	Merged  map[string]int64
 }
 
 func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool, error) {
 	p := PeerContent{Peer: peer}
-	err := s.db.QueryRow(`SELECT version, content FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).Scan(&p.Version, &p.Content)
+	var merged sql.NullString
+	err := s.db.QueryRow(`SELECT version, content, merged FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).
+		Scan(&p.Version, &p.Content, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, false, nil
 	}
+	p.Merged = decodeMerged(merged)
 	return p, err == nil, err
+}
+
+func decodeMerged(raw sql.NullString) map[string]int64 {
+	var merged map[string]int64
+	if !raw.Valid || json.Unmarshal([]byte(raw.String), &merged) != nil {
+		return nil
+	}
+	return merged
 }
 
 func (s *Store) PeerVersion(peer, pageID string) (int64, bool, error) {
@@ -75,22 +91,33 @@ func (s *Store) PeerVersion(peer, pageID string) (int64, bool, error) {
 }
 
 func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {
-	rows, err := s.db.Query(`SELECT peer_id, version, content FROM peer_contents WHERE page_id = ? ORDER BY peer_id`, pageID)
+	rows, err := s.db.Query(`SELECT peer_id, version, content, merged FROM peer_contents WHERE page_id = ? ORDER BY peer_id`, pageID)
 	return collect(rows, err, func(sc scanner) (PeerContent, error) {
 		var p PeerContent
-		err := sc.Scan(&p.Peer, &p.Version, &p.Content)
+		var merged sql.NullString
+		err := sc.Scan(&p.Peer, &p.Version, &p.Content, &merged)
+		p.Merged = decodeMerged(merged)
 		return p, err
 	})
 }
 
 func (s *Store) PutPeerContent(peer, pageID string, version int64, content string) error {
-	return putPeerContent(s.db, peer, pageID, version, content)
+	return putPeerContent(s.db, pageID, PeerContent{Peer: peer, Version: version, Content: content})
 }
 
-func putPeerContent(q querier, peer, pageID string, version int64, content string) error {
-	_, err := q.Exec(`INSERT INTO peer_contents (peer_id, page_id, version, content) VALUES (?, ?, ?, ?)
-		ON CONFLICT(peer_id, page_id) DO UPDATE SET version = excluded.version, content = excluded.content`,
-		peer, pageID, version, content)
+func putPeerContent(q querier, pageID string, p PeerContent) error {
+	var merged any
+	if p.Merged != nil {
+		raw, err := json.Marshal(p.Merged)
+		if err != nil {
+			return err
+		}
+		merged = string(raw)
+	}
+	_, err := q.Exec(`INSERT INTO peer_contents (peer_id, page_id, version, content, merged) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(peer_id, page_id) DO UPDATE SET version = excluded.version, content = excluded.content,
+		merged = excluded.merged`,
+		p.Peer, pageID, p.Version, p.Content, merged)
 	return err
 }
 
@@ -103,7 +130,7 @@ func (s *Store) PeerMerged(pageID string, from PeerContent, label string, confli
 }
 
 func putPeerMerge(tx *sql.Tx, pageID string, from PeerContent, label string, conflicts []doc.Conflict) error {
-	if err := putPeerContent(tx, from.Peer, pageID, from.Version, from.Content); err != nil {
+	if err := putPeerContent(tx, pageID, from); err != nil {
 		return err
 	}
 	if err := addConflicts(tx, pageID, conflicts); err != nil || label == "" {

@@ -113,7 +113,8 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
 - 在你允许时，智能体可以使用网络：`read_web_page` 把网页读成带链接的文本，
   `web_search` 通过智能体自己的服务商搜索（OpenAI、Claude、xAI、OpenRouter、
   GLM 或 ChatGPT 套餐）。一次运行读过网络后，只写入和读取它找到的或你给的
-  链接；一旦读取你的其他页面，这次运行就不再使用网络。
+  链接；一旦读取你的其他页面，这次运行就不再使用网络，它所在聊天或评论串的
+  后续轮次也不再使用，因为之前的回复可能含有它读到的内容。
 - 支持任何兼容 OpenAI 的服务商：内置 OpenAI、Claude、xAI、OpenRouter、
   DeepSeek 和 GLM 预设，支持 ChatGPT Plus 或 Pro 登录、自定义端点，以及
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
@@ -264,8 +265,9 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 权限共享给你的页面是只读的。智能体首次编辑某个页面前会保存一份历史快照，
 之后每十分钟的编辑保存一份，若期间有别人改过页面则会提前保存，并像其他修改
 一样同步。编辑时附上 `read_page` 给出的块版本，若该块在此之后被人改过，就会
-原样保留并返回它现在的内容。不附版本的编辑若覆盖了智能体没读到的修改，修改前
-的页面会作为冲突保存在页面历史中，返回结果也会说明。打开着的应用会在一秒内
+原样保留并返回它现在的内容。编辑若覆盖了智能体没读到的修改（例如别人在它删除
+的块下新加的嵌套项），修改前的页面会作为冲突保存在页面历史中，返回结果也会
+说明。打开着的应用会在一秒内
 读到这些修改，并与正在输入的内容合并。应用关闭或没有打开页面时，`current_page`
 给出这台设备上最后打开的页面，不含选区。
 
@@ -334,7 +336,8 @@ Windows 构建，除非用 `--mac` 或 `--win` 选定其一；调试脚本为 ma
 | `scripts/publish.sh <version> [--mac\|--win] [--allow-partial] [--dry-run]` | 面向 macOS 和 Windows 的 GitHub 发布：检查、取自 `CHANGELOG.md` 的发布说明、构建、打标签和发布。只指定一个平台时，发布会保持为草稿，直到另一平台的构建也加入：缺少某个平台更新清单的发布，会让该平台已安装的应用得不到更新；`--allow-partial` 仍然发布它 |
 
 在 Windows 上，PowerShell 7 脚本在本机构建 Windows 应用。如果没有安装
-NSIS，MyGo 会下载它；签名使用 Windows SDK 中的 `signtool`：
+NSIS，MyGo 会下载它；签名使用 PowerShell 的 `Set-AuthenticodeSignature`
+（`scripts\sign-windows.ps1`），证书密码从环境变量读取：
 
 | 脚本 | 构建内容 |
 | --- | --- |
@@ -343,11 +346,13 @@ NSIS，MyGo 会下载它；签名使用 Windows SDK 中的 `signtool`：
 
 任何脚本加 `--help` 都会列出其选项，`.ps1` 脚本则用 `Get-Help`。macOS
 发布需要 Developer ID Application 身份和一个 `notarytool` 钥匙串配置，
-Windows 安装程序需要 NSIS（`brew install makensis`），所有发布都需要更新
-签名密钥；`scripts/build-release.sh --help` 对每一项都有说明。未签名的
-Windows 安装程序，以及用 `--skip-notarize` 构建的 macOS 安装包，不会被
-上传，除非用 `--allow-unsigned`（`-AllowUnsigned`）或
-`LEAFLET_ALLOW_UNSIGNED=1` 表明仍要发布它们。
+Windows 安装程序需要 NSIS（`brew install makensis`，签名需要 3.08 或更高
+版本），所有发布都需要更新签名密钥；`scripts/build-release.sh --help` 对每
+一项都有说明。未签名的 Windows 安装程序，以及用 `--skip-notarize` 构建的
+macOS 安装包，不会被上传，除非用 `--allow-unsigned`（`-AllowUnsigned`）或
+`LEAFLET_ALLOW_UNSIGNED=1` 表明仍要发布它们。上传也绝不会发往已经发布的
+版本，也不会从有改动、或有 git 既不跟踪也不忽略的文件的工作树进行（构建前
+或构建后都是如此）。
 
 就像 `SUPABASE_URL` 和 `SUPABASE_PUBLISHABLE_KEY` 为一次运行指定服务器一样，要把一个
 服务器内置进构建，可以通过 `MYGO_LDFLAGS` 把它的 URL 和 Publishable key 传给

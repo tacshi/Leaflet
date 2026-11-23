@@ -162,6 +162,14 @@ struct EditorStyle {
             s.removeAttribute(.leafletOrdinal, range: para)
         }
         let checked = info.type == "todo_list" && info.checked
+        var ink: [(NSRange, UIColor)]? = []
+        if info.type == "code", para.length > 0 {
+            let code = (s.string as NSString).substring(with: para)
+                .replacingOccurrences(of: String(lineBreak), with: "\n")
+            ink = CodeHighlighter.spans(
+                code, language: info.data["language"]?.string ?? "", dark: palette.isDark,
+                block: info.id)
+        }
         var pictures: [(at: Int, picture: MathPicture)] = []
         s.enumerateAttributes(in: para) { a, r, _ in
             var font = base
@@ -183,6 +191,9 @@ struct EditorStyle {
             }
             if let hex = a[.leafletColor] as? String, let c = UIColor(hex: hex) { color = c }
             var update: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            // Code whose colors are being worked out keeps those it has, which
+            // move along with what is typed in the meantime.
+            if ink == nil, a[.foregroundColor] != nil { update[.foregroundColor] = nil }
             if let hex = a[.leafletBackground] as? String, let c = UIColor(hex: hex) {
                 update[.backgroundColor] = c
             } else if a[.leafletCode] as? Bool == true || math {
@@ -226,17 +237,10 @@ struct EditorStyle {
                 [.kern: picture.width, .leafletMathPicture: picture],
                 range: NSRange(location: at, length: 1))
         }
-        if info.type == "code", para.length > 0 {
-            let code = (s.string as NSString).substring(with: para)
-                .replacingOccurrences(of: String(lineBreak), with: "\n")
-            let language = info.data["language"]?.string ?? ""
-            for (range, color) in CodeHighlighter.spans(
-                code, language: language, dark: palette.isDark)
-            {
-                s.addAttribute(
-                    .foregroundColor, value: color,
-                    range: NSRange(location: para.location + range.location, length: range.length))
-            }
+        for (range, color) in ink ?? [] {
+            s.addAttribute(
+                .foregroundColor, value: color,
+                range: NSRange(location: para.location + range.location, length: range.length))
         }
     }
 

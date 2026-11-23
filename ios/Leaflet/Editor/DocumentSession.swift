@@ -210,10 +210,25 @@ final class DocumentSession {
         updating = false
         editor.caretMenu.update()
         editor.layout.updateFolds()
+        keepCaretOut()
         editor.format.updateTypingAttributes()
         editor.due.schedule()
         hold(offset)
         return true
+    }
+
+    /// A fold from elsewhere may hide the block the caret is in: the caret
+    /// goes to the end of the shown block before it, as when folding here,
+    /// so nothing is typed out of sight.
+    private func keepCaretOut() {
+        let folded = editor.layout.folded
+        let caret = text.paragraph(at: textView.selectedRange.location).info
+        guard folded.contains(caret.id) else { return }
+        let all = text.blocks()
+        guard let i = all.firstIndex(where: { $0.info.id == caret.id }),
+            let before = all[..<i].last(where: { !folded.contains($0.info.id) })
+        else { return }
+        textView.selectedRange = NSRange(location: NSMaxRange(before.range), length: 0)
     }
 
     func tint(_ ids: Set<String>) {

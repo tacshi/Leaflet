@@ -28,9 +28,12 @@
 # copies see the update once the draft is published. A release that is
 # published already is refused: its files are what installed copies took.
 # So is a draft of another commit, which the draft records as it is made: a
-# release tags one commit. So is a working tree with changes, before the
-# build and again once it is done: the build would not be that commit's. It
-# needs the version named, as mygo.json's is no release's.
+# release tags one commit. So is a working tree with changes, or with files
+# git neither tracks nor ignores, before the build and again once it is
+# done: the build would not be that commit's. So, for that, is -o in the
+# checkout but outside what git ignores. It needs the version named, as
+# mygo.json's is no release's. The draft holds no manifest of the platforms
+# being uploaded until their other files are up.
 #
 # Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 # LEAFLET_UPDATE_KEY, by default
@@ -50,8 +53,9 @@
 # the .pfx LEAFLET_WINDOWS_CERTIFICATE names, whose password is
 # MYGO_WINDOWS_CERTIFICATE_PASSWORD, using osslsigncode
 # (scripts/sign-windows.sh), and fails if any program of the build comes out
-# unsigned; without it the builds are unsigned and SmartScreen warns about
-# them.
+# unsigned; signing also needs NSIS 3.08 or later, which signs the
+# installer's uninstaller. Without a certificate the builds are unsigned and
+# SmartScreen warns about them.
 #
 # --upload refuses unsigned Windows builds, and macOS ones --skip-notarize
 # leaves unnotarized, which installed copies would update to, unless
@@ -65,6 +69,7 @@
 # scripts/publish.sh runs this with --changelog, -o and --upload, and
 # --allow-unsigned when it is given it.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 cd "$ROOT_DIR"
 
@@ -196,10 +201,16 @@ if $UPLOAD; then
 	check_gh
 	check_draft "$VERSION"
 	command -v git >/dev/null 2>&1 || die "needs git"
+	case "$OUT_DIR/" in
+	"$ROOT_DIR"/*)
+		git check-ignore -q "$OUT_DIR" ||
+			die "--upload needs -o outside the checkout or in a folder git ignores, as build/ is: what the build writes would otherwise count as a change to the commit it records"
+		;;
+	esac
 	# Held first: another build of this checkout has mygo.json changed until it ends.
 	hold_config
-	[[ -z "$(git status --porcelain)" ]] ||
-		die "--upload needs a clean working tree, as the draft release records the commit as what was built; commit or stash the changes first"
+	[[ -z "$(git status --porcelain --untracked-files=normal)" ]] ||
+		die "--upload needs a clean working tree, with no file git neither tracks nor ignores, as the draft release records the commit as what was built; commit or stash the changes first"
 	COMMIT="$(git rev-parse HEAD)"
 	check_pushed "$COMMIT"
 	check_draft_commit "$VERSION" "$COMMIT"

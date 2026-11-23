@@ -20,6 +20,7 @@ import (
 	"leaflet/internal/export"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
+	"leaflet/internal/supabaseapi"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -55,7 +56,7 @@ func settingsSize(c *ui.Context) (w, h float32) {
 func (a *App) settingsDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	w, h := settingsSize(c)
-	dialog(c, &a.settingsOpen, w, func() {
+	settings := dialog(c, &a.settingsOpen, w, func() {
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			a.settingsNav(c).FillHeight().AutoFocus()
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
@@ -72,6 +73,11 @@ func (a *App) settingsDialog(c *ui.Context) {
 			})
 		})
 	}).Height(h)
+	if settings.Dismissed() {
+		// Escape, or a click outside, closes Settings as its close button
+		// does, ending what it had open.
+		a.closeSettings()
+	}
 }
 
 func (a *App) settingsBody(c *ui.Context) {
@@ -126,6 +132,8 @@ func headingWith(c *ui.Context, title, desc string, action func()) {
 type accountState struct {
 	name          string
 	renewing      bool
+	renewRun      int
+	stopRenew     context.CancelFunc
 	nameEdited    bool
 	nameShown     bool
 	shownBefore   bool
@@ -285,24 +293,36 @@ func (a *App) accentDots(c *ui.Context) {
 	})
 }
 
+// supabaseSignIn waits for the sign-in to Supabase in the browser that the
+// project's update in Settings asks for.
+var supabaseSignIn = func(ctx context.Context, cr *core.Core) (*supabaseapi.Client, error) {
+	return cr.SignInWithSupabase(ctx, nil)
+}
+
 func (a *App) renewProject() {
 	s := &a.account
 	if s.renewing {
 		return
 	}
-	s.renewing = true
-	cr := a.core()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.renewRun++
+	s.renewing, s.stopRenew = true, cancel
+	run, cr := s.renewRun, a.core()
 	go func() {
-		wait, stop := context.WithTimeout(context.Background(), 5*time.Minute)
-		api, err := cr.SignInWithSupabase(wait, nil)
+		defer cancel()
+		wait, stop := context.WithTimeout(ctx, 5*time.Minute)
+		api, err := supabaseSignIn(wait, cr)
 		stop()
 		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			err = cr.RenewProject(ctx, api)
-			cancel()
+			setup, done := context.WithTimeout(ctx, 10*time.Minute)
+			err = cr.RenewProject(setup, api)
+			done()
 		}
 		a.update(func() {
-			s.renewing = false
+			if s.renewRun != run {
+				return
+			}
+			s.renewing, s.stopRenew = false, nil
 			if err != nil {
 				a.toast(err.Error())
 				return
@@ -310,6 +330,18 @@ func (a *App) renewProject() {
 			a.toast(locales.SettingsProjectUpdated())
 		})
 	}()
+}
+
+// cancelRenewal ends the project's sign-in under way: for its Cancel, as
+// Settings closes and as the account is left. The browser's sign-in, which
+// may never come back, and the project's update are no longer waited for,
+// and what they come to is dropped.
+func (s *accountState) cancelRenewal() {
+	if s.stopRenew != nil {
+		s.stopRenew()
+	}
+	s.renewRun++
+	s.renewing, s.stopRenew = false, nil
 }
 
 func (a *App) accountSettings(c *ui.Context) {
@@ -361,6 +393,9 @@ func (a *App) accountSettings(c *ui.Context) {
 				label := locales.CommonSignIn()
 				if s.renewing {
 					label = locales.SettingsProjectSigningIn()
+					if button(c, "cancel-renew", "", locales.CommonCancel()).Clicked() {
+						s.cancelRenewal()
+					}
 				}
 				if primary(c, "renew", "", label).Disabled(s.renewing).Clicked() {
 					a.renewProject()
@@ -600,6 +635,8 @@ func (a *App) leave(clear func() error, synced bool) {
 	if !a.flush() && synced {
 		return
 	}
+	// The project's sign-in under way is of the account leaving.
+	a.account.cancelRenewal()
 	a.leaving = true
 	a.pageEditable()
 	c := a.core()
@@ -1099,7 +1136,11 @@ func (a *App) fetchModels() {
 				return
 			}
 			a.form.models = models
-			if a.form.model == "" || !contains(models, a.form.model) && !a.form.custom {
+			// A new provider starts at the first model listed. One being edited
+			// keeps its model, which the picker shows above the list: a server
+			// can serve a model it does not list, as an Azure deployment, a
+			// model's variant or one since unloaded is.
+			if a.form.model == "" || a.form.id == "" && !a.form.custom && !contains(models, a.form.model) {
 				a.form.model = models[0]
 			}
 			if a.form.result != "" && !a.form.resultOK {

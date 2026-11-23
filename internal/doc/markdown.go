@@ -762,6 +762,84 @@ type linkScan struct {
 	closes, urlEnds []int
 	found           map[string]map[int]int
 	code            codeSpans[rune]
+	maths           []int
+}
+
+// formula is how long the formula the dollar sign at i opens is, as mathAt reads it: 0 where none opens there.
+// What a formula holds is the formula's, as what a code span holds is the code's: the marks and brackets in its
+// TeX, as the * of f*g or the [ of [0,1), close no italic, bold or link around it.
+func (l *linkScan) formula(i int) int {
+	if l.maths == nil {
+		l.findMaths()
+	}
+	return l.maths[i]
+}
+
+// mathAt reads the formula the dollar sign at i opens, as mathAt does.
+func (l *linkScan) mathAt(i int) (tex string, n int) {
+	s := l.s
+	switch n = l.formula(i); {
+	case n == 0:
+		return "", 0
+	case s[i+1] == '`':
+		open := ticks(s[i+1:])
+		return codeText(s[i+1+open : i+n-1-open]), n
+	case s[i+1] == '$':
+		return strings.TrimSpace(string(s[i+2 : i+n-2])), n
+	}
+	return string(s[i+1 : i+n-1]), n
+}
+
+// findMaths finds every formula of the text in one pass from its end, so that each dollar sign takes a step to
+// read, where mathAt reads on to the end of what it opens: in a text of many dollar signs, each would read most of it.
+func (l *linkScan) findMaths() {
+	s := l.s
+	n := len(s)
+	l.code.s = s
+	l.maths = make([]int, n)
+	// From each place on: stop is the dollar sign or line break that $x$ reads to, past what backslashes escape;
+	// pair the first of two dollar signs, or a line break, that $$x$$ reads to; dollar the first dollar sign;
+	// filled the first character but a space. -1, or n, where there is none.
+	stop, pair, dollar, filled := make([]int, n+2), make([]int, n+2), make([]int, n+2), make([]int, n+2)
+	stop[n], stop[n+1], pair[n], pair[n+1] = -1, -1, -1, -1
+	dollar[n], dollar[n+1], filled[n], filled[n+1] = n, n, n, n
+	for p := n - 1; p >= 0; p-- {
+		c := s[p]
+		stop[p], pair[p], dollar[p], filled[p] = stop[p+1], pair[p+1], dollar[p+1], filled[p+1]
+		switch c {
+		case '\\':
+			stop[p] = stop[p+2]
+		case '\n', '$':
+			stop[p] = p
+		}
+		if p+1 < n && (c == '\n' || c == '$' && s[p+1] == '$') {
+			pair[p] = p
+		}
+		if c == '$' {
+			dollar[p] = p
+		}
+		if !unicode.IsSpace(c) {
+			filled[p] = p
+		}
+		if c != '$' || p+1 == n {
+			continue
+		}
+		switch next := s[p+1]; {
+		case next == '`':
+			if code := l.code.span(p + 1); code > 0 && p+1+code < n && s[p+1+code] == '$' {
+				l.maths[p] = code + 2
+			}
+		case next == '$':
+			if end := pair[p+2]; end >= 0 && s[end] == '$' && dollar[p+2] == end && filled[p+2] < end {
+				l.maths[p] = end + 2 - p
+			}
+		case !unicode.IsSpace(next):
+			if end := stop[p+1]; end >= 0 && s[end] == '$' && !unicode.IsSpace(s[end-1]) &&
+				(end+1 == n || !unicode.IsDigit(s[end+1])) {
+				l.maths[p] = end + 1 - p
+			}
+		}
+	}
 }
 
 // codeAt reads the code span the backticks at i open, as codeSpanAt does. Where it reads none, the whole run of
@@ -809,6 +887,8 @@ func (l *linkScan) scan() {
 			}
 		case ']':
 			l.closes[q] = q
+		case '$':
+			l.closes[q] = at(l.closes, q+max(l.formula(q), 1))
 		default:
 			l.closes[q] = at(l.closes, q+1)
 		}
@@ -918,7 +998,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
 			continue
 		}
 		if c == '$' {
-			if tex, n := mathAt(s, i); n > 0 {
+			if tex, n := links.mathAt(i); n > 0 {
 				flush()
 				a := attrs
 				a.Math = true
@@ -1113,6 +1193,8 @@ func skipSpan(links *linkScan, j int) int {
 			return j + n
 		}
 		return j + ticks(s[j:])
+	case '$':
+		return j + links.formula(j)
 	case '[':
 		if _, _, n, ok := links.link(j); ok {
 			return j + n

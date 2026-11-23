@@ -246,7 +246,11 @@ func withAudio(src Source, pageID string, c *doc.Content, dir string) *doc.Conte
 	}
 	for _, n := range recordings(c) {
 		rec, err := src.Store.Recording(n.Str("recording_id"))
-		if err != nil || rec.PageID != pageID {
+		// A recording still being recorded is left out: its WAV gets the
+		// header that says how much audio it holds only when it stops, so
+		// packed now it would open as holding none. Saving a page as a web
+		// page leaves it out the same way.
+		if err != nil || rec.PageID != pageID || rec.Status == "recording" {
 			continue
 		}
 		title := n.Str("title")
@@ -376,8 +380,11 @@ func SafeName(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return locales.CommonUntitled()
 	}
+	// A name of dots alone would be trimmed away below, or read as the
+	// folder itself or its parent: it becomes as many dashes, cut to the
+	// same length as any other name.
 	if strings.Trim(s, ".") == "" {
-		return strings.ReplaceAll(s, ".", "-")
+		s = strings.ReplaceAll(s, ".", "-")
 	}
 	const maxName = 200
 	if len(s) > maxName {

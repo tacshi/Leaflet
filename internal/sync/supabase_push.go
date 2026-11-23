@@ -307,6 +307,14 @@ func (s *Service) pushRecording(ctx context.Context, e store.OutboxEntry, payloa
 	for _, k := range []string{"status", "error", "transcript", "duration_ms"} {
 		changes[k] = payload[k]
 	}
+	// A change made here before the settle, which waits with it, goes with it, as its audio_path.
+	if cols, ok := payload[store.ChangedKey].([]any); ok {
+		for _, c := range cols {
+			if k, ok := c.(string); ok {
+				changes[k] = payload[k]
+			}
+		}
+	}
 	withChangedAt(changes, payload)
 	rows, err := s.be.Update(ctx, "recordings", []string{remote.Eq("id", e.EntityID), remote.Eq("status", status)}, changes)
 	if err != nil && !remote.IsForbidden(err) || len(rows) > 0 {
@@ -398,11 +406,12 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	if err != nil || recID == "" {
 		return err == nil, err
 	}
-	rec, ok, err := s.uploadedAudio(recID, path, local, time.Now())
+	_, ok, err := s.uploadedAudio(recID, path, local, time.Now())
 	if err != nil || !ok {
 		return err == nil, err
 	}
-	_, _ = s.be.Upsert(ctx, "recordings", store.RecordingToRemote(rec), "")
+	// The recording's audio_path is queued as the one column it changed, which the next push sends.
+	s.KickPush()
 	return true, nil
 }
 

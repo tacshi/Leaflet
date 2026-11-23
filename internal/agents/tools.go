@@ -202,6 +202,7 @@ type ToolContext struct {
 	LinkedNow     func() bool
 	Transcript    func(pageID, recordingID string) string
 	SiteInfo      bool
+	Versions      map[string]string
 	Captions      func(v doc.Video) (web.Captions, error)
 	Request       string
 	SearchWeb     func(query string) (Search, error)
@@ -426,6 +427,9 @@ func (tc ToolContext) Finish(pageID string, v map[string]any) {
 	if !tc.SiteInfo {
 		withoutSiteInfo(v)
 	}
+	if id, _ := v["id"].(string); tc.Versions[id] != "" {
+		v["version"] = tc.Versions[id]
+	}
 }
 
 func withoutSiteInfo(v map[string]any) {
@@ -645,6 +649,13 @@ func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
 	if x.found != nil && addressRe.MatchString(q) {
 		return nil, terr("Search for words, not a web address: read a page you found with read_web_page.")
 	}
+	// A search can open an address its query names, so before the run has
+	// read the web its query names only one the user gave or this page holds.
+	for _, w := range strings.Fields(q) {
+		if addressRe.MatchString(w) && !x.allowed[canonURL(w)] {
+			return nil, terr("Search for words, not a web address: %s is not one the user gave or this page holds, and a search can open an address its query names, carrying what is in it to whoever runs its site. Read a page with read_web_page.", w)
+		}
+	}
 	s, err := x.Ctx.SearchWeb(q)
 	if err != nil {
 		return nil, terr("The search failed: %v", err)
@@ -703,16 +714,22 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 		}
 		x.followed++
 	}
+	// The first read spends the run's free one as it is sent, whether or not
+	// a page comes back: its site has the address either way, and an error's
+	// words are its site's too.
+	x.saw()
 	p, err := x.Ctx.ReadWeb(link)
 	if err != nil {
 		return nil, terr("Could not read %s: %v", link, err)
 	}
-	x.saw()
-	x.find(p.URL, source)
+	// The page read is the address without its fragment, which the model may
+	// have written and its site never saw.
+	read, _, _ := strings.Cut(p.URL, "#")
+	x.find(read, source)
 	for _, u := range p.Links {
 		x.find(u, false)
 	}
-	out := map[string]any{"url": p.URL, "title": p.Title, "text": p.Text}
+	out := map[string]any{"url": read, "title": p.Title, "text": p.Text}
 	if p.Truncated {
 		out["truncated"] = true
 	}

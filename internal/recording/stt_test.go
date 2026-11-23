@@ -152,7 +152,7 @@ func TestTranscribeSonioxFromHere(t *testing.T) {
 	defer func() { sonioxAPI, sonioxPoll = api, poll }()
 
 	src := struct{ io.Reader }{bytes.NewReader(audio)}
-	segs, err := TranscribeSoniox(context.Background(), "sk-here", "stt-rt-v6", src, int64(len(audio)), "audio.m4a", []string{"zh"}, true)
+	segs, err := TranscribeSoniox(context.Background(), "sk-here", "stt-rt-v6", src, int64(len(audio)), "audio.m4a", []string{"zh"}, true, Leftovers{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestTranscribeSonioxFails(t *testing.T) {
 	api := sonioxAPI
 	sonioxAPI = srv.URL
 	defer func() { sonioxAPI = api }()
-	_, err := TranscribeSoniox(context.Background(), "k", "", strings.NewReader("x"), 1, "a.mp3", nil, false)
+	_, err := TranscribeSoniox(context.Background(), "k", "", strings.NewReader("x"), 1, "a.mp3", nil, false, Leftovers{})
 	if err == nil || !strings.Contains(err.Error(), "unsupported audio") {
 		t.Fatalf("error %v", err)
 	}
@@ -232,11 +232,11 @@ func TestStartingAJobHasADeadline(t *testing.T) {
 	audio := []byte("audio")
 	for name, transcribe := range map[string]func() error{
 		"soniox": func() error {
-			_, err := TranscribeSoniox(context.Background(), "sk", "", bytes.NewReader(audio), int64(len(audio)), "a.wav", nil, false)
+			_, err := TranscribeSoniox(context.Background(), "sk", "", bytes.NewReader(audio), int64(len(audio)), "a.wav", nil, false, Leftovers{})
 			return err
 		},
 		"moss": func() error {
-			_, err := TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "a.wav", false)
+			_, err := TranscribeMoss(context.Background(), "mk", bytes.NewReader(audio), int64(len(audio)), "a.wav", false, Leftovers{})
 			return err
 		},
 	} {

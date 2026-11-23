@@ -74,6 +74,11 @@ type session struct {
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    int64     `json:"expires_at"`
 	User         *authUser `json:"user,omitempty"`
+	// Project is the URL of the project the session is signed in to, as the keychain keeps it: one keychain serves
+	// every run of the app, and a run configured for another project, as a build fixed to another server or another
+	// data folder is, leaves the session to the runs of its own project. It is written each time the session is
+	// kept, whatever the auth server's answer held.
+	Project string `json:"project,omitempty"`
 }
 
 type authUser struct {
@@ -209,6 +214,10 @@ func toUser(u *authUser) *store.User {
 
 const secretKey = "supabase.session"
 
+// RestoreSession takes up the session the keychain keeps, unless it is signed in to another project than this run's:
+// a token must only ever go to its own project, and that session is left in the keychain, unchanged, for the runs
+// of its project. A session kept before the keychain named its project is taken as this run's project's, and named
+// so the next time it is kept, so that no one is signed out by the change.
 func (c *Client) RestoreSession() *store.User {
 	raw, err := keychain.Get(secretKey)
 	if err != nil || len(raw) == 0 {
@@ -216,6 +225,9 @@ func (c *Client) RestoreSession() *store.User {
 	}
 	var s session
 	if json.Unmarshal(raw, &s) != nil || s.RefreshToken == "" {
+		return nil
+	}
+	if s.Project != "" && !sameProject(s.Project, c.settings().URL) {
 		return nil
 	}
 	c.mu.Lock()
@@ -228,8 +240,13 @@ func (c *Client) RestoreSession() *store.User {
 	return toUser(s.User)
 }
 
+func sameProject(a, b string) bool { return strings.TrimRight(a, "/") == strings.TrimRight(b, "/") }
+
 func (c *Client) keep(s *session) { c.replace(nil, s, true) }
 
+// replace makes s the session, unless force is false and the session is no longer old, and keeps it in the keychain
+// with the project it is signed in to. That is the project the client is set to: a sign-in is to it, and Use ends
+// the session before it sets another, so a session a refresh replaces is still of the project the refresh went to.
 func (c *Client) replace(old, s *session, force bool) bool {
 	c.keepMu.Lock()
 	defer c.keepMu.Unlock()
@@ -242,6 +259,7 @@ func (c *Client) replace(old, s *session, force bool) bool {
 		c.sessions++
 	}
 	c.sess, c.refused = s, ""
+	project := c.cfg.URL
 	c.mu.Unlock()
 	if c.noKeychain {
 		return true
@@ -251,6 +269,7 @@ func (c *Client) replace(old, s *session, force bool) bool {
 		return true
 	}
 	small := *s
+	small.Project = project
 	if raw, _ := json.Marshal(small); len(raw) > keychain.MaxSecretSize { // #nosec G117
 		small.AccessToken = ""
 		small.ExpiresAt = 0

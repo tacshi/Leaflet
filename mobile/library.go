@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	libtree "leaflet/internal/library"
 	"leaflet/internal/store"
@@ -502,20 +503,35 @@ var todoSections = [...]struct {
 	doc.TodoNoDate:   {"no_date", locales.TodosSectionNoDate},
 }
 
-func (c *Core) Todos() (_ string, err error) {
+// Todos lists the to-dos in their sections, each due at its time in zone, the zone the device is
+// in now, or one offset seconds east of UTC: a due is a time on the clock wherever the device
+// is, and the core keeps the zone it opened in.
+func (c *Core) Todos(zone string, offset int) (_ string, err error) {
 	defer catch(&err)
+	return c.todosAt(time.Now(), location(zone, offset))
+}
+
+func (c *Core) todosAt(now time.Time, loc *time.Location) (string, error) {
 	var todos []store.PageTodo
+	var err error
 	c.q.do(func() { todos, err = c.core.Store.Todos() })
 	if err != nil {
 		return "", err
 	}
+	// The dues are read in the zone the core opened in, so the sections are made at the time
+	// there that the device's clock shows.
+	clock := core.OnClock(now.In(loc), time.Local)
 	out := []todoGroup{}
-	for _, g := range doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, time.Now()) {
+	for _, g := range doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, clock) {
 		section := todoSections[g.Section]
 		group := todoGroup{Section: section.key, Title: section.title(), Todos: make([]todo, 0, len(g.Todos))}
 		for _, t := range g.Todos {
+			due := t.Due
+			if !due.IsZero() {
+				due = core.OnClock(due, loc)
+			}
 			group.Todos = append(group.Todos, todo{
-				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(t.Due), Timed: t.Timed, Owner: t.Owner,
+				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(due), Timed: t.Timed, Owner: t.Owner,
 			})
 		}
 		out = append(out, group)

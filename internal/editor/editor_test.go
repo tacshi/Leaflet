@@ -1547,6 +1547,34 @@ func TestPasteLinesInAnItemWithChildren(t *testing.T) {
 	}
 }
 
+func TestPasteAtTheEndOfAnItemKeepsItsChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       []string
+	}{
+		{"lines", "x\ny", []string{"bulleted_list:abx", "bulleted_list:y", "  bulleted_list:kid"}},
+		{"lines and a break", "x\ny\n", []string{"bulleted_list:abx", "bulleted_list:y", "  bulleted_list:kid"}},
+		{"code", "```\nz\n```", []string{"bulleted_list:ab", "code:z", "bulleted_list:", "  bulleted_list:kid"}},
+	} {
+		e, _, _ := setup(t)
+		item := newText("bulleted_list", doc.FromMarkdown("ab"))
+		item.Children = []*doc.Node{newText("bulleted_list", doc.FromMarkdown("kid"))}
+		e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{item} })
+		e.PlaceCaret(item.ID, -1)
+		e.paste(tc.text)
+		var got []string
+		for _, n := range e.units() {
+			got = append(got, strings.Repeat("  ", e.depth(n.ID))+n.Type+":"+n.Delta().Plain())
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+		if e.Caret().ID != e.units()[len(tc.want)-2].ID {
+			t.Errorf("%s: caret in %q", tc.name, e.node(e.Caret().ID).Delta().Plain())
+		}
+	}
+}
+
 func TestInlineShortcutSkipsMentions(t *testing.T) {
 	for _, tc := range []struct{ title, typed string }{{"A*b", "c*"}, {"A**b", "c**"}, {"x", "*y*"}, {"A`b", "c`"}} {
 		n := &doc.Node{ID: "A", Type: "paragraph"}
@@ -1688,6 +1716,28 @@ func TestColoredTableCell(t *testing.T) {
 	d := doc.TableCells(table)[1][0].Children[0].Delta()
 	if len(d) != 2 || d[0].Text != "Blocked" || d[0].Attrs.Color != "#ef4444ff" || !strings.Contains(d.Plain(), "!") {
 		t.Fatalf("delta %+v", d)
+	}
+}
+
+func TestTableCellKeepsAFormulaInItalics(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"Name"}, {""}}, "")
+	italic := doc.Attrs{Italic: true}
+	doc.TableCells(table)[1][0].Children[0].SetDelta(doc.Delta{{Text: "convolve ", Attrs: italic},
+		{Text: "f*g", Attrs: doc.Attrs{Italic: true, Math: true}}})
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
+	tt.Frame()
+	box := boxOf(e, table.ID)
+	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
+	tt.Frame()
+	if want := "*convolve $f*g$*"; e.cellText != want {
+		t.Fatalf("editing %q, want %q", e.cellText, want)
+	}
+	tt.Type("!")
+	tt.Frame()
+	d := doc.TableCells(table)[1][0].Children[0].Delta()
+	if len(d) != 3 || d[1].Text != "f*g" || !d[1].Attrs.Math || !d[1].Attrs.Italic || d[2].Text != "!" {
+		t.Errorf("after a character typed, the cell is %+v", d)
 	}
 }
 

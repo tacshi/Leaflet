@@ -26,6 +26,7 @@ type Core struct {
 	cards      map[string]doc.Position
 	locale     atomic.Pointer[string]
 	chatgpt    chatgptSignIn
+	choosing   projectChoice
 	micTesting bool
 	micHeard   string
 	recSent    string

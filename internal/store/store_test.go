@@ -1517,6 +1517,85 @@ func TestRowsKeepTheServersTimeUntilTheyChange(t *testing.T) {
 	}
 }
 
+func TestContentSavesLeaveThePagesRowTime(t *testing.T) {
+	s := open(t)
+	pulled := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+	row := PageToRemote(Page{ID: "00000000-0000-0000-0000-0000000000a1", SpaceID: s.Session().SpaceID, Title: "Plan", SortKey: "a0"})
+	row["updated_at"] = pulled.Format(time.RFC3339Nano)
+	if err := s.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	id := S(row, "id")
+	if _, _, err := s.SaveContent(id, doc.FromBlocks([]*doc.Node{{ID: "b1", Type: "paragraph"}})); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Page(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.ChangedAt.Equal(pulled) || !p.UpdatedAt.After(pulled) {
+		t.Errorf("row changed at %v, page edited at %v: want the row at %v, the page after", p.ChangedAt, p.UpdatedAt, pulled)
+	}
+	if at := Time(PageToRemote(p)["changed_at"]); !at.Equal(pulled) {
+		t.Errorf("the row goes up as changed at %v", at)
+	}
+	if at, err := s.RowUpdatedAt("pages", id); err != nil || !at.Equal(pulled) {
+		t.Errorf("the row is versioned at %v, %v", at, err)
+	}
+	if !s.HasRowAt("pages", id, pulled) {
+		t.Error("the server's row, pulled again, reads as one not stored here")
+	}
+	if err := s.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.Page(id); !again.UpdatedAt.Equal(p.UpdatedAt) {
+		t.Errorf("with the server's row taken again the page shows as edited at %v, not %v", again.UpdatedAt, p.UpdatedAt)
+	}
+	if err := s.Requeue("pages", id); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range mustPending(t, s) {
+		var queued map[string]any
+		if err := json.Unmarshal([]byte(e.Payload), &queued); err != nil {
+			t.Fatal(err)
+		}
+		if e.Entity == "pages" && !Time(queued[AdoptKey]).Equal(pulled) {
+			t.Errorf("sent again as changed here at %v", queued[AdoptKey])
+		}
+	}
+}
+
+func TestADatabaseTakesContentSavesOutOfItsRowTimes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.ReplaceAll(schema, ", edited_at INTEGER", "")
+	if before == schema {
+		t.Fatal("the schema keeps no edited_at")
+	}
+	page := func(id, pulled string) string {
+		return `INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at, pulled_at)
+			VALUES ('` + id + `', 's1', 'Plan', 'a', 1, 9000, ` + pulled + `)`
+	}
+	writeDB(t, path, before,
+		page("pulled", "5000"), page("synced", "NULL"), page("waiting", "NULL"), page("local", "NULL"),
+		`INSERT INTO row_versions (tbl, id, at, device) VALUES ('pages', 'synced', 4000, 'd1'),
+			('pages.title', 'synced', 6000, 'd2'), ('pages', 'waiting', 4000, 'd1')`,
+		`INSERT INTO outbox (entity, entity_id, op, payload, created_at) VALUES ('pages', 'waiting', 'upsert', '{}', 1)`,
+		`PRAGMA user_version = 10`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	for id, changed := range map[string]int64{"pulled": 5000, "synced": 6000, "waiting": 9000, "local": 9000} {
+		p, err := s.Page(id)
+		if err != nil || p.ChangedAt.UnixMilli() != changed || p.UpdatedAt.UnixMilli() != 9000 {
+			t.Errorf("%s: row changed at %d, page edited at %d (%v); want %d and 9000",
+				id, p.ChangedAt.UnixMilli(), p.UpdatedAt.UnixMilli(), err, changed)
+		}
+	}
+}
+
 func TestNewDatabaseHasTheLatestSchema(t *testing.T) {
 	if v := userVersion(t, open(t)); v != len(migrations) {
 		t.Errorf("schema %d, want %d", v, len(migrations))
@@ -3459,6 +3538,52 @@ func TestRequeuedRecordingGoesAsAdopted(t *testing.T) {
 	}
 	if at := Time(row[AdoptKey]); !at.Equal(r.UpdatedAt.Truncate(time.Millisecond)) || row["status"] != "ready" {
 		t.Errorf("queued %v, want it whole and changed at %v", row, r.UpdatedAt)
+	}
+}
+
+func TestRecordingChangesGoAsTheColumnsTheyChanged(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
+	r, err := s.CreateRecording(p.ID, "b1", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := func() map[string]any {
+		t.Helper()
+		var row map[string]any
+		for _, e := range mustPending(t, s) {
+			if e.Entity == "recordings" && e.EntityID == r.ID {
+				if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
+					t.Fatal(err)
+				}
+				_ = s.Dequeue(e)
+			}
+		}
+		return row
+	}
+	if _, err := s.FinishRecording(r.ID, false, func(x *Recording) { x.Status, x.Error = "failed", "no network" }); err != nil {
+		t.Fatal(err)
+	}
+	if row := queued(); row == nil || row[ChangedKey] != nil || row["status"] != "failed" {
+		t.Errorf("a recording just finished went as %v, want it whole", row)
+	}
+	if _, err := s.UpdateRecording(r.ID, func(x *Recording) { x.Error = "" }); err != nil {
+		t.Fatal(err)
+	}
+	if row := queued(); fmt.Sprint(row[ChangedKey]) != "[error]" {
+		t.Errorf("a dismissed error went as %v, want the error alone", row)
+	}
+	if _, err := s.SettleRecording(r.ID, "failed", false, func(x *Recording) { x.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	if row := queued(); fmt.Sprint(row[ChangedKey]) != "[status]" || row[IfStatusKey] != "failed" {
+		t.Errorf("a settle went as %v, want its status held to failed", row)
+	}
+	if _, err := s.UpdateRecording(r.ID, func(x *Recording) {}); err != nil {
+		t.Fatal(err)
+	}
+	if row := queued(); row != nil {
+		t.Errorf("a change of nothing went as %v", row)
 	}
 }
 

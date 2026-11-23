@@ -132,7 +132,7 @@ func TestRetranscribeLocallyFetchesStoredAudio(t *testing.T) {
 	var asked string
 	c := NewController(st, nil)
 	c.Blobs = fetching{&asked}
-	_, err = c.transcribe(store.Recording{ID: "r1", AudioPath: "u1/r1.wav"}, "", nil,
+	_, err = c.transcribe(context.Background(), store.Recording{ID: "r1", AudioPath: "u1/r1.wav"}, "", nil,
 		store.SttSettings{Provider: "openai-compatible", BaseURL: "http://localhost:1234/v1"})
 	if asked != "u1/r1.wav" || err == nil || err.Error() != "fetched" {
 		t.Errorf("fetched %q, %v", asked, err)

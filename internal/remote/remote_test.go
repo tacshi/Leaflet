@@ -16,6 +16,7 @@ import (
 
 	"github.com/egoist/mygo/i18n"
 
+	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 )
 
@@ -835,5 +836,82 @@ func TestARefreshGoesToTheProjectOfItsSession(t *testing.T) {
 	}
 	if !r.stale || c.UserID() != "u2" {
 		t.Errorf("the refresh of the session left behind replaced the new one: stale %v, user %q", r.stale, c.UserID())
+	}
+}
+
+type memKeys map[string][]byte
+
+func (m memKeys) Get(name string) ([]byte, error) {
+	if v, ok := m[name]; ok {
+		return v, nil
+	}
+	return nil, keychain.ErrNotFound
+}
+
+func (m memKeys) Set(name string, value []byte) error { m[name] = value; return nil }
+
+func (m memKeys) Delete(name string) error { delete(m, name); return nil }
+
+func useKeys(t *testing.T) memKeys {
+	t.Helper()
+	keys := memKeys{}
+	keychain.Use(keys)
+	t.Cleanup(func() { keychain.Use(nil) })
+	return keys
+}
+
+// TestASessionOfAnotherProjectStaysWithIt has the keychain hold a session signed in to project A, in a run set to
+// project B, as a build fixed to another server or another data folder is: B is sent none of A's tokens, and the
+// session stays in the keychain for A's runs.
+func TestASessionOfAnotherProjectStaysWithIt(t *testing.T) {
+	keys := useKeys(t)
+	b := &projectServer{}
+	hb := httptest.NewServer(b)
+	t.Cleanup(hb.Close)
+	a := session{AccessToken: "token-a", RefreshToken: "refresh-a", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+		User: &authUser{ID: "u1"}, Project: "https://a.supabase.co"}
+	kept, _ := json.Marshal(a) // #nosec G117
+	keys[secretKey] = kept
+	c := New(Settings{URL: hb.URL, PublishableKey: "key-b"}, nil)
+	if u := c.RestoreSession(); u != nil || c.SignedIn() {
+		t.Fatalf("project B took up project A's session: user %+v", u)
+	}
+	if _, err := c.Select(context.Background(), "pages", Query{}); !errors.Is(err, ErrSignedOut) {
+		t.Errorf("a request with no session: %v", err)
+	}
+	if got := b.saw("-a"); len(got) != 0 {
+		t.Errorf("project B was sent project A's tokens: %q", got)
+	}
+	if string(keys[secretKey]) != string(kept) {
+		t.Errorf("project A's session became %q", keys[secretKey])
+	}
+}
+
+// TestASessionKeptBeforeItNamedItsProject is a session the keychain kept before it named the session's project: it is
+// this run's project's, and named so as it is kept again, after a refresh.
+func TestASessionKeptBeforeItNamedItsProject(t *testing.T) {
+	keys := useKeys(t)
+	a := &projectServer{}
+	ha := httptest.NewServer(a)
+	t.Cleanup(ha.Close)
+	old, _ := json.Marshal(map[string]any{"access_token": "token-a", "refresh_token": "refresh-a", "expires_at": time.Now().Add(-time.Hour).Unix(),
+		"user": map[string]any{"id": "u1"}})
+	keys[secretKey] = old
+	c := New(Settings{URL: ha.URL, PublishableKey: "key-a"}, nil)
+	if u := c.RestoreSession(); u == nil || u.ID != "u1" {
+		t.Fatalf("restored %+v", u)
+	}
+	if _, err := c.Select(context.Background(), "pages", Query{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.saw("POST /auth/v1/token"); len(got) != 1 {
+		t.Errorf("refreshed %d times, want 1", len(got))
+	}
+	var s session
+	if err := json.Unmarshal(keys[secretKey], &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Project != ha.URL || s.RefreshToken != "r2" || s.User == nil || s.User.ID != "u1" {
+		t.Errorf("kept %+v", s)
 	}
 }

@@ -68,14 +68,20 @@ final class AppModel {
         let root = folder.root?.path(percentEncoded: false)
         opening = Task { [weak self] in await self?.open(iCloudRoot: root) }
         VoiceNotes.app = self
+        // The reminders and the to-dos are read again in the zone the device is in now, as the
+        // times they show are on its clock.
         for name in [
             NSNotification.Name.NSSystemTimeZoneDidChange,
             UIApplication.significantTimeChangeNotification,
         ] {
             clockChanges.append(
                 NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
-                    _ in
-                    MainActor.assumeIsolated { Self.useTimeZone() }
+                    [weak self] _ in
+                    MainActor.assumeIsolated {
+                        Self.useTimeZone()
+                        self?.remind()
+                        Task { [weak self] in await self?.reload(.todos) }
+                    }
                 })
         }
     }

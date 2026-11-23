@@ -60,7 +60,7 @@ func TestMossKey(ctx context.Context, key string) error {
 	return mossDo(req, strings.TrimSpace(key), nil)
 }
 
-func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64, name string, speakers bool) ([]store.Segment, error) {
+func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64, name string, speakers bool, left Leftovers) ([]store.Segment, error) {
 	if size > mossMaxBytes {
 		return nil, errors.New(locales.RecErrMossTooLarge())
 	}
@@ -108,11 +108,10 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 	if file.ID == "" {
 		return nil, errors.New(locales.RecErrMossFailed(""))
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_ = call(ctx, "DELETE", "/files/"+file.ID, nil, nil)
-	}()
+	// The audio uploaded is noted as soon as MOSS names it, and deleted when
+	// the transcription ends, however it ends.
+	left.keep(Moss, "/files/"+file.ID)
+	defer left.remove(Moss, key, "/files/"+file.ID)
 
 	create, _ := json.Marshal(map[string]any{
 		"model": mossModel, "version": mossVersion, "file_id": file.ID,

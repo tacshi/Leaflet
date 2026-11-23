@@ -18,6 +18,10 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
 
     static let stall = Duration.seconds(180)
 
+    /// A wait of a second that takes this long or longer was one the app spent suspended, or
+    /// the device asleep: nothing went on then, so the transcription did not stall in it.
+    static let away = Duration.seconds(10)
+
     func start(_ id: String?, language: String?, sink: MobileTranscriptSink?) throws {
         let live = LiveTranscription(language: language ?? "auto", sink: SinkRef(sink: sink))
         streams.withLock { $0[id ?? ""] = live }
@@ -63,7 +67,7 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
     private static func text(_ answer: Data) -> String { String(decoding: answer, as: UTF8.self) }
 
     static func wait(
-        _ pulse: Pulse, stall: Duration = stall,
+        _ pulse: Pulse, stall: Duration = stall, away: Duration = away,
         _ body: @escaping @Sendable () async throws -> [SpeechSegment]
     ) throws -> [SpeechSegment] {
         let result = Mutex<Result<[SpeechSegment], any Error>?>(nil)
@@ -78,7 +82,11 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
             }
             done.signal()
         }
+        var woke = ContinuousClock.now
         while done.wait(timeout: .now() + 1) == .timedOut {
+            let now = ContinuousClock.now
+            if now - woke >= away { pulse.beat() }
+            woke = now
             guard pulse.still < stall else {
                 task.cancel()
                 throw SpeechFailure.stuck

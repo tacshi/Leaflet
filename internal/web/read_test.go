@@ -67,6 +67,28 @@ func TestReadFollowsRedirectsInThePagesEncoding(t *testing.T) {
 	}
 }
 
+func TestReadGivesThePageWithoutTheFragmentAsked(t *testing.T) {
+	useServer(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/a" {
+			http.Redirect(w, r, "/b", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<title>t</title><p>hello</p>"))
+	}))
+	defer srv.Close()
+	for _, path := range []string{"/b#Ship-the-editor-first", "/a#Ship-the-editor-first"} {
+		p, err := Read(context.Background(), srv.URL+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.URL != srv.URL+"/b" {
+			t.Errorf("%s read at %s", path, p.URL)
+		}
+	}
+}
+
 func TestReadOnlyThePublicWeb(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("<title>secret</title>"))

@@ -127,6 +127,49 @@ func TestCodeOverLinesReadsBack(t *testing.T) {
 	sameShape(t, toggle, block("paragraph", Delta{{Text: "after"}}))
 }
 
+func TestFormulaOverLinesReadsBack(t *testing.T) {
+	math := Attrs{Math: true}
+	want := Delta{{Text: "a "}, {Text: `x \\ y`, Attrs: math}, {Text: " b"}}
+	for _, typ := range []string{"paragraph", "quote", "toggle_list", "callout"} {
+		n := block(typ, Delta{{Text: "a "}, {Text: "x \\\\\ny", Attrs: math}, {Text: " b"}})
+		if typ == "callout" {
+			n.Set("tone", "info")
+		}
+		if got := readBack(n); len(got) != 1 || got[0].Type != typ || !slices.Equal(got[0].Delta(), want) {
+			t.Errorf("%s read back as %q", typ, shape(got))
+		}
+	}
+}
+
+func TestFormulasInTableCellsReadBack(t *testing.T) {
+	math := Attrs{Math: true}
+	// A formula's pipes, as the ‖ of \|x\|, are no cells' edges, and its line breaks are spaces.
+	texts := [][2]string{{`a|b`, `a|b`}, {`\|x\|`, `\|x\|`}, {`a\\|b`, `a\\|b`}, {"x\ny", "x y"}}
+	var head, row []string
+	for _, tex := range texts {
+		head = append(head, "h")
+		row = append(row, Delta{{Text: "see "}, {Text: tex[0], Attrs: math}}.ToMarkdown())
+	}
+	table, err := TableNode([][]string{head, row}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readBack(table)
+	if len(got) != 1 || got[0].Type != "table" {
+		t.Fatalf("read back as %q", shape(got))
+	}
+	cells := TableCells(got[0])
+	if len(cells) != 2 || len(cells[1]) != len(texts) {
+		t.Fatalf("rows %q", TableRows(got[0]))
+	}
+	for i, tex := range texts {
+		want := Delta{{Text: "see "}, {Text: tex[1], Attrs: math}}
+		if d := cells[1][i].Children[0].Delta(); !slices.Equal(d, want) {
+			t.Errorf("%q read back as %+v", tex[0], d)
+		}
+	}
+}
+
 func TestPipesInTableCodeReadBack(t *testing.T) {
 	table, _ := TableNode([][]string{{"`a|b`", "`a\\|b`"}, {`x\|y`, "`\\`"}}, "")
 	got := readBack(table)

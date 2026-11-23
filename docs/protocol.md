@@ -41,7 +41,11 @@ metadata:
 - Until CRDTs land, two versions of a page merge **last-write-wins per block**
   (see `internal/doc/merge.go`): a block only one side changed since the
   version both last agreed on takes that side's change, whatever the times;
-  the times decide only blocks both sides changed. A block one side deleted
+  the times decide only blocks both sides changed. A move is such a change: a
+  block only one side moved goes under the parent that side gave it, after
+  the nearest block before it there that the merge also leaves where that
+  side has it (one neither side moved, say), since one the other side moved
+  may sit elsewhere. A block one side deleted
   stays deleted if the other side left it (and everything under it) as it
   was; if the other side changed any of it, it comes back whole, and the
   conflict is kept with the deleted side's node null, so the user can delete
@@ -65,7 +69,7 @@ metadata:
 | type | data | notes |
 | --- | --- | --- |
 | `paragraph` | `delta` | |
-| `heading` | `delta`, `level` 1–6 | |
+| `heading` | `delta`, `level` 1–6, `collapsed?` | `collapsed` folds it: the blocks after it, up to the next heading of its level or higher, hide while it is |
 | `bulleted_list`, `numbered_list` | `delta` | nested items go in `children` |
 | `todo_list` | `delta`, `checked`, `due?` | `due` is the day it is due, `YYYY-MM-DD`, or the day and time, `YYYY-MM-DDTHH:MM`, in the user's own time |
 | `quote` | `delta` | |
@@ -79,7 +83,7 @@ metadata:
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
-| `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `url` is `file://<file_id>/<name>`, no path on a device, which other devices and people would read: `file_id` finds the file, and a Markdown export writes the file's name alone for a `file:` URL; `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1" |
+| `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?`, `transcribed_by?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `url` is `file://<file_id>/<name>`, no path on a device, which other devices and people would read: `file_id` finds the file, and a Markdown export writes the file's name alone for a `file:` URL; `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1"; `transcribed_by` is the speech-to-text engine that wrote the transcript into `notes`, `soniox`, `moss`, `on-device`, or `openai-compatible` for an endpoint, which the card names beside the file's size while `notes` holds text |
 | `math_equation` | `formula` | TeX, drawn in display style |
 | `diagram` | `source` | Mermaid, drawn by Pele |
 | `recording` | `recording_id`, `title`, `duration_ms` | transcript lives in `recordings` |
@@ -87,7 +91,8 @@ metadata:
 
 Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
 `math` (a formula in the line: the run's text is its TeX source, written
-`$x^2$` in inline Markdown), `href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
+`$x^2$` in inline Markdown, whose marks and brackets, as a code span's, are
+its own: the `*` of `*see $f*g$ here*` ends no italic), `href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
 and `color` and `background`, the text's color and highlight as hex
 (`"#rrggbbaa"`). In agents' inline Markdown they are
 `<span style="color:#ef4444ff;background:#eab30840">text</span>`, either
@@ -118,14 +123,21 @@ loop with the same tools, on the device (§4). Tool definitions live in
 `leaflet mcp` (`internal/mcp`) offers the same page tools, each with a
 `page_id`, to agents outside the app.
 Its `read_page` gives each BlockView a `version`: a hash of what the view
-shows, apart from where the block sits, so a move keeps it. `replace_block`
+shows, apart from where the block sits, so a move keeps it, and apart from
+its nested blocks, which have versions of their own. `replace_block`
 takes `version?` and `delete_blocks` `versions?: {id: version}`. A block
 whose version no longer matches leaves the page as it is, and the error gives
 the block's view now, with its new version. A matching version counts as
-having seen the block as it is. An edit that replaces or deletes a block
-someone changed since the client last saw it (the blocks a `read_page`
-returned, a table with its cells, and those it wrote) keeps the page before
-it in history as a `conflict`, and its result says so in `conflict`.
+having seen the block as it is, a table with its cells. An edit that
+replaces or deletes a block someone changed since the client last saw it
+(the blocks a `read_page` returned, a table with its cells, and those it
+wrote, from the page as it was at the client's first read or edit of it)
+keeps the page before it in history as a `conflict`, and its result says so
+in `conflict`. So does one that takes out, with the block it deletes or
+rewrites with nested blocks of its own, a nested block the client never saw,
+as someone added it since, or one changed since it saw it, whatever the
+block's version; a rewrite that keeps the nested blocks, as one of a list
+item's text does, replaces nothing of them.
 
 ### BlockSpec (what a model writes)
 
@@ -245,12 +257,19 @@ conversation, which may hold what it read: a turn records it as
 whole conversation, a turn undone or failed left out. A run whose
 conversation has earlier turns whose URL guard was on (`guarded`: they read
 the web) keeps to the URLs it may write after reading the web, below, from
-its start, with none found yet. A tool's result reaches the model cut to 60,000 characters of
+its start, with none found yet. A `comment` run's conversation is its thread:
+the agent's replies in it are its earlier turns, each as its run's job has
+it (§4), and one this device has no job of, as another device's run wrote
+it, as having read beyond its page, the web, and a page someone else writes
+or reads. The model reads them with the thread, cross-page reading on or
+off, so a run after one not kept to its page does not keep to its page
+either. A tool's result reaches the model cut to 60,000 characters of
 its JSON, written with its `blocks` last: a result cut loses blocks, never
 what says how to read on. A read of a page (`read_page`, `read_other_page`,
 the workspace's and `leaflet mcp`'s `read_page`, one reader) keeps under
-that: a part is the blocks that fit 58,000 bytes of the result's JSON, one
-at least, and in the first part (`offset` 0 or none) the subpages and the
+that: a part is the blocks that fit 58,000 bytes of the result's JSON, its
+keys, counts and `leaflet mcp`'s versions among them, one block at least,
+and in the first part (`offset` 0 or none) the subpages and the
 comments take at most a quarter of that each, before the blocks. `offset`
 and `limit` are whole numbers, 0 and 1 at least; an `offset` past the last
 block gives none.
@@ -278,8 +297,18 @@ the run's provider, as a request of its own: the Responses API's
 OpenRouter's `openrouter:web_search` or GLM's `web_search`; other providers
 have none. `read_web_page` reads a public page, its redirects followed,
 as text with Markdown's headings, list items and links (MAX_PAGE_TEXT,
-30,000 characters). Once a run has read the web, `read_video_transcript`'s
-captions among it, what it writes, and the pages it reads, may hold only a
+30,000 characters), and gives the page's address after the redirects,
+without a fragment: a fragment never reaches the site, and the model may
+have written it. A run's first `read_web_page`, its free one, may go to an
+address the model made up, a short one (120 characters at most) with no
+query, fragment or user name, but on a page someone else writes or reads
+only to one in the instruction or on the page. It is spent as the read goes
+out, whether a page comes back or not: its site has the address either way,
+and an error's words are the site's too. Before a run has read the web, a
+query may name only an address in the instruction or on the page, on any
+page: a search can open an address its query names. Once a run has read
+the web, `read_video_transcript`'s captions among it, what it writes, and
+the pages it reads, may hold only a
 URL in the instruction, on the page as the run began, among a search's
 results (not one its query names) or linked from a page it read, and a
 query may name no address: a page could have the run send what is on this
@@ -427,20 +456,22 @@ run reads (§2, §7).
    Undo.
 5. The run's job stays on the device, in its own `ai_jobs` table, which
    does not sync:
-   `{ id, page_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "done"|"failed", request: { instruction, selection_text?, allow_cross_page, allow_web, agent_name }, result: { reply, ops, edits: [{ summary, block_ids, page_id? }], read_others }, error? }`.
-   The app's chat keeps each turn's `kept_to_page` (the run read nothing
-   beyond its page), `guarded` (its URL guard was on: it read beyond its
-   page or the web, or followed turns that did, so the app puts the
-   pictures of its reply in a page as links) and `read_others`, for the
-   turns after it (§2). On the `comment` surface the reply goes in as a
-   comment by the agent.
+   `{ id, page_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "done"|"failed", request: { instruction, selection_text?, allow_cross_page, allow_web, agent_name }, result: { reply, ops, edits: [{ summary, block_ids, page_id? }], kept_to_page, guarded, read_others, reply_comment_id? }, error? }`.
+   `kept_to_page` is that the run read nothing beyond its page, `guarded`
+   that its URL guard was on (it read beyond its page or the web, or
+   followed turns that did, so the app puts the pictures of its reply in a
+   page as links), and `read_others` that it read a page someone else
+   writes or reads, or followed turns that did. The app's chat keeps each
+   turn's three, for the turns after it (§2). On the `comment` surface the
+   reply goes in as a comment by the agent, before the job is kept, and
+   `reply_comment_id` is that comment's: a later run in the thread, the
+   job's `comment_id`, finds what the run that wrote a reply read by it.
 
 A workspace run's job is of no page: `page_id` is empty, `surface` is
 `workspace`, and its `request` has `open_page_id?`, the page open as the
-user asked, and `public_page_ids?`, those the app has a public link open
-to. It makes its changes through the app's own page changes, a subpage's
-card going in and out of the page it moves in or out of, and keeps no
-page's history.
+user asked. It makes its changes through the app's own page changes, a
+subpage's card going in and out of the page it moves in or out of, and
+keeps no page's history.
 
 ## 5. Edge Functions
 
@@ -460,10 +491,19 @@ transcription run on the device (§4).
 - The outbox keeps one entry per changed row. Replacing a queued payload
   moves the entry's revision on, and an upload takes the entry off the queue
   only if its revision is still the one sent.
-- A page or folder changed on a device goes up as the columns it changed
-  there (an update), so a change another device made to another column
-  meanwhile stays: an offline rename does not undo a move or a deletion. A
-  row the server does not have yet, or one sent again whole, goes up whole.
+- A page, folder, file, comment or recording changed on a device goes up as
+  the columns it changed there (an update), so a change another device made
+  to another column meanwhile stays: an offline rename does not undo a move
+  or a deletion, nor does dismissing a recording's error undo a transcript
+  made elsewhere. A transcription that ends on a device goes up only while
+  the server's row still has the status it ended from; where another device
+  ended it first, the device takes the server's row, and a change made
+  after it that keeps the status it ended with, as dismissing its error,
+  goes the same way. A row the server does not have yet, or one sent again
+  whole, goes up whole. A page's row changes with its columns alone: saving
+  its content, which goes up on its own, leaves the time the row last
+  changed, which the row goes up with as `changed_at` and which iCloud Drive
+  versions it by (§8).
   The rows a device sends again whole as its pages join an account, which
   the server may have already from a device it synced with through iCloud
   Drive, go over the server's only when they changed on the device after
@@ -669,11 +709,12 @@ later than when it reached the server; each writer keeps their newest 50
 unnamed snapshots of a page, and each writer but the page's owner their
 newest 50 named (`manual`) ones.
 Pages are only soft-deleted. What is on a deleted page (its
-`page_content`, comments, recordings, files and their objects, and its
-images) is the owner's to read, and anyone else's only if their view of
-it began, as their history of it does, no later than the page, or a page
-between it and the shared one, was deleted: what was taken off before it
-was shared with them is not theirs. The page's own row stays readable, so
+`page_content`, `page_history`, comments, recordings, files and their
+objects, and its images) is the owner's to read, and anyone else's only
+if their view of it began, as their history of it does, no later than the
+page, or a page between it and the shared one, was deleted: what was
+taken off before it was shared with them is not theirs, nor are the
+snapshots of it taken since. The page's own row stays readable, so
 its deletion syncs, and the client simply finds nothing on it. Only
 someone who may read what is on a deleted page restores it, or changes
 its `deleted_at` (`forbidden_restore`), and writes to it or under it:
@@ -714,7 +755,7 @@ its page. A
 `files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
-then remove its object). Its `folder_id` is a folder of its space
+then remove its object), but not remove its row. Its `folder_id` is a folder of its space
 (`folder_in_other_space` otherwise), and its `page_id`, as it is set, a
 page of its space or one its writer can edit, as an editor's upload to a
 page shared with them is (`forbidden_file_page` otherwise). A comment with
@@ -843,9 +884,10 @@ Leaflet/
   version there is older, so an offline rename on one device undoes no
   move or deletion made on another. A reader without the row takes it
   whole, its other columns older than any change. A device that changed a
-  row it has not sent yet keeps its change, and sends it with an `at` after
-  every version it has seen; what came for the row's other columns
-  meanwhile applies once its change has gone.
+  row it has not sent yet keeps its change, and sends it with `at` the time
+  it changed the row (saving a page's content changes no row), or after
+  every version it has seen where that is later; what came for the row's
+  other columns meanwhile applies once its change has gone.
 - **A page file** is `{format, page_id, version, merged, content}`: the
   device's whole version of the page (§1), `version` when it wrote it (ms,
   one more than its last at least), and `merged`, the version of each other
@@ -853,7 +895,13 @@ Leaflet/
   device's newer page file into its own (§1's merge), with the base the
   file of that device it merged last, and writes its own when the result is
   new to both. A conflict is noted on the device whose edit lost, when the
-  other device had not merged it.
+  other device had not merged it. A device that only passed on another's
+  edit leaves the conflict to that one: the edit it lost is another's when
+  a third device's page file has it that could not have had it from this
+  one, as neither that device nor any whose file it merged had merged a
+  page file this one wrote after the edit. A device whose file says nothing
+  of what it merged, or whose file this one has not read, may have had it
+  from here.
 - **Order.** A device writes blobs and page files before the batch that
   names them, and reads each device's batches in order from the last it
   applied, stopping at one that is missing, still downloading, or does not

@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import LeafletCore
+import UIKit
 
 @MainActor
 @Observable
@@ -20,6 +21,9 @@ final class Recorder {
 
     private(set) var speech: [String: SpeechChoices] = [:]
 
+    /// The editor the recording playing was played in (`EditorController.players`), or nil for
+    /// one played from elsewhere: closing another editor leaves it playing.
+    @ObservationIgnored private var owner: String?
     @ObservationIgnored private var client: CoreClient?
     @ObservationIgnored private var attaching: Task<Void, Never>?
     @ObservationIgnored private var speechAsked: Set<String> = []
@@ -34,8 +38,48 @@ final class Recorder {
         self?.changes += 1
         self?.letAudioGo()
     }
+    @ObservationIgnored private var observers: [any NSObjectProtocol] = []
 
-    private init() {}
+    private init() {
+        let center = NotificationCenter.default
+        observers.append(
+            center.addObserver(
+                forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let info = note.userInfo
+                let before =
+                    info?[AVAudioSessionRouteChangePreviousRouteKey]
+                    as? AVAudioSessionRouteDescription
+                let outputs = before?.outputs.map(\.portType.rawValue) ?? []
+                guard
+                    let raw = info?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                    let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+                    Self.goesOutLoud(reason, from: outputs)
+                else { return }
+                MainActor.assumeIsolated { self?.pausePlaying() }
+            })
+        // The time away the system gives a transcription runs out, and the app is suspended
+        // until it is back: each time it goes away, it holds on again.
+        observers.append(
+            center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.state.transcribes, !self.finishing.running else { return }
+                    self.finishing.begin("Transcribe")
+                }
+            })
+    }
+
+    /// Whether a change of route leaves a recording playing out loud: the headphones, or another
+    /// device it played on, went, and the speaker takes over. An audio player plays on then, so
+    /// it is paused, as other players are.
+    nonisolated static func goesOutLoud(
+        _ reason: AVAudioSession.RouteChangeReason, from outputs: [String]
+    ) -> Bool {
+        let aloud = [AVAudioSession.Port.builtInSpeaker, .builtInReceiver].map(\.rawValue)
+        return reason == .oldDeviceUnavailable && outputs.contains { !aloud.contains($0) }
+    }
 
     func attach(_ client: CoreClient, toast: @escaping (String) -> Void) {
         self.client = client
@@ -79,10 +123,21 @@ final class Recorder {
     }
 
     private func holdOn(_ s: RecordingState) {
-        let busy = !s.transcribing.isEmpty || !s.finishing.isEmpty
-        if busy, !finishing.running {
+        if s.transcribes, !finishing.running {
             finishing.begin("Transcribe")
-        } else if !busy {
+        } else if !s.transcribes {
+            finishing.end()
+        }
+    }
+
+    /// Holds time away for a transcription from before the core is asked for it, as the core
+    /// tells of one only once it has begun, then for as long as the core's state says it goes on.
+    private func transcribing(_ client: CoreClient, _ ask: () async -> Void) async {
+        if !finishing.running { finishing.begin("Transcribe") }
+        await ask()
+        if let s = try? await client.recordingState() {
+            holdOn(s)
+        } else {
             finishing.end()
         }
     }
@@ -125,13 +180,7 @@ final class Recorder {
 
     func stopRecording() async {
         guard let client else { return }
-        if !finishing.running { finishing.begin("Transcribe") }
-        await client.stopRecording()
-        if let s = try? await client.recordingState() {
-            holdOn(s)
-        } else {
-            finishing.end()
-        }
+        await transcribing(client) { await client.stopRecording() }
     }
 
     func togglePause() {
@@ -176,11 +225,13 @@ final class Recorder {
     func retranscribe(_ id: String, page: String?, provider: String) {
         guard let client else { return }
         Task {
-            do {
-                try await client.retranscribe(id, provider: provider)
-                await load(id)
-            } catch {
-                toast?(error.localizedDescription)
+            await transcribing(client) {
+                do {
+                    try await client.retranscribe(id, provider: provider)
+                    await load(id)
+                } catch {
+                    toast?(error.localizedDescription)
+                }
             }
             if let page { await loadChoices(page) }
         }
@@ -189,10 +240,12 @@ final class Recorder {
     func transcribeFile(page: String, block: String, provider: String = "") {
         guard let client else { return }
         Task {
-            do {
-                try await client.transcribeFile(page: page, block: block, provider: provider)
-            } catch {
-                toast?(error.localizedDescription)
+            await transcribing(client) {
+                do {
+                    try await client.transcribeFile(page: page, block: block, provider: provider)
+                } catch {
+                    toast?(error.localizedDescription)
+                }
             }
             await loadChoices(page)
         }
@@ -252,8 +305,10 @@ final class Recorder {
         editor?.insertBlocks(transcript.blocks, after: block)
     }
 
-    func play(_ id: String, from at: TimeInterval? = nil) {
+    /// Plays a recording, or pauses it as it plays. `editor` is the one it is played in.
+    func play(_ id: String, from at: TimeInterval? = nil, in editor: String? = nil) {
         if playing == id, let player {
+            if let editor { owner = editor }
             if at != nil || !player.isPlaying {
                 try? AVAudioSession.sharedInstance().setActive(true)
             }
@@ -275,6 +330,7 @@ final class Recorder {
         guard let client, loading == nil, !state.recording else { return }
         stopPlaying()
         loading = id
+        owner = editor
         fetch += 1
         let this = fetch
         fetching = Task {
@@ -337,11 +393,26 @@ final class Recorder {
         fetching = nil
         fetch += 1
         loading = nil
+        owner = nil
         let was = player
         player?.stop()
         player = nil
         playing = nil
         if was != nil { letAudioGo() }
+    }
+
+    /// Whether the recording playing, if one is, is `editor`'s to show and steer: it was played
+    /// there, or in no editor.
+    func plays(in editor: String?) -> Bool { owner == nil || owner == editor }
+
+    /// Stops the recording playing, or loading, as an editor that has it closes, unless it was
+    /// played in another: a recording, like a file or a video, plays in the window it was played
+    /// in.
+    func stopPlaying(_ recordings: Set<String>, in editor: String) {
+        guard let id = playing ?? loading, recordings.contains(id), plays(in: editor) else {
+            return
+        }
+        stopPlaying()
     }
 
     private func letAudioGo() {

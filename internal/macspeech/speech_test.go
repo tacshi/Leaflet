@@ -1,6 +1,7 @@
 package macspeech
 
 import (
+	"context"
 	"encoding/binary"
 	"os"
 	"os/exec"
@@ -104,6 +105,26 @@ func TestFileAndAnUnknownLanguage(t *testing.T) {
 	}
 	if _, err := s.Finish(); err == nil {
 		t.Fatal("a stream in a language the Mac can't transcribe finished")
+	}
+}
+
+func TestFileEndsTheHelperWithItsContext(t *testing.T) {
+	h := helper(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.FileContext(ctx, "/tmp/a.wav", "deaf")
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a helper ended before its answer gave a transcript")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the helper runs on after its context ended")
 	}
 }
 

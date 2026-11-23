@@ -709,7 +709,9 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		}
 	}
 	if last != n {
-		if tail.Len() > 0 && typ != "code" {
+		// The last block takes the item's kind where it holds what was after the caret: its text, or its children,
+		// which a block that holds none would let out of the list.
+		if (tail.Len() > 0 || len(kids) > 0 && !nestable(last)) && typ != "code" {
 			last.Type = typ
 			for _, k := range doc.TypedKeys {
 				delete(last.Data, k)

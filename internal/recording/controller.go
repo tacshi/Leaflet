@@ -61,6 +61,11 @@ type Controller struct {
 	testWhy      error
 	Transcribing map[string]bool
 	Finishing    map[string]bool
+
+	// jobs is the context transcriptions run in, and endJobs ends it: see
+	// CutShort.
+	jobs    context.Context
+	endJobs context.CancelFunc
 }
 
 type ending struct {
@@ -124,6 +129,20 @@ const OnDevice = "on-device"
 type Engine interface {
 	Stream(language string, text func(string)) (Stream, error)
 	File(path, language string) ([]store.Segment, error)
+}
+
+// A contextEngine is an Engine whose transcription of a file ends with ctx:
+// the helper doing it is stopped, rather than left running alone once the
+// app is gone.
+type contextEngine interface {
+	FileContext(ctx context.Context, path, language string) ([]store.Segment, error)
+}
+
+func engineFile(ctx context.Context, e Engine, path, language string) ([]store.Segment, error) {
+	if ce, ok := e.(contextEngine); ok {
+		return ce.FileContext(ctx, path, language)
+	}
+	return e.File(path, language)
 }
 
 type Stream interface {
@@ -207,8 +226,8 @@ func (r *Controller) release(id string) {
 	r.mu.Unlock()
 }
 
-// Settle waits until no recording is being saved or transcribed, for at
-// most d, and reports whether none is.
+// Settle waits until no recording is being saved or transcribed, and no
+// audio file transcribed, for at most d, and reports whether none is.
 func (r *Controller) Settle(d time.Duration) bool {
 	r.mu.Lock()
 	settled := r.settled
@@ -224,7 +243,44 @@ func (r *Controller) Settle(d time.Duration) bool {
 	}
 }
 
+// jobContext is the context a transcription runs in.
+func (r *Controller) jobContext() context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.jobs == nil {
+		r.jobs, r.endJobs = context.WithCancel(context.Background())
+	}
+	return r.jobs
+}
+
+// CutShort ends the transcriptions under way, for a quit that cannot wait
+// for them any longer: each stops where it is, deletes what it put on a
+// provider's side and stops the helper transcribing on the device, rather
+// than going on until the process is gone. Each then fails as cut off by
+// the quit, a recording keeping its audio to transcribe again.
+// Transcriptions that start afterwards run as before.
+func (r *Controller) CutShort() {
+	r.mu.Lock()
+	end := r.endJobs
+	r.jobs, r.endJobs = nil, nil
+	r.mu.Unlock()
+	if end != nil {
+		end()
+	}
+}
+
+// quitError tells the error of a transcription CutShort ended: the quit's.
+func quitError(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return errors.New(locales.RecErrQuit())
+	}
+	return err
+}
+
 func (r *Controller) RecoverInterrupted() {
+	if left := r.leftBehind(); len(left) > 0 {
+		guard.Go(func() { r.deleteLeftovers(left) })
+	}
 	recs, err := r.st.Recordings()
 	if err != nil {
 		return
@@ -874,12 +930,15 @@ func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSet
 	}
 	var segs []store.Segment
 	var err error
+	ctx := r.jobContext()
 	switch {
 	case stream != nil:
+		stop := context.AfterFunc(ctx, stream.Close)
+		defer stop()
 		segs, err = stream.Finish()
 	case stt.Provider == OnDevice:
-		if e := r.waitEngine(context.Background()); e != nil {
-			segs, err = e.File(path, stt.Language)
+		if e := r.waitEngine(ctx); e != nil {
+			segs, err = engineFile(ctx, e, path, stt.Language)
 		} else {
 			err = errors.New(locales.RecErrOnDevice())
 		}
@@ -893,10 +952,10 @@ func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSet
 		var size int64
 		if f, size, err = openAudio(path); err == nil {
 			defer func() { _ = f.Close() }()
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
 			if stt.Provider == Moss {
-				segs, err = TranscribeMoss(ctx, MossKey(), f, size, "test.wav", false)
+				segs, err = TranscribeMoss(ctx, MossKey(), f, size, "test.wav", false, r.leftovers())
 			} else {
 				segs, err = TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(stt.BaseURL), stt.Language)
 			}
@@ -950,7 +1009,9 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 			r.Finishing[rec.ID] = true
 		}
 	})
-	segs, err := r.transcribe(rec, path, stream, stt)
+	ctx := r.jobContext()
+	segs, err := r.transcribe(ctx, rec, path, stream, stt)
+	err = quitError(ctx, err)
 	var lost error
 	if stream != nil {
 		lost = stream.Lost()
@@ -1082,11 +1143,14 @@ func openAudio(path string) (*os.File, int64, error) {
 	return f, fi.Size(), nil
 }
 
-func (r *Controller) transcribe(rec store.Recording, path string, stream Stream, stt store.SttSettings) ([]store.Segment, error) {
+func (r *Controller) transcribe(ctx context.Context, rec store.Recording, path string, stream Stream, stt store.SttSettings) ([]store.Segment, error) {
 	if stream != nil {
+		// A stream still finishing when the transcription is cut short is
+		// closed, and with it the helper transcribing it on the device.
+		stop := context.AfterFunc(ctx, stream.Close)
+		defer stop()
 		return stream.Finish()
 	}
-	ctx := context.Background()
 	if stt.Provider == OnDevice {
 		return r.transcribeOnDevice(ctx, rec, path, stt.Language)
 	}
@@ -1105,9 +1169,9 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 	defer func() { _ = f.Close() }()
 	switch stt.Provider {
 	case "soniox":
-		return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, f, size, "recording.wav", sonioxHints(stt), stt.SpeakerLabels)
+		return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, f, size, "recording.wav", sonioxHints(stt), stt.SpeakerLabels, r.leftovers())
 	case Moss:
-		return TranscribeMoss(ctx, MossKey(), f, size, "recording.wav", stt.SpeakerLabels)
+		return TranscribeMoss(ctx, MossKey(), f, size, "recording.wav", stt.SpeakerLabels, r.leftovers())
 	}
 	return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(stt.BaseURL), stt.Language)
 }
@@ -1134,9 +1198,16 @@ func (r *Controller) TranscribeFile(f store.File, blockID string, stt store.SttS
 		r.TranscribingFiles = map[string]string{}
 	}
 	r.TranscribingFiles[blockID] = f.ID
+	// A quit waits for the transcription as for a recording's, so that it
+	// can write its notes, or, cut short, delete what it uploaded.
+	hold := "file " + f.ID
+	r.hold(hold)
+	ctx := r.jobContext()
 	guard.Go(func() {
-		segs, err := r.transcribeFile(context.Background(), f, stt)
+		segs, err := r.transcribeFile(ctx, f, stt)
+		err = quitError(ctx, err)
 		r.update(func() {
+			defer r.release(hold)
 			delete(r.TranscribingFiles, blockID)
 			done(segs, err)
 		})
@@ -1161,7 +1232,7 @@ func (r *Controller) transcribeFile(ctx context.Context, f store.File, stt store
 		if e == nil {
 			return nil, errors.New(locales.RecErrOnDevice())
 		}
-		return e.File(path, stt.Language)
+		return engineFile(ctx, e, path, stt.Language)
 	}
 	audio, size, err := openAudio(path)
 	if err != nil {
@@ -1171,9 +1242,9 @@ func (r *Controller) transcribeFile(ctx context.Context, f store.File, stt store
 	name := "audio" + strings.ToLower(filepath.Ext(f.Name))
 	switch stt.Provider {
 	case "soniox":
-		return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, audio, size, name, sonioxHints(stt), stt.SpeakerLabels)
+		return TranscribeSoniox(ctx, LocalSonioxKey(), stt.SonioxModel, audio, size, name, sonioxHints(stt), stt.SpeakerLabels, r.leftovers())
 	case Moss:
-		return TranscribeMoss(ctx, MossKey(), audio, size, name, stt.SpeakerLabels)
+		return TranscribeMoss(ctx, MossKey(), audio, size, name, stt.SpeakerLabels, r.leftovers())
 	}
 	return transcribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, size, name, fileWait(size), EndpointKey(stt.BaseURL), stt.Language)
 }
@@ -1216,7 +1287,7 @@ func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording
 		}
 		defer func() { _ = os.Remove(path) }()
 	}
-	return e.File(path, language)
+	return engineFile(ctx, e, path, language)
 }
 
 func tempAudio(audio io.Reader) (string, error) {

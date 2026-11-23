@@ -43,6 +43,9 @@ type fakeProject struct {
 	realtimeWaits bool
 	heard         int
 	deployDown    bool
+	// A marker another device's build sets on its deploy, as this one
+	// reads the Auth settings, after it read the secrets.
+	markedMeanwhile string
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -121,6 +124,10 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 		case strings.HasSuffix(path, "/config/auth") && f.authDown:
 			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "GET":
+			if f.markedMeanwhile != "" {
+				f.secrets = append(f.secrets, supabaseapi.Secret{Name: f.markedMeanwhile, Value: "digest"})
+				f.markedMeanwhile = ""
+			}
 			_ = json.NewEncoder(w).Encode(f.signUps)
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "PATCH":
 			var set map[string]bool
@@ -344,6 +351,50 @@ func TestSetupNeverDowngrades(t *testing.T) {
 	}
 	if setup(hashName(FunctionsVersion, hash)); len(f.deployed) != 0 {
 		t.Errorf("a development build deployed its own again: %v", f.deployed)
+	}
+}
+
+// Two devices set a project up at once, both finding the functions of an
+// earlier version. The other's build deploys its own while this one gets
+// the database ready: a newer build's functions stay, and an older one's
+// are replaced, its marker with them.
+func TestSetupLooksAgainBeforeItDeploys(t *testing.T) {
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := FunctionsHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier := hashName(FunctionsVersion-2, "0123456789ABCDEF")
+	setup := func(meanwhile string) (*fakeProject, []string) {
+		t.Helper()
+		f := &fakeProject{
+			applied:         map[string][]supabaseapi.Migration{"p": nil},
+			secrets:         []supabaseapi.Secret{{Name: earlier, Value: "digest"}},
+			markedMeanwhile: meanwhile,
+		}
+		for _, m := range all {
+			f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+		}
+		if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, s := range f.secrets {
+			names = append(names, s.Name)
+		}
+		return f, names
+	}
+
+	newer := hashName(FunctionsVersion+1, "FEDCBA9876543210")
+	if f, names := setup(newer); len(f.deployed) != 0 || !slices.Equal(names, []string{earlier, newer}) {
+		t.Errorf("with a newer build's deployed meanwhile: deployed %v, secrets %v", f.deployed, names)
+	}
+	older := hashName(FunctionsVersion-1, "FEDCBA9876543210")
+	if f, names := setup(older); !slices.Equal(f.deployed, Functions) || !slices.Equal(names, []string{hashName(FunctionsVersion, hash)}) {
+		t.Errorf("with an older build's deployed meanwhile: deployed %v, secrets %v", f.deployed, names)
 	}
 }
 

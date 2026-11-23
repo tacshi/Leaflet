@@ -39,7 +39,14 @@ func Find(dir string) *Helper {
 }
 
 func (h *Helper) File(path, language string) ([]store.Segment, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), fileWait(path))
+	return h.FileContext(context.Background(), path, language)
+}
+
+// FileContext transcribes the audio file at path, and ends the helper
+// doing it when ctx ends: the helper is a process of its own, which the
+// app's quit would otherwise leave running alone.
+func (h *Helper) FileContext(ctx context.Context, path, language string) ([]store.Segment, error) {
+	ctx, cancel := context.WithTimeout(ctx, fileWait(path))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.path, "file", language, path) // #nosec G204
 	out, err := cmd.StdoutPipe()

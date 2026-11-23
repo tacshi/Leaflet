@@ -235,9 +235,10 @@ struct Todo: Codable, Hashable, Sendable {
     var due: Int64
     var timed: Bool
     var owner: String?
+    var overdue: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case text, due, timed, owner
+        case text, due, timed, owner, overdue
         case pageID = "page_id"
         case pageTitle = "page_title"
         case blockID = "block_id"
@@ -248,9 +249,14 @@ struct Todo: Codable, Hashable, Sendable {
     }
 }
 
+/// A day's to-dos from every page, or those with no date.
 struct TodoGroup: Codable, Hashable, Sendable {
+    /// The day as 2026-11-20, or "no-date".
+    var key: String
     var section: String
     var title: String
+    /// Whether the day shows only its header until it is opened, as the days gone by do.
+    var folded: Bool?
     var todos: [Todo]
 
     var overdue: Bool { section == "overdue" }

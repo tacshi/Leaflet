@@ -1,51 +1,72 @@
 package doc
 
 import (
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"leaflet/locales"
 )
 
-func TestTodoGroups(t *testing.T) {
+func TestTodoDays(t *testing.T) {
 	now := time.Date(2026, 11, 3, 15, 0, 0, 0, time.Local)
 	day := func(d int) time.Time { return time.Date(2026, 11, d, 0, 0, 0, 0, time.Local) }
 	todos := []Todo{
 		{BlockID: "later", Due: day(9)},
 		{BlockID: "owner b", Owner: "Sam"},
 		{BlockID: "soon", Due: day(4)},
+		{BlockID: "tonight", Due: day(3).Add(20 * time.Hour), Timed: true},
 		{BlockID: "this morning", Due: now.Add(-5 * time.Hour), Timed: true},
 		{BlockID: "today", Due: day(3)},
 		{BlockID: "owner a", Owner: "Ann"},
 		{BlockID: "last week", Due: day(27).AddDate(0, -1, 0)},
+		{BlockID: "also soon", Due: day(4)},
+		{BlockID: "last week too", Due: day(27).AddDate(0, -1, 0).Add(9 * time.Hour), Timed: true},
 	}
-	groups := TodoGroups(todos, func(t Todo) Todo { return t }, now)
-	var got [][]string
-	var sections []TodoSection
-	for _, g := range groups {
-		sections = append(sections, g.Section)
+	var got []string
+	for _, d := range TodoDays(todos, func(t Todo) Todo { return t }, now) {
 		var ids []string
-		for _, t := range g.Todos {
+		for _, t := range d.Todos {
 			ids = append(ids, t.BlockID)
 		}
-		got = append(got, ids)
+		got = append(got, fmt.Sprintf("%s %d %v %v", d.Key(), d.Section, d.Folded(), ids))
 	}
-	want := [][]string{{"last week", "this morning"}, {"today"}, {"soon", "later"}, {"owner b", "owner a"}}
-	if len(got) != len(want) {
-		t.Fatalf("sections %v: %v", sections, got)
+	want := []string{
+		"2026-10-27 0 true [last week last week too]",
+		"2026-11-03 1 false [today this morning tonight]",
+		"2026-11-04 2 false [soon also soon]",
+		"2026-11-09 2 false [later]",
+		"no-date 3 false [owner b owner a]",
 	}
-	for i := range want {
-		if sections[i] != TodoSection(i) || len(got[i]) != len(want[i]) {
-			t.Fatalf("sections %v: %v, want %v", sections, got, want)
-		}
-		for j := range want[i] {
-			if got[i][j] != want[i][j] {
-				t.Fatalf("section %d: %v, want %v", i, got[i], want[i])
-			}
-		}
+	if !slices.Equal(got, want) {
+		t.Errorf("days\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if g := TodoGroups(todos[:1], func(t Todo) Todo { return t }, now); len(g) != 1 || g[0].Section != TodoUpcoming {
-		t.Errorf("one to-do: %+v", g)
+	if d := TodoDays(todos[1:2], func(t Todo) Todo { return t }, now); len(d) != 1 || d[0].Section != TodoNoDate || !d[0].Day.IsZero() {
+		t.Errorf("one to-do with no date: %+v", d)
+	}
+	if d := TodoDays([]Todo{}, func(t Todo) Todo { return t }, now); len(d) != 0 {
+		t.Errorf("no to-dos: %+v", d)
+	}
+}
+
+func TestTodoDaysOverAChangeOfClocks(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no time zone data:", err)
+	}
+	local := time.Local
+	time.Local = ny
+	t.Cleanup(func() { time.Local = local })
+	todos := []Todo{
+		{BlockID: "before", Due: time.Date(2026, 11, 1, 0, 30, 0, 0, ny), Timed: true},
+		{BlockID: "after", Due: time.Date(2026, 11, 1, 23, 30, 0, 0, ny), Timed: true},
+		{BlockID: "next", Due: time.Date(2026, 11, 2, 0, 0, 0, 0, ny)},
+	}
+	days := TodoDays(todos, func(t Todo) Todo { return t }, time.Date(2026, 11, 1, 12, 0, 0, 0, ny))
+	if len(days) != 2 || days[0].Key() != "2026-11-01" || len(days[0].Todos) != 2 || days[0].Section != TodoToday || days[1].Section != TodoUpcoming {
+		t.Errorf("over the end of summer time: %+v", days)
 	}
 }
 

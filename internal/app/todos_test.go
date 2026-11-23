@@ -23,20 +23,31 @@ func TestTodoRowsAndReminders(t *testing.T) {
 		return store.PageTodo{Todo: doc.Todo{BlockID: id, Text: id, Due: due, Owner: "Sam"}, PageID: "p"}
 	}
 	todos := []store.PageTodo{todo("later", day(3)), todo("owned", time.Time{}), todo("today", day(0)), todo("late", day(-2)), todo("soon", day(1))}
-	var got []string
-	for _, r := range todoRows(todos, now) {
-		if r.header != "" {
-			got = append(got, "# "+r.header)
-		} else {
-			got = append(got, r.todo.BlockID)
+	ids := func(rows []todoRow) string {
+		var got []string
+		for _, r := range rows {
+			if r.day != nil {
+				got = append(got, fmt.Sprintf("# %s %d", r.day.Key(), len(r.day.Todos)))
+			} else {
+				got = append(got, r.todo.BlockID)
+			}
 		}
+		return fmt.Sprint(got)
 	}
-	want := "[# Overdue late # Today today # Upcoming soon later # No date owned]"
-	if s := fmt.Sprint(got); s != want {
+	unfolded := func(d todoDay) bool { return !d.Folded() }
+	want := "[# 2026-10-24 1 # 2026-10-26 1 today # 2026-10-27 1 soon # 2026-10-29 1 later # no-date 1 owned]"
+	if s := ids(todoRows(todos, now, unfolded)); s != want {
 		t.Errorf("rows %s, want %s", s, want)
 	}
-	if rows := todoRows(todos[:1], now); len(rows) != 1 || rows[0].header != "" {
-		t.Errorf("one section's rows %+v", rows)
+	all := func(todoDay) bool { return true }
+	if s, want := ids(todoRows(todos, now, all)), "[# 2026-10-24 1 late # 2026-10-26 1 today # 2026-10-27 1 soon # 2026-10-29 1 later # no-date 1 owned]"; s != want {
+		t.Errorf("rows with every day open %s, want %s", s, want)
+	}
+	if s := ids(todoRows(todos[1:2], now, all)); s != "[owned]" {
+		t.Errorf("rows of a to-do with no date %s", s)
+	}
+	if s := ids(todoRows(todos[:1], now, all)); s != "[# 2026-10-29 1 later]" {
+		t.Errorf("rows of one day %s", s)
 	}
 	reminded := map[string]bool{"late": true}
 	var due []string
@@ -66,10 +77,14 @@ func TestTimedTodos(t *testing.T) {
 	}
 	todos := []store.PageTodo{todo("meet", at(15, 0)), todo("call", at(8, 30))}
 	var got []string
-	for _, r := range todoRows(todos, at(10, 0)) {
-		got = append(got, r.header+r.todo.BlockID)
+	for _, r := range todoRows(todos, at(10, 0), func(todoDay) bool { return true }) {
+		if r.day != nil {
+			got = append(got, todoDayTitle(*r.day, at(10, 0)))
+		} else {
+			got = append(got, r.todo.BlockID)
+		}
 	}
-	if want := "[Overdue call Today meet]"; fmt.Sprint(got) != want {
+	if want := "[Today call meet]"; fmt.Sprint(got) != want {
 		t.Errorf("rows %v, want %s", got, want)
 	}
 	none := func(store.PageTodo) bool { return false }
@@ -312,5 +327,76 @@ func TestRemindersOfTheUsersOwnTodos(t *testing.T) {
 	}
 	if got := fmt.Sprint(ids()); got != "[given mine]" {
 		t.Errorf("once reminded of the call, reminded of %s", got)
+	}
+}
+
+func TestTodoDaysFoldAndUnfold(t *testing.T) {
+	a := templatesApp(t)
+	todo := func(id, text string, due time.Time) *doc.Node {
+		n := &doc.Node{ID: id, Type: "todo_list"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		n.Set("checked", false)
+		n.SetDue(due, false)
+		return n
+	}
+	now := time.Now()
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Yesterday's list", Content: doc.FromBlocks([]*doc.Node{
+		todo("old", "Read for 40 minutes", now.AddDate(0, 0, -1)),
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Today's list", Content: doc.FromBlocks([]*doc.Node{
+		todo("new", "Listen for an hour", now),
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Work", Content: doc.FromBlocks([]*doc.Node{
+		todo("work", "Send the invoice", now),
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	for _, s := range []string{"Yesterday", "Today", "Listen for an hour", "Send the invoice", "Today's list", "Work"} {
+		if !tt.HasText(s) {
+			t.Errorf("no %q in %v", s, tt.Texts())
+		}
+	}
+	if tt.HasText("Read for 40 minutes") {
+		t.Errorf("yesterday's to-do shows before its day is opened: %v", tt.Texts())
+	}
+	if err := tt.Click("Yesterday"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Read for 40 minutes") {
+		t.Errorf("yesterday's to-do isn't shown once its day is opened: %v", tt.Texts())
+	}
+	if err := tt.Click("Today"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("Listen for an hour") || tt.HasText("Send the invoice") {
+		t.Errorf("today's to-dos show with the day folded: %v", tt.Texts())
+	}
+	day := func(d time.Time) string { return d.Format(time.DateOnly) }
+	saved := a.st.Settings().TodoDaysOpen
+	if len(saved) != 2 || !saved[day(now.AddDate(0, 0, -1))] || saved[day(now)] {
+		t.Errorf("days kept open or folded %v", saved)
+	}
+	if err := tt.Click("Today"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Listen for an hour") || !tt.HasText("Send the invoice") {
+		t.Errorf("today's to-dos aren't shown once re-opened: %v", tt.Texts())
+	}
+	saved = a.st.Settings().TodoDaysOpen
+	if _, ok := saved[day(now)]; ok {
+		t.Errorf("re-opened default-open day still kept in %v", saved)
 	}
 }

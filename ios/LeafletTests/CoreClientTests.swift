@@ -80,7 +80,7 @@ struct CoreClientTests {
         await client.closePage(page.id, editor: opened.editor)
     }
 
-    @Test func toDosComeInTheirSections() async throws {
+    @Test func toDosComeADayAtATime() async throws {
         let page = try await client.createPage(NewPage(title: "Chores"))
         var opened = try await client.openPage(page.id)
         func todo(_ id: String, _ text: String, _ due: String) -> DocNode {
@@ -93,7 +93,7 @@ struct CoreClientTests {
         }
         opened.content.document.children = [
             todo("a", "Later", "2999-01-02"), todo("b", "Late", "2001-01-01"),
-            todo("c", "Sooner", "2999-01-01"),
+            todo("c", "Sooner", "2999-01-01"), todo("d", "Also sooner", "2999-01-01"),
         ]
         try await client.editPage(
             page.id, editor: opened.editor, content: opened.content, rev: opened.rev)
@@ -101,9 +101,11 @@ struct CoreClientTests {
         let mine = try await client.todos().map { group in
             (group, group.todos.filter { $0.pageID == page.id }.map(\.text))
         }.filter { !$0.1.isEmpty }
-        #expect(mine.map(\.0.section) == ["overdue", "upcoming"])
-        #expect(mine.first?.0.overdue == true)
-        #expect(mine.last?.1 == ["Sooner", "Later"])
+        #expect(mine.map(\.0.key) == ["2001-01-01", "2999-01-01", "2999-01-02"])
+        #expect(mine.map(\.0.section) == ["overdue", "upcoming", "upcoming"])
+        #expect(mine.map { $0.0.folded == true } == [true, false, false])
+        #expect(mine.first?.0.todos.first?.overdue == true)
+        #expect(mine.map(\.1) == [["Late"], ["Sooner", "Also sooner"], ["Later"]])
     }
 
     @Test func aSignInWithSeveralProjectsAsksWhichToUse() throws {

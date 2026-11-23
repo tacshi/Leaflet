@@ -8637,34 +8637,6 @@ func (msgs Messages) TodosEmptyBody() string {
 	return Catalog.Format(msgs.locale, "todosEmptyBody", nil)
 }
 
-// TodosSectionOverdue says "Overdue"
-// in the language the app shows.
-//
-// To-dos view section header.
-func TodosSectionOverdue() string { return In(i18n.Locale()).TodosSectionOverdue() }
-
-// TodosSectionOverdue says "Overdue"
-// in the language of msgs.
-//
-// To-dos view section header.
-func (msgs Messages) TodosSectionOverdue() string {
-	return Catalog.Format(msgs.locale, "todosSectionOverdue", nil)
-}
-
-// TodosSectionUpcoming says "Upcoming"
-// in the language the app shows.
-//
-// To-dos view section header.
-func TodosSectionUpcoming() string { return In(i18n.Locale()).TodosSectionUpcoming() }
-
-// TodosSectionUpcoming says "Upcoming"
-// in the language of msgs.
-//
-// To-dos view section header.
-func (msgs Messages) TodosSectionUpcoming() string {
-	return Catalog.Format(msgs.locale, "todosSectionUpcoming", nil)
-}
-
 // TodosSectionNoDate says "No date"
 // in the language the app shows.
 //
@@ -8677,6 +8649,22 @@ func TodosSectionNoDate() string { return In(i18n.Locale()).TodosSectionNoDate()
 // To-dos view section header.
 func (msgs Messages) TodosSectionNoDate() string {
 	return Catalog.Format(msgs.locale, "todosSectionNoDate", nil)
+}
+
+// TodosDueTime says "{due, time, ::jm}"
+// in the language the app shows.
+//
+// To-dos view: a to-do's time of day, beside it under its day's header, as
+// 3:00 PM.
+func TodosDueTime(due time.Time) string { return In(i18n.Locale()).TodosDueTime(due) }
+
+// TodosDueTime says "{due, time, ::jm}"
+// in the language of msgs.
+//
+// To-dos view: a to-do's time of day, beside it under its day's header, as
+// 3:00 PM.
+func (msgs Messages) TodosDueTime(due time.Time) string {
+	return Catalog.Format(msgs.locale, "todosDueTime", map[string]any{"due": due})
 }
 
 // TodosUntitled says "To-do"

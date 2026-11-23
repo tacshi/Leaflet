@@ -3101,17 +3101,18 @@
   "@todosEmptyBody": {
     "description": "To-dos view empty state: explanation."
   },
-  "todosSectionOverdue": "Overdue",
-  "@todosSectionOverdue": {
-    "description": "To-dos view section header."
-  },
-  "todosSectionUpcoming": "Upcoming",
-  "@todosSectionUpcoming": {
-    "description": "To-dos view section header."
-  },
   "todosSectionNoDate": "No date",
   "@todosSectionNoDate": {
     "description": "To-dos view section header."
+  },
+  "todosDueTime": "{due, time, ::jm}",
+  "@todosDueTime": {
+    "description": "To-dos view: a to-do's time of day, beside it under its day's header, as 3:00 PM.",
+    "placeholders": {
+      "due": {
+        "type": "DateTime"
+      }
+    }
   },
   "todosUntitled": "To-do",
   "@todosUntitled": {

@@ -293,13 +293,16 @@ struct SidebarView: View {
         .selectionDisabled()
     }
 
-    private func foldHeader(_ title: String, open: Binding<Bool>) -> some View {
+    private func foldHeader(_ group: TodoGroup, open: Binding<Bool>) -> some View {
         Button {
             withAnimation(.snappy) { open.wrappedValue.toggle() }
         } label: {
             HStack {
-                Text(title)
+                Text(group.title)
                 Spacer()
+                Text(group.todos.count, format: .number)
+                    .monospacedDigit()
+                    .foregroundStyle(group.overdue ? Color.red : Color.secondary)
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
@@ -310,12 +313,33 @@ struct SidebarView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private func expanded(_ key: String) -> Binding<Bool> {
+    /// Whether what key names shows what is in it: as it was last left, or else as open says. A
+    /// key folded is kept as itself, and one opened against its default as itself after a +.
+    private func expanded(_ key: String, open byDefault: Bool = true) -> Binding<Bool> {
         Binding(
-            get: { !collapsed.split(separator: "\n").contains(Substring(key)) },
+            get: {
+                let keys = collapsed.split(separator: "\n")
+                if keys.contains(Substring(key)) { return false }
+                return byDefault || keys.contains(Substring("+" + key))
+            },
             set: { open in
-                var keys = collapsed.split(separator: "\n").map(String.init).filter { $0 != key }
-                if !open { keys.append(key) }
+                let activeTodoKeys: Set<String>? =
+                    key.hasPrefix("todo:")
+                    ? Set(app.todos.map { "todo:\($0.key)" })
+                    : nil
+                var keys = collapsed.split(separator: "\n").map(String.init).filter { entry in
+                    let base = entry.hasPrefix("+") ? String(entry.dropFirst()) : entry
+                    if base == key { return false }
+                    if let activeTodoKeys, base.hasPrefix("todo:") {
+                        return activeTodoKeys.contains(base)
+                    }
+                    return true
+                }
+                if !open && byDefault {
+                    keys.append(key)
+                } else if open && !byDefault {
+                    keys.append("+" + key)
+                }
                 collapsed = keys.joined(separator: "\n")
             })
     }
@@ -326,20 +350,20 @@ struct SidebarView: View {
             ContentUnavailableView(
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
-        if groups.count == 1, !groups[0].overdue {
+        if groups.count == 1, groups[0].section == "no_date" {
             Section {
                 todoRows(groups[0])
             }
             .withoutTopLine()
         } else {
-            ForEach(groups, id: \.section) { group in
-                let open = expanded("todo:\(group.section)")
+            ForEach(groups, id: \.key) { group in
+                let open = expanded("todo:\(group.key)", open: group.folded != true)
                 Section {
                     if open.wrappedValue {
                         todoRows(group)
                     }
                 } header: {
-                    foldHeader(group.title, open: open)
+                    foldHeader(group, open: open)
                 }
                 .withoutTopLine()
             }
@@ -348,7 +372,7 @@ struct SidebarView: View {
 
     private func todoRows(_ group: TodoGroup) -> some View {
         ForEach(group.todos, id: \.self) { todo in
-            TodoRowView(todo: todo, overdue: group.overdue) {
+            TodoRowView(todo: todo) {
                 scene.open(todo.pageID, at: todo.blockID)
             }
         }
@@ -627,9 +651,9 @@ struct FolderRowView: View {
     }
 }
 
+/// A to-do under its day's header, with its page and its time of day if it has one.
 struct TodoRowView: View {
     let todo: Todo
-    let overdue: Bool
     let open: () -> Void
 
     var body: some View {
@@ -638,13 +662,9 @@ struct TodoRowView: View {
                 Text(todo.text.isEmpty ? L.todosUntitled : todo.text).lineLimit(2)
                 HStack(spacing: 6) {
                     Text(todo.pageTitle.isEmpty ? L.commonUntitled : todo.pageTitle)
-                    if let due = todo.dueDate {
-                        Text(
-                            due,
-                            format: todo.timed
-                                ? .dateTime.month().day().hour().minute() : .dateTime.month().day()
-                        )
-                        .foregroundStyle(overdue ? Color.red : Color.secondary)
+                    if todo.timed, let due = todo.dueDate {
+                        Text(due, format: .dateTime.hour().minute())
+                            .foregroundStyle(todo.overdue == true ? Color.red : Color.secondary)
                     }
                 }
                 .font(.footnote)

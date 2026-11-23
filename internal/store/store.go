@@ -57,7 +57,7 @@ func OpenPath(path, dir string) (*Store, error) {
 	dsn := ":memory:"
 	if path != ":memory:" {
 		var err error
-		if dsn, err = fileURI(path, "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)&_txlock=immediate"); err != nil {
+		if dsn, err = fileURI(path, "_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)&_txlock=immediate"); err != nil {
 			return nil, err
 		}
 	}

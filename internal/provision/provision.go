@@ -64,6 +64,20 @@ func deployedVersion(secrets []supabaseapi.Secret) (version int, found bool) {
 	return version, found
 }
 
+// needsDeploy reports whether the functions the secrets mark as deployed
+// are to be replaced by this build's, whose marker is name: only older
+// ones are, and for a development build those of its version too, unless
+// they are its own.
+func needsDeploy(secrets []supabaseapi.Secret, name string) bool {
+	switch theirs, found := deployedVersion(secrets); {
+	case !found || theirs < FunctionsVersion:
+		return true
+	case theirs == FunctionsVersion:
+		return ProjectName == DevProjectName && !slices.ContainsFunc(secrets, func(s supabaseapi.Secret) bool { return s.Name == name })
+	}
+	return false
+}
+
 const uploadLimit = 500 << 20
 
 type Migration struct {
@@ -318,13 +332,7 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		return err
 	}
 	name := hashName(FunctionsVersion, hash)
-	var deploy bool
-	switch theirs, found := deployedVersion(secrets); {
-	case !found || theirs < FunctionsVersion:
-		deploy = true
-	case theirs == FunctionsVersion:
-		deploy = ProjectName == DevProjectName && !slices.ContainsFunc(secrets, func(s supabaseapi.Secret) bool { return s.Name == name })
-	}
+	deploy := needsDeploy(secrets, name)
 	total, done := len(missing), 0
 	if deploy {
 		total += len(Functions)
@@ -343,6 +351,17 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 	}
 	open := errors.Join(closeSignUps(ctx, api, ref), hearSaves(ctx, api, ref))
 	if !deploy {
+		return open
+	}
+	// Another device may have set the project up since the secrets were
+	// read, with a build as new as this one or newer: deploying over its
+	// functions would leave its marker on older ones, and that build would
+	// never deploy again. So they are read again just before the deploy,
+	// and the markers it replaces are those found then.
+	if secrets, err = api.Secrets(ctx, ref); err != nil {
+		return err
+	}
+	if !needsDeploy(secrets, name) {
 		return open
 	}
 	for _, slug := range Functions {

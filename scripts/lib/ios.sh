@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 
 TEAM=""
 check_team() {

@@ -106,6 +106,25 @@ struct CoreClientTests {
         #expect(mine.last?.1 == ["Sooner", "Later"])
     }
 
+    @Test func aSignInWithSeveralProjectsAsksWhichToUse() throws {
+        let raw = #"""
+            {"email":"","lost":0,"projects":[
+              {"ref":"older","name":"Leaflet","region":"us-east-1","paused":false},
+              {"ref":"newer","name":"Leaflet 2","region":"eu-central-1","paused":true}]}
+            """#
+        let asked = try JSONDecoder().decode(SignedIn.self, from: Data(raw.utf8))
+        #expect(asked.projects?.map(\.id) == ["older", "newer"])
+        #expect(asked.projects?.last?.paused == true)
+        let done = try JSONDecoder().decode(
+            SignedIn.self, from: Data(#"{"email":"me@example.com","lost":0}"#.utf8))
+        #expect(done.projects == nil && done.email == "me@example.com")
+    }
+
+    @Test func aProjectIsChosenOnlyOfASignInsOwn() async throws {
+        await #expect(throws: (any Error).self) { try await client.useSupabaseProject("older") }
+        #expect(try await client.account().signedIn == false)
+    }
+
     @Test func applyingATemplateGivesTheTitleItTook() async throws {
         let page = try await client.createPage(NewPage())
         let template = try #require(try await client.templates().first { !$0.title.isEmpty })

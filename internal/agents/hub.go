@@ -429,6 +429,11 @@ func firstNonNil(a, b *store.ModelChoice) *store.ModelChoice {
 	return b
 }
 
+// thread is the comment thread comment id is in, for a run that answers it:
+// its first comment, then the replies not deleted. A reply of the agent has
+// what its run did, from the run's job on this device; one with no job here,
+// as another device's run wrote it, counts as having read beyond the page, the
+// web, and a page someone else writes or reads.
 func (h *Hub) thread(pageID, id string) []ThreadComment {
 	if id == "" {
 		return nil
@@ -437,25 +442,43 @@ func (h *Hub) thread(pageID, id string) []ThreadComment {
 	if err != nil {
 		return nil
 	}
-	comment := func(c store.Comment) ThreadComment {
-		who := c.AuthorName
-		switch {
-		case c.AuthorKind == "agent":
-			who = cmp.Or(who, "Agent") + " (agent)"
-		case c.AuthorKind == "guest":
-			who = cmp.Or(who, "Guest") + " (guest, through the page's public link)"
-		case who == "":
-			who = "Someone"
-		}
-		body := c.Body
-		if !c.DeletedAt.IsZero() {
-			body = "(deleted)"
-		}
-		return ThreadComment{Author: who, Body: body}
-	}
 	for _, t := range ts {
 		if t.Root.ID != id && !slices.ContainsFunc(t.Replies, func(c store.Comment) bool { return c.ID == id }) {
 			continue
+		}
+		did := map[string]map[string]any{}
+		jobs, err := h.st.CommentJobs(t.Root.ID)
+		if err != nil {
+			log.Printf("agent jobs of a thread: %v", err)
+		}
+		for _, j := range jobs {
+			if reply, _ := j.Result["reply_comment_id"].(string); reply != "" {
+				did[reply] = j.Result
+			}
+		}
+		comment := func(c store.Comment) ThreadComment {
+			who := c.AuthorName
+			switch {
+			case c.AuthorKind == "agent":
+				who = cmp.Or(who, "Agent") + " (agent)"
+			case c.AuthorKind == "guest":
+				who = cmp.Or(who, "Guest") + " (guest, through the page's public link)"
+			case who == "":
+				who = "Someone"
+			}
+			if !c.DeletedAt.IsZero() {
+				return ThreadComment{Author: who, Body: "(deleted)"}
+			}
+			out := ThreadComment{Author: who, Body: c.Body}
+			if c.AuthorKind == "agent" {
+				out.Agent, out.Guarded, out.ReadOthers = true, true, true
+				if r, ok := did[c.ID]; ok {
+					out.KeptToPage, _ = r["kept_to_page"].(bool)
+					out.Guarded, _ = r["guarded"].(bool)
+					out.ReadOthers, _ = r["read_others"].(bool)
+				}
+			}
+			return out
 		}
 		out := []ThreadComment{comment(t.Root)}
 		for _, r := range t.Replies {
@@ -528,12 +551,15 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		}
 		h.host.Tint(pageID, run.BlockIDs())
 	}
-	h.logJob(run, req)
+	reply := ""
 	if req.Surface == "comment" && run.Error == "" && run.Reply != "" && len(req.FocusBlockIDs) > 0 {
-		if _, err := h.st.AddComment(pageID, req.FocusBlockIDs[0], run.Reply, req.CommentID, "", "agent", option.Name()); err != nil {
+		if c, err := h.st.AddComment(pageID, req.FocusBlockIDs[0], run.Reply, req.CommentID, "", "agent", option.Name()); err != nil {
 			run.Status, run.Error = "failed", err.Error()
+		} else {
+			reply = c.ID
 		}
 	}
+	h.logJob(run, req, reply)
 	if o.Reply != nil {
 		o.Reply.Pending, o.Reply.Streamed = false, false
 		o.Reply.Error = run.Error != ""
@@ -558,7 +584,10 @@ func short(s string) string {
 	return s
 }
 
-func (h *Hub) logJob(run *Run, req Request) {
+// logJob keeps the run's job, with what the run read, for the runs after it: a
+// later run in a comment thread finds it by reply, the comment the run's reply
+// went in as.
+func (h *Hub) logJob(run *Run, req Request, reply string) {
 	var edits []any
 	for _, e := range run.Edits {
 		edit := map[string]any{"summary": e.Summary, "block_ids": e.BlockIDs}
@@ -571,10 +600,14 @@ func (h *Hub) logJob(run *Run, req Request) {
 	if run.Error != "" {
 		status = "failed"
 	}
+	result := map[string]any{"reply": run.Reply, "ops": run.Ops, "edits": edits, "kept_to_page": run.KeptToPage, "guarded": run.Guarded, "read_others": run.ReadOthers}
+	if reply != "" {
+		result["reply_comment_id"] = reply
+	}
 	if err := h.st.PutJob(store.Job{
 		ID: run.ID, PageID: req.PageID, Surface: run.Surface, FocusBlockIDs: req.FocusBlockIDs, CommentID: req.CommentID,
 		ConversationID: req.ConversationID, ProviderID: req.ProviderID, Model: req.Model, Status: status,
-		Request: req.JobRequest(), Result: map[string]any{"reply": run.Reply, "ops": run.Ops, "edits": edits, "read_others": run.ReadOthers}, Error: run.Error,
+		Request: req.JobRequest(), Result: result, Error: run.Error,
 	}); err != nil {
 		log.Printf("agent job: %v", err)
 	}

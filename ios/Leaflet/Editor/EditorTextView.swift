@@ -592,6 +592,7 @@ final class EditorTextView: UITextView {
         case #selector(toggleBoldface(_:)), #selector(toggleItalics(_:)),
             #selector(toggleUnderline(_:)):
             return isEditable && isFirstResponder
+                && (controller?.format.formats(selectedRange) ?? false)
         default:
             return super.canPerformAction(action, withSender: sender)
         }

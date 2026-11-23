@@ -119,7 +119,9 @@ struct RecordingBlock: View {
         if recorder.loading == nil, !state.recording {
             let playing = recorder.playing == id && recorder.player?.isPlaying == true
             out.append(
-                BlockAction(title: playing ? L.commonPause : L.recPlay) { recorder.play(id) })
+                BlockAction(title: playing ? L.commonPause : L.recPlay) {
+                    recorder.play(id, in: editor?.players)
+                })
         }
         return out
             + menuItems(id, block: block, row, canEdit: canEdit, editor: editor).filter(\.enabled)
@@ -178,7 +180,7 @@ struct RecordingBlock: View {
         _ = recorder.changes
         let playing = recorder.playing == id && recorder.player?.isPlaying == true
         return Button {
-            recorder.play(id)
+            recorder.play(id, in: editor?.players)
         } label: {
             Group {
                 if recorder.loading == id {
@@ -244,7 +246,10 @@ struct RecordingBlock: View {
         RecordingLine(
             line: line, index: index, widest: widest, clock: clock,
             disabled: Recorder.shared.state.recording, follow: follow,
-            play: { Recorder.shared.play(id, from: TimeInterval(line.startMs) / 1000) })
+            play: {
+                Recorder.shared.play(
+                    id, from: TimeInterval(line.startMs) / 1000, in: editor?.players)
+            })
     }
 
     private func notice(_ row: RecordingRow) -> some View {

@@ -22,7 +22,7 @@ func PageToRemote(p Page) map[string]any {
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
 		"title": ClampTitle(p.Title), "icon": ns(p.Icon), "sort_key": p.SortKey, "created_by": ns(p.CreatedBy),
 		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt), "is_template": p.Template,
-		"tags": NormalizeTags(p.Tags), "default_template_id": ns(p.DefaultTemplateID), "changed_at": iso(p.UpdatedAt),
+		"tags": NormalizeTags(p.Tags), "default_template_id": ns(p.DefaultTemplateID), "changed_at": iso(p.ChangedAt),
 	}
 }
 
@@ -190,10 +190,11 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 	if sk == "" {
 		sk = "V"
 	}
+	at := Time(r["updated_at"])
 	return Page{
 		ID: S(r, "id"), SpaceID: S(r, "space_id"), ParentID: S(r, "parent_id"), FolderID: S(r, "folder_id"),
 		Title: S(r, "title"), Icon: S(r, "icon"), SortKey: sk, CreatedBy: S(r, "created_by"),
-		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
+		CreatedAt: Time(r["created_at"]), UpdatedAt: at, ChangedAt: at, DeletedAt: TimeOrZero(r["deleted_at"]),
 		KeepOffline: keepOffline, Template: r["is_template"] == true, Tags: tagsFromRemote(r["tags"]),
 		DefaultTemplateID: S(r, "default_template_id"),
 	}

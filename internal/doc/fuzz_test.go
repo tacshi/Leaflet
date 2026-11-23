@@ -2,6 +2,7 @@ package doc
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -212,6 +213,103 @@ func FuzzTableCellRoundTrip(f *testing.F) {
 			t.Errorf("%q wrote\n%s\nread back as %q, want %q", md, PageMarkdown("", FromBlocks([]*Node{table}), MarkdownOptions{}), rows, want)
 		}
 	})
+}
+
+// inlinePieces are what inlineRuns makes runs of: Markdown's marks and what may read as them, in text, code and
+// formulas, whose TeX holds marks too.
+var inlinePieces = []string{"a", "x y", " ", "*", "**", "_", "__", "`", "``", "$", "$5", "[", "]", "(", ")", "<", ">",
+	`\`, "~", "~~", "!", "#", "&amp;", `<span style="color:#ff0000">`, "</span>", "é", "😀", "1", "a_b", "|", "\n",
+	"https://x.dev/a_b_c", "f*g", "z^*", "x_{1}", "[0,1)"}
+
+// inlineRuns makes a run of every two bytes: which of inlinePieces is its text, and its marks.
+func inlineRuns(data []byte) Delta {
+	var d Delta
+	for i := 0; i+1 < len(data); i += 2 {
+		f := data[i+1]
+		a := Attrs{Bold: f&1 != 0, Italic: f&2 != 0, Strike: f&4 != 0}
+		switch f >> 3 & 7 {
+		case 1:
+			a.Code = true
+		case 2:
+			a.Math = true
+		case 3:
+			a.Href = "https://x.dev/a"
+		case 4:
+			a.Href = "https://x.dev/(b)"
+		case 5:
+			a.Color = "#ff0000"
+		case 6:
+			a.Background = "#00ff00ff"
+		case 7:
+			a.Href, a.Math = "https://x.dev/a", true
+		}
+		if f>>6 == 3 {
+			a.Color = "#123456"
+		}
+		d = append(d, Run{Text: inlinePieces[int(data[i])%len(inlinePieces)], Attrs: a})
+	}
+	return d
+}
+
+// inlineShown is each character of d with its marks, but those Markdown leaves out: underline, and bold, italic and
+// strikethrough on a line break, or on a space outside code and formulas, where the marks end.
+func inlineShown(d Delta) []Run {
+	var out []Run
+	for _, r := range d {
+		for _, c := range r.Text {
+			a := r.Attrs
+			a.Under = false
+			if c == '\n' || unicode.IsSpace(c) && !a.Code && !a.Math {
+				a.Bold, a.Italic, a.Strike = false, false, false
+			}
+			out = append(out, Run{Text: string(c), Attrs: a})
+		}
+	}
+	return out
+}
+
+func inlineRoundTrip(t *testing.T, data []byte) {
+	t.Helper()
+	d := inlineRuns(data)
+	md := d.ToMarkdown()
+	got := FromMarkdown(md)
+	same := func(a, b Run) bool { return a.Text == b.Text && a.Attrs.Equal(b.Attrs) }
+	if !slices.EqualFunc(inlineShown(got), inlineShown(d), same) {
+		t.Errorf("%+v wrote %q, which reads back as %+v", d, md, got)
+	}
+}
+
+func FuzzInlineMarkdownRoundTrip(f *testing.F) {
+	piece := func(s string) byte { return byte(slices.Index(inlinePieces, s)) }
+	// Bold, italic and strikethrough add up; a run is a formula, a link, a formula in a link, or none; and colored.
+	const bold, italic, strike, formula, link, linkedFormula, colored = 1, 2, 4, 2 << 3, 3 << 3, 7 << 3, 3 << 6
+	for _, runs := range [][]byte{
+		{piece("x y"), italic, piece("f*g"), italic | formula, piece("x y"), italic},
+		{piece("a"), italic, piece("z^*"), italic | formula},
+		{piece("a"), bold, piece("**"), bold | formula, piece("a"), bold},
+		{piece("a"), italic, piece("__"), italic | bold | formula},
+		{piece("a"), strike, piece("~~"), strike | formula, piece("a"), strike},
+		{piece("a"), link, piece("[0,1)"), linkedFormula},
+		{piece("a"), colored, piece("</span>"), colored | formula},
+		{piece("*"), italic | formula, piece("|"), bold | strike, piece("$"), italic},
+	} {
+		f.Add(runs)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) { inlineRoundTrip(t, data) })
+}
+
+func TestInlineMarkdownRoundTripsMarksAndFormulas(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 8)) // #nosec G404
+	for range 20000 {
+		data := make([]byte, 2+2*rng.IntN(8))
+		for i := range data {
+			data[i] = byte(rng.IntN(256))
+		}
+		inlineRoundTrip(t, data)
+		if t.Failed() {
+			return
+		}
+	}
 }
 
 func FuzzMergeOneSidedChange(f *testing.F) {

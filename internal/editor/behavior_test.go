@@ -471,20 +471,6 @@ func TestCopyNestsAsMarkdown(t *testing.T) {
 }
 
 func TestLinkEditorMakesLinksThatOpen(t *testing.T) {
-	for typed, want := range map[string]string{
-		" example.com/a ": "https://example.com/a", "https://x.dev": "https://x.dev", "localhost:3000": "https://localhost:3000",
-		"ann@example.com": "mailto:ann@example.com", "mailto:ann@example.com": "mailto:ann@example.com",
-		doc.PageLink("p1"): doc.PageLink("p1"), "   ": "",
-	} {
-		if got, ok := linkHref(typed); !ok || got != want {
-			t.Errorf("%q links %q, %v; want %q", typed, got, ok, want)
-		}
-	}
-	for _, typed := range []string{"two words", "file:///etc/hosts", "javascript:alert(1)", "word", "mailto:"} {
-		if got, ok := linkHref(typed); ok {
-			t.Errorf("%q links %q", typed, got)
-		}
-	}
 	e, tt, _ := setup(t)
 	nodes := page(e, "see the site")
 	e.Select(Pos{nodes[0].ID, 8}, Pos{nodes[0].ID, 12})

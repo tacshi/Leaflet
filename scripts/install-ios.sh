@@ -89,6 +89,7 @@ xcode_configuration() {
   fi
 }
 
+# shellcheck source-path=SCRIPTDIR source=lib/ios.sh
 source "${ROOT_DIR}/scripts/lib/ios.sh"
 
 discover_devices() {

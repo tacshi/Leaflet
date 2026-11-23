@@ -371,7 +371,7 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 		}
 		return ""
 	}
-	from := store.PeerContent{Peer: peer, Version: file.Version, Content: string(file.Content)}
+	from := store.PeerContent{Peer: peer, Version: file.Version, Content: string(file.Content), Merged: file.Merged}
 	var merged *doc.Content
 	var conflicts []doc.Conflict
 	queued := false
@@ -420,21 +420,50 @@ func (s *Service) ownConflicts(me, peer, pageID string, file icloud.PageFile, co
 		if c.Kept() != "remote" || c.LocalEditedAt <= file.Merged[me] {
 			continue
 		}
-		relayed := false
-		for _, o := range others {
-			if o.Peer == me || o.Peer == peer {
-				continue
-			}
-			if sameVersion(doc.MustDecode(o.Content), c.BlockID, c.Local) {
-				relayed = true
-				break
-			}
-		}
-		if !relayed {
+		if !relayed(me, peer, file.Merged, others, c) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// relayed reports whether the version of the block this device lost came to it from another device, whose conflict it
+// is to note: a third device has that version that cannot have had it from this one, as neither it nor any device it
+// merged had merged a page file written here since the edit. A device whose file says nothing of what it merged, or
+// whose file this one has not read, may have had it from here. peerMerged is what the peer's file merged.
+func relayed(me, peer string, peerMerged map[string]int64, others []store.PeerContent, c doc.Conflict) bool {
+	merged := map[string]map[string]int64{peer: peerMerged}
+	for _, o := range others {
+		if o.Peer != me && o.Peer != peer {
+			merged[o.Peer] = o.Merged
+		}
+	}
+	fromHere := map[string]bool{me: true}
+	mayHave := func(d string) bool {
+		_, read := merged[d]
+		return fromHere[d] || !read
+	}
+	for grew := true; grew; {
+		grew = false
+		for d, of := range merged {
+			if fromHere[d] {
+				continue
+			}
+			took := of == nil
+			for p, version := range of {
+				took = took || version >= c.LocalEditedAt && mayHave(p)
+			}
+			if took {
+				fromHere[d], grew = true, true
+			}
+		}
+	}
+	for _, o := range others {
+		if o.Peer != me && o.Peer != peer && !fromHere[o.Peer] && sameVersion(doc.MustDecode(o.Content), c.BlockID, c.Local) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameVersion(c *doc.Content, id string, node *doc.Node) bool {

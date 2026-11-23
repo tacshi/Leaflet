@@ -325,14 +325,6 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	}
 }
 
-func TestEditorBaseOfARevNoLongerKept(t *testing.T) {
-	old, last, newer := doc.Empty(), doc.Empty(), doc.Empty()
-	e := &pageEditor{seen: map[int64]*doc.Content{3: old, 5: last, 40: newer}, last: 5}
-	if e.base(5) != last || e.base(10) != last || e.base(40) != newer || e.base(2) != nil {
-		t.Error("base of the wrong rev")
-	}
-}
-
 func openEditor(t *testing.T, c *Core, id string) openedPage {
 	t.Helper()
 	raw, err := c.OpenPage(id)

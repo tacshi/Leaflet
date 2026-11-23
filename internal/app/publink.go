@@ -31,11 +31,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 	"rsc.io/qr"
 
 	"leaflet/internal/doc"
@@ -68,6 +71,8 @@ type pubLink struct {
 	threads  map[string]bool
 	posts    map[string][]time.Time
 	total    int
+
+	served pubNames
 }
 
 type pubSnapshot struct {
@@ -75,6 +80,7 @@ type pubSnapshot struct {
 	files  map[string]pubFile
 	embeds map[string]string
 	blocks map[string]string
+	taken  map[string]bool
 }
 
 type pubFile struct {
@@ -93,7 +99,13 @@ type pubJob struct {
 	threads            map[string]bool
 	head               string
 	known              bool
+	owner              pubOwner
+	agents             []string
 }
+
+// pubOwner is the page's owner, as its public page shows them: by the name
+// they have now, "" for none.
+type pubOwner struct{ id, name string }
 
 type cloudflaredInfo struct {
 	checked, busy bool
@@ -434,7 +446,7 @@ func (a *App) pubChanged(ch store.Change) {
 		return
 	}
 	switch ch.Table {
-	case "*", "pages", "files":
+	case "*", "pages", "files", "session", "model_providers":
 	case "page_contents", "comments", "recordings":
 		if ch.PageID != "" && ch.PageID != p.page {
 			return
@@ -467,8 +479,13 @@ func (a *App) pubJob(p *pubLink) pubJob {
 	p.mu.Lock()
 	threads, comments := maps.Clone(p.threads), p.comments
 	p.mu.Unlock()
+	var agents []string
+	for _, pr := range a.providers {
+		agents = append(agents, pr.Name)
+	}
 	return pubJob{st: a.st, seq: p.seq, page: p.page, title: a.pageTitleOf(p.page), token: p.token, titles: titles,
-		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead("/"+p.token+"/", comments)}
+		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead("/"+p.token+"/", comments),
+		owner: pubOwner{id: a.session.UserID, name: realName(a.session.DisplayName)}, agents: agents}
 }
 
 func (a *App) pageTitles() map[string]string {
@@ -488,16 +505,17 @@ func (p *pubLink) render(job pubJob) {
 	c.Walk(func(n, _ *doc.Node) { blocks[n.ID] = squash(n.Delta().Plain()) })
 	embeds := map[string]string{}
 	threads := map[string][]store.Thread{}
-	if len(job.threads) > 0 {
-		all, _ := job.st.Threads(job.page)
-		for _, t := range all {
-			if job.threads[t.Root.ID] && !t.Root.Resolved {
-				threads[t.Root.BlockID] = append(threads[t.Root.BlockID], t)
-			}
+	var all []store.Thread
+	if len(job.threads) > 0 || job.comments {
+		all, _ = job.st.Threads(job.page)
+	}
+	for _, t := range all {
+		if job.threads[t.Root.ID] && !t.Root.Resolved {
+			threads[t.Root.BlockID] = append(threads[t.Root.BlockID], t)
 		}
 	}
 	prefix := "/" + job.token + "/"
-	srv := &pubServer{prefix: prefix, files: map[string]pubFile{}, names: map[string]string{}}
+	srv := &pubServer{prefix: prefix, files: map[string]pubFile{}, served: &p.served}
 	page := webpage.HTML(c, webpage.Options{
 		Store:  job.st,
 		Page:   job.page,
@@ -506,7 +524,7 @@ func (p *pubLink) render(job pubJob) {
 		Files:  job.files,
 		Lang:   i18n.Locale(),
 		Head:   job.head,
-		Tail:   commentsPanel(c, threads, job.comments),
+		Tail:   commentsPanel(c, threads, job.comments, job.owner),
 		Video: func(v doc.Video) doc.Video {
 			if job.known {
 				return web.KnownVideoPart(v)
@@ -538,38 +556,127 @@ func (p *pubLink) render(job pubJob) {
 		return
 	}
 	p.shown = job.seq
-	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, blocks: blocks}
+	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, blocks: blocks, taken: job.taken(all)}
+}
+
+// taken is what a visitor can't go by, as nameKey reads names: the names
+// of the page's owner, of the agents and of the others whose comments are
+// on the page, and the words the page or the app shows in place of the
+// owner's name.
+func (j pubJob) taken(threads []store.Thread) map[string]bool {
+	taken := map[string]bool{}
+	add := func(name string) {
+		if k := nameKey(name); k != "" {
+			taken[k] = true
+		}
+	}
+	add(j.owner.name)
+	for _, lang := range locales.Catalog.Languages() {
+		add(locales.In(lang).CommonYou())
+		add(locales.In(lang).PubPageOwner())
+	}
+	for _, name := range j.agents {
+		add(name)
+	}
+	for _, t := range threads {
+		for _, c := range t.All() {
+			if c.AuthorKind != "guest" {
+				add(c.AuthorName)
+			}
+		}
+	}
+	return taken
+}
+
+// nameKey reads a name as its reader sees it: whatever its case, its width
+// or compatibility forms, its runs of spaces, and the characters that show
+// nothing, as zero-width spaces and joiners and the marks that set the
+// direction of text.
+func nameKey(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.In(r, unicode.Cf, unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector) {
+			return -1
+		}
+		return r
+	}, name)
+	name = norm.NFKC.String(cases.Fold().String(norm.NFKC.String(name)))
+	return strings.Join(strings.Fields(name), " ")
+}
+
+// realName is a name the user goes by, or "" for the "You" the app calls
+// them by when they have set none: on the public page every visitor would
+// read it as themselves.
+func realName(name string) string {
+	key := nameKey(name)
+	for _, lang := range locales.Catalog.Languages() {
+		if key == nameKey(locales.In(lang).CommonYou()) {
+			return ""
+		}
+	}
+	return strings.TrimSpace(name)
+}
+
+// guestName is the name a visitor gives, without the marks that set the
+// direction of text: they can make a name show as another, the owner's,
+// while it reads as something else.
+func guestName(name string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Bidi_Control, r) {
+			return -1
+		}
+		return r
+	}, name))
 }
 
 type pubServer struct {
 	prefix string
 	files  map[string]pubFile
-	names  map[string]string
+	served *pubNames
 }
 
-func (s *pubServer) Image(path, typ string) string {
-	if name, ok := s.names[path]; ok {
-		return s.prefix + "f/" + name
+// pubNames names the files a link serves. A file keeps the name it was
+// first given for as long as the link is up, whatever the page becomes:
+// a visitor's copy of the page, or audio playing from it, asks for the
+// same address long after, and must never be handed another file.
+type pubNames struct {
+	mu    sync.Mutex
+	names map[pubFile]string
+}
+
+func (n *pubNames) name(f pubFile, ext string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if name, ok := n.names[f]; ok {
+		return name
 	}
-	name := strconv.Itoa(len(s.files)+1) + strings.ToLower(filepath.Ext(path))
-	s.files[name], s.names[path] = pubFile{typ: typ, path: path}, name
+	if n.names == nil {
+		n.names = map[pubFile]string{}
+	}
+	name := strconv.Itoa(len(n.names)+1) + ext
+	n.names[f] = name
+	return name
+}
+
+func (s *pubServer) serve(f pubFile, ext string) string {
+	name := s.served.name(f, ext)
+	s.files[name] = f
 	return s.prefix + "f/" + name
 }
 
+func (s *pubServer) Image(path, typ string) string {
+	return s.serve(pubFile{typ: typ, path: path}, servedExt(path))
+}
+
 func (s *pubServer) File(path, name string) string {
-	served := strconv.Itoa(len(s.files)+1) + servedExt(name)
 	typ := "application/octet-stream"
 	if t := doc.FileMediaType(name, ""); strings.HasPrefix(t, "audio/") || strings.HasPrefix(t, "video/") {
 		typ = t
 	}
-	s.files[served] = pubFile{typ: typ, path: path, name: name}
-	return s.prefix + "f/" + served
+	return s.serve(pubFile{typ: typ, path: path, name: name}, servedExt(name))
 }
 
 func (s *pubServer) Audio(path string) string {
-	served := strconv.Itoa(len(s.files)+1) + ".wav"
-	s.files[served] = pubFile{typ: "audio/wav", path: path}
-	return s.prefix + "f/" + served
+	return s.serve(pubFile{typ: "audio/wav", path: path}, ".wav")
 }
 
 func servedExt(name string) string {
@@ -591,7 +698,7 @@ func pubHead(prefix string, comments bool) string {
 	for _, s := range [][2]string{
 		{"comment", locales.PubComment()}, {"reply", locales.PubReply()}, {"name", locales.PubName()},
 		{"text", locales.PubText()}, {"send", locales.PubSend()}, {"cancel", locales.CommonCancel()},
-		{"failed", locales.PubFailed()}, {"busy", locales.PubBusy()},
+		{"failed", locales.PubFailed()}, {"busy", locales.PubBusy()}, {"taken", locales.PubNameTaken()},
 		{"full", locales.RenderedFullScreen()}, {"full-icon", theme.IconSVG("maximize-2")},
 		{"exit", locales.RenderedExitFullScreen()}, {"exit-icon", theme.IconSVG("minimize-2")},
 		{"fit", locales.RenderedZoomFit()}, {"fit-icon", theme.IconSVG("rotate-ccw")},
@@ -681,7 +788,32 @@ func pubCommentBody(c store.Comment) string {
 	return doc.FromMarkdown(c.Body).Uncolored().HTML()
 }
 
-func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments bool) string {
+// byline says who wrote a comment, and what they are to the page: a
+// visitor, who comes through the link as anyone can and names themselves,
+// the page's owner, by the name they have now, or an agent.
+func (o pubOwner) byline(c store.Comment) string {
+	name, tag, class := c.AuthorName, "", ""
+	switch c.AuthorKind {
+	case "guest":
+		tag, class = locales.PanelViaPublicLink(), "guest"
+	case "agent":
+		tag, class = locales.CommonAgent(), "agent"
+	default:
+		if c.AuthorID == "" || c.AuthorID == o.id {
+			name, tag, class = o.name, locales.PubPageOwner(), "owner"
+			if name == "" {
+				name, tag = locales.PubPageOwner(), ""
+			}
+		}
+	}
+	out := `<strong>` + html.EscapeString(name) + `</strong>`
+	if tag != "" {
+		out += ` <span class="ctag ` + class + `">` + html.EscapeString(tag) + `</span>`
+	}
+	return out
+}
+
+func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments bool, owner pubOwner) string {
 	if len(threads) == 0 {
 		return ""
 	}
@@ -704,7 +836,7 @@ func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments b
 				groups.WriteString(`<p class="tquote">` + html.EscapeString(t.Root.Quote) + `</p>`)
 			}
 			for _, c := range t.All() {
-				groups.WriteString(`<div class="c"><div class="who"><strong>` + html.EscapeString(c.AuthorName) + `</strong> <span class="muted">` +
+				groups.WriteString(`<div class="c"><div class="who">` + owner.byline(c) + ` <span class="muted">` +
 					c.CreatedAt.Format("2006-01-02") + `</span></div><div>` + pubCommentBody(c) + `</div></div>`)
 			}
 			if comments {
@@ -851,7 +983,7 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusBadRequest, err.Error())
 		return
 	}
-	in.Name, in.Body, in.Quote = strings.TrimSpace(in.Name), strings.TrimSpace(in.Body), squash(in.Quote)
+	in.Name, in.Body, in.Quote = guestName(in.Name), strings.TrimSpace(in.Body), squash(in.Quote)
 	if in.Body == "" || in.Name == "" || utf8.RuneCountInString(in.Body) > pubMaxComment || utf8.RuneCountInString(in.Name) > pubMaxName {
 		refuse(http.StatusBadRequest, "no name or text, or too long")
 		return
@@ -866,6 +998,8 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !p.comments:
 		status, why = http.StatusForbidden, "comments are off"
+	case p.snap.taken[nameKey(in.Name)]:
+		status, why = http.StatusConflict, "the name of someone else on the page"
 	case in.Parent != "":
 		in.Quote = ""
 		if !p.threads[in.Parent] {
@@ -1204,6 +1338,8 @@ font:13px -apple-system,system-ui,sans-serif;cursor:pointer}
 .thread.flash{background:var(--warning)}
 .thread .c{margin:.4em 0}
 .who{font-size:.92em}
+.ctag{display:inline-block;padding:0 6px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.85em}
+.ctag.owner{border-color:var(--link);color:var(--link)}
 .creply,.cform button{font:13px -apple-system,system-ui,sans-serif;padding:4px 10px;border-radius:6px;border:1px solid var(--line);
 background:var(--bg);color:var(--fg);cursor:pointer}
 .cform{display:flex;flex-direction:column;gap:8px;margin:.6em 0 1em;padding:12px;border:1px solid var(--line);border-radius:8px}
@@ -1344,7 +1480,7 @@ const commentsScript = `(function () {
         location.reload();
       }).catch(function (status) {
         send.disabled = false;
-        note.textContent = status === 429 ? word("busy") : word("failed");
+        note.textContent = status === 429 ? word("busy") : status === 409 ? word("taken") : word("failed");
       });
     };
     if (inside) after.appendChild(f); else after.after(f);

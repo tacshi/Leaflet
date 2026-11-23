@@ -124,7 +124,9 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   リンク付きのテキストとして読み、`web_search` はエージェント自身のプロバイダ
   （OpenAI、Claude、xAI、OpenRouter、GLM、ChatGPT プラン）で検索します。
   ウェブを読んだ実行は、見つけたリンクかあなたが渡したリンクだけを書き込み、
-  読みます。ほかのページを読んだ実行は、それ以降ウェブを使いません。
+  読みます。ほかのページを読んだ実行は、それ以降ウェブを使いません。その
+  チャットやコメントスレッドのあとのターンも、前の返信に読んだ内容が含まれ
+  うるため、ウェブを使いません。
 - OpenAI 互換のプロバイダならどれでも使えます：OpenAI、Claude、xAI、
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
@@ -295,9 +297,9 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 編集 10 分ごとに 1 つ（その間にほかの人がページを変更していればそれより早く）
 保存し、ほかの変更と同じように同期します。`read_page` が示すブロックの
 バージョンを付けた編集は、その後ブロックが変更されていればそのまま残し、
-今の内容を返します。バージョンなしの編集がエージェントの読んでいない変更を
-上書きした場合は、編集前のページが競合としてページの履歴に残り、結果にも
-そう示されます。開いている
+今の内容を返します。エージェントの読んでいない変更（削除するブロックの下に
+ほかの人が加えた入れ子の項目など）を上書きした編集は、編集前のページが競合
+としてページの履歴に残り、結果にもそう示されます。開いている
 アプリは 1 秒以内にその内容を取り込み、入力中の内容とマージします。アプリが
 閉じているかページが開いていないとき、`current_page` はこのデバイスで最後に
 開いたページを返し、選択範囲は含みません。
@@ -372,7 +374,8 @@ go build -o leaflet . && LEAFLET_DATA_DIR="$HOME/Library/Application Support/Lea
 
 Windows では、PowerShell 7 のスクリプトがそのマシン上で Windows アプリを
 ビルドします。NSIS がインストールされていなければ MyGo がダウンロードし、
-署名には Windows SDK の `signtool` を使います：
+署名には PowerShell の `Set-AuthenticodeSignature`（`scripts\sign-windows.ps1`）
+を使います。証明書のパスワードは環境変数から読みます：
 
 | スクリプト | ビルドするもの |
 | --- | --- |
@@ -382,11 +385,13 @@ Windows では、PowerShell 7 のスクリプトがそのマシン上で Windows
 どのスクリプトも `--help` で、`.ps1` のものは `Get-Help` でオプションを表示
 します。macOS のリリースには Developer ID Application の証明書と
 `notarytool` のキーチェーンプロファイル、Windows インストーラには NSIS
-（`brew install makensis`）、すべてのリリースにはアップデート署名鍵が必要です。
-それぞれ `scripts/build-release.sh --help` で説明しています。署名されていない
-Windows インストーラや `--skip-notarize` でビルドした macOS のものは、
-`--allow-unsigned`（`-AllowUnsigned`）か `LEAFLET_ALLOW_UNSIGNED=1` で
-公開すると明示しない限りアップロードされません。
+（`brew install makensis`、署名するには 3.08 以降）、すべてのリリースには
+アップデート署名鍵が必要です。それぞれ `scripts/build-release.sh --help` で
+説明しています。署名されていない Windows インストーラや `--skip-notarize` で
+ビルドした macOS のものは、`--allow-unsigned`（`-AllowUnsigned`）か
+`LEAFLET_ALLOW_UNSIGNED=1` で公開すると明示しない限りアップロードされません。
+公開済みのリリースへも、変更や、git が追跡も無視もしていないファイルのある
+作業ツリーからも（ビルドの前でも後でも）アップロードしません。
 
 `SUPABASE_URL` と `SUPABASE_PUBLISHABLE_KEY` が 1 回の実行にサーバーを指定するように、
 ビルドにサーバーを 1 つ組み込むには、その URL と Publishable キーを

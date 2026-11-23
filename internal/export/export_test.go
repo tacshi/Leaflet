@@ -327,6 +327,84 @@ func TestSafeName(t *testing.T) {
 	if got := SafeName(long); len(got) > 200 || !utf8.ValidString(got) {
 		t.Errorf("SafeName of a long name is %d bytes: %q", len(got), got)
 	}
+	if got := SafeName(strings.Repeat(".", 300)); got != strings.Repeat("-", 200) {
+		t.Errorf("SafeName of 300 dots is %d bytes: %q", len(got), got)
+	}
+	// Whatever a title is, its name is one that macOS, Windows and Linux
+	// all take from a zip.
+	for _, in := range []string{
+		".", "...", " ..", ". .", "a/b", `a\b`, "CON .txt", "COM1.tar.gz", "LPT¹", "AUX ", "aux.", "con .", " con",
+		strings.Repeat("é", 150) + ".jpeg", strings.Repeat(" ", 300) + "x", strings.Repeat("x", 197) + " . .png",
+		"a\x00b", strings.Repeat("a", 196) + "字.png", "x" + strings.Repeat(" ", 250), strings.Repeat("a", 198) + ". ",
+		strings.Repeat(".", 199) + "a",
+	} {
+		got := SafeName(in)
+		stem, _, _ := strings.Cut(got, ".")
+		if got == "" || len(got) > 200 || !utf8.ValidString(got) || strings.ContainsAny(got, `/\:*?"<>|`) ||
+			strings.HasSuffix(got, ".") || strings.HasSuffix(got, " ") || windowsDevice.MatchString(strings.TrimRight(stem, " ")) {
+			t.Errorf("SafeName(%q) = %q (%d bytes)", in, got, len(got))
+		}
+	}
+}
+
+func TestAllLeavesOutARecordingStillRecorded(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.OpenMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := os.MkdirAll(filepath.Join(dir, "recordings"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	wav := func(name string, stop bool) string {
+		path := filepath.Join(dir, "recordings", name+".wav")
+		w, err := recording.CreateWav(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Write(make([]byte, 2*recording.SampleRate)); err != nil {
+			t.Fatal(err)
+		}
+		if stop {
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			t.Cleanup(func() { _ = w.Close() })
+		}
+		return path
+	}
+	pg, err := st.CreatePage(store.NewPageOptions{Title: "Standup", Content: doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "live", "title": "Live"}},
+		{ID: "b2", Type: "recording", Data: map[string]any{"recording_id": "done", "title": "Done"}},
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []store.Recording{
+		{ID: "live", PageID: pg.ID, BlockID: "b1", Status: "recording", LocalPath: wav("live", false)},
+		{ID: "done", PageID: pg.ID, BlockID: "b2", Status: "ready", LocalPath: wav("done", true)},
+	} {
+		if err := st.PutRecording(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "all.zip")
+	if _, err := All(out, Source{Store: st, Sync: &fakeSync{}, Rec: recording.NewController(st, nil)}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out) // #nosec G304
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := unzip(t, data)
+	if _, ok := got["files/Live.wav"]; ok {
+		t.Error("the export packs a recording still being recorded")
+	}
+	if audio := got["files/Done.wav"]; len(audio) != 44+2*recording.SampleRate {
+		t.Errorf("the finished recording's audio is %d bytes, files %v", len(audio), keys(got))
+	}
 }
 
 func TestWithAudioOneRecordingTwice(t *testing.T) {

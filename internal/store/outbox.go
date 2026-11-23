@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -116,9 +117,11 @@ func queuedCols(q querier, entity, id string) (cols []string, queued bool, err e
 	return cols, true, nil
 }
 
+// withChanged is cols with the columns row changed from old. A key that starts with _ is a note of the outbox's, as
+// _if_status, and no column.
 func withChanged(cols []string, old, row map[string]any) []string {
 	for k, v := range row {
-		if k != "changed_at" && !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
+		if k != "changed_at" && !strings.HasPrefix(k, "_") && !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
 			cols = append(cols, k)
 		}
 	}

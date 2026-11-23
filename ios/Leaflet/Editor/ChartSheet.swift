@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ChartSheet: View {
     let node: DocNode
-    let save: ([String: JSONValue]) -> Void
+    let save: BlockChange
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var title = ""
@@ -14,6 +14,8 @@ struct ChartSheet: View {
     @State private var original: [String]?
 
     private var fields: [String] { [title, kind, text, caption] }
+    /// The data keys each of the fields saves into.
+    static let keys = [["title"], ["chart_type"], ["labels", "series"], ["caption"]]
     private var dirty: Bool { original.map { $0 != fields } ?? false }
 
     var body: some View {
@@ -72,19 +74,26 @@ struct ChartSheet: View {
     }
 
     private func apply() {
+        guard dirty, let original else { return dismiss() }
         var error: NSError?
         let raw = MobileChartData(kind, title, caption, text, &error)
         if let error {
             failure = error.localizedDescription
             return
         }
+        let data: [String: JSONValue]
         do {
-            var data = try JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
-            data["author"] = node.data?["author"]
-            save(data)
-            dismiss()
+            data = try JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
         } catch {
             failure = L.appErrorInternal(error: error.localizedDescription)
+            return
+        }
+        let keys = changedKeys(Self.keys, from: original, to: fields)
+        do {
+            try save { $0.setting(keys, from: data) }
+            dismiss()
+        } catch {
+            failure = L.appErrorSave(error: error.localizedDescription)
         }
     }
 }

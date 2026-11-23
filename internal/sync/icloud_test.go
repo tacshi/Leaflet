@@ -196,6 +196,64 @@ func TestICloudRowsAgree(t *testing.T) {
 	}
 }
 
+// A renames a page and B renames it later; A edits the page's content before its rename goes. The rename goes at the
+// time it was made, so B's later one wins on both, as it does with no edit.
+func TestICloudRenameSentAfterAContentEditKeepsItsTime(t *testing.T) {
+	for _, edited := range []bool{false, true} {
+		root := cloudRoot(t)
+		a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+		p := a.page("Plan", para("x", "x0"))
+		syncAll(a, b)
+		if err := a.st.RenamePage(p.ID, "Plan A"); err != nil {
+			t.Fatal(err)
+		}
+		nextStamp()
+		if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
+			t.Fatal(err)
+		}
+		b.sync()
+		if edited {
+			nextStamp()
+			a.edit(p.ID, "x", "typed on A")
+		}
+		syncAll(a, b)
+		if a.title(p.ID) != "Plan B" || b.title(p.ID) != "Plan B" {
+			t.Errorf("content edited %v: titles A %q, B %q, want B's later rename", edited, a.title(p.ID), b.title(p.ID))
+		}
+	}
+}
+
+// B renames a page; A, before reading B's batch, edits the page's content and sends everything again, as it does
+// after a damaged batch of its own. A's row did not change, so it goes at no time after B's rename.
+func TestICloudSendingAgainAfterAContentEditKeepsARenameMadeElsewhere(t *testing.T) {
+	for _, edited := range []bool{false, true} {
+		root := cloudRoot(t)
+		a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+		p := a.page("Plan", para("x", "x0"))
+		syncAll(a, b)
+		nextStamp()
+		if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
+			t.Fatal(err)
+		}
+		b.sync()
+		nextStamp()
+		if edited {
+			a.edit(p.ID, "x", "edited on A")
+		}
+		space, _ := a.st.Value("icloud.space")
+		if err := a.svc.requeueAll(context.Background(), space); err != nil {
+			t.Fatal(err)
+		}
+		syncAll(a, b)
+		if a.title(p.ID) != "Plan B" || b.title(p.ID) != "Plan B" {
+			t.Errorf("content edited %v: titles A %q, B %q, want B's rename", edited, a.title(p.ID), b.title(p.ID))
+		}
+		if edited && b.text(p.ID, "x") != "edited on A" {
+			t.Errorf("B has %q of A's edit", b.text(p.ID, "x"))
+		}
+	}
+}
+
 func TestICloudChangesGoColumnByColumn(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -402,6 +460,83 @@ func TestICloudRelayedEditIsNoConflict(t *testing.T) {
 	}
 	if a.conflicts() != 1 || b.conflicts() != 0 || c.conflicts() != 0 {
 		t.Errorf("conflicts: A %d, B %d, C %d", a.conflicts(), b.conflicts(), c.conflicts())
+	}
+}
+
+// B edits a block, and C, merging B's file, writes its own with B's edit in it. A edits B's block later, not having
+// merged B's edit, which loses. B notes the conflict whether it reads C's file or A's first: C had B's edit from B,
+// so it passed on nothing B had from elsewhere.
+func TestICloudLostEditIsNotedThoughADeviceThatMergedItHasIt(t *testing.T) {
+	for cID, order := range map[string]string{
+		"cccccccc-cccc-4ccc-8ccc-cccccccccccc": "after", "00000000-0000-4000-8000-000000000001": "before",
+	} {
+		root := cloudRoot(t)
+		a, b, c := newCloudDevice(t, root), newCloudDevice(t, root), newCloudDevice(t, root)
+		for d, id := range map[*cloudDevice]string{
+			a: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", b: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", c: cID,
+		} {
+			if err := d.st.SetValue("device.id", id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p := a.page("Notes", para("x", "x0"), para("y", "y0"))
+		syncAll(a, b, c)
+		nextStamp()
+		b.edit(p.ID, "x", "b")
+		b.sync()
+		nextStamp()
+		c.edit(p.ID, "y", "c")
+		c.sync()
+		c.sync()
+		nextStamp()
+		a.edit(p.ID, "x", "a")
+		a.sync()
+		b.sync()
+		syncAll(a, b, c)
+		for _, d := range []*cloudDevice{a, b, c} {
+			if d.text(p.ID, "x") != "a" || d.text(p.ID, "y") != "c" {
+				t.Fatalf("C's file read %s A's: content %q %q", order, d.text(p.ID, "x"), d.text(p.ID, "y"))
+			}
+		}
+		if a.conflicts() != 0 || b.conflicts() != 1 || c.conflicts() != 0 {
+			t.Errorf("C's file read %s A's: conflicts A %d, B %d, C %d, want B's alone",
+				order, a.conflicts(), b.conflicts(), c.conflicts())
+		}
+	}
+}
+
+// A third device that has the version of a block this device lost passed it on to this one, which leaves the
+// conflict to it, only when it cannot have had it from this one: neither it nor a device whose file it merged had
+// merged a file this one wrote after the edit (at 100 here).
+func TestRelayedOnlyByADeviceThatCannotHaveHadTheEditFromHere(t *testing.T) {
+	has := doc.FromBlocks([]*doc.Node{para("x", "lost")}).Encode()
+	lost := doc.Conflict{BlockID: "x", Local: para("x", "lost"), Remote: para("x", "won"), LocalEditedAt: 100, RemoteEditedAt: 200}
+	for _, tc := range []struct {
+		name   string
+		others []store.PeerContent
+		want   bool
+	}{
+		{"one that merged nothing of this one's since", []store.PeerContent{{Peer: "c", Content: has, Merged: map[string]int64{"me": 50}}}, true},
+		{"one that merged this one's edit", []store.PeerContent{{Peer: "c", Content: has, Merged: map[string]int64{"me": 120}}}, false},
+		{"one that merged a device that had merged it", []store.PeerContent{
+			{Peer: "c", Content: has, Merged: map[string]int64{"me": 120}},
+			{Peer: "d", Content: has, Merged: map[string]int64{"me": 50, "c": 130}},
+		}, false},
+		{"one that merged a device before that had merged it", []store.PeerContent{
+			{Peer: "c", Content: has, Merged: map[string]int64{"me": 120}},
+			{Peer: "d", Content: has, Merged: map[string]int64{"me": 50, "c": 90}},
+		}, true},
+		{"one that merged a device whose file is not read here", []store.PeerContent{
+			{Peer: "d", Content: has, Merged: map[string]int64{"me": 50, "e": 130}},
+		}, false},
+		{"one whose file says nothing of what it merged", []store.PeerContent{{Peer: "c", Content: has}}, false},
+		{"one without the version", []store.PeerContent{
+			{Peer: "c", Content: doc.FromBlocks([]*doc.Node{para("x", "other")}).Encode(), Merged: map[string]int64{}},
+		}, false},
+	} {
+		if got := relayed("me", "peer", map[string]int64{"me": 50}, tc.others, lost); got != tc.want {
+			t.Errorf("%s: relayed %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -1914,6 +2049,39 @@ func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
 	for _, d := range []*cloudDevice{a, b} {
 		if r, _ := d.st.Recording(rec.ID); r.Status != "ready" || len(r.Transcript) != 1 {
 			t.Errorf("recording %s %v", r.Status, r.Transcript)
+		}
+	}
+}
+
+// A recording failed on A; B transcribed it since. A, before reading B's batch, dismisses the error, which goes as
+// that column alone: the transcript B made stays on both.
+func TestICloudDismissedErrorLeavesATranscriptMadeElsewhere(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Meeting")
+	rec, err := a.st.CreateRecording(p.ID, "b1", "openai-compatible", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status, r.Error = "failed", "no network" }); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	nextStamp()
+	if _, err := b.st.UpdateRecording(rec.ID, func(r *store.Recording) {
+		r.Status, r.Error, r.Transcript = "ready", "", []store.Segment{{Text: "Theirs"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	nextStamp()
+	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Error = "" }); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	for _, d := range []*cloudDevice{a, b} {
+		if r, _ := d.st.Recording(rec.ID); r.Status != "ready" || r.Error != "" || len(r.Transcript) != 1 || r.Transcript[0].Text != "Theirs" {
+			t.Errorf("recording %s %q %v, want B's transcript", r.Status, r.Error, r.Transcript)
 		}
 	}
 }

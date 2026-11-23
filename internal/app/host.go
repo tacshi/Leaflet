@@ -147,6 +147,9 @@ func (h *host) CommentPreview(c *ui.Context, blockID string) {
 							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 								avatar(c, cm.AuthorName, 18, cm.AuthorKind == "agent")
 								ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine()
+								if cm.AuthorKind == "guest" {
+									ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
+								}
 								ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 							})
 							if !cm.DeletedAt.IsZero() {

@@ -116,12 +116,15 @@ enum Reminders {
     @MainActor private static var running: Task<Void, Never>?
     @MainActor private static var again: Again?
 
+    /// Reminders are read in the zone the device is in now, and each is asked for at its time
+    /// on the clock, with no zone: it shows at that time wherever the device is by then.
     @MainActor
     private static func scheduleOnce(_ client: CoreClient, asking: Bool) async {
         let center = UNUserNotificationCenter.current()
+        let calendar = Calendar.current
         let list: [Reminder]
         do {
-            list = try await client.reminders(now: .now, limit: limit)
+            list = try await client.reminders(now: .now, limit: limit, zone: calendar.timeZone)
         } catch {
             Logger.app.error("Could not read the reminders: \(error)")
             return
@@ -137,12 +140,12 @@ enum Reminders {
         }
         var scheduled: [Reminder] = []
         for reminder in list {
-            if shown(reminder, at: times) {
+            if shown(reminder, at: times, calendar: calendar) {
                 scheduled.append(reminder)
                 continue
             }
             do {
-                try await center.add(request(reminder))
+                try await center.add(request(reminder, calendar: calendar))
                 scheduled.append(reminder)
             } catch {
                 Logger.app.error("Could not schedule a reminder: \(error)")

@@ -193,7 +193,8 @@ func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (Saved,
 		if err := queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
+		// The page shows as edited now, but its row has not changed: its updated_at is what sync versions the row by.
+		if _, err := tx.Exec(`UPDATE pages SET edited_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
 			return err
 		}
 		saved.Changed = true

@@ -1,13 +1,16 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"log"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -95,6 +98,7 @@ type App struct {
 	route    Route
 	router   *ui.Router
 	routerAt string
+	visits   int
 	page     *pageState
 
 	sidebarW        float32
@@ -464,9 +468,12 @@ func (a *App) beforeQuit(e *mygo.QuitEvent) {
 	if e.SessionEnding {
 		// Logout or shutdown: the quit can't wait, and the process may end
 		// once this returns. The page is saved here; a recording under way
-		// is cut off and RecoverInterrupted repairs it at the next start.
+		// is cut off and RecoverInterrupted repairs it at the next start. A
+		// transcription is cut short: what it uploaded and could not delete
+		// before the process ends is deleted at the next start.
 		a.quitting = true
 		a.flush()
+		a.rec.CutShort()
 		a.stopPub()
 		a.endView()
 		return
@@ -482,13 +489,19 @@ func (a *App) beforeQuit(e *mygo.QuitEvent) {
 		return
 	}
 	a.quitting = true
+	a.rec.CutShort()
 	a.stopPub()
 	a.endView()
 }
 
 // quitWait is the longest a quit waits for a recording to be saved and its
-// live transcript to end.
+// live transcript to end, and for the transcriptions under way to end.
 var quitWait = 20 * time.Second
+
+// cutShortWait is how long a quit then waits for the transcriptions it cut
+// short to delete what they put on a provider's side. What they could not
+// delete by then is deleted at the next start.
+var cutShortWait = 5 * time.Second
 
 var (
 	quitApp     = func() { mygo.App.Quit() }
@@ -510,10 +523,12 @@ func (a *App) holdRunning() {
 	}
 }
 
-// keepRecording reports whether a quit has to wait for a recording: it
-// stops the one under way, and quits again once the audio and the
-// transcript are stored or quitWait has passed. The quit that follows the
-// wait is let through whatever is left unsaved.
+// keepRecording reports whether a quit has to wait for a recording, or for
+// an audio file's transcription: it stops the recording under way, and
+// quits again once the audio and the transcripts are stored, or once
+// quitWait has passed and what still runs is cut short, so that it deletes
+// what it uploaded rather than leaving it with the provider. The quit that
+// follows the wait is let through whatever is left unsaved.
 func (a *App) keepRecording() bool {
 	if a.recKeeping {
 		return true
@@ -521,11 +536,22 @@ func (a *App) keepRecording() bool {
 	if time.Since(a.recKeptAt) < keptFor || !a.rec.Active() && a.rec.Saving() == 0 {
 		return false
 	}
+	// Each file being transcribed holds the quit once.
+	files := !a.rec.Active() && a.rec.Saving() <= len(a.rec.TranscribingFiles)
 	a.rec.Stop()
 	a.recKeeping = true
 	a.showWindow()
-	a.toast(locales.AppSavingRecording())
-	a.offMain(func() { a.rec.Settle(quitWait) }, func() {
+	if files {
+		a.toast(locales.AppFinishingTranscription())
+	} else {
+		a.toast(locales.AppSavingRecording())
+	}
+	a.offMain(func() {
+		if !a.rec.Settle(quitWait) {
+			a.rec.CutShort()
+			a.rec.Settle(cutShortWait)
+		}
+	}, func() {
 		a.recKeeping, a.recKeptAt = false, time.Now()
 		if relaunch := a.relaunching; relaunch {
 			a.relaunching = false
@@ -849,10 +875,12 @@ func (a *App) toggleSettings() {
 
 // closeSettings also ends what Settings had open, so a dialog half filled
 // in, as the one that deletes the account, is not there waiting the next
-// time.
+// time, and a sign-in started there, which only Settings shows, does not
+// go on waiting out of sight.
 func (a *App) closeSettings() {
 	a.settingsOpen = false
 	a.account.deleteOpen, a.account.confirm = false, ""
+	a.account.cancelRenewal()
 	a.form.end()
 	a.form = providerForm{}
 }
@@ -883,48 +911,94 @@ func (a *App) back() { a.step(-1) }
 func (a *App) forward() { a.step(1) }
 
 // step goes back or forward past the pages that are gone, so a deleted
-// page in the history does not stand between the user and the one before.
+// page in the history does not stand between the user and the one before:
+// follow goes on past them the way the router moved.
 func (a *App) step(by int) {
 	if a.router == nil {
 		return
 	}
-	further := a.router.CanGoBack
-	if by > 0 {
-		further = a.router.CanGoForward
-	}
-	for further() {
-		a.router.Go(by)
-		if !a.gone(routeAt(a.router.Path())) {
-			break
-		}
-	}
+	a.router.Go(by)
 	a.follow()
 }
 
-func (a *App) gone(r Route) bool { return r.Kind == "page" && a.pageByID(r.ID) == nil }
+// gone reports whether a route of the history has nothing left to show: a
+// page deleted, or the sign-in screen once this device syncs, signed in or
+// through iCloud, whose forms would sign in over the account in use.
+func (a *App) gone(r Route) bool {
+	switch r.Kind {
+	case "page":
+		return a.pageByID(r.ID) == nil
+	case "signin":
+		return a.syncOn()
+	}
+	return false
+}
 
+// visitKey numbers the router's entries in the order they were made, in
+// their locations' query: as Push drops the entries after the one shown,
+// the history is always in that order, so follow tells by the numbers
+// which way the router moved when it moves on its own, as the title bar's
+// Back and Forward and the pages they list move it.
+const visitKey = "visit"
+
+// location is where the router keeps route r in the entry made in visit
+// n: its path, with the number, but for the router's first entry.
+func location(r Route, n int) string {
+	if n == 0 {
+		return r.path()
+	}
+	return r.path() + "?" + visitKey + "=" + strconv.Itoa(n)
+}
+
+// visitOf is the number of the visit a location was made in.
+func visitOf(loc string) int {
+	u, err := url.Parse(loc)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(u.Query().Get(visitKey))
+	return n
+}
+
+// push adds route r to the router's history, after the entry shown.
+func (a *App) push(r Route) {
+	a.visits++
+	a.router.Push(location(r, a.visits))
+	a.routerAt = a.router.Location()
+}
+
+// follow keeps the route shown and the router's history together. When the
+// router moved, as Back and Forward move it, the route it shows follows,
+// past the entries that are gone the same way it moved, or home in the
+// place of the last of them when there is nothing beyond. A route shown
+// otherwise, as navigate shows one, is added to the history.
 func (a *App) follow() {
 	if a.router == nil {
 		return
 	}
-	at := a.router.Path()
-	if at != a.routerAt {
-		a.routerAt = at
-		r := routeAt(at)
-		if a.gone(r) {
-			r = Route{Kind: "home"}
-			a.router.Replace(r.path())
-			a.routerAt = a.router.Path()
-		}
-		if r != a.route && !a.show(r) {
-			a.router.Push(a.route.path())
-			a.routerAt = a.router.Path()
+	at := a.router.Location()
+	if at == a.routerAt {
+		if a.route.path() != a.router.Path() {
+			a.push(a.route)
 		}
 		return
 	}
-	if p := a.route.path(); p != at {
-		a.router.Push(p)
-		a.routerAt = a.router.Path()
+	way := cmp.Compare(visitOf(at), visitOf(a.routerAt))
+	further := a.router.CanGoBack
+	if way > 0 {
+		further = a.router.CanGoForward
+	}
+	for way != 0 && a.gone(routeAt(a.router.Path())) && further() {
+		a.router.Go(way)
+	}
+	r := routeAt(a.router.Path())
+	if a.gone(r) {
+		r = Route{Kind: "home"}
+		a.router.Replace(location(r, visitOf(a.router.Location())))
+	}
+	a.routerAt = a.router.Location()
+	if r != a.route && !a.show(r) {
+		a.push(a.route)
 	}
 }
 

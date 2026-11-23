@@ -24,6 +24,9 @@ func (c *Core) SwitchICloud(on bool) error {
 	return err
 }
 
+// KeepICloud keeps the app's iCloud setting, and its watch on the iCloud folder, as on says iCloud sync now is, never
+// on while signed in. It reads and saves the app's settings, so the app calls it on its main thread: after
+// SwitchICloud, and after UseAccount, which turns iCloud sync off.
 func (c *Core) KeepICloud(on bool) {
 	if on && c.Store.Session().SignedIn {
 		on = false

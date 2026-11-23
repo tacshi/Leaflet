@@ -200,20 +200,10 @@ struct FileBlock: View {
         let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
         let type = (name as NSString).pathExtension.uppercased()
         let detail = type.isEmpty ? bytes : L.cardFileDetail(kind: type, size: bytes)
-        guard let engine = Self.engine(node.data?["transcribed_by"]?.string),
-            !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let engine = MobileEngineName(node.data?["transcribed_by"]?.string ?? "")
+        guard !engine.isEmpty, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return detail }
         return L.cardTranscribedBy(detail: detail, engine: engine)
-    }
-
-    static func engine(_ provider: String?) -> String? {
-        switch provider {
-        case nil, "": nil
-        case "soniox": "Soniox"
-        case "moss": "MOSS"
-        case "on-device": L.recEngineOnDevice
-        default: L.commonEndpoint
-        }
     }
 
     private func card(_ playback: FilePlayback) -> some View {

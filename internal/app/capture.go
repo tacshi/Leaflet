@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -27,7 +28,8 @@ const capturePage = `<!doctype html>
 <script>
 const session = new URLSearchParams(location.search).get("s");
 const call = (name, ...args) => window.mygo.call("Recorder." + name, session, ...args);
-let ctx, stream, node, source, paused = false, buf = [], seq = 0;
+const constraints = {audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}};
+let ctx, stream, node, source, paused = false, stopping = false, buf = [], seq = 0;
 // sending are the chunks' calls not answered yet.
 const sending = new Set();
 // tail is what the last buffer left over, which the next output sample
@@ -46,9 +48,20 @@ function send() {
   sending.add(sent);
   sent.then(() => sending.delete(sent));
 }
+// A microphone that stops is told to the app, which pauses the recording
+// rather than fill it with silence: one unplugged or gone with its
+// Bluetooth headset ends, one the system or another app holds for a while
+// is muted, and told again when it is given back.
+function watch(s) {
+  for (const t of s.getAudioTracks()) {
+    t.onended = () => { if (!stopping) call("Stalled", "ended"); };
+    t.onmute = () => { if (!stopping) call("Stalled", "muted"); };
+    t.onunmute = () => { if (!stopping) call("Recovered"); };
+  }
+}
 async function start() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === "suspended") await ctx.resume();
     source = ctx.createMediaStreamSource(stream);
@@ -80,15 +93,44 @@ async function start() {
     source.connect(node);
     node.connect(ctx.destination);
     setInterval(send, 50);
+    watch(stream);
+    // The system can stop the page's sound too, and start it again.
+    ctx.onstatechange = () => {
+      if (stopping || ctx.state === "closed") return;
+      if (ctx.state === "running") call("Recovered");
+      else call("Stalled", "suspended");
+    };
     call("Started", ctx.sampleRate);
   } catch (e) {
     call("Failed", String(e && e.name || ""), String(e && e.message || e));
   }
 }
-window.pauseCapture = (p) => { paused = p; };
+// again, as the recording resumes, asks once more for a microphone that
+// ended, so that it goes on from the one there is now, and starts the
+// sound again if the system stopped it.
+async function again() {
+  try {
+    if (stream.getAudioTracks().every((t) => t.readyState === "ended")) {
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      source.disconnect();
+      stream = s;
+      watch(stream);
+      source = ctx.createMediaStreamSource(stream);
+      source.connect(node);
+    }
+    if (ctx.state !== "running") await ctx.resume();
+  } catch (e) {
+    call("Stalled", "ended");
+  }
+}
+window.pauseCapture = (p) => {
+  paused = p;
+  if (!p && ctx && !stopping) again();
+};
 // stopCapture sends what is left, and is done once every chunk's call
 // has been answered: the app has them all then.
 window.stopCapture = async () => {
+  stopping = true;
   send();
   try { node && node.disconnect(); source && source.disconnect(); } catch (_) {}
   stream && stream.getTracks().forEach((t) => t.stop());
@@ -105,14 +147,21 @@ type Recorder struct {
 	sessions map[string]*captureSink
 }
 
-type captureSink struct {
-	chunk   func([]byte)
-	started func()
-	failed  func(string)
+func newCaptureSink(sink recording.Sink) *captureSink {
+	return &captureSink{chunk: sink.Chunk, started: sink.Started, failed: sink.Failed, stalled: sink.Stalled, recovered: sink.Recovered}
+}
 
-	mu   sync.Mutex
-	next int
-	held map[int][]byte
+type captureSink struct {
+	chunk     func([]byte)
+	started   func()
+	failed    func(string)
+	stalled   func(string)
+	recovered func()
+
+	mu    sync.Mutex
+	next  int
+	held  map[int][]byte
+	began bool
 }
 
 const maxHeld = 40
@@ -141,6 +190,31 @@ func (s *captureSink) deliver(seq int, pcm []byte) {
 		delete(s.held, s.next)
 		s.next++
 		s.chunk(p)
+	}
+}
+
+// again readies the sink for a capture page loaded again, which counts its
+// chunks from the first. What the page before it left held, waiting for a
+// chunk that went with it, goes in first.
+func (s *captureSink) again() {
+	s.flush()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next = 0
+}
+
+// lost tells the recording that its capture page is gone, with the process
+// it ran in: one that had not begun fails, one under way stalls, and the
+// page is loaded again as it resumes.
+func (s *captureSink) lost() {
+	s.mu.Lock()
+	began := s.began
+	s.mu.Unlock()
+	switch {
+	case !began && s.failed != nil:
+		s.failed(locales.RecMicRecorderGone())
+	case began && s.stalled != nil:
+		s.stalled(locales.RecMicRecorderGone())
 	}
 }
 
@@ -177,8 +251,36 @@ func (r *Recorder) Started(session string, sampleRate float64) {
 	r.mu.Lock()
 	s := r.sessions[session]
 	r.mu.Unlock()
-	if s != nil && s.started != nil {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.began = true
+	s.mu.Unlock()
+	if s.started != nil {
 		s.started()
+	}
+}
+
+// Stalled tells that the microphone stopped giving sound: why is "ended"
+// for one gone, "muted" for one held by the system or another app, and
+// "suspended" for sound the system stopped.
+func (r *Recorder) Stalled(session, why string) {
+	s := r.sink(session)
+	if s == nil || s.stalled == nil {
+		return
+	}
+	msg := locales.RecMicHeld()
+	if why == "ended" {
+		msg = locales.RecMicDisconnected()
+	}
+	s.stalled(msg)
+}
+
+// Recovered tells that the microphone gives sound again.
+func (r *Recorder) Recovered(session string) {
+	if s := r.sink(session); s != nil && s.recovered != nil {
+		s.recovered()
 	}
 }
 
@@ -239,7 +341,8 @@ type webCapture struct {
 
 func (w *webCapture) Start(rate int, sink recording.Sink) (recording.Mic, error) {
 	session := doc.NewBlockID()
-	recorder.add(session, &captureSink{chunk: sink.Chunk, started: sink.Started, failed: sink.Failed})
+	s := newCaptureSink(sink)
+	recorder.add(session, s)
 	v, err := w.win.NewWebView(mygo.WebViewOptions{URL: captureURL(session),
 		Page: mygo.PageOptions{BackgroundThrottling: mygo.ThrottlingOff}})
 	if err != nil {
@@ -249,7 +352,14 @@ func (w *webCapture) Start(rate int, sink recording.Sink) (recording.Mic, error)
 	w.mu.Lock()
 	w.view = v
 	w.mu.Unlock()
-	return &webMic{capture: w, session: session, view: v}, nil
+	m := &webMic{capture: w, session: session, view: v}
+	m.off = v.Page().OnRenderProcessGone(func(string) {
+		m.gone.Store(true)
+		if recorder.sink(session) == s {
+			s.lost()
+		}
+	})
+	return m, nil
 }
 
 func (w *webCapture) View() *mygo.WebView {
@@ -262,10 +372,25 @@ type webMic struct {
 	capture *webCapture
 	session string
 	view    *mygo.WebView
+	off     func()
+	// gone is set once the page's process crashed or was ended.
+	gone atomic.Bool
 }
 
-func (m *webMic) Pause()  { _, _ = m.view.Page().Eval("window.pauseCapture(true)") }
-func (m *webMic) Resume() { _, _ = m.view.Page().Eval("window.pauseCapture(false)") }
+func (m *webMic) Pause() { _, _ = m.view.Page().Eval("window.pauseCapture(true)") }
+
+func (m *webMic) Resume() {
+	if m.gone.Swap(false) {
+		// The page went with its process: it is loaded again, and captures
+		// from the start.
+		if s := recorder.sink(m.session); s != nil {
+			s.again()
+		}
+		m.view.Page().Reload()
+		return
+	}
+	_, _ = m.view.Page().Eval("window.pauseCapture(false)")
+}
 
 func (m *webMic) Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), stopWait)
@@ -279,6 +404,7 @@ func (m *webMic) Stop() {
 const stopWait = 5 * time.Second
 
 func (m *webMic) Close() {
+	m.off()
 	recorder.remove(m.session)
 	m.capture.mu.Lock()
 	if m.capture.view == m.view {

@@ -1,0 +1,61 @@
+name: Vulnerabilities
+
+# CI looks for known vulnerabilities as the code changes; this looks again
+# each week, for those published since: in the Go modules, for macOS and
+# Windows, the iOS app's Swift packages and the Edge Functions' npm
+# packages.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  go:
+    name: Go modules
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: Known vulnerabilities
+        run: govulncheck ./...
+      - name: Known vulnerabilities, for Windows
+        env:
+          GOOS: windows
+        run: govulncheck ./...
+
+  swift:
+    name: Swift packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.1
+      - name: Known vulnerabilities
+        run: osv-scanner scan source -L ios/Package.resolved
+
+  npm:
+    name: Edge Functions' npm packages
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.9.8
+      - name: Known vulnerabilities
+        run: deno audit

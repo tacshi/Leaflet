@@ -243,7 +243,7 @@ func TestTodosComeInSections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := c.Todos()
+	raw, err := c.Todos(time.Local.String(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,3 +8,11 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        update-types: [minor, patch]

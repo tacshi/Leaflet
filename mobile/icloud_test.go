@@ -158,3 +158,24 @@ func TestSetICloudDuringAPassLeavesTheCoreFree(t *testing.T) {
 		t.Errorf("folder %q", got)
 	}
 }
+
+func TestSigningInTurnsICloudSyncOff(t *testing.T) {
+	c, p := openWatching(t)
+	root := filepath.Join(t.TempDir(), "Leaflet")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetICloud(root, true); err != nil {
+		t.Fatal(err)
+	}
+	signInRocky(t, c)
+	if s := iCloudStatus(t, c); s.ICloudOn {
+		t.Error("iCloud sync stayed on for the account signed in")
+	}
+	if c.core.Store.Settings().ICloudSync {
+		t.Error("the setting stayed on")
+	}
+	if got := p.watched(); len(got) == 0 || got[len(got)-1] {
+		t.Errorf("watched %v: the folder is still watched", got)
+	}
+}

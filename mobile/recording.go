@@ -125,6 +125,17 @@ func audioLasts(size int64) time.Duration {
 	return time.Duration(max(size, 0)/2) * time.Second / recording.SampleRate
 }
 
+// awakeTick is how often a wait on the device's speech recognition counts
+// the time that has gone.
+const awakeTick = time.Second
+
+// giveUpAfter waits for fn until the app has run for d and onDeviceSlack
+// more, and gives up on it then. Only the time the app runs counts: iOS
+// freezes an app it sends to the background, and the transcription with
+// it, while the clock goes on, so a timer comes back from the freeze long
+// past due and would end a transcription that never had the time to run.
+// The time is counted a tick at a time, and a tick that comes more than a
+// tick late found the app frozen in between: it counts as one tick.
 func giveUpAfter(d time.Duration, fn func() (string, error)) (string, error) {
 	type answer struct {
 		raw string
@@ -135,13 +146,32 @@ func giveUpAfter(d time.Duration, fn func() (string, error)) (string, error) {
 		raw, err := fn()
 		done <- answer{raw, err}
 	})
-	timer := time.NewTimer(d + onDeviceSlack)
-	defer timer.Stop()
-	select {
-	case a := <-done:
-		return a.raw, a.err
-	case <-timer.C:
-		return "", errStuck
+	left := d + onDeviceSlack
+	tick := min(awakeTick, left)
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+	last := time.Now()
+	for {
+		select {
+		case a := <-done:
+			return a.raw, a.err
+		case <-ticker.C:
+		}
+		now := time.Now()
+		ran := now.Sub(last)
+		last = now
+		if ran > 2*tick {
+			ran = tick
+		}
+		if left -= ran; left > 0 {
+			continue
+		}
+		select {
+		case a := <-done:
+			return a.raw, a.err
+		default:
+			return "", errStuck
+		}
 	}
 }
 
@@ -293,6 +323,9 @@ func (c *Core) StartRecording(pageID, provider string) (_ string, err error) {
 		}
 		s := c.core.Store.Settings()
 		err = c.core.Rec.Start(pageID, c.sttFor(pageID, provider, keys), c.online(s), func(n *doc.Node) { node = n })
+		if err == nil {
+			c.recordingStarted()
+		}
 		c.tellRecording()
 	})
 	if err != nil {
@@ -325,6 +358,7 @@ func (c *Core) RecordNewPage(folderID string) (_ string, err error) {
 			page:  store.NewPageOptions{ID: id, FolderID: folderID, Title: locales.RecBlockTitle(time.Now())},
 			recID: c.core.Rec.State.ID, block: block,
 		}
+		c.recordingStarted()
 		c.tellRecording()
 	})
 	if err != nil {
@@ -332,6 +366,12 @@ func (c *Core) RecordNewPage(folderID string) (_ string, err error) {
 	}
 	return id, nil
 }
+
+// recordingStarted ends, for what the app shows, the microphone test that
+// a recording just took the microphone from. A test stopped reads as one
+// until its transcription is back, as long as a minute, and the recording
+// under way meanwhile would read as the test.
+func (c *Core) recordingStarted() { c.micTesting = false }
 
 func (c *Core) settleVoiceNote() {
 	v := c.voiceNote

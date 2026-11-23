@@ -14,9 +14,24 @@ function Warn([string]$Message) { [Console]::Error.WriteLine("warning: $Message"
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $CallerDir = (Get-Location -PSProvider FileSystem).ProviderPath
 $ConfigPath = Join-Path $RootDir 'mygo.json'
-$ConfigLock = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.lock')
-$ConfigKept = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.committed')
-$ConfigRecover = [IO.Path]::Combine($RootDir, 'build', 'mygo.json.recover')
+
+# A build that changes mygo.json for its run keeps a copy of the committed
+# one, and of what it wrote, to put the committed one back as it ends, and
+# a lock, so that one build of the checkout at a time changes it. They are
+# in the checkout's git folder, which cleaning build\ leaves alone (outside
+# a git checkout, in build\).
+function Get-ConfigDir {
+	try {
+		$dir = & git -C $RootDir rev-parse --absolute-git-dir 2>$null
+		if ($LASTEXITCODE -eq 0 -and $dir) { return Join-Path ([IO.Path]::GetFullPath("$dir".Trim())) 'leaflet-build' }
+	} catch { }
+	Join-Path $RootDir 'build'
+}
+$ConfigDir = Get-ConfigDir
+$ConfigLock = Join-Path $ConfigDir 'mygo.json.lock'
+$ConfigKept = Join-Path $ConfigDir 'mygo.json.committed'
+$ConfigWritten = Join-Path $ConfigDir 'mygo.json.written'
+$ConfigRecover = Join-Path $ConfigDir 'mygo.json.recover'
 $ConfigHeld = $false
 
 function Need([string[]]$Tools) {
@@ -62,7 +77,7 @@ function Read-Holder([string]$Path) {
 }
 
 function Hold-Config {
-	New-Item -ItemType Directory -Force (Split-Path $ConfigLock) | Out-Null
+	New-Item -ItemType Directory -Force $ConfigDir | Out-Null
 	$said = $false
 	while (-not (New-Exclusive $ConfigLock "$PID`n")) {
 		$holder = Read-Holder $ConfigLock
@@ -77,22 +92,44 @@ function Hold-Config {
 	$script:ConfigHeld = $true
 	Copy-Item $ConfigPath "$ConfigKept.$PID"
 	Move-Item -Force "$ConfigKept.$PID" $ConfigKept
+	Copy-Item $ConfigKept $ConfigWritten
 }
 
 function Repair-Config([string]$Holder) {
 	if (-not (New-Exclusive $ConfigRecover '')) { return $false }
 	try {
 		if ((Read-Holder $ConfigLock) -eq $Holder) {
-			if (Test-Path -PathType Leaf $ConfigKept) {
-				Warn 'a build that ended early left mygo.json changed; putting the committed one back'
-				Move-Item -Force $ConfigKept $ConfigPath
-			}
+			Restore-Committed 'a build that ended early left mygo.json changed; putting the committed one back'
 			Remove-Item -Force $ConfigLock
 		}
 	} finally {
 		Remove-Item -Force -ErrorAction SilentlyContinue $ConfigRecover
 	}
 	$true
+}
+
+function Test-SameFile([string]$A, [string]$B) {
+	(Test-Path -PathType Leaf $A) -and (Test-Path -PathType Leaf $B) -and
+		((Get-FileHash -LiteralPath $A).Hash -eq (Get-FileHash -LiteralPath $B).Hash)
+}
+
+# Puts the committed mygo.json that Hold-Config kept back, over what
+# Set-Config wrote, saying $Message if it is given and they differ. A
+# mygo.json changed since, by hand or by another session, stays as it is,
+# with the committed one beside it to compare it with.
+function Restore-Committed([string]$Message) {
+	if (-not (Test-Path -PathType Leaf $ConfigKept)) {
+		if (Test-Path -PathType Leaf $ConfigWritten) {
+			Warn "the copy of the committed mygo.json kept to put back, $ConfigKept, is gone, so mygo.json may still have the build's changes; git diff mygo.json shows them"
+		}
+	} elseif (-not (Test-Path -PathType Leaf $ConfigPath) -or (Test-SameFile $ConfigPath $ConfigKept) -or (Test-SameFile $ConfigPath $ConfigWritten)) {
+		if ($Message -and -not (Test-SameFile $ConfigPath $ConfigKept)) { Warn $Message }
+		Move-Item -Force $ConfigKept $ConfigPath
+	} else {
+		Move-Item -Force $ConfigKept "$ConfigPath.committed"
+		Warn 'mygo.json changed while a build had it changed, so it stays as it is; the committed one is beside it, mygo.json.committed, to compare it with'
+	}
+	Remove-Item -Force -ErrorAction SilentlyContinue $ConfigWritten
 }
 
 function Set-Config([string[]]$Pairs) {
@@ -119,12 +156,15 @@ function Set-Config([string[]]$Pairs) {
 		}
 	}
 	$json = ($config | ConvertTo-Json -Depth 32) + "`n"
-	[IO.File]::WriteAllText($ConfigPath, $json, [Text.UTF8Encoding]::new($false))
+	# Recorded first, so that mygo.json never holds it unrecorded.
+	foreach ($file in $ConfigWritten, $ConfigPath) {
+		[IO.File]::WriteAllText($file, $json, [Text.UTF8Encoding]::new($false))
+	}
 }
 
 function Restore-Config {
 	if ($script:ConfigHeld) {
-		if (Test-Path -PathType Leaf $ConfigKept) { Move-Item -Force $ConfigKept $ConfigPath }
+		Restore-Committed
 		Remove-Item -Force -ErrorAction SilentlyContinue $ConfigLock
 		$script:ConfigHeld = $false
 	}
@@ -163,25 +203,41 @@ function Get-HostArch {
 	}
 }
 
-function Find-Signtool {
-	$found = Get-Command signtool -ErrorAction SilentlyContinue
-	if ($found) { return $found.Source }
-	$arch = if ((Get-HostArch) -eq 'arm64') { 'arm64' } else { 'x64' }
-	$kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-	Get-ChildItem -Path "$kits\10.*\$arch\signtool.exe" -ErrorAction SilentlyContinue |
-		Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
-}
-
 function Get-WindowsCertificate {
 	$cert = $env:LEAFLET_WINDOWS_CERTIFICATE
 	if (-not $cert) { return }
 	$cert = Get-FullPath $cert
 	if (-not (Test-Path -PathType Leaf $cert)) { Fail "no Windows certificate at $cert (LEAFLET_WINDOWS_CERTIFICATE)" }
-	if (-not (Find-Signtool)) { Fail 'signing Windows builds needs signtool from the Windows SDK' }
+	if (-not (Get-Command Set-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+		Fail 'signing Windows builds needs Set-AuthenticodeSignature, which PowerShell has on Windows'
+	}
 	if (-not $env:MYGO_WINDOWS_CERTIFICATE_PASSWORD) {
 		Warn 'MYGO_WINDOWS_CERTIFICATE_PASSWORD is not set; the certificate must have no password'
 	}
 	$cert
+}
+
+# The NSIS installed where MyGo looks for one, or nothing: without one,
+# MyGo downloads its own, a version that signs the uninstaller.
+function Find-Makensis {
+	$found = Get-Command makensis -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+	if ($found) { return $found.Source }
+	foreach ($dir in ${env:ProgramFiles(x86)}, $env:ProgramFiles) {
+		if ($dir -and (Test-Path -PathType Leaf (Join-Path $dir 'NSIS\makensis.exe'))) { return Join-Path $dir 'NSIS\makensis.exe' }
+	}
+}
+
+# MyGo signs the installer's uninstaller through NSIS 3.08 or later, and
+# with an older one leaves it unsigned, which no check of the build's
+# programs sees: it is inside the installer.
+function Test-Nsis {
+	$tool = Find-Makensis
+	if (-not $tool) { return }
+	$version = "$(& $tool -VERSION)".Trim()
+	$signs = $version -match '^v?(\d+)\.(\d+)' -and ([int]$Matches[1] -gt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -ge 8))
+	if (-not $signs) {
+		Fail "a signed Windows build needs NSIS 3.08 or later, which signs the uninstaller, not $version at $tool; update it, or uninstall it for the one MyGo downloads"
+	}
 }
 
 function Test-Signed([string[]]$Paths) {
@@ -244,9 +300,12 @@ function Test-DraftCommit([string]$Version, [string]$Commit) {
 	}
 }
 
+# Fails unless the checkout is still the commit $Commit with no file changed
+# or added: one that git does not ignore may have gone into the build, and
+# the tag would not have it.
 function Test-Unchanged([string]$Commit) {
 	$head = & git rev-parse HEAD
-	$changed = & git status --porcelain --untracked-files=no
+	$changed = & git status --porcelain --untracked-files=normal
 	if ($LASTEXITCODE -ne 0 -or "$head".Trim() -ne $Commit -or $changed) {
 		Fail "the checkout changed while $Commit was built, so the build is not of the commit its draft release would record; nothing was uploaded"
 	}
@@ -336,7 +395,8 @@ function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$C
 	Test-Draft $Version
 	Test-DraftCommit $Version $Commit
 	if (Find-Release $Version @('--json', 'assets', '--jq', '.assets[].name')) {
-		if (@($script:Release) -contains 'SHA256SUMS') {
+		$assets = @($script:Release)
+		if ($assets -contains 'SHA256SUMS') {
 			$earlier = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
 			New-Item -ItemType Directory $earlier | Out-Null
 			try {
@@ -344,6 +404,18 @@ function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$C
 				Merge-Checksums $sumsFile (Join-Path $earlier 'SHA256SUMS')
 			} finally {
 				Remove-Item -Recurse -Force $earlier
+			}
+		}
+		# The manifests of these platforms come off first, and go back on
+		# last: gh deletes each file before it uploads its replacement, so a
+		# run that stops part way would leave them naming files gone, or not
+		# those they were. Without them, the draft offers those platforms no
+		# update.
+		foreach ($manifest in $manifests) {
+			$name = Split-Path -Leaf $manifest
+			if ($assets -contains $name) {
+				Info "taking $name off $tag of $repo until the files it names are up"
+				Invoke-Gh release delete-asset $tag $name --repo $repo --yes | Out-Null
 			}
 		}
 	} else {

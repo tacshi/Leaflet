@@ -46,6 +46,33 @@ struct RemindersTests {
         #expect(Reminders.request(r, now: at.addingTimeInterval(-1)).trigger != nil)
     }
 
+    @Test func aDayDueIsRemindedAtNineInTheZoneTheDeviceIsIn() async throws {
+        let core = try ScratchCore("RemindersTests")
+        let client = core.client
+        let page = try await client.createPage(NewPage(title: "Trip"))
+        var opened = try await client.openPage(page.id)
+        opened.content.document.children = [
+            DocNode(
+                id: "pack", type: "todo_list",
+                data: [
+                    "checked": .bool(false), "due": .string("2026-12-02"),
+                    "delta": .array([.object(["insert": .string("Pack")])]),
+                ], children: nil)
+        ]
+        try await client.editPage(
+            page.id, editor: opened.editor, content: opened.content, rev: opened.rev)
+        await client.closePage(page.id, editor: opened.editor)
+        let berlin = try #require(TimeZone(identifier: "Europe/Berlin"))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = berlin
+        let now = try #require(
+            calendar.date(from: DateComponents(year: 2026, month: 12, day: 1, hour: 12)))
+        let list = try await client.reminders(now: now, limit: 10, zone: berlin)
+        let date = try #require(list.first { $0.blockID == "pack" }?.date)
+        let at = calendar.dateComponents([.month, .day, .hour, .minute], from: date)
+        #expect(at.month == 12 && at.day == 2 && at.hour == 9 && at.minute == 0)
+    }
+
     @Test func onlyRemindersNoLongerListedAreTakenBack() {
         let stale = Reminders.stale(["todo:p#b", "todo:p#gone"], keeping: [reminder(at: 0)])
         #expect(stale == ["todo:p#gone"])

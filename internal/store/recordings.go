@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"leaflet/internal/doc"
@@ -106,12 +108,21 @@ func (s *Store) SettleRecording(id, status string, upload bool, fn func(*Recordi
 	return s.updateRecording(id, status, upload, fn)
 }
 
+// updateRecording changes the recording's row by fn, and queues the columns it changed, so that a change made here
+// takes nothing back of what another device changed since: dismissing an error here leaves the transcript another
+// device made. A row that was still recording, which no device has yet, goes whole.
 func (s *Store) updateRecording(id, ifStatus string, upload bool, fn func(*Recording)) (Recording, error) {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
 		if r, err = recordingIn(tx, s.Dir, id); err != nil {
 			return err
+		}
+		var old map[string]any
+		if r.Status != "recording" {
+			was := r
+			was.Transcript = slices.Clone(r.Transcript)
+			old = RecordingToRemote(was)
 		}
 		fn(&r)
 		r.UpdatedAt = time.Now()
@@ -126,13 +137,15 @@ func (s *Store) updateRecording(id, ifStatus string, upload bool, fn func(*Recor
 			label = "audio waiting to upload"
 		}
 		row := RecordingToRemote(r)
+		if ifStatus == "" {
+			if ifStatus, err = settleWaiting(tx, r); err != nil {
+				return err
+			}
+		}
 		if ifStatus != "" {
 			row[IfStatusKey] = ifStatus
 		}
-		if err := unpulled(tx, "recordings", r.ID); err != nil {
-			return err
-		}
-		if err := queue(tx, "recordings", r.ID, row, label, r.PageID); err != nil || !upload || r.AudioPath != "" || r.LocalPath == "" {
+		if err := queueChange(tx, "recordings", r.ID, old, row, label, r.PageID); err != nil || !upload || r.AudioPath != "" || r.LocalPath == "" {
 			return err
 		}
 		return queue(tx, "storage", "recordings/"+r.ID, audioUpload(s.Dir, r), "audio waiting to upload", r.PageID)
@@ -145,6 +158,30 @@ func (s *Store) updateRecording(id, ifStatus string, upload bool, fn func(*Recor
 	}
 	s.Notify("recordings", r.PageID)
 	return r, nil
+}
+
+// settleWaiting is the status a settle of r that still waits to go up holds it to, while r keeps
+// the status it settled to. A change made after the settle, as dismissing its error, then goes
+// only as the settle does: where another device settled the recording first, its row stays, and
+// this change, made to the settle that lost, goes with it. A change of status, as transcribing the
+// recording again, is a new one of this device's and goes as it is.
+func settleWaiting(q querier, r Recording) (string, error) {
+	var payload string
+	err := q.QueryRow(`SELECT payload FROM outbox WHERE entity = 'recordings' AND entity_id = ? AND op = 'upsert'`, r.ID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var queued map[string]any
+	if err := json.Unmarshal([]byte(payload), &queued); err != nil {
+		return "", err
+	}
+	if status, _ := queued[IfStatusKey].(string); status != "" && queued["status"] == r.Status {
+		return status, nil
+	}
+	return "", nil
 }
 
 func (s *Store) QueueUpload(r Recording) error {

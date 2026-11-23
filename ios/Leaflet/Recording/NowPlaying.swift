@@ -21,7 +21,9 @@ final class NowPlaying {
     static let shared = NowPlaying()
     private static let lost = 1.5
 
-    private var block: String?
+    /// The player shown: a block's in one editor (`EditorController.player(_:)`), as the same
+    /// page open in two windows has players of its own.
+    private var player: String?
     private var title = ""
     private var controls: Controls?
     private var artwork: MPMediaItemArtwork?
@@ -30,20 +32,20 @@ final class NowPlaying {
 
     private init() {}
 
-    func show(block: String, title: String, cover: UIImage?, controls: Controls) {
+    func show(player: String, title: String, cover: UIImage?, controls: Controls) {
         if !listening {
             listening = true
             Self.listen()
         }
-        self.block = block
+        self.player = player
         self.title = title
         self.controls = controls
         artwork = (cover ?? UIImage(named: "NowPlayingCover")).map(Self.artwork)
         shown = nil
     }
 
-    func sync(at: Double, length: Double, on: Bool) {
-        guard block != nil else { return }
+    func sync(player: String, at: Double, length: Double, on: Bool) {
+        guard player == self.player else { return }
         let rate = PlaySpeed.current
         if let shown, shown.on == on, shown.length == length, shown.rate == rate {
             let ran = on ? Date().timeIntervalSince(shown.when) * Double(rate) : 0
@@ -62,9 +64,10 @@ final class NowPlaying {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    func clear(block id: String? = nil) {
-        guard block != nil, id == nil || id == block else { return }
-        block = nil
+    /// Takes away what `player` showed, unless another player has shown since.
+    func clear(player: String) {
+        guard player == self.player else { return }
+        self.player = nil
         controls = nil
         artwork = nil
         shown = nil

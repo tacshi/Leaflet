@@ -76,10 +76,16 @@ func ParseVideoURL(s string) (Video, bool) {
 			return Video{Provider: "youtube", ID: id, Start: startOf(t)}, true
 		}
 	case "vimeo.com", "player.vimeo.com":
-		for i := len(parts) - 1; i >= 0; i-- {
-			if !vimeoID.MatchString(parts[i]) {
-				continue
-			}
+		i := len(parts) - 1
+		for i >= 0 && !vimeoID.MatchString(parts[i]) {
+			i--
+		}
+		// The video is the last number of the path, but for an unlisted one's link, /<id>/<hash>, whose hash, ten hex
+		// digits, may be digits alone; a channel's number comes before its video's, as in /channels/<channel>/<id>.
+		if i > 0 && vimeoID.MatchString(parts[i-1]) && vimeoHash.MatchString(parts[i]) && (i < 2 || parts[i-2] != "channels") {
+			i--
+		}
+		if i >= 0 {
 			v := Video{Provider: "vimeo", ID: parts[i], Hash: q.Get("h")}
 			if i+1 < len(parts) && vimeoHash.MatchString(parts[i+1]) {
 				v.Hash = parts[i+1]

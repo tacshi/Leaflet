@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,12 +147,109 @@ func TestLeafletProjectWakesAPausedOne(t *testing.T) {
 	supabaseapi.Base, supabaseapi.Auth = srv.URL, ""
 	t.Cleanup(func() { supabaseapi.Base, supabaseapi.Auth = old, auth })
 
-	p, err := leafletProject(t.Context(), supabaseapi.Resume("r"))
+	p, choices, err := leafletProject(t.Context(), supabaseapi.Resume("r"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Ref != "paused" || !p.Healthy() || !restored {
-		t.Fatalf("project %+v, restored %v", p, restored)
+	if p.Ref != "paused" || !p.Healthy() || !restored || len(choices) != 0 {
+		t.Fatalf("project %+v, restored %v, choices %+v", p, restored, choices)
+	}
+}
+
+func TestPickProjectAsksWhichOfSeveral(t *testing.T) {
+	project := func(ref, status string) supabaseapi.Project {
+		return supabaseapi.Project{Ref: ref, Name: "Leaflet " + ref, Status: status}
+	}
+	older, newer := project("older", "ACTIVE_HEALTHY"), project("newer", "ACTIVE_HEALTHY")
+	paused, empty := project("paused", "INACTIVE"), project("empty", "ACTIVE_HEALTHY")
+	for name, tc := range map[string]struct {
+		found   provision.Found
+		last    string
+		want    string
+		choices string
+	}{
+		"one":                {found: provision.Found{Projects: []supabaseapi.Project{older}, Unfinished: []supabaseapi.Project{paused}}, want: "older"},
+		"several":            {found: provision.Found{Projects: []supabaseapi.Project{older, newer}, Unfinished: []supabaseapi.Project{paused, empty}}, choices: "older newer paused"},
+		"the one used last":  {found: provision.Found{Projects: []supabaseapi.Project{older, newer}}, last: "newer", want: "newer"},
+		"one used elsewhere": {found: provision.Found{Projects: []supabaseapi.Project{older, newer}}, last: "gone", choices: "older newer"},
+		"one paused":         {found: provision.Found{Unfinished: []supabaseapi.Project{paused, empty}}, want: "paused"},
+		"several paused":     {found: provision.Found{Unfinished: []supabaseapi.Project{paused, project("asleep", "INACTIVE")}}, choices: "paused asleep"},
+		"none":               {found: provision.Found{Unfinished: []supabaseapi.Project{empty}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, choices := pickProject(tc.found, tc.last)
+			var refs []string
+			for _, c := range choices {
+				refs = append(refs, c.Ref)
+			}
+			if p.Ref != tc.want || strings.Join(refs, " ") != tc.choices {
+				t.Errorf("picked %q, choices %v: want %q, choices %q", p.Ref, refs, tc.want, tc.choices)
+			}
+		})
+	}
+}
+
+func TestSignInAsksWhichOfTheAccountsProjects(t *testing.T) {
+	c, _ := open(t)
+	var mu sync.Mutex
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch path := r.URL.Path; {
+		case path == "/v1/oauth/token":
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,"token_type":"Bearer"}`)
+		case path == "/v1/organizations":
+			_, _ = io.WriteString(w, `[{"id":"1","slug":"me","name":"Me"}]`)
+		case path == "/v1/projects":
+			_, _ = io.WriteString(w, `[
+				{"ref":"newer","name":"Leaflet 2","status":"ACTIVE_HEALTHY","region":"eu-central-1","created_at":"2026-09-01","organization_slug":"me"},
+				{"ref":"older","name":"Leaflet","status":"ACTIVE_HEALTHY","region":"us-east-1","created_at":"2026-08-01","organization_slug":"me"}]`)
+		case strings.HasSuffix(path, "/database/migrations"):
+			_ = json.NewEncoder(w).Encode([]supabaseapi.Migration{{Version: provision.FirstMigration, Name: "init"}})
+		default:
+			mu.Lock()
+			asked = append(asked, path)
+			mu.Unlock()
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	old, auth := supabaseapi.Base, supabaseapi.Auth
+	supabaseapi.Base, supabaseapi.Auth = srv.URL, ""
+	t.Cleanup(func() { supabaseapi.Base, supabaseapi.Auth = old, auth })
+
+	callback := "https://leaflet-auth.capyvibe.app/auth/supabase?" + url.Values{"state": {"s"}, "code": {"c"}}.Encode()
+	raw, err := c.FinishSupabaseSignIn(callback, "s", "v")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got signedIn
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []supabaseProject{{Ref: "older", Name: "Leaflet", Region: "us-east-1"}, {Ref: "newer", Name: "Leaflet 2", Region: "eu-central-1"}}
+	if !slices.Equal(got.Projects, want) {
+		t.Fatalf("answered %s: want the projects to choose among, oldest first", raw)
+	}
+	if acct := account0(t, c); acct.SignedIn {
+		t.Error("signed in before a project was chosen")
+	}
+	if _, err := c.UseSupabaseProject("gone"); err == nil {
+		t.Error("signed in to a project not among those found")
+	}
+	seen := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(asked)
+	}
+	tried := func(ref string) bool {
+		return slices.ContainsFunc(seen(), func(path string) bool { return strings.HasPrefix(path, "/v1/projects/"+ref+"/") })
+	}
+	// The server here sets up no project, so each sign-in fails once it reaches the project.
+	if _, err := c.UseSupabaseProject("newer"); err == nil || !tried("newer") || tried("older") {
+		t.Fatalf("using the newer project: %v, asked %v", err, seen())
+	}
+	if _, err := c.UseSupabaseProject("older"); err == nil || !tried("older") {
+		t.Errorf("after one failed, using the other: %v, asked %v", err, seen())
 	}
 }
 

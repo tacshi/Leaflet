@@ -223,8 +223,7 @@ final class EditorClipboard {
         guard let link = p.link, !link.isEmpty else { return false }
         if range.length > 0 {
             textView.selectedRange = range
-            editor.format.set(.leafletHref, link)
-            return true
+            if editor.format.set(.leafletHref, link) { return true }
         }
         var attributes = editor.format.typing
         attributes[.leafletHref] = link

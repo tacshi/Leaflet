@@ -21,6 +21,12 @@ struct RecordingState: Codable, Equatable, Sendable {
 
     var recording: Bool { active || starting }
 
+    /// Whether the core is at work on a transcript: of a recording, as it stops or again, or of
+    /// an audio or video file.
+    var transcribes: Bool {
+        !transcribing.isEmpty || !transcribingFiles.isEmpty || !finishing.isEmpty
+    }
+
     static let idle = RecordingState()
 
     enum CodingKeys: String, CodingKey {

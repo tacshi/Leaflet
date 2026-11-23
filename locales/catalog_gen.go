@@ -267,6 +267,22 @@ func (msgs Messages) AppSavingRecording() string {
 	return Catalog.Format(msgs.locale, "appSavingRecording", nil)
 }
 
+// AppFinishingTranscription says "Finishing the transcription before Leaflet quits…"
+// in the language the app shows.
+//
+// Toast when quitting waits for an audio file's transcription under way to
+// finish; one that takes too long is stopped.
+func AppFinishingTranscription() string { return In(i18n.Locale()).AppFinishingTranscription() }
+
+// AppFinishingTranscription says "Finishing the transcription before Leaflet quits…"
+// in the language of msgs.
+//
+// Toast when quitting waits for an audio file's transcription under way to
+// finish; one that takes too long is stopped.
+func (msgs Messages) AppFinishingTranscription() string {
+	return Catalog.Format(msgs.locale, "appFinishingTranscription", nil)
+}
+
 // AppErrorSave says "Could not save: {error}"
 // in the language the app shows.
 //
@@ -5109,6 +5125,40 @@ func PubBusy() string { return In(i18n.Locale()).PubBusy() }
 // comment limit.
 func (msgs Messages) PubBusy() string {
 	return Catalog.Format(msgs.locale, "pubBusy", nil)
+}
+
+// PubNameTaken says "Someone on this page goes by that name. Choose another."
+// in the language the app shows.
+//
+// Public page (seen by visitors): the comment form, when the name typed is
+// that of the page's owner, of an agent or of someone else who comments on
+// the page, which a visitor can't take.
+func PubNameTaken() string { return In(i18n.Locale()).PubNameTaken() }
+
+// PubNameTaken says "Someone on this page goes by that name. Choose another."
+// in the language of msgs.
+//
+// Public page (seen by visitors): the comment form, when the name typed is
+// that of the page's owner, of an agent or of someone else who comments on
+// the page, which a visitor can't take.
+func (msgs Messages) PubNameTaken() string {
+	return Catalog.Format(msgs.locale, "pubNameTaken", nil)
+}
+
+// PubPageOwner says "Page owner"
+// in the language the app shows.
+//
+// Public page (seen by visitors): beside the name on a comment of the
+// page's owner, or in place of the name when the owner has set none.
+func PubPageOwner() string { return In(i18n.Locale()).PubPageOwner() }
+
+// PubPageOwner says "Page owner"
+// in the language of msgs.
+//
+// Public page (seen by visitors): beside the name on a comment of the
+// page's owner, or in place of the name when the owner has set none.
+func (msgs Messages) PubPageOwner() string {
+	return Catalog.Format(msgs.locale, "pubPageOwner", nil)
 }
 
 // PubStarting says "This page is getting ready. Reload in a moment."
@@ -10161,6 +10211,62 @@ func (msgs Messages) RecErrMicStalled(error string) string {
 	return Catalog.Format(msgs.locale, "recErrMicStalled", map[string]any{"error": error})
 }
 
+// RecMicDisconnected says "it was disconnected or turned off."
+// in the language the app shows.
+//
+// Why a recording paused on the computer: its microphone went away, as when
+// it is unplugged or a Bluetooth headset disconnects. Resuming records from
+// the microphone there is then. Follows 'The microphone stopped: '.
+func RecMicDisconnected() string { return In(i18n.Locale()).RecMicDisconnected() }
+
+// RecMicDisconnected says "it was disconnected or turned off."
+// in the language of msgs.
+//
+// Why a recording paused on the computer: its microphone went away, as when
+// it is unplugged or a Bluetooth headset disconnects. Resuming records from
+// the microphone there is then. Follows 'The microphone stopped: '.
+func (msgs Messages) RecMicDisconnected() string {
+	return Catalog.Format(msgs.locale, "recMicDisconnected", nil)
+}
+
+// RecMicHeld says "the system or another app is holding it."
+// in the language the app shows.
+//
+// Why a recording paused on the computer: the system or another app holds
+// the microphone, or stopped the app's sound, for now; the recording goes
+// on by itself when it is given back. Follows 'The microphone stopped: '.
+func RecMicHeld() string { return In(i18n.Locale()).RecMicHeld() }
+
+// RecMicHeld says "the system or another app is holding it."
+// in the language of msgs.
+//
+// Why a recording paused on the computer: the system or another app holds
+// the microphone, or stopped the app's sound, for now; the recording goes
+// on by itself when it is given back. Follows 'The microphone stopped: '.
+func (msgs Messages) RecMicHeld() string {
+	return Catalog.Format(msgs.locale, "recMicHeld", nil)
+}
+
+// RecMicRecorderGone says "the part of Leaflet that records stopped."
+// in the language the app shows.
+//
+// Why a recording paused on the computer, or did not start: the hidden web
+// page that records from the microphone crashed or was ended. Resuming
+// starts it again. Follows 'The microphone stopped: ' or 'The microphone
+// did not start: '.
+func RecMicRecorderGone() string { return In(i18n.Locale()).RecMicRecorderGone() }
+
+// RecMicRecorderGone says "the part of Leaflet that records stopped."
+// in the language of msgs.
+//
+// Why a recording paused on the computer, or did not start: the hidden web
+// page that records from the microphone crashed or was ended. Resuming
+// starts it again. Follows 'The microphone stopped: ' or 'The microphone
+// did not start: '.
+func (msgs Messages) RecMicRecorderGone() string {
+	return Catalog.Format(msgs.locale, "recMicRecorderGone", nil)
+}
+
 // RecErrLive says "Live transcript unavailable: {error}"
 // in the language the app shows.
 //
@@ -15149,6 +15255,34 @@ func ExternalCouldNotChangeSafely() string { return In(i18n.Locale()).ExternalCo
 // toast. Lowercase, as part of a sentence.
 func (msgs Messages) ExternalCouldNotChangeSafely() string {
 	return Catalog.Format(msgs.locale, "externalCouldNotChangeSafely", nil)
+}
+
+// ExternalUnsafeInCommandPrompt says "{command} runs in the Windows command prompt, which cannot take {argument} safely; set it up by hand instead"
+// in the language the app shows.
+//
+// Settings › External agents, on Windows: why an AI app could not be
+// connected, shown inside the externalConnectFailed toast, lowercase, as
+// part of a sentence. Its command-line tool is a batch file, as npm
+// installs claude.cmd, which runs in the command prompt; that would read a
+// character of what Leaflet passes it, as & or % in a folder's path, as a
+// command, so nothing was run. Set it up by hand is the section under the
+// apps (externalByHand).
+func ExternalUnsafeInCommandPrompt(command string, argument string) string {
+	return In(i18n.Locale()).ExternalUnsafeInCommandPrompt(command, argument)
+}
+
+// ExternalUnsafeInCommandPrompt says "{command} runs in the Windows command prompt, which cannot take {argument} safely; set it up by hand instead"
+// in the language of msgs.
+//
+// Settings › External agents, on Windows: why an AI app could not be
+// connected, shown inside the externalConnectFailed toast, lowercase, as
+// part of a sentence. Its command-line tool is a batch file, as npm
+// installs claude.cmd, which runs in the command prompt; that would read a
+// character of what Leaflet passes it, as & or % in a folder's path, as a
+// command, so nothing was run. Set it up by hand is the section under the
+// apps (externalByHand).
+func (msgs Messages) ExternalUnsafeInCommandPrompt(command string, argument string) string {
+	return Catalog.Format(msgs.locale, "externalUnsafeInCommandPrompt", map[string]any{"command": command, "argument": argument})
 }
 
 // ExternalConnectFailed says "Could not connect {app}: {error}"

@@ -22,8 +22,10 @@ version looks like 1.2.3 and the build is a positive integer, one the
 version hasn't had.
 
 The build is of a published commit: main must be checked out, with a clean
-Git worktree, at the commit origin/main is at. --allow-branch builds from
-another branch instead, which origin must have at the same commit.
+Git worktree, at the commit origin/main is at, before the build and once it
+is done. Files Git neither tracks nor ignores count too, as the build could
+take them in. --allow-branch builds from another branch instead, which
+origin must have at the same commit.
 
 It needs asc signed in to App Store Connect (asc auth login), Xcode 27,
 XcodeGen and Go, and an Apple Distribution identity of the team, or an Xcode
@@ -59,6 +61,7 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "$1 not found in PATH."
 }
 
+# shellcheck source-path=SCRIPTDIR source=lib/ios.sh
 source "${ROOT_DIR}/scripts/lib/ios.sh"
 
 run_xcodebuild() {
@@ -105,8 +108,8 @@ done
 
 cd "${ROOT_DIR}"
 
-[[ -z "$(git status --porcelain)" ]] ||
-  die "The worktree isn't clean. Commit or stash the changes before publishing."
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] ||
+  die "The worktree isn't clean, or has files Git neither tracks nor ignores. Commit or stash the changes before publishing."
 check_published_commit "${ALLOW_BRANCH}"
 COMMIT="$(git rev-parse HEAD)"
 log "Leaflet ${VERSION} (${BUILD_NUMBER}) from $(git branch --show-current) at $(git rev-parse --short HEAD)."
@@ -204,7 +207,7 @@ grep -qxF "${APP_DIR}PrivacyInfo.xcprivacy" "${WORK_DIR}/files" ||
   die "The IPA has no PrivacyInfo.xcprivacy (ios/Leaflet/Resources)."
 log "Built ${IPA#"${ROOT_DIR}"/}, with its icon."
 
-[[ "$(git rev-parse HEAD)" == "${COMMIT}" && -z "$(git status --porcelain --untracked-files=no)" ]] ||
+[[ "$(git rev-parse HEAD)" == "${COMMIT}" && -z "$(git status --porcelain --untracked-files=normal)" ]] ||
   die "The checkout changed while Leaflet ${VERSION} (${BUILD_NUMBER}) was built from ${COMMIT}, so the build isn't that commit's. Nothing was published."
 
 log "Publishing ${VERSION} (${BUILD_NUMBER}) to ${TESTFLIGHT_GROUP}..."

@@ -202,10 +202,14 @@ struct PageScreen: View {
         }
         .sheet(item: Binding(get: { scene.editingLink }, set: { scene.editingLink = $0 })) {
             node in
-            LinkSheet(kind: "video", current: node.data?["url"]?.string ?? "") { [scene] made in
+            LinkSheet(kind: "video", current: node.data?["url"]?.string ?? "") {
+                [scene, app] made in
                 guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
-                    now.type == "video", made.data?["url"] != now.data?["url"]
-                else { return }
+                    now.type == "video"
+                else {
+                    return app.show(Toast(message: L.appErrorSave(error: L.outlineBlockGone)))
+                }
+                guard made.data?["url"] != now.data?["url"] else { return }
                 var data = now.data ?? [:]
                 data["url"] = made.data?["url"]
                 data["title"] = made.data?["title"] ?? .string("")
@@ -217,13 +221,15 @@ struct PageScreen: View {
         .sheet(item: Binding(get: { scene.editingNotes }, set: { scene.editingNotes = $0 })) {
             node in
             NotesSheet(notes: node.data?["notes"]?.string ?? "", file: node.type == "file") {
-                [scene] notes in
-                guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
-                    now.type == "video" || now.type == "file"
-                else { return }
-                var data = now.data ?? [:]
-                data["notes"] = notes.isEmpty ? nil : .string(notes)
-                if data != (now.data ?? [:]) { editor.setData(data, ofBlock: node.id) }
+                [scene, app] notes in
+                do {
+                    guard let editor = scene.editor else { throw BlockGone() }
+                    try editor.changeBlock(node.id, type: node.type) {
+                        $0.setting(["notes"], from: notes.isEmpty ? [:] : ["notes": .string(notes)])
+                    }
+                } catch {
+                    app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+                }
             }
         }
         .alert(
@@ -252,8 +258,8 @@ struct PageScreen: View {
                 upload: link.id == "image" ? { uploadNext = true } : nil)
         }
         .sheet(isPresented: $embedding) {
-            EmbedSheet(author: app.status?.displayName ?? "") { [scene] in
-                scene.editor?.insertBlock($0)
+            EmbedSheet(author: app.status?.displayName ?? "") { [scene] embed, _ in
+                scene.editor?.insertBlock(embed)
             }
         }
         .task(id: pageID) {
@@ -351,23 +357,33 @@ struct PageScreen: View {
 
     private func rename(_ node: DocNode) {
         let name = scene.blockName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name != node.data?["title"]?.string else { return }
-        var data = node.data ?? [:]
-        data["title"] = .string(name)
-        scene.editor?.setData(data, ofBlock: node.id)
+        guard !name.isEmpty else { return }
+        let save = change(node)
+        do {
+            try save { $0.setting(["title"], from: ["title": .string(name)]) }
+        } catch {
+            app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+        }
+    }
+
+    /// Saves a change into a block as the page has it now: an agent or another
+    /// device may have changed it since its sheet opened on it.
+    private func change(_ node: DocNode) -> BlockChange {
+        { [scene] change in
+            guard let editor = scene.editor else { throw BlockGone() }
+            try editor.changeBlock(node.id, type: node.type, change)
+        }
     }
 
     @ViewBuilder private func blockSheet(_ node: DocNode) -> some View {
-        let save: ([String: JSONValue]) -> Void = { [scene] data in
-            scene.editor?.setData(data, ofBlock: node.id)
-        }
+        let save = change(node)
         if node.type == "chart" {
             ChartSheet(node: node, save: save)
         } else if node.type == "table" {
-            TableSheet(node: node) { [scene] table in scene.editor?.replaceBlock(table) }
+            TableSheet(node: node, save: save)
         } else if node.type == "embed" {
-            EmbedSheet(author: app.status?.displayName ?? "", editing: node) { [scene] embed in
-                scene.editor?.replaceBlock(embed)
+            EmbedSheet(author: app.status?.displayName ?? "", editing: node) { embed, changed in
+                try save { $0.setting(changed, from: embed.data ?? [:]) }
             }
         } else {
             SourceSheet(node: node, save: save)

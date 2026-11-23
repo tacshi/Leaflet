@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -46,6 +47,33 @@ func (s *Store) PutJob(j Job) error {
 		s.Notify("ai_jobs", j.PageID)
 	}
 	return err
+}
+
+// CommentJobs is the jobs of the runs asked in the comment thread commentID
+// starts, the oldest first.
+func (s *Store) CommentJobs(commentID string) ([]Job, error) {
+	rows, err := s.db.Query(`SELECT id, page_id, surface, focus_block_ids, comment_id, conversation_id, provider_id, model,
+		status, request, result, error, created_at, updated_at FROM ai_jobs WHERE comment_id = ? ORDER BY created_at`, commentID)
+	return collect(rows, err, scanJob)
+}
+
+func scanJob(sc scanner) (Job, error) {
+	var j Job
+	var focus, req string
+	var comment, conversation, res, failed sql.NullString
+	var created, updated int64
+	if err := sc.Scan(&j.ID, &j.PageID, &j.Surface, &focus, &comment, &conversation, &j.ProviderID, &j.Model,
+		&j.Status, &req, &res, &failed, &created, &updated); err != nil {
+		return j, err
+	}
+	j.CommentID, j.ConversationID, j.Error = comment.String, conversation.String, failed.String
+	j.CreatedAt, j.UpdatedAt = time.UnixMilli(created), time.UnixMilli(updated)
+	_ = json.Unmarshal([]byte(focus), &j.FocusBlockIDs)
+	_ = json.Unmarshal([]byte(req), &j.Request)
+	if res.Valid {
+		_ = json.Unmarshal([]byte(res.String), &j.Result)
+	}
+	return j, nil
 }
 
 func (s *Store) SetJobStatus(id, status string) (bool, error) {

@@ -56,7 +56,10 @@ type Core struct {
 	mgmt            *supabaseapi.Client
 	signInEnded     atomic.Int32
 
-	OpenURL      func(url string)
+	OpenURL func(url string)
+	// WatchICloud, Settings and SaveSettings are the app's own, which it reads and changes on its main thread: core
+	// calls them only from the methods the app calls there, as KeepICloud, and never from one that may run off it,
+	// as UseAccount.
 	WatchICloud  func(on bool)
 	Settings     func() store.Settings
 	SaveSettings func(store.Settings)

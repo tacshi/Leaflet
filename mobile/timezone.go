@@ -16,10 +16,7 @@ var setLocal = func(loc *time.Location) { time.Local = loc }
 
 func SetTimeZone(name string, offset int) {
 	defer catch(nil)
-	loc, err := time.LoadLocation(name)
-	if err != nil || name == "" {
-		loc = time.FixedZone(name, offset)
-	}
+	loc := location(name, offset)
 	zone.Lock()
 	defer zone.Unlock()
 	if zone.fixed {
@@ -29,6 +26,16 @@ func SetTimeZone(name string, offset int) {
 		return
 	}
 	setLocal(loc)
+}
+
+// location is the zone named name, such as "Pacific/Auckland", or one offset seconds east of
+// UTC in place of a name Go doesn't know.
+func location(name string, offset int) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil || name == "" {
+		loc = time.FixedZone(name, offset)
+	}
+	return loc
 }
 
 func fixZone() {

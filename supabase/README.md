@@ -44,10 +44,12 @@ Leaflet, then sets it up from this folder, built into the app:
   change to them), `_` and the first 16 hex digits of their sources' hash
   says which they are (the name, since the API lists secrets' values only
   as digests). A build never deploys over functions of its version or a
-  newer one, so two builds never take turns; a development build replaces
-  those of its own version, as they change while it is worked on. With
-  them it deletes the `agent`, `providers` and `stt` functions an earlier
-  build deployed, whose tables and keys `20261114000000` drops;
+  newer one, so two builds never take turns; it reads the secrets again
+  just before it deploys, as another device may have set the project up
+  with a newer build meanwhile. A development build replaces those of its
+  own version, as they change while it is worked on. With them it deletes
+  the `agent`, `providers` and `stt` functions an earlier build deployed,
+  whose tables and keys `20261114000000` drops;
 - the Realtime policy for a page's saves, once Realtime has made the table
   it goes on: until then the setup runs again as the app starts;
 - a 500 MiB upload limit, where the plan allows it.
@@ -228,22 +230,26 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
 
 ## Notes for the client
 
-- **Agents and speech to text** run on the device: of the server, a run
-  reads only `pages.public_link_until`. The tables `ai_jobs`,
-  `model_providers`, `stt_settings`, `stt_secrets`, `stt_jobs` and
-  `stt_file_jobs`, the Vault helpers and the `agent_…` RPCs stay as the
-  migrations make them, with their rows, for the `agent`, `providers` and
-  `stt` functions an earlier build deployed; the app neither reads nor
-  writes them. A provider such a build kept here stays listed on a device,
-  and runs once its key is pasted there.
+- **Agents and speech to text** run on the device, which keeps its
+  providers, speech settings and keys: of the server, a run reads only
+  `pages.public_link_until`. What the `agent`, `providers` and `stt`
+  functions of an earlier build worked through is gone since
+  `20261114000000`: the tables `ai_jobs`, `model_providers`,
+  `stt_settings`, `stt_secrets`, `stt_jobs` and `stt_file_jobs`, with
+  their rows, the keys they kept in Vault, and the RPCs they and the apps
+  called (the `agent_…` ones, `set_provider_secret`, `get_provider_secret`
+  and those of the speech-to-text keys). The app deletes the three
+  functions from a project as it sets it up. A device still on such a
+  build syncs as before, and runs no agent or transcription.
 - **Tree depth**: a tree goes at most 256 pages deep (`page_too_deep`); one
   already deeper stays, read to its deepest page, and its pages may change,
   or move no deeper.
 - **updated_at** is always set by the server (`clock_timestamp()`), on insert
   and update. Pull with `updated_at > cursor`; soft-deleted rows
   (`deleted_at`) come through the same pull. What is on a page deleted
-  before someone was shared it (its content, comments, recordings, files,
-  images) is not theirs: they pull the page's row, and nothing on it.
+  before someone was shared it (its content, history, comments,
+  recordings, files, images) is not theirs: they pull the page's row, and
+  nothing on it.
 - **Devices**: a device upserts its own `devices` row (its heartbeat), which
   the server stamps with the session it was written with; Account › Devices
   signs another out with `sign_out_device`, which revokes the row and ends
@@ -287,5 +293,7 @@ deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
   and so is none sent over one, so a device may send a recording whole
   without the path; only the recorder clears it, once the object is gone.
   No client deletes a recording's row: it goes with its page.
-  A deleted file (`deleted_at`) is read only by its space's owner and its
-  page's owner, who may remove its object.
+  A page's owner deletes a file someone else put on it only by its
+  `deleted_at`, never its row, which its space's owner keeps. A deleted
+  file is read only by its space's owner and its page's owner, who may
+  remove its object.

@@ -771,7 +771,7 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		panel.Children(func() {
 			ui.Icon(c, theme.Icon("link")).TextColor(pal.TextMuted).Margin(0, 2, 0, 6)
 			in := ui.TextInputBase(c.Key("link-url"), &e.linkDraft).Placeholder(locales.EditorPasteLink()).Grow(1).AutoFocus()
-			href, ok := linkHref(e.linkDraft)
+			href, ok := doc.LinkHref(e.linkDraft)
 			apply := func() {
 				e.SetLink(href)
 				e.linkOpen = false

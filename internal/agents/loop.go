@@ -62,6 +62,10 @@ type Turn struct {
 type ThreadComment struct {
 	Author string `json:"author"`
 	Body   string `json:"body"`
+	// A reply of the agent is an earlier turn of the thread, as a chat's are,
+	// with what the run that wrote it did, which a run after it follows.
+	Agent                           bool `json:"-"`
+	KeptToPage, Guarded, ReadOthers bool `json:"-"`
 }
 
 const (
@@ -129,9 +133,15 @@ func shownText(s string) string {
 func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev Events) (Result, error) {
 	tc.Request = req.Instruction
 	pagesBefore := len(req.History) > 0 && !req.KeptToPage
+	// The agent's earlier replies in a comment thread go to the model with the
+	// thread, whatever a run may read now, and with them what their runs read.
+	threadBefore := slices.ContainsFunc(req.Thread, func(c ThreadComment) bool { return c.Agent && !c.KeptToPage })
 	crossPage := tc.ListPages != nil || tc.ReadOtherPage != nil || tc.Workspace != nil && tc.Workspace.Reading
-	webBefore := slices.ContainsFunc(req.History, func(t Turn) bool { return t.Guarded })
-	if req.Web && req.SupportsTools && !pagesBefore {
+	webBefore := slices.ContainsFunc(req.History, func(t Turn) bool { return t.Guarded }) ||
+		slices.ContainsFunc(req.Thread, func(c ThreadComment) bool { return c.Agent && c.Guarded })
+	readOthers := req.ReadOthers || slices.ContainsFunc(req.Thread, func(c ThreadComment) bool { return c.Agent && c.ReadOthers })
+	armed := pagesBefore || threadBefore
+	if req.Web && req.SupportsTools && !armed {
 		if tc.ReadWeb == nil {
 			tc.ReadWeb = func(link string) (web.Page, error) { return web.Read(ctx, link) }
 		}
@@ -144,12 +154,12 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	if tc.Captions == nil {
 		tc.Captions = func(v doc.Video) (web.Captions, error) { return web.ReadCaptions(ctx, v) }
 	}
-	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise, armed: pagesBefore, readOthers: req.ReadOthers}
+	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise, armed: armed, readOthers: readOthers}
 	if webBefore {
 		exec.saw()
 	}
 	exec.begin()
-	held := pagesBefore && crossPage
+	held := pagesBefore && crossPage || threadBefore
 	result := func(reply string) Result {
 		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages && !held, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
 	}

@@ -259,6 +259,8 @@ struct NowPlayingBar: View {
     }
 
     @State private var block: String?
+    /// The player this bar shows on the lock screen, of its editor (`NowPlaying`).
+    @State private var shown: String?
     @State private var title = ""
     @State private var away = false
     @State private var at: Double = 0
@@ -268,13 +270,16 @@ struct NowPlayingBar: View {
     private var following: Bool { PlayerSettings.shared.following }
     @Environment(\.horizontalSizeClass) private var width
 
+    /// What plays in this bar's editor: a file or a recording played in another window is that
+    /// window's to show and steer.
     private var playing: Playing? {
         let (files, recorder) = (FilePlayback.shared, Recorder.shared)
         _ = recorder.changes
-        let recording = recorder.playing.map(Playing.recording)
-        let file = files.block.map(Playing.file)
-        if files.playing { return file }
-        if recorder.player?.isPlaying == true { return recording }
+        let players = editor?.players
+        let recording = recorder.plays(in: players) ? recorder.playing.map(Playing.recording) : nil
+        let file = files.owner == players ? files.block.map(Playing.file) : nil
+        if files.playing, let file { return file }
+        if recorder.player?.isPlaying == true, let recording { return recording }
         return file ?? recording
     }
 
@@ -349,24 +354,25 @@ struct NowPlayingBar: View {
         }
         .task(id: playing) {
             away = false
-            guard let playing else {
-                NowPlaying.shared.clear()
+            guard let playing, let found = find(playing) else {
+                if let shown { NowPlaying.shared.clear(player: shown) }
+                shown = nil
                 return
             }
-            guard let found = find(playing) else { return }
-            (block, title) = (found.id, found.title)
+            let player = editor?.player(found.id) ?? found.id
+            (block, title, shown) = (found.id, found.title, player)
             NowPlaying.shared.show(
-                block: found.id, title: found.title, cover: Self.cover(playing),
+                player: player, title: found.title, cover: Self.cover(playing),
                 controls: Self.controls(playing))
             while !Task.isCancelled {
                 away = found.audio && !(editor?.showsHead(ofBlock: found.id) ?? true)
                 read(playing)
-                NowPlaying.shared.sync(at: at, length: length, on: on)
+                NowPlaying.shared.sync(player: player, at: at, length: length, on: on)
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
         .onDisappear {
-            if let block { NowPlaying.shared.clear(block: block) }
+            if let shown { NowPlaying.shared.clear(player: shown) }
         }
     }
 

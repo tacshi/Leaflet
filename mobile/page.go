@@ -3,6 +3,7 @@ package mobile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -31,6 +32,10 @@ type openPage struct {
 	coded          map[*doc.Node][]byte
 }
 
+// A pageEditor keeps, for one editor of the page, what it was shown at each
+// rev its next edit may be over: at last, the rev it shows or last edited
+// over, however many revs come after it, and of the later ones the newest,
+// within keepRevs and keepBytes.
 type pageEditor struct {
 	seen  map[int64]*doc.Content
 	sizes map[int64]int
@@ -42,21 +47,24 @@ const (
 	keepBytes = 32 << 20
 )
 
+// errRevGone answers an editor for a rev the page no longer keeps for it:
+// what the editor showed there is gone, so nothing tells its own changes
+// from the ones it was shown.
+var errRevGone = errors.New("the page no longer keeps the rev this editor shows")
+
 func snapshot(c *doc.Content) *doc.Content {
 	return &doc.Content{Children: c.Children, Blocks: c.Blocks, Deleted: c.Deleted}
 }
 
-func (e *pageEditor) base(rev int64) *doc.Content {
-	if c := e.seen[rev]; c != nil {
-		return c
-	}
-	at := int64(-1)
+// keepFrom makes rev the one the editor's next edits are over: it is kept
+// whatever comes after it, and the revs before it are let go.
+func (e *pageEditor) keepFrom(rev int64) {
+	e.last = rev
 	for r := range e.seen {
-		if r < rev && r > at {
-			at = r
+		if r < rev {
+			e.forget(r)
 		}
 	}
-	return e.seen[at]
 }
 
 func (e *pageEditor) saw(rev int64, c *doc.Content, size int) {
@@ -181,7 +189,10 @@ func (p *openPage) edit(e *pageEditor, edit *doc.Content, rev int64, size int) e
 	if rev == p.rev && len(p.editors) == 1 {
 		p.cur = edit
 	} else {
-		base := e.base(rev)
+		base := e.seen[rev]
+		if base == nil {
+			return errRevGone
+		}
 		local := edit.Stamped(base, time.Now().UnixMilli())
 		merged, conflicts := doc.Merge(base, local, p.cur)
 		for _, cf := range conflicts {
@@ -193,14 +204,52 @@ func (p *openPage) edit(e *pageEditor, edit *doc.Content, rev int64, size int) e
 		p.bump(merged, len(raw))
 		p.c.ev.pageUpdated(p.id, raw, p.rev, "merge", false)
 	}
-	e.last = rev
+	e.keepFrom(rev)
 	e.saw(rev, snapshot(edit), size)
-	for r := range e.seen {
-		if r < rev {
-			e.forget(r)
+	p.live.Edited()
+	return nil
+}
+
+// ShowedRev tells the page which rev an editor shows, the one its next
+// edits are over: what the editor was shown there is kept for them, however
+// many revs come after. Should that rev be gone already, as when many came
+// before the editor took it, content is what the editor shows there, kept in
+// its place; with no content, the answer is errRevGone.
+func (c *Core) ShowedRev(id string, editor int64, rev int64, content string) (err error) {
+	defer catch(&err)
+	var shown *doc.Content
+	if content != "" {
+		if shown, err = doc.DecodeEdit(content); err != nil {
+			return err
 		}
 	}
-	p.live.Edited()
+	c.q.do(func() {
+		p := c.pages[id]
+		if p == nil || p.editors[editor] == nil {
+			err = errNotOpen
+			return
+		}
+		if rev > p.rev {
+			err = fmt.Errorf("the editor shows rev %d, after the page's %d", rev, p.rev)
+			return
+		}
+		err = p.editors[editor].showed(rev, shown, len(content))
+	})
+	return err
+}
+
+func (e *pageEditor) showed(rev int64, shown *doc.Content, size int) error {
+	if rev < e.last {
+		return nil
+	}
+	kept := e.seen[rev] != nil
+	if !kept && shown == nil {
+		return errRevGone
+	}
+	e.keepFrom(rev)
+	if !kept {
+		e.saw(rev, shown, size)
+	}
 	return nil
 }
 

@@ -584,6 +584,62 @@ func (s *stuckTranscriber) File(path, language string) (string, error) {
 	return `{"done":true,"segments":[]}`, nil
 }
 
+// finishLater transcribes a stream once it is let.
+type finishLater struct {
+	fakeTranscriber
+	release chan struct{}
+}
+
+func (f *finishLater) Finish(id string) (string, error) {
+	<-f.release
+	return f.fakeTranscriber.Finish(id)
+}
+
+func TestVoiceNoteRightAfterAMicTestIsNoTest(t *testing.T) {
+	c, _ := open(t)
+	c.UseMicrophone(&fakeMic{closed: make(chan struct{}, 2)})
+	tr := &finishLater{
+		fakeTranscriber: fakeTranscriber{heard: map[string]int{}, sinks: map[string]*TranscriptSink{}},
+		release:         make(chan struct{}),
+	}
+	c.UseTranscriber(tr)
+	state := func() recordingState {
+		var st recordingState
+		raw, _ := c.RecordingState()
+		_ = json.Unmarshal([]byte(raw), &st)
+		return st
+	}
+	until := func(what string, done func(recordingState) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !done(state()); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("never %s: %+v", what, state())
+			}
+		}
+	}
+	if err := c.TestMicrophone(); err != nil {
+		t.Fatal(err)
+	}
+	until("testing", func(st recordingState) bool { return st.Active && st.Testing })
+	// The Action Button pressed during the test stops it and records a
+	// voice note, while the test's transcription has yet to come back.
+	c.StopRecording()
+	id, err := c.RecordNewPage("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	until("recording the voice note", func(st recordingState) bool { return st.Active && st.PageID == id })
+	if st := state(); st.Testing {
+		t.Errorf("the voice note reads as the microphone test: %+v", st)
+	}
+	close(tr.release)
+	c.StopRecording()
+	until("transcribed", func(st recordingState) bool { return !st.Active && len(st.Transcribing) == 0 })
+	if st := state(); st.Testing {
+		t.Errorf("a test reads as under way once all is done: %+v", st)
+	}
+}
+
 func TestStuckEngineIsGivenUpOn(t *testing.T) {
 	slack := onDeviceSlack
 	onDeviceSlack = 50 * time.Millisecond

@@ -101,6 +101,8 @@ final class EditorController: NSObject, UITextViewDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(refreshDue),
             name: UIApplication.significantTimeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(codeColored(_:)), name: CodeHighlighter.colored, object: nil)
         textView.registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
             [weak self] (_: EditorTextView, previous: UITraitCollection) in
             guard let self,
@@ -137,6 +139,18 @@ final class EditorController: NSObject, UITextViewDelegate {
 
     @objc private func refreshDue() { due.refresh() }
 
+    /// Colors worked out off the main thread for a code block go on it once
+    /// it is styled again, if its code is still what they were for. Text
+    /// being composed is left alone: the edit that ends it styles it again.
+    @objc private func codeColored(_ note: Notification) {
+        guard let id = note.object as? String, !session.updating, !session.composing,
+            let block = text.blocks().first(where: { $0.info.id == id && $0.info.type == "code" })
+        else { return }
+        storage.beginEditing()
+        style.apply(to: storage, in: block.range)
+        storage.endEditing()
+    }
+
     func load(_ content: DocContent, tinted: Set<String>) {
         session.load(content, tinted: tinted)
     }
@@ -167,6 +181,11 @@ final class EditorController: NSObject, UITextViewDelegate {
             Set(text.blocks().filter { $0.info.type == "video" }.map { player($0.info.id) }))
         FilePlayback.shared.stop(
             Set(text.blocks().filter { $0.info.type == "file" }.map { $0.info.id }),
+            in: players)
+        Recorder.shared.stopPlaying(
+            Set(
+                text.blocks().filter { $0.info.type == "recording" }
+                    .compactMap { $0.info.data["recording_id"]?.string }),
             in: players)
         textView.blocks.reset()
         // Undo keeps its targets unowned, so nothing may be undone on them once they are gone.
@@ -473,6 +492,10 @@ final class EditorController: NSObject, UITextViewDelegate {
     }
 
     func replaceBlock(_ node: DocNode) { commands.replaceBlock(node) }
+
+    func changeBlock(_ id: String, type: String, _ change: (DocNode) throws -> DocNode) throws {
+        try commands.changeBlock(id, type: type, change)
+    }
 
     func removeBlock(_ id: String) { commands.removeBlock(id) }
 

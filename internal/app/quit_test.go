@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"leaflet/internal/keychain"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 type testMic struct{}
@@ -122,6 +124,61 @@ func TestQuitDoesNotWaitForever(t *testing.T) {
 	e = &mygo.QuitEvent{}
 	if a.beforeQuit(e); e.DefaultPrevented() {
 		t.Error("the quit after the wait is held too")
+	}
+}
+
+func TestQuitWaitsForAFileTranscriptionThenCutsItShort(t *testing.T) {
+	quits := 0
+	quit, wait := quitApp, quitWait
+	quitApp, quitWait = func() { quits++ }, 10*time.Millisecond
+	defer func() { quitApp, quitWait = quit, wait }()
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	asked, ended := make(chan struct{}, 1), make(chan struct{}, 1)
+	stuck := make(chan struct{})
+	hs := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// The audio read, the server hears the request given up on.
+		_, _ = io.Copy(io.Discard, r.Body)
+		asked <- struct{}{}
+		select {
+		case <-stuck:
+		case <-r.Context().Done():
+			ended <- struct{}{}
+		}
+	}))
+	defer hs.Close()
+	defer close(stuck)
+	src := filepath.Join(t.TempDir(), "Board meeting.m4a")
+	if err := os.WriteFile(src, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.rec.Attach(&testCapture{}, a.update)
+	var answer error
+	stt := store.SttSettings{Provider: recording.Endpoint, BaseURL: hs.URL}
+	if err := a.rec.TranscribeFile(f, "b1", stt, true, func(_ []store.Segment, err error) { answer = err }); err != nil {
+		t.Fatal(err)
+	}
+	<-asked
+	e := &mygo.QuitEvent{}
+	a.beforeQuit(e)
+	if !e.DefaultPrevented() || quits != 1 {
+		t.Fatalf("held %v, asked to quit %d times", e.DefaultPrevented(), quits)
+	}
+	if n := len(a.toasts); n == 0 || a.toasts[n-1].text != locales.AppFinishingTranscription() {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the transcription goes on after the quit")
+	}
+	if answer == nil || answer.Error() != locales.RecErrQuit() || a.rec.Saving() != 0 {
+		t.Errorf("answered %v, %d saving", answer, a.rec.Saving())
 	}
 }
 

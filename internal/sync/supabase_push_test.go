@@ -643,6 +643,118 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 	}
 }
 
+// A settle that finds the recording's audio_path still waiting to go up sends it along, while the row is still as
+// this device had it.
+func TestSettleTakesAChangeWaitingWithIt(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "soniox", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.AudioPath = "u1/" + r.ID + ".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SettleRecording(r.ID, "transcribing", false, func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+		t.Fatal(err)
+	}
+	var patched []map[string]any
+	srv := &refusing{patch: func(_ string, req *http.Request) []map[string]any {
+		var row map[string]any
+		_ = json.NewDecoder(req.Body).Decode(&row)
+		if req.URL.Query().Get("status") == "eq.transcribing" {
+			patched = append(patched, row)
+		}
+		return []map[string]any{{"id": r.ID}}
+	}}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(patched) != 1 || patched[0]["status"] != "failed" || patched[0]["audio_path"] != "u1/"+r.ID+".wav" || st.PendingCount() != 0 {
+		t.Errorf("settled with %v, %d queued", patched, st.PendingCount())
+	}
+}
+
+// A settle waits here when its error is dismissed; another device had settled the recording first. The dismissal goes
+// only as the settle does, so the transcript made there stays, here as on the server.
+func TestAChangeAfterASettleGoesAsTheSettleDoes(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "soniox", "", "", "auto")
+	if r, err = st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.SettleRecording(r.ID, "transcribing", false, func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Error = "" }); err != nil {
+		t.Fatal(err)
+	}
+	server := store.RecordingToRemote(r)
+	server["status"], server["transcript"] = "ready", []map[string]any{{"text": "Theirs"}}
+	server["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	var held []string
+	hs := httptest.NewServer(&refusing{rows: map[string]map[string]any{"recordings": server},
+		patch: func(_ string, req *http.Request) []map[string]any {
+			held = append(held, req.URL.Query().Get("status"))
+			return nil
+		}})
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if len(held) != 1 || held[0] != "eq.transcribing" {
+		t.Errorf("updated the recording held to %q, want only while it was still transcribing", held)
+	}
+	if st.PendingCount() != 0 || got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Theirs" {
+		t.Errorf("%d queued; recording %s %v", st.PendingCount(), got.Status, got.Transcript)
+	}
+}
+
+// Transcribing a recording again while its settle waits is a change of this device's own: it goes as it is.
+func TestTranscribingAgainAfterASettleGoesAsItIs(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "soniox", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.SettleRecording(r.ID, "transcribing", false, func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status, x.Error = "transcribing", "" }); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := st.Pending()
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending %v, %v", pending, err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(pending[0].Payload), &row); err != nil {
+		t.Fatal(err)
+	}
+	if _, held := row[store.IfStatusKey]; held || row["status"] != "transcribing" {
+		t.Errorf("queued %v, want the new status as it is", row)
+	}
+}
+
 func TestRefusedRecordingTakesTheServers(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -670,6 +782,102 @@ func TestRefusedRecordingTakesTheServers(t *testing.T) {
 	got, _ := st.Recording(r.ID)
 	if st.PendingCount() != 0 || got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Theirs" {
 		t.Errorf("%d queued; recording %s %v", st.PendingCount(), got.Status, got.Transcript)
+	}
+}
+
+// A recording failed here; another device has transcribed it since. Dismissing the error here sends the error alone,
+// so the transcript made there stays on the server.
+func TestDismissedErrorGoesUpAlone(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "", "", "", "auto")
+	if r, err = st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status, x.Error = "failed", "no network" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Error = "" }); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var sent []map[string]any
+	var methods []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		out := []map[string]any{}
+		if req.URL.Path == "/rest/v1/recordings" && req.Method != http.MethodGet {
+			var row map[string]any
+			_ = json.NewDecoder(req.Body).Decode(&row)
+			mu.Lock()
+			sent, methods = append(sent, row), append(methods, req.Method)
+			mu.Unlock()
+			out = append(out, map[string]any{"id": r.ID})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || methods[0] != http.MethodPatch || len(sent[0]) != 2 || sent[0]["error"] != nil || sent[0]["changed_at"] == nil {
+		t.Errorf("sent %v as %v, want the error alone", sent, methods)
+	}
+	if st.HasPending("recordings", r.ID) {
+		t.Error("the dismissal still waits")
+	}
+}
+
+// Audio that went up sets the recording's audio_path on the server as the one column it changed: the row, which
+// another device may have transcribed since, does not go whole.
+func TestUploadedAudioSetsItsPathAlone(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Standup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := t.TempDir() + "/a.wav"
+	if err := os.WriteFile(local, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := st.CreateRecording(p.ID, "b1", "", "", local, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err = st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if err := st.QueueUpload(r); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var rows []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		out := []map[string]any{}
+		if req.URL.Path == "/rest/v1/recordings" && req.Method != http.MethodGet {
+			var row map[string]any
+			_ = json.NewDecoder(req.Body).Decode(&row)
+			mu.Lock()
+			rows = append(rows, req.Method+" "+strings.Join(slices.Sorted(maps.Keys(row)), ","))
+			mu.Unlock()
+			out = append(out, map[string]any{"id": r.ID})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := st.Recording(r.ID); got.AudioPath != "u1/"+r.ID+".wav" || st.PendingCount() != 0 {
+		t.Fatalf("audio path %q, %d waiting", got.AudioPath, st.PendingCount())
+	}
+	if want := []string{"PATCH audio_path,changed_at"}; !slices.Equal(rows, want) {
+		t.Errorf("recording rows sent %v, want %v", rows, want)
 	}
 }
 
@@ -1040,6 +1248,82 @@ func TestAdoptedPulledRowsGoOnlyWhenChangedHere(t *testing.T) {
 		}
 		if st.HasPending("pages", id) {
 			t.Errorf("%s: still queued", tc.name)
+		}
+	}
+}
+
+// A page's row last changed here two hours ago, and on the server an hour ago, where another device renamed or deleted
+// it. Since, this device edited only the page's content: joining the account, it takes the server's row, as its own
+// did not change after the server's.
+func TestAdoptedPageWithOnlyItsContentEditedTakesTheServersRow(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		edited, deleted bool
+	}{
+		{name: "renamed there"},
+		{name: "content edited here, renamed there", edited: true},
+		{name: "content edited here, deleted there", edited: true, deleted: true},
+	} {
+		st := openStore(t)
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: doc.FromBlocks([]*doc.Node{para("b1", "one")})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dequeueAll(t, st)
+		now := time.Now()
+		if _, err := st.DB().Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, now.Add(-2*time.Hour).UnixMilli(), p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if p, err = st.Page(p.ID); err != nil {
+			t.Fatal(err)
+		}
+		stamp := func(at time.Time) string { return at.UTC().Format(time.RFC3339Nano) }
+		there := store.PageToRemote(p)
+		there["updated_at"], there["changed_at"] = stamp(now.Add(-time.Hour)), stamp(now.Add(-time.Hour))
+		if tc.deleted {
+			there["deleted_at"] = stamp(now.Add(-time.Hour))
+		} else {
+			there["title"] = "Plan, renamed there"
+		}
+		if tc.edited {
+			c := st.Content(p.ID)
+			c.Find("b1").SetDelta(doc.Delta{{Text: "one, edited here"}})
+			if _, _, err := st.SaveContent(p.ID, c); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.Requeue("pages", p.ID); err != nil {
+			t.Fatal(err)
+		}
+		var mu gosync.Mutex
+		var sent []map[string]any
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			out := []map[string]any{}
+			if r.URL.Path == "/rest/v1/pages" {
+				if r.Method == http.MethodGet {
+					out = append(out, there)
+				} else {
+					var row map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&row)
+					mu.Lock()
+					sent = append(sent, row)
+					mu.Unlock()
+					out = append(out, row)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		hs.Close()
+		if len(sent) != 0 {
+			t.Errorf("%s: the row went over the server's newer one: %v", tc.name, sent)
+		}
+		got, _ := st.Page(p.ID)
+		if got.Title != store.S(there, "title") || got.DeletedAt.IsZero() != !tc.deleted {
+			t.Errorf("%s: page %q, deleted %v; want the server's", tc.name, got.Title, got.DeletedAt)
 		}
 	}
 }

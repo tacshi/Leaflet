@@ -1,7 +1,6 @@
 package editor
 
 import (
-	"net/url"
 	"slices"
 	"strings"
 	"unicode"
@@ -943,31 +942,6 @@ func (e *Editor) SetLink(url string) {
 			a.Mention = nil
 		}
 	})
-}
-
-func linkHref(typed string) (href string, ok bool) {
-	s := strings.TrimSpace(typed)
-	lower := strings.ToLower(s)
-	if _, page := doc.PageLinkID(s); s == "" || page || doc.WebURL(s) {
-		return s, true
-	}
-	if strings.ContainsAny(s, " \t\n") {
-		return "", false
-	}
-	if strings.HasPrefix(lower, "mailto:") {
-		return s, len(s) > len("mailto:")
-	}
-	if user, host, at := strings.Cut(s, "@"); at && user != "" && strings.Contains(host, ".") && !strings.ContainsAny(s, "/:") {
-		return "mailto:" + s, true
-	}
-	if strings.Contains(s, "://") {
-		return "", false
-	}
-	u, err := url.Parse("https://" + s)
-	if err != nil || !doc.WebURL(u.String()) || !strings.Contains(u.Hostname(), ".") && u.Hostname() != "localhost" {
-		return "", false
-	}
-	return "https://" + s, true
 }
 
 func (e *Editor) LinkAt() string {

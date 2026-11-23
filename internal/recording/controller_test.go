@@ -834,7 +834,7 @@ func TestCloudEndpointTranscribesFromTheDevice(t *testing.T) {
 	if err := os.WriteFile(path, WavFromPCM(make([]byte, 3200)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	segs, err := r.transcribe(store.Recording{ID: "r1"}, path, nil, stt)
+	segs, err := r.transcribe(context.Background(), store.Recording{ID: "r1"}, path, nil, stt)
 	if err != nil || len(segs) != 1 || segs[0].Text != "Hello." || segs[0].EndMs != 1500 {
 		t.Fatalf("segments %+v, %v", segs, err)
 	}
@@ -842,7 +842,7 @@ func TestCloudEndpointTranscribesFromTheDevice(t *testing.T) {
 		t.Errorf("asked %+v", a)
 	}
 	stt.BaseURL = "https://elsewhere.example.com/v1"
-	if _, err := r.transcribe(store.Recording{ID: "r1"}, path, nil, stt); err != nil {
+	if _, err := r.transcribe(context.Background(), store.Recording{ID: "r1"}, path, nil, stt); err != nil {
 		t.Fatal(err)
 	}
 	if a := <-got; a.host != "elsewhere.example.com" || a.auth != "" {

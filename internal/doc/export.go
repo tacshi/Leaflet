@@ -343,6 +343,18 @@ func markdownLines(md string) []string {
 				i += n
 				continue
 			}
+		case '$':
+			// A formula stays on one line, its line breaks spaces, as TeX reads them: cut at one as code is, it would
+			// read back as text and code.
+			if tex, n := links.mathAt(i); n > 0 {
+				if strings.Contains(tex, "\n") {
+					b.WriteString("$" + codeSpan(strings.ReplaceAll(tex, "\n", " ")) + "$")
+				} else {
+					b.WriteString(string(s[i : i+n]))
+				}
+				i += n
+				continue
+			}
 		case '`':
 			code, n := codeSpanAt(s[i:])
 			switch {
@@ -459,6 +471,18 @@ func cellMarkdown(md string) string {
 				span := string(s[i : i+n])
 				if strings.Contains(code, "\n") {
 					span = codeSpan(strings.ReplaceAll(code, "\n", " "))
+				}
+				b.WriteString(strings.ReplaceAll(span, "|", `\|`))
+				i += n
+				continue
+			}
+		case '$':
+			// A formula goes as code does: its line breaks spaces, as TeX reads them, and its pipes escaped, but
+			// for none of its backslashes, which are its TeX's.
+			if tex, n := links.mathAt(i); n > 0 {
+				span := string(s[i : i+n])
+				if strings.Contains(tex, "\n") {
+					span = "$" + codeSpan(strings.ReplaceAll(tex, "\n", " ")) + "$"
 				}
 				b.WriteString(strings.ReplaceAll(span, "|", `\|`))
 				i += n

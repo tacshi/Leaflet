@@ -21,9 +21,12 @@ them and install.ps1 finds its installer. Installed copies see the update
 once the draft is published. A release that is published already is refused:
 its files are what installed copies took. So is a draft of another commit,
 which the draft records as it is made: a release tags one commit. So is a
-working tree with changes, before the build and again once it is done: the
-build would not be that commit's. It needs the version named, as mygo.json's
-is no release's.
+working tree with changes, or with files git neither tracks nor ignores,
+before the build and again once it is done: the build would not be that
+commit's. So, for that, is -Out in the checkout but outside what git
+ignores. It needs the version named, as mygo.json's is no release's. The
+draft holds no manifest of the platforms being uploaded until their other
+files are up.
 
 Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 LEAFLET_UPDATE_KEY, by default
@@ -33,11 +36,13 @@ made with
 Its public half is updates.publicKey in mygo.json.
 
 Signs with the .pfx LEAFLET_WINDOWS_CERTIFICATE names, whose password is
-MYGO_WINDOWS_CERTIFICATE_PASSWORD, using signtool from the Windows SDK, and
-fails if any program of the build comes out unsigned; without it the builds
-are unsigned and SmartScreen warns about them, and -Upload refuses them
-unless -AllowUnsigned, or LEAFLET_ALLOW_UNSIGNED=1, says to upload them
-anyway.
+MYGO_WINDOWS_CERTIFICATE_PASSWORD, using Set-AuthenticodeSignature
+(scripts\sign-windows.ps1, which reads the password from the environment),
+and fails if any program of the build comes out unsigned; signing also
+needs an NSIS installed to be 3.08 or later, which signs the installer's
+uninstaller. Without a certificate the builds are unsigned and SmartScreen
+warns about them, and -Upload refuses them unless -AllowUnsigned, or
+LEAFLET_ALLOW_UNSIGNED=1, says to upload them anyway.
 
 Paths given, -Out, -Changelog and those in LEAFLET_WINDOWS_CERTIFICATE and
 LEAFLET_UPDATE_KEY, are from where this is run.
@@ -78,7 +83,12 @@ $Config = @("version=$Version")
 if ($Changelog) { $Config += "updates.changelog=$Changelog" }
 $Certificate = Get-WindowsCertificate
 if ($Certificate) {
-	$Config += "windows.certificate=$Certificate"
+	Test-Nsis
+	# Not windows.certificate, with which MyGo puts the password on
+	# signtool's command line for every program it signs.
+	Need pwsh
+	$env:LEAFLET_WINDOWS_CERTIFICATE = $Certificate
+	$Config += 'windows.signCommand=pwsh -NoProfile -NonInteractive -File scripts\sign-windows.ps1 %1'
 } elseif ($Upload -and -not $AllowUnsigned -and $env:LEAFLET_ALLOW_UNSIGNED -ne '1') {
 	Fail 'LEAFLET_WINDOWS_CERTIFICATE is not set, so -Upload would publish unsigned Windows builds; set it, or add -AllowUnsigned (or LEAFLET_ALLOW_UNSIGNED=1) to upload them anyway'
 } else {
@@ -91,6 +101,13 @@ if ($Upload) {
 	Test-Gh
 	Test-Draft $Version
 	Need git
+	$inside = [IO.Path]::GetRelativePath($RootDir, $Out)
+	if (-not [IO.Path]::IsPathRooted($inside) -and $inside -ne '..' -and -not $inside.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")) {
+		& git check-ignore -q $Out
+		if ($LASTEXITCODE -ne 0) {
+			Fail '-Upload needs -Out outside the checkout or in a folder git ignores, as build\ is: what the build writes would otherwise count as a change to the commit it records'
+		}
+	}
 	$Commit = & git rev-parse HEAD
 	if ($LASTEXITCODE -ne 0) { Fail 'git rev-parse HEAD failed' }
 	Test-Pushed $Commit
@@ -101,8 +118,8 @@ try {
 	if ($Upload) {
 		# Held first: another build of this checkout has mygo.json changed until it ends.
 		Hold-Config
-		if (& git status --porcelain) {
-			Fail '-Upload needs a clean working tree, as the draft release records the commit as what was built; commit or stash the changes first'
+		if (& git status --porcelain --untracked-files=normal) {
+			Fail '-Upload needs a clean working tree, with no file git neither tracks nor ignores, as the draft release records the commit as what was built; commit or stash the changes first'
 		}
 	}
 	Set-Config $Config

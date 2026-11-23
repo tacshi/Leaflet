@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -849,5 +851,128 @@ func TestPubEmbedPageLeadsItsFrames(t *testing.T) {
 	page := pubEmbedPage(`<iframe srcdoc="<script>new RTCPeerConnection()</script>"></iframe>`)
 	if n := strings.Count(page, "function noRTCNested"); n != 2 {
 		t.Errorf("NoRTCNested is in the embed and its frame %d times: %s", n, page)
+	}
+}
+
+func TestPubCommentsSayWhoWroteThem(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	const origin = "https://quiet-river.trycloudflare.com"
+	if w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"Is the trip still on?"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("a visitor's thread: %d", w.Code)
+	}
+	threads, _ := a.st.Threads(pg.ID)
+	root := threads[0].Root
+	// The owner, who has set no name, answers in the app, and so does an
+	// agent.
+	if _, err := a.st.AddComment(pg.ID, "p1", "Yes, it is.", root.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.AddComment(pg.ID, "p1", "The bus leaves at nine.", root.ID, "", "agent", "Claude"); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	page := get(h, "/tok/").Body.String()
+	for _, want := range []string{
+		`<strong>Ann</strong> <span class="ctag guest">` + html.EscapeString(locales.PanelViaPublicLink()) + `</span>`,
+		`<strong>` + html.EscapeString(locales.PubPageOwner()) + `</strong> <span class="muted">`,
+		`<strong>Claude</strong> <span class="ctag agent">` + html.EscapeString(locales.CommonAgent()) + `</span>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("no %s in\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, "<strong>"+html.EscapeString(locales.CommonYou())+"</strong>") {
+		t.Error("the owner's reply reads as the visitor's own")
+	}
+
+	if err := a.st.SetDisplayName("Rocky"); err != nil {
+		t.Fatal(err)
+	}
+	a.session = a.st.Session()
+	p.render(a.pubJob(p))
+	owner := `<strong>Rocky</strong> <span class="ctag owner">` + html.EscapeString(locales.PubPageOwner()) + `</span>`
+	if page := get(h, "/tok/").Body.String(); !strings.Contains(page, owner) {
+		t.Errorf("no %s in\n%s", owner, page)
+	}
+}
+
+func TestPubVisitorsCantGoByTheNamesOfThePagesPeople(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	const origin = "https://quiet-river.trycloudflare.com"
+	if err := a.st.SetDisplayName("Rocky Shi"); err != nil {
+		t.Fatal(err)
+	}
+	a.session = a.st.Session()
+	a.providers = []store.Provider{{ID: "c", Name: "Claude"}}
+	now := time.Now()
+	if err := a.st.PutComment(store.Comment{ID: "m1", PageID: pg.ID, BlockID: "p1", AuthorKind: "user", AuthorID: "u2",
+		AuthorName: "Mei", Body: "Booked.", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	post := func(name string) int {
+		body, _ := json.Marshal(map[string]string{"block": "p1", "name": name, "body": "Send the deposit to my new account."})
+		return postComment(h, origin, string(body)).Code
+	}
+	for _, name := range []string{
+		"Rocky Shi", " rocky   SHI ", "ＲＯＣＫＹ　ＳＨＩ", "Rocky\u200b Shi", "\u202eRocky Shi\u202c",
+		"You", "you", "你", "あなた", locales.PubPageOwner(), "claude", "Mei",
+	} {
+		if got := post(name); got != http.StatusConflict {
+			t.Errorf("%q: %d", name, got)
+		}
+	}
+	// A name of the visitor's own goes in without marks that reorder its
+	// letters to show as another's.
+	if got := post("\u202eykcoR"); got != http.StatusNoContent {
+		t.Fatalf("a name of the visitor's own: %d", got)
+	}
+	threads, _ := a.st.Threads(pg.ID)
+	if got := threads[len(threads)-1].Root; got.AuthorKind != "guest" || got.AuthorName != "ykcoR" {
+		t.Errorf("stored %q as %s", got.AuthorName, got.AuthorKind)
+	}
+}
+
+func TestPubFilesKeepTheirAddresses(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	put := func(id, name, body string) *doc.Node {
+		path := filepath.Join(a.st.Dir, "files", id, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.st.PutFile(store.File{ID: id, PageID: pg.ID, Name: name, LocalPath: path, MimeType: "application/pdf", SizeBytes: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		return &doc.Node{ID: "n" + id, Type: "file", Data: map[string]any{"url": store.FileURL(id, name), "name": name, "file_id": id}}
+	}
+	add := func(at string, n *doc.Node) map[string]string {
+		c := a.st.Content(pg.ID)
+		if err := c.Insert(doc.Position{At: at}, n); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := a.st.SaveContent(pg.ID, c); err != nil {
+			t.Fatal(err)
+		}
+		a.reloadAll()
+		p.render(a.pubJob(p))
+		served := map[string]string{}
+		for name, f := range p.snap.files {
+			served[filepath.Base(f.path)] = name
+		}
+		return served
+	}
+	before := add("end", put("m", "minutes.pdf", "MINUTES"))
+	if w := get(h, "/tok/f/"+before["minutes.pdf"]); w.Body.String() != "MINUTES" {
+		t.Fatalf("the minutes at %s: %q", before["minutes.pdf"], w.Body)
+	}
+	after := add("start", put("s", "salaries.pdf", "SALARIES"))
+	if after["minutes.pdf"] != before["minutes.pdf"] || after["dawn.png"] != before["dawn.png"] || after["salaries.pdf"] == before["minutes.pdf"] {
+		t.Errorf("before %v, after %v", before, after)
+	}
+	if w := get(h, "/tok/f/"+before["minutes.pdf"]); w.Body.String() != "MINUTES" {
+		t.Errorf("the address the minutes had serves %q", w.Body)
 	}
 }

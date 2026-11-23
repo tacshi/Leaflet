@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/internal/supabaseapi"
 	"leaflet/locales"
 )
 
@@ -921,5 +923,132 @@ func TestOpenLinksWithAModifierClick(t *testing.T) {
 	}
 	if a.settings.ModClickLinks || a.st.Settings().ModClickLinks {
 		t.Error("a click opens no links again")
+	}
+}
+
+// TestEditingAProviderKeepsItsModel opens a provider whose server does not list its model, as an Azure deployment
+// is not, and saves it: it keeps its model, which the picker shows above the list.
+func TestEditingAProviderKeepsItsModel(t *testing.T) {
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"listed-a"},{"id":"listed-b"}]}`)
+	}))
+	t.Cleanup(hs.Close)
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	until := func(busy func() bool, what string) {
+		t.Helper()
+		for busy() {
+			select {
+			case fn := <-posted:
+				fn()
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s never came", what)
+			}
+		}
+	}
+	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000ef", Preset: "custom", Name: "Mine", BaseURL: hs.URL,
+		AuthKind: "api_key", DefaultModel: "my-deployment"}
+	if err := a.st.PutProvider(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.SetLocalKey(p.ID, "sk-kept"); err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(a.providerDialog, 900, 800)
+	a.editProvider(&p)
+	until(func() bool { return a.form.reading }, "the key")
+	until(func() bool { return a.form.fetching }, "the models")
+	tt.Frame()
+	if a.form.model != "my-deployment" || !slices.Equal(a.form.models, []string{"listed-a", "listed-b"}) {
+		t.Errorf("model %q of %v", a.form.model, a.form.models)
+	}
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	until(func() bool { return a.form.saving }, "the save")
+	if got, err := a.st.Provider(p.ID); err != nil || got.DefaultModel != "my-deployment" {
+		t.Errorf("saved with model %q, %v", got.DefaultModel, err)
+	}
+
+	a.newProvider(agents.PresetByID("custom"))
+	a.form.baseURL, a.form.apiKey = hs.URL, "sk-new"
+	a.fetchModels()
+	until(func() bool { return a.form.fetching }, "the new provider's models")
+	if a.form.model != "listed-a" {
+		t.Errorf("a new provider starts at %q, not the first model listed", a.form.model)
+	}
+}
+
+// TestTheProjectSignInCancels starts the sign-in to Supabase that brings the project up to date, in Settings, and
+// leaves it: its Cancel, and Settings closing by Escape, end the wait for the browser, which may never come back, and
+// what the sign-in comes to after is dropped.
+func TestTheProjectSignInCancels(t *testing.T) {
+	a := templatesApp(t)
+	a.backend = remote.SignedInToProjectForTest("http://127.0.0.1:1", "abcdefghijklmnopqrst", a.st, "u1")
+	if _, err := a.st.LoadSession(&store.User{ID: "u1", Email: "me@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	a.session = a.st.Session()
+	posted := make(chan func(), 16)
+	a.post = func(fn func()) { posted <- fn }
+	waiting := make(chan context.Context, 1)
+	var ended sync.WaitGroup
+	signIn := supabaseSignIn
+	t.Cleanup(func() { supabaseSignIn = signIn })
+	supabaseSignIn = func(ctx context.Context, _ *core.Core) (*supabaseapi.Client, error) {
+		defer ended.Done()
+		waiting <- ctx
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	start := func() context.Context {
+		t.Helper()
+		ended.Add(1)
+		a.renewProject()
+		select {
+		case ctx := <-waiting:
+			return ctx
+		case <-time.After(5 * time.Second):
+			t.Fatal("the sign-in never started")
+			return nil
+		}
+	}
+	a.settingsOpen, a.settingsSection = true, "account"
+	tt := ui.NewTester(func(c *ui.Context) {
+		if a.settingsOpen {
+			a.settingsDialog(c)
+		}
+	}, 1000, 800)
+	ctx := start()
+	tt.Frame()
+	if err := tt.Click(locales.CommonCancel()); err != nil {
+		t.Fatalf("no Cancel: %v (%v)", err, tt.Texts())
+	}
+	if ctx.Err() == nil || a.account.renewing {
+		t.Errorf("Cancel left the sign-in waiting %v, renewing %v", ctx.Err() == nil, a.account.renewing)
+	}
+
+	ctx = start()
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.settingsOpen || ctx.Err() == nil || a.account.renewing {
+		t.Errorf("Escape: Settings open %v, the sign-in waiting %v, renewing %v", a.settingsOpen, ctx.Err() == nil, a.account.renewing)
+	}
+	ended.Wait()
+	for drained := false; !drained; {
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(200 * time.Millisecond):
+			drained = true
+		}
+	}
+	if a.account.renewing || len(a.toasts) != 0 {
+		t.Errorf("the sign-ins left came back: renewing %v, toasts %+v", a.account.renewing, a.toasts)
 	}
 }

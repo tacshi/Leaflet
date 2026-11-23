@@ -26,6 +26,16 @@ supabase/.temp/
 # Wrangler local state
 worker/.wrangler/
 
+# Keys and secrets: the signing certificates and update key the release
+# scripts take by path (LEAFLET_WINDOWS_CERTIFICATE, LEAFLET_UPDATE_KEY),
+# App Store Connect keys, and the local secrets of tools such as Wrangler
+*.pfx
+*.p12
+*.p8
+*.key
+.env
+.dev.vars
+
 # The iOS app: the framework make ios-core builds, the project XcodeGen
 # makes from ios/project.yml, and Xcode's own state
 /ios/build/

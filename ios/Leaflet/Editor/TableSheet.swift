@@ -3,7 +3,7 @@ import SwiftUI
 
 struct TableSheet: View {
     let node: DocNode
-    let save: (DocNode) -> Void
+    let save: BlockChange
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var rows: [[String]] = []
@@ -122,19 +122,25 @@ struct TableSheet: View {
     }
 
     private func apply() {
-        guard let table = try? JSONEncoder().encode(node),
-            let cells = try? JSONEncoder().encode(rows)
-        else { return }
-        var error: NSError?
-        let raw = MobileSetTableRows(
-            String(decoding: table, as: UTF8.self), String(decoding: cells, as: UTF8.self), &error)
-        guard error == nil,
-            let saved = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
-        else {
-            failure = L.appErrorSave(error: error?.localizedDescription ?? "")
-            return
+        guard dirty, let original else { return dismiss() }
+        do {
+            let was = String(decoding: try JSONEncoder().encode(original), as: UTF8.self)
+            let cells = String(decoding: try JSONEncoder().encode(rows), as: UTF8.self)
+            try save { now in try Self.change(now, from: was, to: cells) }
+            dismiss()
+        } catch {
+            failure = L.appErrorSave(error: error.localizedDescription)
         }
-        save(saved)
-        dismiss()
+    }
+
+    /// The table as the page has it now, with the cells the sheet changed
+    /// from the rows it opened on and the rows and columns it added or took
+    /// off: the rest stays as others may have left it in the meantime.
+    static func change(_ table: DocNode, from was: String, to rows: String) throws -> DocNode {
+        let now = String(decoding: try JSONEncoder().encode(table), as: UTF8.self)
+        var error: NSError?
+        let raw = MobileChangeTableRows(now, was, rows, &error)
+        if let error { throw error }
+        return try JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
     }
 }

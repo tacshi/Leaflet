@@ -126,7 +126,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   text with its links, and `web_search` searches through the agent's own
   provider (OpenAI, Claude, xAI, OpenRouter, GLM or a ChatGPT plan). Once a
   run has read the web, it writes and reads only the links it found or you
-  gave it, and once it reads your other pages, the web is closed to it.
+  gave it, and once it reads your other pages, the web is closed to it and
+  to the later turns of its chat or comment thread, whose earlier replies
+  may hold what it read.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
@@ -295,9 +297,10 @@ history snapshot before an agent's first edit of a page, then one per ten
 minutes of its edits, or sooner when someone else changed the page in
 between, and sync like any other change. An edit given the version
 `read_page` shows for a block leaves the block as it is if someone changed
-it since, and answers with what it holds now. One without that replaces a
-change the agent never read is kept as a conflict in the page's history,
-and its answer says so. The open app picks up
+it since, and answers with what it holds now. One that replaces a change
+the agent never read, as a nested item someone added under a block it
+deletes, is kept as a conflict in the page's history, and its answer says
+so. The open app picks up
 what they write within a second and merges it with what is being typed.
 With the app closed, or no page open, `current_page` gives the page opened
 last on this device, with no selection.
@@ -372,8 +375,9 @@ script builds for macOS, or for Windows with `--win`:
 | `scripts/publish.sh <version> [--mac\|--win] [--allow-partial] [--dry-run]` | A GitHub release for macOS and Windows: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing. One platform named alone stays a draft until the other's build joins it, as a release without a platform's update manifest leaves that platform's installed copies no update; `--allow-partial` publishes it anyway |
 
 On Windows, the PowerShell 7 scripts build the Windows app on that machine.
-MyGo downloads NSIS if it isn't installed, and signing uses `signtool` from
-the Windows SDK:
+MyGo downloads NSIS if it isn't installed, and signing uses PowerShell's
+`Set-AuthenticodeSignature` (`scripts\sign-windows.ps1`), which reads the
+certificate's password from the environment:
 
 | Script | Builds |
 | --- | --- |
@@ -383,12 +387,13 @@ the Windows SDK:
 Run any script with `--help` for its options, or `Get-Help` for a `.ps1`
 one. macOS releases need a Developer ID Application identity and a
 `notarytool` keychain profile, Windows installers need NSIS (`brew install
-makensis`), and every release needs the update signing key;
-`scripts/build-release.sh --help` explains each one. Uploads refuse
-unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
-`--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1` says
-to publish them anyway, and never go to a release that is published
-already.
+makensis`), 3.08 or later to sign them, and every release needs the update
+signing key; `scripts/build-release.sh --help` explains each one. Uploads
+refuse unsigned Windows installers, and macOS ones built `--skip-notarize`,
+unless `--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1`
+says to publish them anyway, and never go to a release that is published
+already, nor from a working tree with changes or files git neither tracks
+nor ignores, before the build or after it.
 
 To build one server in, as `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`
 set one for a run, give its URL and Publishable key to the linker through

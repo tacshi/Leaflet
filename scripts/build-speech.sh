@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 
 [[ "$(uname -s)" == "Darwin" ]] || die "leaflet-speech is built on macOS"

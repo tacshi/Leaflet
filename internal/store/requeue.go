@@ -16,7 +16,7 @@ func (s *Store) Requeue(table, id string) error {
 				return err
 			}
 			pageID = p.ID
-			if err := requeueRow(tx, "pages", p.ID, nil, adopting(PageToRemote(p), p.UpdatedAt), "", p.ID); err != nil {
+			if err := requeueRow(tx, "pages", p.ID, nil, adopting(PageToRemote(p), p.ChangedAt), "", p.ID); err != nil {
 				return err
 			}
 			return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID)

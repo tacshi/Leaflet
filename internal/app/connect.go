@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
@@ -140,9 +141,14 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		if cli == "" {
 			return errors.New(locales.ExternalClaudeNotFound())
 		}
+		add := []string{"mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR=" + dir, "--", exe, "mcp"}
+		// The entry before goes first: an add that cmd.exe could not take is refused before that.
+		if err := cmdRefuses(cli, add); err != nil {
+			return err
+		}
 		old := claudeEntry(env)
 		_ = runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
-		err := runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
+		err := runCLI(cli, env, add...)
 		if err != nil && old != nil {
 			if rerr := runCLI(cli, env, "mcp", "add-json", "-s", "user", "leaflet", string(old)); rerr != nil {
 				return errors.New(locales.ExternalOldEntryNotBack(err.Error(), rerr.Error()))
@@ -689,6 +695,9 @@ func hasApp(app agentApp, home string) bool {
 }
 
 func runCLI(cli string, env agentEnv, args ...string) error {
+	if err := cmdRefuses(cli, args); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204
@@ -700,6 +709,29 @@ func runCLI(cli string, env agentEnv, args ...string) error {
 			return errors.New(msg)
 		}
 		return err
+	}
+	return nil
+}
+
+// cmdRefuses refuses to run cli with args when cli is a batch file, as the
+// .cmd shims npm installs claude and opencode as on Windows are, and an
+// argument holds what cmd.exe, which runs it, reads as its own syntax. Go
+// quotes arguments for programs that read their command line as most do,
+// not for cmd.exe: it takes & | < > ^ ( ) outside quotes as separators of
+// commands and redirections, % and ! as variables inside quotes too, a
+// quote Go escaped as the end of one and a line break as the end of the
+// command, so that the part of a folder's path after an & would run as a
+// command of its own. Such an argument is refused rather than quoted for
+// cmd.exe, which no quoting does safely for every argument; the setup by
+// hand is there for it.
+func cmdRefuses(cli string, args []string) error {
+	if ext := strings.ToLower(filepath.Ext(cli)); ext != ".cmd" && ext != ".bat" {
+		return nil
+	}
+	for _, arg := range args {
+		if strings.ContainsAny(arg, `"%!^&|<>()`) || strings.ContainsFunc(arg, unicode.IsControl) {
+			return errors.New(locales.ExternalUnsafeInCommandPrompt(filepath.Base(cli), arg))
+		}
 	}
 	return nil
 }

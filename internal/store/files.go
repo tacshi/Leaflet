@@ -28,7 +28,16 @@ type File struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   time.Time
+	// Kept is whether the file kept its contents as it was deleted, in the bin. One deleted by a Leaflet from before
+	// the bin went with them.
+	Kept bool
+	// PurgedAt is when the file was deleted for good, out of the bin, its contents with it.
+	PurgedAt time.Time
 }
+
+// Gone reports whether the file's contents are gone: it was deleted for good, or deleted without the bin keeping
+// them.
+func (f File) Gone() bool { return !f.PurgedAt.IsZero() || !f.DeletedAt.IsZero() && !f.Kept }
 
 func (s *Store) Files() ([]File, error) {
 	return s.queryFiles(`deleted_at IS NULL ORDER BY created_at DESC`)
@@ -52,15 +61,15 @@ func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
 }
 
 func filesIn(q querier, dir, where string, args ...any) ([]File, error) {
-	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...) // #nosec G202
+	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at, kept, purged_at FROM files WHERE `+where, args...) // #nosec G202
 	return collect(rows, err, func(sc scanner) (File, error) {
 		var f File
 		var folder, page, sp, lp sql.NullString
 		var c, u int64
-		var d sql.NullInt64
-		err := sc.Scan(&f.ID, &f.SpaceID, &folder, &page, &f.Name, &sp, &lp, &f.MimeType, &f.SizeBytes, &c, &u, &d)
+		var d, purged sql.NullInt64
+		err := sc.Scan(&f.ID, &f.SpaceID, &folder, &page, &f.Name, &sp, &lp, &f.MimeType, &f.SizeBytes, &c, &u, &d, &f.Kept, &purged)
 		f.FolderID, f.PageID, f.StoragePath, f.LocalPath = folder.String, page.String, sp.String, absPath(dir, lp.String)
-		f.CreatedAt, f.UpdatedAt, f.DeletedAt = time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
+		f.CreatedAt, f.UpdatedAt, f.DeletedAt, f.PurgedAt = time.UnixMilli(c), time.UnixMilli(u), fromMs(d), fromMs(purged)
 		return f, err
 	})
 }
@@ -68,13 +77,14 @@ func filesIn(q querier, dir, where string, args ...any) ([]File, error) {
 func (s *Store) PutFile(f File) error { return putFile(s.db, s.Dir, f) }
 
 func putFile(q querier, dir string, f File) error {
-	_, err := q.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
+	_, err := q.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at, kept, purged_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
 		folder_id = excluded.folder_id, page_id = excluded.page_id, name = excluded.name, storage_path = excluded.storage_path,
 		local_path = COALESCE(excluded.local_path, files.local_path), mime_type = excluded.mime_type,
-		size_bytes = excluded.size_bytes, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at`,
+		size_bytes = excluded.size_bytes, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+		kept = excluded.kept, purged_at = COALESCE(files.purged_at, excluded.purged_at)`,
 		f.ID, f.SpaceID, ns(f.FolderID), ns(f.PageID), f.Name, ns(f.StoragePath), ns(relPath(dir, f.LocalPath)), f.MimeType, f.SizeBytes,
-		ms(f.CreatedAt), ms(f.UpdatedAt), nt(f.DeletedAt))
+		ms(f.CreatedAt), ms(f.UpdatedAt), nt(f.DeletedAt), f.Kept && !f.DeletedAt.IsZero(), nt(f.PurgedAt))
 	return err
 }
 
@@ -235,7 +245,7 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 
 func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 	var name string
-	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ? AND deleted_at IS NULL`, id).Scan(&name); err != nil {
+	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ? AND purged_at IS NULL`, id).Scan(&name); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(s.Dir, "files", id)
@@ -244,7 +254,7 @@ func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 		_ = os.Remove(dir)
 		return "", err
 	}
-	res, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ? AND deleted_at IS NULL`, relPath(s.Dir, local), id)
+	res, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ? AND purged_at IS NULL`, relPath(s.Dir, local), id)
 	if err == nil {
 		var n int64
 		if n, err = res.RowsAffected(); err == nil && n == 0 {
@@ -259,37 +269,23 @@ func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 	return local, nil
 }
 
+// DeleteFile deletes a file for good, its contents with it, as one just added that could not be placed.
 func (s *Store) DeleteFile(f File) error {
-	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, s.Dir, f.ID, time.Now()) }); err != nil {
+	var copies []string
+	err := s.inTx(func(tx *sql.Tx) error {
+		var err error
+		copies, err = purgeFile(tx, s.Dir, f.ID, time.Now())
+		return err
+	})
+	if err != nil {
 		return err
 	}
-	s.removeCopy(f.ID)
+	for _, path := range copies {
+		s.removeLocalCopy(path)
+	}
 	s.Notify("outbox", "")
 	s.Notify("files", "")
 	return nil
-}
-
-func deleteFile(tx *sql.Tx, dir, id string, now time.Time) error {
-	files, err := filesIn(tx, dir, `id = ?`, id)
-	if err != nil || len(files) == 0 {
-		return err
-	}
-	f := files[0]
-	old := FileToRemote(f)
-	f.DeletedAt, f.UpdatedAt = now, now
-	if err := putFile(tx, dir, f); err != nil {
-		return err
-	}
-	if err := queueChange(tx, "files", f.ID, old, FileToRemote(f), "deleted file", f.PageID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID); err != nil {
-		return err
-	}
-	if f.StoragePath == "" {
-		return nil
-	}
-	return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", f.PageID)
 }
 
 func (s *Store) removeCopy(id string) {

@@ -55,7 +55,13 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 			return err
 		}
 	}
-	return s.refreshWaiting(ctx)
+	if err := s.refreshWaiting(ctx); err != nil {
+		return err
+	}
+	if caughtUp {
+		s.pulled()
+	}
+	return nil
 }
 
 var (
@@ -245,7 +251,7 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 func wantKey(peer, pageID string) string { return "icloud.want." + peer + "." + pageID }
 
 func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content, error) {
-	if p, err := s.st.Page(pageID); err == nil && p.SpaceID != s.st.Session().SpaceID {
+	if p, err := s.st.Page(pageID); err == nil && (p.SpaceID != s.st.Session().SpaceID || !p.PurgedAt.IsZero()) {
 		return s.st.Content(pageID), nil
 	}
 	me := s.st.DeviceID()

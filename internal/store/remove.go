@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
-	"strings"
 )
 
 var tables = []struct{ name, page string }{
@@ -132,11 +131,14 @@ func (s *Store) RemovePages(ids []string) error {
 }
 
 func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
-	in := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
+	return s.wipePages(tx, ids, false)
+}
+
+// wipePages removes everything on the pages from this device, and their rows unless keepRows, and is the local copies
+// of their files and recordings to remove once it is done.
+func (s *Store) wipePages(tx *sql.Tx, ids []string, keepRows bool) ([]string, error) {
+	in := marks(len(ids))
+	args := anys(ids)
 	rows, err := tx.Query(`SELECT local_path FROM files WHERE local_path IS NOT NULL AND page_id IN (`+in+`)
 		UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, slices.Concat(args, args)...) // #nosec G202
 	copies, err := collect(rows, err, func(sc scanner) (string, error) {
@@ -157,7 +159,7 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 		}
 	}
 	for _, t := range tables {
-		if t.page == "" {
+		if t.page == "" || keepRows && t.name == "pages" {
 			continue
 		}
 		if _, err := tx.Exec(`DELETE FROM `+t.name+` WHERE `+t.page+` IN (`+in+`)`, args...); err != nil { // #nosec G202

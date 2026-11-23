@@ -52,6 +52,8 @@ struct RootView: View {
                 } detail: {
                     if let day = scene.day {
                         TodoDayScreen(key: day).id(day)
+                    } else if scene.binShown {
+                        BinScreen()
                     } else if let selection = scene.selection {
                         PageScreen(pageID: selection).id(selection)
                             .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -94,7 +96,9 @@ struct RootView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $scene.history) { HistorySheet(page: $0).presentationSizing(.page) }
+        .sheet(item: $scene.history) {
+            HistorySheet(pageID: $0.id, canEdit: $0.canEdit).presentationSizing(.page)
+        }
         .fileExporter(
             isPresented: Binding(
                 get: { scene.exported != nil }, set: { if !$0 { scene.exported = nil } }),

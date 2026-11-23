@@ -81,8 +81,24 @@ extension CoreClient {
         try await call(waiting: true) { try $0.addFolderFile(folderID, path: path) }
     }
 
-    nonisolated(nonsending) func deleteFile(_ id: String) async throws {
-        try await call { try $0.deleteFile(id) }
+    nonisolated(nonsending) func trashFile(_ id: String) async throws {
+        try await call { try $0.trashFile(id) }
+    }
+
+    nonisolated(nonsending) func bin() async throws -> [BinItem] {
+        try await call([BinItem].self) { core in try Self.answer { e in core.binItems(e) } }
+    }
+
+    nonisolated(nonsending) func restoreFromBin(_ kind: BinItem.Kind, id: String) async throws {
+        try await call { try $0.binRestore(kind.rawValue, id_: id) }
+    }
+
+    nonisolated(nonsending) func purgeFromBin(_ kind: BinItem.Kind, id: String) async throws {
+        try await call { try $0.binPurge(kind.rawValue, id_: id) }
+    }
+
+    nonisolated(nonsending) func emptyBin() async throws {
+        try await call { try $0.binEmpty() }
     }
 
     nonisolated(nonsending) func nameVersion(_ pageID: String, name: String) async throws {

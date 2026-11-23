@@ -18,6 +18,8 @@ final class AppModel {
     let iCloud: ICloudSync
 
     var library = LibrarySnapshot.empty
+    /// Moves on as the library is read again, for the Trash to read itself again too.
+    private(set) var libraryVersion = 0
     var templates: [TemplateRow] = []
     var todos: [TodoGroup] = []
     var conflicts: [Conflict] = []
@@ -218,6 +220,7 @@ final class AppModel {
                 if parts.contains(.library), let lib = await read("library", client.library) {
                     libraryLoaded = true
                     library = lib
+                    libraryVersion += 1
                 }
                 if parts.contains(.todos), !todosShown.isEmpty,
                     let list = await read("to-dos", client.todos)

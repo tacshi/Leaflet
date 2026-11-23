@@ -117,6 +117,12 @@ final class SceneModel {
     /// 2026-11-20, or "no-date".
     static let dayPrefix = "day:"
 
+    /// The selection that shows the Trash.
+    static let binKey = "bin"
+
+    /// Whether the Trash is shown.
+    var binShown: Bool { selection == Self.binKey }
+
     /// The key of the day whose to-dos are shown, if a day's are.
     var day: String? {
         guard let selection, selection.hasPrefix(Self.dayPrefix) else { return nil }
@@ -124,7 +130,7 @@ final class SceneModel {
     }
 
     /// The ID of the page shown, if a page is.
-    var pageID: String? { day == nil ? selection : nil }
+    var pageID: String? { day == nil && !binShown ? selection : nil }
 
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
@@ -161,9 +167,12 @@ final class SceneModel {
         speakerEdit = nil
     }
 
-    /// Forgets the pages no longer in ids, going back from one shown. A day's to-dos stay.
+    /// Forgets the pages no longer in ids, going back from one shown. A day's to-dos and the
+    /// Trash stay.
     func keep(_ ids: Set<String>) {
-        let kept = { (id: String) in ids.contains(id) || id.hasPrefix(Self.dayPrefix) }
+        let kept = { (id: String) in
+            ids.contains(id) || id.hasPrefix(Self.dayPrefix) || id == Self.binKey
+        }
         back.removeAll { !kept($0) }
         forward.removeAll { !kept($0) }
         if let id = selection, !kept(id) { show(back.popLast()) }

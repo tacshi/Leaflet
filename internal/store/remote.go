@@ -18,11 +18,21 @@ func iso(t time.Time) any {
 }
 
 func PageToRemote(p Page) map[string]any {
-	return map[string]any{
+	row := map[string]any{
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
 		"title": ClampTitle(p.Title), "icon": ns(p.Icon), "sort_key": p.SortKey, "created_by": ns(p.CreatedBy),
 		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt), "is_template": p.Template,
 		"tags": NormalizeTags(p.Tags), "default_template_id": ns(p.DefaultTemplateID), "changed_at": iso(p.ChangedAt),
+	}
+	withPurgedAt(row, p.PurgedAt)
+	return row
+}
+
+// withPurgedAt puts a row's purged_at in it only once it is set: a row never purged goes up without it, as it did
+// before the bin, to a server not updated yet too.
+func withPurgedAt(row map[string]any, at time.Time) {
+	if !at.IsZero() {
+		row["purged_at"] = iso(at)
 	}
 }
 
@@ -61,11 +71,18 @@ func RecordingToRemote(r Recording) map[string]any {
 }
 
 func FileToRemote(f File) map[string]any {
-	return map[string]any{
+	row := map[string]any{
 		"id": f.ID, "space_id": f.SpaceID, "folder_id": ns(f.FolderID), "page_id": ns(f.PageID), "name": f.Name,
 		"storage_path": ns(f.StoragePath), "mime_type": f.MimeType, "size_bytes": f.SizeBytes,
 		"created_at": iso(f.CreatedAt), "deleted_at": iso(f.DeletedAt), "changed_at": iso(f.UpdatedAt),
 	}
+	// A deleted file says whether it kept its contents, in the bin. A server without the bin, which would empty its
+	// row, knows no such column: the deletion waits there until the server is updated.
+	if !f.DeletedAt.IsZero() {
+		row["kept"] = f.Kept
+	}
+	withPurgedAt(row, f.PurgedAt)
+	return row
 }
 
 func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
@@ -196,7 +213,7 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 		Title: S(r, "title"), Icon: S(r, "icon"), SortKey: sk, CreatedBy: S(r, "created_by"),
 		CreatedAt: Time(r["created_at"]), UpdatedAt: at, ChangedAt: at, DeletedAt: TimeOrZero(r["deleted_at"]),
 		KeepOffline: keepOffline, Template: r["is_template"] == true, Tags: tagsFromRemote(r["tags"]),
-		DefaultTemplateID: S(r, "default_template_id"),
+		DefaultTemplateID: S(r, "default_template_id"), PurgedAt: TimeOrZero(r["purged_at"]),
 	}
 }
 
@@ -243,7 +260,8 @@ func FileFromRemote(r map[string]any) File {
 	size, _ := r["size_bytes"].(float64)
 	return File{ID: S(r, "id"), SpaceID: S(r, "space_id"), FolderID: S(r, "folder_id"), PageID: S(r, "page_id"), Name: fileName(S(r, "name")),
 		StoragePath: S(r, "storage_path"), MimeType: S(r, "mime_type"), SizeBytes: int64(size),
-		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
+		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
+		Kept: r["kept"] == true, PurgedAt: TimeOrZero(r["purged_at"])}
 }
 
 var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true}
@@ -269,6 +287,10 @@ func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry
 		}
 		waits, err := pending(tx, entity, id)
 		if err != nil || waits {
+			return err
+		}
+		// What comes for a page deleted for good here is of a device that had not heard: nothing on it is kept.
+		if gone, err := isPurged(tx, S(r, "page_id")); err != nil || gone {
 			return err
 		}
 		stored = true
@@ -335,13 +357,33 @@ func (s *Store) PutRemotePage(r map[string]any) error { return s.putRemotePage(r
 
 func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
 	id := S(r, "id")
+	var copies []string
+	tombstoned := false
 	_, err := s.putRemote("pages", id, r, over, func(tx *sql.Tx) error {
 		keep := true
-		if err := tx.QueryRow(`SELECT keep_offline FROM pages WHERE id = ?`, id).Scan(&keep); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		var was sql.NullInt64
+		if err := tx.QueryRow(`SELECT keep_offline, purged_at FROM pages WHERE id = ?`, id).Scan(&keep, &was); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		return writePage(tx, PageFromRemote(r, keep))
+		// A page deleted for good stays so: a row from a device that had not heard of it brings nothing back.
+		if was.Valid {
+			return nil
+		}
+		p := PageFromRemote(r, keep)
+		if p.PurgedAt.IsZero() {
+			return writePage(tx, p)
+		}
+		tombstoned = true
+		var err error
+		copies, err = s.putPurgedPage(tx, p)
+		return err
 	})
+	for _, path := range copies {
+		s.removeLocalCopy(path)
+	}
+	if err == nil && tombstoned {
+		s.Notify("*", "")
+	}
 	return err
 }
 
@@ -367,14 +409,36 @@ func (s *Store) PutRemoteFile(r map[string]any) error { return s.putRemoteFile(r
 
 func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 	f := FileFromRemote(r)
+	ignored := false
 	stored, err := s.putRemote("files", f.ID, r, over, func(tx *sql.Tx) error {
-		if err := putFile(tx, s.Dir, f); err != nil || !f.DeletedAt.IsZero() {
+		if over == nil {
+			var was sql.NullInt64
+			if err := tx.QueryRow(`SELECT purged_at FROM files WHERE id = ?`, f.ID).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			// A file deleted for good stays so: a stale row from a device that had not heard brings nothing back.
+			if was.Valid && (f.PurgedAt.IsZero() || f.DeletedAt.IsZero()) {
+				ignored = true
+				return nil
+			}
+		}
+		if err := putFile(tx, s.Dir, f); err != nil {
 			return err
+		}
+		if over != nil && f.PurgedAt.IsZero() {
+			if _, err := tx.Exec(`UPDATE files SET purged_at = NULL WHERE id = ?`, f.ID); err != nil {
+				return err
+			}
+		}
+		if !f.DeletedAt.IsZero() {
+			return nil
 		}
 		_, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage_delete' AND entity_id = ?`, "files/"+f.ID)
 		return err
 	})
-	if stored && !f.DeletedAt.IsZero() {
+	// A file in the bin keeps its copy here, to come back with it; one deleted for good, or deleted by a Leaflet from
+	// before the bin, whose contents went with it, does not.
+	if stored && !ignored && f.Gone() {
 		s.removeCopy(f.ID)
 	}
 	return err

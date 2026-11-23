@@ -579,21 +579,23 @@ func (a *App) historyDialog(c *ui.Context) {
 		dialogHeader(c, locales.DialogHistoryTitle(), a.pageTitleOf(d.historyPage), &d.historyOpen)
 		ui.Row(c).Height(500).AlignItems(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 			ui.Column(c).Width(250).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
-				ui.Column(c).Padding(8, 8, 4).Children(func() {
-					if !d.naming {
-						if ghost(c, "name-version", "bookmark", locales.DialogHistoryNameVersion()).Justify(ui.Start).FillWidth().Clicked() {
-							d.naming = true
+				if a.canEdit(d.historyPage) {
+					ui.Column(c).Padding(8, 8, 4).Children(func() {
+						if !d.naming {
+							if ghost(c, "name-version", "bookmark", locales.DialogHistoryNameVersion()).Justify(ui.Start).FillWidth().Clicked() {
+								d.naming = true
+							}
+							return
 						}
-						return
-					}
-					in := ui.TextInput(c.Key("version-name"), &d.versionName).Placeholder(locales.DialogHistoryNamePlaceholder()).AutoFocus()
-					if in.Submitted() {
-						a.nameVersion(d.versionName)
-					}
-					if in.Shortcut(0, ui.KeyEscape) {
-						d.naming, d.versionName = false, ""
-					}
-				})
+						in := ui.TextInput(c.Key("version-name"), &d.versionName).Placeholder(locales.DialogHistoryNamePlaceholder()).AutoFocus()
+						if in.Submitted() {
+							a.nameVersion(d.versionName)
+						}
+						if in.Shortcut(0, ui.KeyEscape) {
+							d.naming, d.versionName = false, ""
+						}
+					})
+				}
 				ui.Scroll(c).Grow(1).Padding(0, 6, 6).Children(func() {
 					if len(d.history) == 0 {
 						ui.Text(c, locales.DialogHistoryEmpty()).

@@ -61,9 +61,21 @@ func (s *Service) contentsWait(e store.OutboxEntry) bool {
 }
 
 func (s *Service) removal(payload map[string]any) (waits, stays bool) {
-	id := store.S(payload, "file_id")
-	if s.st.HasPending("files", id) || s.uploadRuns("files/"+id) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
+	if pid := store.S(payload, "page_id"); pid != "" && s.st.HasPending("pages", pid) {
 		return true, false
+	}
+	id := store.S(payload, "file_id")
+	if id != "" && (s.st.HasPending("files", id) || s.uploadRuns("files/"+id)) {
+		return true, false
+	}
+	if recID := store.S(payload, "recording_id"); recID != "" && s.uploadRuns("recordings/"+recID) {
+		return true, false
+	}
+	if s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
+		return true, false
+	}
+	if id == "" {
+		return false, false
 	}
 	f, err := s.st.File(id)
 	return false, err == nil && f.DeletedAt.IsZero()

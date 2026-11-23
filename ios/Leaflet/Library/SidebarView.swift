@@ -81,7 +81,9 @@ struct SidebarView: View {
                 get: { scene.selection },
                 set: { id in
                     guard let id else { return scene.open(nil) }
-                    if id.hasPrefix(SceneModel.dayPrefix) || app.library.page(id) != nil {
+                    if id.hasPrefix(SceneModel.dayPrefix) || id == SceneModel.binKey
+                        || app.library.page(id) != nil
+                    {
                         scene.open(id)
                     }
                 })
@@ -210,6 +212,9 @@ struct SidebarView: View {
                 PageRows(pages: lib.sharedPages, actions: actions, open: open)
             }
             .withoutTopLine()
+        }
+        Section {
+            Label(L.binName, systemImage: "trash").tag(SceneModel.binKey)
         }
     }
 

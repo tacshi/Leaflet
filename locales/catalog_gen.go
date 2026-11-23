@@ -8201,36 +8201,6 @@ func (msgs Messages) SidebarDeleteFile() string {
 	return Catalog.Format(msgs.locale, "sidebarDeleteFile", nil)
 }
 
-// SidebarDeleteFileTitle says "Delete “{name}”?"
-// in the language the app shows.
-//
-// The alert asking before a file is deleted from the sidebar: its title.
-func SidebarDeleteFileTitle(name string) string {
-	return In(i18n.Locale()).SidebarDeleteFileTitle(name)
-}
-
-// SidebarDeleteFileTitle says "Delete “{name}”?"
-// in the language of msgs.
-//
-// The alert asking before a file is deleted from the sidebar: its title.
-func (msgs Messages) SidebarDeleteFileTitle(name string) string {
-	return Catalog.Format(msgs.locale, "sidebarDeleteFileTitle", map[string]any{"name": name})
-}
-
-// SidebarDeleteFileMessage says "It is deleted from every device it syncs to. You can't undo this."
-// in the language the app shows.
-//
-// The alert asking before a file is deleted from the sidebar: its message.
-func SidebarDeleteFileMessage() string { return In(i18n.Locale()).SidebarDeleteFileMessage() }
-
-// SidebarDeleteFileMessage says "It is deleted from every device it syncs to. You can't undo this."
-// in the language of msgs.
-//
-// The alert asking before a file is deleted from the sidebar: its message.
-func (msgs Messages) SidebarDeleteFileMessage() string {
-	return Catalog.Format(msgs.locale, "sidebarDeleteFileMessage", nil)
-}
-
 // SidebarCouldNotMove says "Could not move: {error}"
 // in the language the app shows.
 //
@@ -18159,4 +18129,338 @@ func PreviewCannotShow() string { return In(i18n.Locale()).PreviewCannotShow() }
 // A file with a known name whose contents can’t be previewed.
 func (msgs Messages) PreviewCannotShow() string {
 	return Catalog.Format(msgs.locale, "previewCannotShow", nil)
+}
+
+// BinName says "Trash"
+// in the language the app shows.
+//
+// The bin of deleted pages and files, as Mac and iOS name it: the sidebar's
+// button, the bin's heading, and in sentences.
+func BinName() string { return In(i18n.Locale()).BinName() }
+
+// BinName says "Trash"
+// in the language of msgs.
+//
+// The bin of deleted pages and files, as Mac and iOS name it: the sidebar's
+// button, the bin's heading, and in sentences.
+func (msgs Messages) BinName() string {
+	return Catalog.Format(msgs.locale, "binName", nil)
+}
+
+// BinNameWindows says "Recycle Bin"
+// in the language the app shows.
+//
+// The bin of deleted pages and files, as Windows names it.
+func BinNameWindows() string { return In(i18n.Locale()).BinNameWindows() }
+
+// BinNameWindows says "Recycle Bin"
+// in the language of msgs.
+//
+// The bin of deleted pages and files, as Windows names it.
+func (msgs Messages) BinNameWindows() string {
+	return Catalog.Format(msgs.locale, "binNameWindows", nil)
+}
+
+// BinHint says "What you delete stays here for {days, plural, one {# day} other {# days}}, then is deleted for good."
+// in the language the app shows.
+//
+// The bin: under its heading.
+func BinHint(days int) string { return In(i18n.Locale()).BinHint(days) }
+
+// BinHint says "What you delete stays here for {days, plural, one {# day} other {# days}}, then is deleted for good."
+// in the language of msgs.
+//
+// The bin: under its heading.
+func (msgs Messages) BinHint(days int) string {
+	return Catalog.Format(msgs.locale, "binHint", map[string]any{"days": days})
+}
+
+// BinNothing says "Nothing in the {bin}"
+// in the language the app shows.
+//
+// The bin when it holds nothing.
+func BinNothing(bin string) string { return In(i18n.Locale()).BinNothing(bin) }
+
+// BinNothing says "Nothing in the {bin}"
+// in the language of msgs.
+//
+// The bin when it holds nothing.
+func (msgs Messages) BinNothing(bin string) string {
+	return Catalog.Format(msgs.locale, "binNothing", map[string]any{"bin": bin})
+}
+
+// BinEmptyButton says "Empty {bin}"
+// in the language the app shows.
+//
+// The bin: the button that deletes everything in it for good.
+func BinEmptyButton(bin string) string { return In(i18n.Locale()).BinEmptyButton(bin) }
+
+// BinEmptyButton says "Empty {bin}"
+// in the language of msgs.
+//
+// The bin: the button that deletes everything in it for good.
+func (msgs Messages) BinEmptyButton(bin string) string {
+	return Catalog.Format(msgs.locale, "binEmptyButton", map[string]any{"bin": bin})
+}
+
+// BinEmptyTitle says "Empty the {bin}?"
+// in the language the app shows.
+//
+// The alert asking before the bin is emptied: its title.
+func BinEmptyTitle(bin string) string { return In(i18n.Locale()).BinEmptyTitle(bin) }
+
+// BinEmptyTitle says "Empty the {bin}?"
+// in the language of msgs.
+//
+// The alert asking before the bin is emptied: its title.
+func (msgs Messages) BinEmptyTitle(bin string) string {
+	return Catalog.Format(msgs.locale, "binEmptyTitle", map[string]any{"bin": bin})
+}
+
+// BinEmptyMessage says "Everything in it is deleted for good, from every device it syncs to. You can’t undo this."
+// in the language the app shows.
+//
+// The alert asking before the bin is emptied: its message.
+func BinEmptyMessage() string { return In(i18n.Locale()).BinEmptyMessage() }
+
+// BinEmptyMessage says "Everything in it is deleted for good, from every device it syncs to. You can’t undo this."
+// in the language of msgs.
+//
+// The alert asking before the bin is emptied: its message.
+func (msgs Messages) BinEmptyMessage() string {
+	return Catalog.Format(msgs.locale, "binEmptyMessage", nil)
+}
+
+// BinRestore says "Restore"
+// in the language the app shows.
+//
+// The bin: put a page or file back where it was.
+func BinRestore() string { return In(i18n.Locale()).BinRestore() }
+
+// BinRestore says "Restore"
+// in the language of msgs.
+//
+// The bin: put a page or file back where it was.
+func (msgs Messages) BinRestore() string {
+	return Catalog.Format(msgs.locale, "binRestore", nil)
+}
+
+// BinDeleteForever says "Delete Forever"
+// in the language the app shows.
+//
+// The bin: delete a page or file for good.
+func BinDeleteForever() string { return In(i18n.Locale()).BinDeleteForever() }
+
+// BinDeleteForever says "Delete Forever"
+// in the language of msgs.
+//
+// The bin: delete a page or file for good.
+func (msgs Messages) BinDeleteForever() string {
+	return Catalog.Format(msgs.locale, "binDeleteForever", nil)
+}
+
+// BinDeleteForeverTitle says "Delete “{title}” forever?"
+// in the language the app shows.
+//
+// The alert asking before a page or file of the bin is deleted for good:
+// its title.
+func BinDeleteForeverTitle(title string) string {
+	return In(i18n.Locale()).BinDeleteForeverTitle(title)
+}
+
+// BinDeleteForeverTitle says "Delete “{title}” forever?"
+// in the language of msgs.
+//
+// The alert asking before a page or file of the bin is deleted for good:
+// its title.
+func (msgs Messages) BinDeleteForeverTitle(title string) string {
+	return Catalog.Format(msgs.locale, "binDeleteForeverTitle", map[string]any{"title": title})
+}
+
+// BinDeleteForeverMessage says "It is deleted from every device it syncs to, with its history. You can’t undo this."
+// in the language the app shows.
+//
+// The alert asking before a page or file of the bin is deleted for good:
+// its message.
+func BinDeleteForeverMessage() string { return In(i18n.Locale()).BinDeleteForeverMessage() }
+
+// BinDeleteForeverMessage says "It is deleted from every device it syncs to, with its history. You can’t undo this."
+// in the language of msgs.
+//
+// The alert asking before a page or file of the bin is deleted for good:
+// its message.
+func (msgs Messages) BinDeleteForeverMessage() string {
+	return Catalog.Format(msgs.locale, "binDeleteForeverMessage", nil)
+}
+
+// BinDeletedOn says "Deleted {day}"
+// in the language the app shows.
+//
+// The bin: when a page or file was deleted, as Today, Yesterday or Nov 20.
+func BinDeletedOn(day string) string { return In(i18n.Locale()).BinDeletedOn(day) }
+
+// BinDeletedOn says "Deleted {day}"
+// in the language of msgs.
+//
+// The bin: when a page or file was deleted, as Today, Yesterday or Nov 20.
+func (msgs Messages) BinDeletedOn(day string) string {
+	return Catalog.Format(msgs.locale, "binDeletedOn", map[string]any{"day": day})
+}
+
+// BinDaysLeft says "{days, plural, one {# day left} other {# days left}}"
+// in the language the app shows.
+//
+// The bin: how long until a page or file in it is deleted for good.
+func BinDaysLeft(days int) string { return In(i18n.Locale()).BinDaysLeft(days) }
+
+// BinDaysLeft says "{days, plural, one {# day left} other {# days left}}"
+// in the language of msgs.
+//
+// The bin: how long until a page or file in it is deleted for good.
+func (msgs Messages) BinDaysLeft(days int) string {
+	return Catalog.Format(msgs.locale, "binDaysLeft", map[string]any{"days": days})
+}
+
+// BinPages says "{count, plural, one {# page} other {# pages}}"
+// in the language the app shows.
+//
+// The bin: how many pages go with a deleted page, it and those under it.
+func BinPages(count int) string { return In(i18n.Locale()).BinPages(count) }
+
+// BinPages says "{count, plural, one {# page} other {# pages}}"
+// in the language of msgs.
+//
+// The bin: how many pages go with a deleted page, it and those under it.
+func (msgs Messages) BinPages(count int) string {
+	return Catalog.Format(msgs.locale, "binPages", map[string]any{"count": count})
+}
+
+// BinRestored says "Restored {title}"
+// in the language the app shows.
+//
+// Toast after a page or file was taken out of the bin, with a button to
+// open it.
+func BinRestored(title string) string { return In(i18n.Locale()).BinRestored(title) }
+
+// BinRestored says "Restored {title}"
+// in the language of msgs.
+//
+// Toast after a page or file was taken out of the bin, with a button to
+// open it.
+func (msgs Messages) BinRestored(title string) string {
+	return Catalog.Format(msgs.locale, "binRestored", map[string]any{"title": title})
+}
+
+// BinDeletedForever says "Deleted {title} forever"
+// in the language the app shows.
+//
+// Toast after a page or file of the bin was deleted for good.
+func BinDeletedForever(title string) string { return In(i18n.Locale()).BinDeletedForever(title) }
+
+// BinDeletedForever says "Deleted {title} forever"
+// in the language of msgs.
+//
+// Toast after a page or file of the bin was deleted for good.
+func (msgs Messages) BinDeletedForever(title string) string {
+	return Catalog.Format(msgs.locale, "binDeletedForever", map[string]any{"title": title})
+}
+
+// BinEmptied says "Emptied the {bin}"
+// in the language the app shows.
+//
+// Toast after the bin was emptied.
+func BinEmptied(bin string) string { return In(i18n.Locale()).BinEmptied(bin) }
+
+// BinEmptied says "Emptied the {bin}"
+// in the language of msgs.
+//
+// Toast after the bin was emptied.
+func (msgs Messages) BinEmptied(bin string) string {
+	return Catalog.Format(msgs.locale, "binEmptied", map[string]any{"bin": bin})
+}
+
+// BinInBin says "In the {bin}"
+// in the language the app shows.
+//
+// Above a page of the bin as it is shown: the page can only be read.
+func BinInBin(bin string) string { return In(i18n.Locale()).BinInBin(bin) }
+
+// BinInBin says "In the {bin}"
+// in the language of msgs.
+//
+// Above a page of the bin as it is shown: the page can only be read.
+func (msgs Messages) BinInBin(bin string) string {
+	return Catalog.Format(msgs.locale, "binInBin", map[string]any{"bin": bin})
+}
+
+// BinHistory says "History"
+// in the language the app shows.
+//
+// The bin: see the versions of a deleted page.
+func BinHistory() string { return In(i18n.Locale()).BinHistory() }
+
+// BinHistory says "History"
+// in the language of msgs.
+//
+// The bin: see the versions of a deleted page.
+func (msgs Messages) BinHistory() string {
+	return Catalog.Format(msgs.locale, "binHistory", nil)
+}
+
+// BinTemplate says "Template"
+// in the language the app shows.
+//
+// The bin: a deleted page that is a template.
+func BinTemplate() string { return In(i18n.Locale()).BinTemplate() }
+
+// BinTemplate says "Template"
+// in the language of msgs.
+//
+// The bin: a deleted page that is a template.
+func (msgs Messages) BinTemplate() string {
+	return Catalog.Format(msgs.locale, "binTemplate", nil)
+}
+
+// BinChoose says "Choose an item to see it, restore it or delete it forever."
+// in the language the app shows.
+//
+// The bin: beside the list, before a page or file is chosen.
+func BinChoose() string { return In(i18n.Locale()).BinChoose() }
+
+// BinChoose says "Choose an item to see it, restore it or delete it forever."
+// in the language of msgs.
+//
+// The bin: beside the list, before a page or file is chosen.
+func (msgs Messages) BinChoose() string {
+	return Catalog.Format(msgs.locale, "binChoose", nil)
+}
+
+// BinFile says "File"
+// in the language the app shows.
+//
+// The bin: a deleted file, as it is described.
+func BinFile() string { return In(i18n.Locale()).BinFile() }
+
+// BinFile says "File"
+// in the language of msgs.
+//
+// The bin: a deleted file, as it is described.
+func (msgs Messages) BinFile() string {
+	return Catalog.Format(msgs.locale, "binFile", nil)
+}
+
+// BinCouldNotRead says "Could not read the {bin}: {error}"
+// in the language the app shows.
+//
+// The bin: above its list, when what is in it could not be read.
+func BinCouldNotRead(bin string, error string) string {
+	return In(i18n.Locale()).BinCouldNotRead(bin, error)
+}
+
+// BinCouldNotRead says "Could not read the {bin}: {error}"
+// in the language of msgs.
+//
+// The bin: above its list, when what is in it could not be read.
+func (msgs Messages) BinCouldNotRead(bin string, error string) string {
+	return Catalog.Format(msgs.locale, "binCouldNotRead", map[string]any{"bin": bin, "error": error})
 }

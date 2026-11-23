@@ -332,13 +332,70 @@ extension AppModel {
         await reload(.library)
     }
 
+    /// Puts a file in the Trash, with a toast to undo it.
     func delete(_ file: FileRow) async {
+        guard let client else { return }
         do {
-            try await client?.deleteFile(file.id)
+            try await client.trashFile(file.id)
             await reload(.library)
+            let id = file.id
+            show(
+                Toast(
+                    message: L.appDeleted(title: file.name), actionLabel: L.commonUndo,
+                    action: { [weak self] in
+                        do {
+                            try await client.restoreFromBin(.file, id: id)
+                        } catch {
+                            let message = L.appErrorRestore(error: error.localizedDescription)
+                            self?.show(Toast(message: message))
+                        }
+                        await self?.reload(.library)
+                    }))
         } catch {
             show(Toast(message: L.sidebarCouldNotDelete(error: error.localizedDescription)))
         }
+    }
+
+    /// Takes a page, with the pages deleted with it, or a file out of the Trash, with a toast
+    /// to open the page.
+    func restore(_ item: BinItem, open: ((String) -> Void)? = nil) async {
+        do {
+            try await client?.restoreFromBin(item.kind, id: item.id)
+        } catch {
+            show(Toast(message: L.appErrorRestore(error: error.localizedDescription)))
+            return
+        }
+        await reload()
+        if item.kind == .page, !item.template, let open {
+            show(
+                Toast(
+                    message: L.binRestored(title: item.title), actionLabel: L.commonOpen,
+                    action: { open(item.id) }))
+        } else {
+            show(Toast(message: L.binRestored(title: item.title)))
+        }
+    }
+
+    /// Deletes a page or a file of the Trash for good.
+    func purge(_ item: BinItem) async {
+        do {
+            try await client?.purgeFromBin(item.kind, id: item.id)
+            show(Toast(message: L.binDeletedForever(title: item.title)))
+        } catch {
+            show(Toast(message: L.sidebarCouldNotDelete(error: error.localizedDescription)))
+        }
+        await reload()
+    }
+
+    /// Deletes everything in the Trash for good.
+    func emptyBin() async {
+        do {
+            try await client?.emptyBin()
+            show(Toast(message: L.binEmptied(bin: L.binName)))
+        } catch {
+            show(Toast(message: L.sidebarCouldNotDelete(error: error.localizedDescription)))
+        }
+        await reload()
     }
 
     var syncs: Bool { status?.signedIn ?? false || status?.iCloudOn ?? false }

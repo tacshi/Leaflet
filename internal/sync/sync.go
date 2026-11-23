@@ -30,8 +30,12 @@ type Service struct {
 	DeviceName    func() string
 	Updating      func() bool
 	Watched       func(pageID string) bool
+	// Pulled is told when a pull has brought in every change of the other devices, the bin's above all: what this
+	// device knew before may be old, as of a page another device has restored since.
+	Pulled func()
 
 	cloudOn                     atomic.Bool
+	compactSoon, redactSoon     atomic.Bool
 	halted                      atomic.Int32
 	kick                        chan struct{}
 	mu                          gosync.Mutex
@@ -109,6 +113,15 @@ func (s *Service) SetICloud(on bool) {
 func (s *Service) ICloudOn() bool { return s.cloudOn.Load() }
 
 func (s *Service) Uploads() bool { return s.target().ready() }
+
+// Syncs reports whether this device syncs, through an account or iCloud Drive, whether or not it can now.
+func (s *Service) Syncs() bool { return s.target().ready() }
+
+func (s *Service) pulled() {
+	if s.Pulled != nil {
+		s.Pulled()
+	}
+}
 
 func (s *Service) CanFetch() bool {
 	return s.target().ready() || s.joinedICloud()

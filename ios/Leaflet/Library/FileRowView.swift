@@ -5,7 +5,6 @@ struct FileRowView: View {
     let file: FileRow
     @Environment(AppModel.self) private var app
     @State private var shown: URL?
-    @State private var deleting = false
 
     var body: some View {
         Button {
@@ -25,18 +24,10 @@ struct FileRowView: View {
             }
             Divider()
             Button(L.sidebarDeleteFile, systemImage: "trash", role: .destructive) {
-                deleting = true
+                Task { await app.delete(file) }
             }
         }
         .quickLookPreview($shown)
-        .alert(L.sidebarDeleteFileTitle(name: file.name), isPresented: $deleting) {
-            Button(L.commonCancel, role: .cancel) {}
-            Button(L.commonDelete, role: .destructive) {
-                Task { await app.delete(file) }
-            }
-        } message: {
-            Text(L.sidebarDeleteFileMessage)
-        }
     }
 
     private func open() async {

@@ -132,6 +132,7 @@ type App struct {
 	players         map[string]*player
 
 	dialogs                  dialogs
+	bin                      binState
 	md                       markdown.Options
 	commentMD                markdown.Options
 	images                   *imageCache
@@ -191,8 +192,6 @@ type App struct {
 	running      func() // releases holdRunning's hold on App Nap
 	openView     store.OpenView
 	viewTimer    *time.Timer
-
-	fileToDelete *store.File
 
 	// watch is the corner window showing the edits of agents outside the app.
 	watch agentWatch
@@ -738,6 +737,9 @@ func (a *App) reload(ch store.Change) {
 		reread(&a.files, a.st.Files)
 		clear(a.present)
 	}
+	if (all || ch.Table == "pages" || ch.Table == "files") && a.route.Kind == "bin" {
+		a.loadBin()
+	}
 	if all || ch.Table == "model_providers" {
 		if providers, err := a.st.Providers(); err == nil {
 			a.providers = providers
@@ -846,7 +848,7 @@ func (r Route) path() string {
 		return "/page/" + r.ID
 	case "day":
 		return "/day/" + r.ID
-	case "signin":
+	case "signin", "bin":
 		return "/" + r.Kind
 	}
 	return "/"
@@ -857,7 +859,7 @@ func routeAt(path string) Route {
 	switch kind {
 	case "page", "day":
 		return Route{Kind: kind, ID: rest}
-	case "signin":
+	case "signin", "bin":
 		return Route{Kind: kind}
 	}
 	return Route{Kind: "home"}
@@ -872,6 +874,8 @@ func (a *App) routeTitle() string {
 		return todoDayTitle(todoDayAt(todoDays(a.todoList(), now), a.route.ID, now), now)
 	case "signin":
 		return locales.CommonSignIn()
+	case "bin":
+		return binName()
 	}
 	return "Leaflet"
 }
@@ -919,8 +923,11 @@ func (a *App) show(r Route) bool {
 		return false
 	}
 	a.route = r
-	if r.Kind == "page" {
+	switch r.Kind {
+	case "page":
 		a.loadPage(r.ID)
+	case "bin":
+		a.loadBin()
 	}
 	return true
 }
@@ -1283,7 +1290,11 @@ func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 	}
 	a.openPage(p.ID)
 	if a.page == nil || a.page.id != p.ID {
+		// A page that never opened was never the user's: it goes for good, not to the bin, unless it is in someone
+		// else's space, where only its owner deletes for good.
 		if _, err := a.st.DeletePage(p.ID); err != nil {
+			log.Printf("page %s: %v", p.ID, err)
+		} else if err := a.st.Purge(store.BinRef{Kind: store.BinPage, ID: p.ID}); err != nil {
 			log.Printf("page %s: %v", p.ID, err)
 		}
 		reread(&a.pages, a.st.Pages)
@@ -1477,6 +1488,10 @@ func (a *App) togglePanel(tab int) {
 
 func (a *App) pageTitleOf(id string) string {
 	if p := a.pageByID(id); p != nil {
+		return p.DisplayTitle()
+	}
+	// A page in the bin, whose history is open.
+	if p, err := a.st.Page(id); err == nil && p.PurgedAt.IsZero() {
 		return p.DisplayTitle()
 	}
 	return ""

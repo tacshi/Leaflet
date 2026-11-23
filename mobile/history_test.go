@@ -244,11 +244,82 @@ func TestFolderFiles(t *testing.T) {
 	if local, err := c.LocalFile(files[0].ID, 0); err != nil || local == "" {
 		t.Errorf("local file %q, %v", local, err)
 	}
-	if err := c.DeleteFile(files[0].ID); err != nil {
+	id := files[0].ID
+	if err := c.TrashFile(id); err != nil {
 		t.Fatal(err)
 	}
 	if files := lib().Files; len(files) != 0 {
 		t.Errorf("after deleting, files %+v", files)
+	}
+	bin := func() []binRow {
+		t.Helper()
+		raw, err := c.BinItems()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []binRow
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := bin(); len(got) != 1 || got[0].Kind != "file" || got[0].Title != "budget.txt" || got[0].Size != 4 || got[0].When == "" {
+		t.Fatalf("bin %+v", got)
+	}
+	if err := c.BinRestore("file", id); err != nil {
+		t.Fatal(err)
+	}
+	if files := lib().Files; len(files) != 1 || files[0].FolderID != folder.ID {
+		t.Fatalf("after restoring, files %+v", files)
+	}
+	if err := c.TrashFile(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BinPurge("file", id); err != nil {
+		t.Fatal(err)
+	}
+	if got := bin(); len(got) != 0 {
+		t.Errorf("bin after deleting forever %+v", got)
+	}
+	if err := c.BinRestore("file", id); err == nil {
+		t.Error("restored a file deleted forever")
+	}
+}
+
+func TestBinRestoresAPageWithItsSubpages(t *testing.T) {
+	c, _ := open(t)
+	parent := create(t, c, `{"title":"Parent"}`)
+	kid := create(t, c, `{"title":"Kid","parent_id":"`+parent.ID+`"}`)
+	if _, err := c.DeletePage(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.BinItems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []binRow
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != parent.ID || items[0].Pages != 2 {
+		t.Fatalf("bin %+v", items)
+	}
+	if err := c.BinRestore("page", parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{parent.ID, kid.ID} {
+		if p, err := c.core.Store.Page(id); err != nil || !p.DeletedAt.IsZero() {
+			t.Errorf("%s: %+v, %v", id, p, err)
+		}
+	}
+	if _, err := c.DeletePage(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BinEmpty(); err != nil {
+		t.Fatal(err)
+	}
+	if !c.core.Store.IsPurged(kid.ID) {
+		t.Error("the kid stayed")
 	}
 }
 

@@ -162,6 +162,9 @@ func (a *App) main(c *ui.Context) {
 	case "signin":
 		a.signInView(c)
 		return
+	case "bin":
+		a.binView(c)
+		return
 	}
 	a.homeView(c)
 }

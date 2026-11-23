@@ -165,7 +165,13 @@ func (s *Service) pull(ctx context.Context) error {
 	if err := s.pullComments(ctx); err != nil {
 		return err
 	}
-	return s.pullContents(ctx)
+	if err := s.pullContents(ctx); err != nil {
+		return err
+	}
+	if caughtUp["pages"] && caughtUp["files"] {
+		s.pulled()
+	}
+	return nil
 }
 
 func (s *Service) pullTable(ctx context.Context, table, columns string, apply func(map[string]any) error) error {

@@ -254,18 +254,6 @@ func (c *Core) AddFolderFile(folderID, path string) (err error) {
 	return nil
 }
 
-func (c *Core) DeleteFile(id string) (err error) {
-	defer catch(&err)
-	c.q.do(func() {
-		var f store.File
-		if f, err = c.core.Store.File(id); err != nil {
-			return
-		}
-		err = c.core.Store.DeleteFile(f)
-	})
-	return err
-}
-
 func (c *Core) AddFile(pageID, path string) (_ string, err error) {
 	defer catch(&err)
 	f, err := c.core.Store.AddFile(path, "", pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))

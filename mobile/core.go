@@ -178,7 +178,7 @@ const cancelKept = 10 * time.Minute
 
 func (c *Core) Stop() {
 	defer catch(nil)
-	c.core.Sync.Stop()
+	c.core.Stop()
 }
 
 func (c *Core) Kick() {

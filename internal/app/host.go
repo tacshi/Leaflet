@@ -362,21 +362,6 @@ func (a *App) addFiles(paths []string, folderID, pageID string, added func(f sto
 	}
 }
 
-func uploadedImage(f store.File) *doc.Node {
-	return &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-		"url": store.FileURL(f.ID, f.Name), "align": "center", "alt": f.Name, "file_id": f.ID,
-	}}
-}
-
-func uploadedFile(f store.File) *doc.Node {
-	if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
-		return uploadedImage(f)
-	}
-	return &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
-		"url": store.FileURL(f.ID, f.Name), "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
-	}}
-}
-
 // placeUpload puts a file added for a page into it: over the picture of the
 // block replaced when there is one, as a new block otherwise. The user may
 // have left the page while the file was copied, and it then goes to the end
@@ -396,13 +381,13 @@ func (a *App) placeUpload(pageID, replaced string, f store.File) {
 		if n := ed.Content.Find(replaced); replaced != "" && n != nil && n.Type == "image" {
 			ed.Edit(func(c *doc.Content) { swap(c) })
 		} else {
-			ed.InsertBlocks(uploadedFile(f))
+			ed.InsertBlocks(store.FileBlock(f))
 		}
 		return
 	}
 	placed := false
 	err := a.pageCore().EditPage(pageID, func(c *doc.Content) bool {
-		placed = swap(c) || c.Insert(doc.Position{At: "end"}, uploadedFile(f)) == nil
+		placed = swap(c) || c.Insert(doc.Position{At: "end"}, store.FileBlock(f)) == nil
 		return placed
 	})
 	if err == nil && placed {

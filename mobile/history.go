@@ -272,18 +272,8 @@ func (c *Core) AddFile(pageID, path string) (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
-	var n *doc.Node
-	if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
-		n = &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-			"url": store.FileURL(f.ID, f.Name), "align": "center", "alt": f.Name, "file_id": f.ID,
-		}}
-	} else {
-		n = &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
-			"url": store.FileURL(f.ID, f.Name), "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
-		}}
-	}
 	c.core.Sync.KickPush()
-	return encode(n)
+	return encode(store.FileBlock(f))
 }
 
 func (c *Core) Picture(link string) (_ []byte, err error) {

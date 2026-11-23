@@ -290,6 +290,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | `create_folder`、`rename_folder` | フォルダの作成（トップレベルまたは別のフォルダの中）と名前の変更 |
 | `move_folder` | フォルダを別のフォルダの中、またはトップレベルへ移動する |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
+| `upload_files` | このコンピュータ上の画像、音声、動画、PDF をパスで指定してページに追加する |
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて
 いても動作します。閲覧のみで共有されたページは読み取り専用です。エージェントが
@@ -299,7 +300,12 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 バージョンを付けた編集は、その後ブロックが変更されていればそのまま残し、
 今の内容を返します。エージェントの読んでいない変更（削除するブロックの下に
 ほかの人が加えた入れ子の項目など）を上書きした編集は、編集前のページが競合
-としてページの履歴に残り、結果にもそう示されます。開いている
+としてページの履歴に残り、結果にもそう示されます。`upload_files` はアプリの
+「アップロード」と同じようにファイルをページにコピーしますが、ほかの人も持つ
+ページや公開リンクのあるページには入れません。ほかのコンピュータが提供する
+公開リンクはアプリだけが知っています。アプリは実行中 2 分ごとに確認し、直近
+5 分以内の確認がないとき（アプリを閉じている、またはしばらくオフラインのとき
+など）、`upload_files` は同期するページに何も追加しません。開いている
 アプリは 1 秒以内にその内容を取り込み、入力中の内容とマージします。アプリが
 閉じているかページが開いていないとき、`current_page` はこのデバイスで最後に
 開いたページを返し、選択範囲は含みません。
@@ -328,6 +334,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet cat PAGE` | ページを Markdown で出力する |
 | `leaflet new [TITLE]` | ページを作成し、その ID を出力する。`--stdin` でパイプで渡した Markdown を内容にする |
 | `leaflet append PAGE [TEXT...]` | ページの末尾に Markdown を追加する：指定した文字列、またはパイプで渡した内容 |
+| `leaflet upload PAGE FILE...` | アプリの「アップロード」と同じように、ファイルをページの末尾に追加する |
 | `leaflet rename PAGE TITLE` | ページのタイトルを変更する |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | ページを別のページの中、フォルダ、またはトップレベルへ移動する |
 | `leaflet tag PAGE [TAG...]` | ページのタグを設定する、または出力する。`--clear` ですべて外す |

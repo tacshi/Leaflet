@@ -43,6 +43,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/guard"
 	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -60,6 +61,7 @@ type pubLink struct {
 	srv             *http.Server
 	lease           func()
 	leaseWay        string
+	here            func()
 	timer           *time.Timer
 	seq             int
 
@@ -399,7 +401,13 @@ func (a *App) leaseWay() string {
 
 func (a *App) leasePub() {
 	p := a.pub
-	if p == nil || a.hub == nil {
+	if p == nil {
+		return
+	}
+	if p.serving() && p.here == nil {
+		p.here = keepServed(a.st, p.page)
+	}
+	if a.hub == nil {
 		return
 	}
 	way := a.leaseWay()
@@ -412,7 +420,44 @@ func (a *App) leasePub() {
 	}
 }
 
+// keepServed records in the database that this device serves page's public
+// link, for the agents outside the app, which ask it there, and renews the
+// record until stop, which clears it.
+func keepServed(st *store.Store, page string) (stop func()) {
+	if err := st.KeepServedLink(page); err != nil {
+		log.Printf("public link: %v", err)
+	}
+	stopped, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer guard.Recover()
+		defer close(done)
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-time.After(store.ServedLinkLease / 4):
+			}
+			if err := st.KeepServedLink(page); err != nil {
+				log.Printf("public link: %v", err)
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(stopped)
+			<-done
+			if err := st.EndServedLink(page); err != nil {
+				log.Printf("public link: %v", err)
+			}
+		})
+	}
+}
+
 func (p *pubLink) close() {
+	if p.here != nil {
+		p.here()
+	}
 	if p.lease != nil {
 		p.lease()
 	}

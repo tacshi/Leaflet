@@ -290,6 +290,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 | `create_folder`, `rename_folder` | Make folders, at the top level or in another folder, and rename them |
 | `move_folder` | Move a folder into another folder or to the top level |
 | `write_markdown`, `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
+| `upload_files` | Add pictures, audio, video and PDFs on this computer to a page, by their paths |
 
 The server opens the same database as the app, so it works with the app
 open or closed. Pages shared with you to view are read-only. Edits keep a
@@ -300,7 +301,12 @@ between, and sync like any other change. An edit given the version
 it since, and answers with what it holds now. One that replaces a change
 the agent never read, as a nested item someone added under a block it
 deletes, is kept as a conflict in the page's history, and its answer says
-so. The open app picks up
+so. `upload_files` copies files into the page as the app's Upload does,
+except into a page other people have or one with a public link. Only the
+app knows of a link another of your computers serves: it checks every two
+minutes while it runs, and without a check from the last five minutes, as
+with the app closed or offline for a while, `upload_files` adds nothing to
+pages that sync. The open app picks up
 what they write within a second and merges it with what is being typed.
 With the app closed, or no page open, `current_page` gives the page opened
 last on this device, with no selection.
@@ -329,6 +335,7 @@ adds to them, with the same tools as `leaflet mcp`:
 | `leaflet cat PAGE` | Print a page as Markdown |
 | `leaflet new [TITLE]` | Make a page and print its ID; `--stdin` takes its content from the Markdown piped in |
 | `leaflet append PAGE [TEXT...]` | Add Markdown to the end of a page: the text given, or what is piped in |
+| `leaflet upload PAGE FILE...` | Add files to the end of a page, as the app's Upload does |
 | `leaflet rename PAGE TITLE` | Change a page's title |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | Move a page inside another, into a folder, or to the top level |
 | `leaflet tag PAGE [TAG...]` | Set a page's tags, or print them; `--clear` takes them off |
@@ -344,6 +351,7 @@ that completes page titles.
 make test 2>&1 | leaflet append "CI log"
 leaflet new "Meeting notes" --folder Work --stdin < notes.md
 leaflet cat Roadmap > roadmap.md
+leaflet upload Trip ~/Pictures/beach.jpg tickets.pdf
 ```
 
 Settings › External agents › Command line installs it: on a Mac as a link

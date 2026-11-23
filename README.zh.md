@@ -260,6 +260,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | `create_folder`、`rename_folder` | 在顶层或其他文件夹中新建文件夹，以及重命名文件夹 |
 | `move_folder` | 把文件夹移入其他文件夹，或移到顶层 |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | 像应用内的智能体一样编辑页面 |
+| `upload_files` | 按路径把这台电脑上的图片、音频、视频和 PDF 添加到页面 |
 
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看
 权限共享给你的页面是只读的。智能体首次编辑某个页面前会保存一份历史快照，
@@ -267,7 +268,10 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 一样同步。编辑时附上 `read_page` 给出的块版本，若该块在此之后被人改过，就会
 原样保留并返回它现在的内容。编辑若覆盖了智能体没读到的修改（例如别人在它删除
 的块下新加的嵌套项），修改前的页面会作为冲突保存在页面历史中，返回结果也会
-说明。打开着的应用会在一秒内
+说明。`upload_files` 像应用的“上传”一样把文件复制到页面中，但不会放进别人也
+能看到的页面，或有公开链接的页面。你的其他电脑提供的公开链接只有应用知道：
+应用运行时每两分钟检查一次；若最近五分钟内没有检查过（例如应用关闭或离线
+一段时间），`upload_files` 不会向会同步的页面添加文件。打开着的应用会在一秒内
 读到这些修改，并与正在输入的内容合并。应用关闭或没有打开页面时，`current_page`
 给出这台设备上最后打开的页面，不含选区。
 
@@ -294,6 +298,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet cat PAGE` | 以 Markdown 输出页面 |
 | `leaflet new [TITLE]` | 新建页面并输出它的 ID；`--stdin` 用管道传入的 Markdown 作为内容 |
 | `leaflet append PAGE [TEXT...]` | 把 Markdown 添加到页面末尾：给出的文字，或管道传入的内容 |
+| `leaflet upload PAGE FILE...` | 像应用的“上传”一样，把文件添加到页面末尾 |
 | `leaflet rename PAGE TITLE` | 修改页面标题 |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | 把页面移入其他页面、文件夹，或移到顶层 |
 | `leaflet tag PAGE [TAG...]` | 设置页面的标签，或输出它们；`--clear` 清除全部标签 |

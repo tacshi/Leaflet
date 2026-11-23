@@ -38,6 +38,7 @@ var hints = map[string]struct {
 	"create_folder":  {"Create Folder", false, false},
 	"rename_folder":  {"Rename Folder", false, true},
 	"move_folder":    {"Move Folder", false, true},
+	"upload_files":   {"Upload Files", false, false},
 }
 
 func toolList() []map[string]any {
@@ -85,6 +86,19 @@ func toolList() []map[string]any {
 		}
 		add(name, desc, object(props, required...))
 	}
+	add("upload_files", "Add files on this computer to a page, as the user's Upload in the app does: a picture shows in the page, and any other file as a card that opens it, audio and video playing there. Pictures, audio, video and PDFs only. They go in the order given, each after the one before it, the first at the end of the page, or each where its position says. Returns each one's block ID, in order.",
+		object(map[string]any{
+			"page_id": pageID,
+			"files": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxUploads, "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":     map[string]any{"type": "string", "description": "The file's absolute path on this computer, or one starting with ~/."},
+					"alt":      map[string]any{"type": "string", "description": "For a picture: what it shows, for those who cannot see it. Without it, the file's name."},
+					"position": agents.Properties(defs["insert_blocks"]["parameters"].(map[string]any))["position"],
+				},
+				"required": []string{"path"},
+			}},
+		}, "page_id", "files"))
 	made := agents.Properties(defs["create_page"]["parameters"].(map[string]any))
 	add("create_page", "Create a page, optionally with content, at the top level unless the user asks for it in a folder or inside a page. With parent_id it goes inside that page, and a link to it is added at the end of the parent.",
 		object(map[string]any{
@@ -135,7 +149,11 @@ func (t *pageTools) keep(id string, c sight) {
 
 func (t *pageTools) call(name string, args map[string]any) map[string]any {
 	clean, _ := cleanArg(args).(map[string]any)
-	return agents.ToolAnswer(t.dispatch(name, clean))
+	out := agents.ToolAnswer(t.dispatch(name, clean))
+	if out["error"] == doc.NeedsImageURL {
+		out["error"] = doc.NeedsImageURL + " For a picture on this computer, use upload_files with its path."
+	}
+	return out
 }
 
 func cleanArg(v any) any {
@@ -227,6 +245,8 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 		return map[string]any{"page_id": p.ID, "tags": p.Tags}, nil
 	case "move_page":
 		return t.movePage(args)
+	case "upload_files":
+		return t.uploadFiles(args)
 	case "create_folder":
 		name, _ := args["name"].(string)
 		if name = strings.TrimSpace(name); name == "" {
@@ -272,7 +292,7 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 		return map[string]any{"folder_id": f.ID}, nil
 	}
 	if slices.Contains(pageToolNames, name) {
-		return t.onPage(name, args)
+		return t.onPage(name, args, nil)
 	}
 	return nil, toolErr("Unknown tool " + name + ".")
 }
@@ -410,7 +430,10 @@ func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	return p, nil
 }
 
-func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, error) {
+// onPage reads or edits a page with the tool name, or edits it with run, as
+// that tool would: with its snapshot in history, a version from read_page
+// checked, and a change not read kept as a conflict.
+func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.Executor) map[string]any) (map[string]any, error) {
 	st := t.s.st
 	p, err := t.page(args, name != "read_page")
 	if err != nil {
@@ -461,7 +484,11 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		}
 		before := content.Copy()
 		x := &agents.Executor{Ctx: tc}
-		out = x.Call(name, args)
+		if run != nil {
+			out = run(x)
+		} else {
+			out = x.Call(name, args)
+		}
 		if len(x.Ops) == 0 {
 			return false, nil
 		}
@@ -788,6 +815,8 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 		return nil, toolErr("A page cannot move inside itself or one of its subpages.")
 	case t.app && parent.ID != "" && agents.ShowsToOthers(st, p, parent):
 		return nil, toolErr("Other people may have that page: inside it, this page and its subpages would be theirs to read. The user can move it there themselves, in the app.")
+	case t.app && parent.ID != "" && publiclyLinked(st, parent.ID):
+		return nil, toolErr("That page has a public link: inside it, this page's title would show to anyone with the link. The user can move it there themselves, in the app.")
 	}
 	if p.ParentID == parent.ID && (parent.ID != "" || p.FolderID == folderID) {
 		return map[string]any{"page_id": p.ID}, nil
@@ -808,6 +837,13 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 		}
 	}
 	return map[string]any{"page_id": p.ID}, nil
+}
+
+// publiclyLinked is whether a page has a public link, as far as can be told: a
+// move only shows a page's title.
+func publiclyLinked(st *store.Store, pageID string) bool {
+	linked, _ := st.PublicLink(pageID)
+	return linked
 }
 
 func (t *pageTools) linkSubpage(parent store.Page, id string) error {

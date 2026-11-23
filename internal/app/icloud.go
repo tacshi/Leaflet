@@ -78,6 +78,7 @@ func (a *App) setICloud(on bool) {
 			a.icloudBusy = false
 			c.KeepICloud(on && err == nil)
 			a.leasePub()
+			a.hub.KickPublicLinks()
 			if err != nil {
 				a.toast(a.iCloudFailed(err))
 			}

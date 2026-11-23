@@ -806,3 +806,91 @@ func TestLsShowsPagesEachInsideAnother(t *testing.T) {
 		}
 	}
 }
+
+func TestUpload(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "Trip")
+	files := t.TempDir()
+	t.Chdir(files)
+	for _, name := range []string{"beach.jpg", "tickets.pdf", "packing.txt"} {
+		if err := os.WriteFile(name, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := ok(t, dir, "", "upload", "Trip", "beach.jpg", filepath.Join(files, "tickets.pdf")); out != "" {
+		t.Errorf("upload printed %q", out)
+	}
+	var added struct {
+		IDs []string `json:"inserted_ids"`
+	}
+	if err := json.Unmarshal([]byte(ok(t, dir, "", "upload", "Trip", "packing.txt", "--json")), &added); err != nil || len(added.IDs) != 1 {
+		t.Errorf("upload --json: %v, %+v", err, added)
+	}
+	if _, errOut, code := run(t, dir, "", "upload", "Trip", "nope.png"); code == 0 || !strings.Contains(errOut, "No file at "+filepath.Join(files, "nope.png")) {
+		t.Errorf("upload of no file: exit %d, %s", code, errOut)
+	}
+	if _, _, code := run(t, dir, "", "upload", "Trip"); code == 0 {
+		t.Error("upload of no files succeeded")
+	}
+	md := ok(t, dir, "", "cat", "Trip")
+	for _, want := range []string{"beach.jpg", "tickets.pdf", "packing.txt"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("cat lacks %q:\n%s", want, md)
+		}
+	}
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := st.Files()
+	if err != nil || len(kept) != 3 {
+		t.Fatalf("files %+v, %v", kept, err)
+	}
+	for _, f := range kept {
+		if raw, err := os.ReadFile(f.LocalPath); err != nil || string(raw) != f.Name {
+			t.Errorf("the copy of %s holds %q, %v", f.Name, raw, err)
+		}
+	}
+}
+
+func TestUploadManyFiles(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "Shots")
+	files := t.TempDir()
+	var args []string
+	for i := range 102 {
+		path := filepath.Join(files, fmt.Sprintf("shot-%03d.png", i))
+		if err := os.WriteFile(path, []byte("png"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args = append(args, path)
+	}
+	var added struct {
+		IDs []string `json:"inserted_ids"`
+	}
+	if err := json.Unmarshal([]byte(ok(t, dir, "", append([]string{"upload", "Shots", "--json"}, args...)...)), &added); err != nil || len(added.IDs) != len(args) {
+		t.Fatalf("upload of %d files: %v, %d IDs", len(args), err, len(added.IDs))
+	}
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	var shots []string
+	pages, _ := st.Pages()
+	for _, n := range st.Content(pages[0].ID).Children {
+		if n.Type == "image" {
+			shots = append(shots, n.Str("alt"))
+		}
+	}
+	if len(shots) != len(args) || !slices.IsSorted(shots) {
+		t.Errorf("the page shows %d pictures, in order %v", len(shots), slices.IsSorted(shots))
+	}
+}

@@ -109,6 +109,7 @@ type Hub struct {
 	ICloudLease func(pageID string) (stop func())
 	ICloudLinks func() (map[string]time.Time, error)
 	linksMu     sync.Mutex
+	linksKick   chan struct{}
 	links       map[string]time.Time
 	listed      map[string]bool
 	leases      map[string]int
@@ -152,7 +153,7 @@ func (h *Hub) runContext() context.Context {
 }
 
 func NewHub(st *store.Store, be *remote.Client, host Host) *Hub {
-	h := &Hub{st: st, be: be, host: host, sessions: map[string]*Session{}}
+	h := &Hub{st: st, be: be, host: host, sessions: map[string]*Session{}, linksKick: make(chan struct{}, 1)}
 	st.Subscribe(func(c store.Change) {
 		if c.Table == "model_providers" || c.Table == "*" {
 			h.optionsMu.Lock()

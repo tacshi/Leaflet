@@ -375,12 +375,17 @@ func (a *App) start() error {
 	a.commentMD.OnLink = a.md.OnLink
 	a.md.CodeLink, a.commentMD.CodeLink = a.codeLink, a.codeLink
 	a.hub.PublicLink = a.publiclyLinked
+	go func() {
+		defer guard.Recover()
+		a.hub.WatchPublicLinks(context.Background(), a.sync.CanSync)
+	}()
 	a.online = mygo.Network.Status().Online
 	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
 		a.update(func() {
 			a.online = s.Online
 			if s.Online {
 				a.sync.Kick()
+				a.hub.KickPublicLinks()
 			}
 		})
 	})
@@ -742,6 +747,7 @@ func (a *App) reload(ch store.Change) {
 	if all || ch.Table == "session" {
 		a.session = a.st.Session()
 		a.leasePub()
+		a.hub.KickPublicLinks()
 	}
 	if a.page != nil && (all || ch.Table == "comments" && (ch.PageID == "" || ch.PageID == a.page.id)) {
 		a.page.setThreads(a.st.Threads(a.page.id))

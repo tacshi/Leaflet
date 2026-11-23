@@ -137,7 +137,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		}
 		url, _ := img["url"].(string)
 		if url = strings.TrimSpace(url); !agentURL(url) {
-			return nil, toolErr("An image block needs image.url (http or https).")
+			return nil, toolErr(NeedsImageURL)
 		}
 		alt, _ := img["alt"].(string)
 		n.Data = map[string]any{"url": url, "align": "center", "alt": alt}

@@ -17,7 +17,7 @@ var tables = []struct{ name, page string }{
 var accountRows = map[string]string{
 	"model_providers": `FALSE`,
 	"key_values": `key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting')
-		OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%' OR key LIKE 'mcp_edited:%'`,
+		OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%' OR key LIKE 'mcp_edited:%' OR key LIKE 'mcp_activity:%'`,
 }
 
 func (s *Store) Wipe() error {

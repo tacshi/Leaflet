@@ -5554,6 +5554,42 @@
       }
     }
   },
+  "externalLiveEdits": "Show their edits as they happen",
+  "@externalLiveEdits": {
+    "description": "Settings › External agents: a switch, on at first, for the small window in a corner of the screen that shows the page an AI app outside Leaflet is changing, as it changes it."
+  },
+  "externalLiveEditsDesc": "While Leaflet is open, a small window in a corner of the screen shows the part of a page an AI app is changing, as it changes it, with the lines around it. It stays away while that page is open in front of you, and goes once the AI app stops.",
+  "@externalLiveEditsDesc": {
+    "description": "Settings › External agents: under externalLiveEdits, what the switch does."
+  },
+  "externalLiveEditsTitle": "Live edits",
+  "@externalLiveEditsTitle": {
+    "description": "The name of the small window in a corner of the screen that shows an AI app's edits as it makes them, for screen readers and the system's window lists."
+  },
+  "externalLiveEditsEditing": "{agent} is editing",
+  "@externalLiveEditsEditing": {
+    "description": "The small window in a corner of the screen, above the page's title, while an AI app outside Leaflet changes the page; agent is its name.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude Code"
+      }
+    }
+  },
+  "externalLiveEditsEdited": "{agent} edited",
+  "@externalLiveEditsEdited": {
+    "description": "The small window in a corner of the screen, above the page's title, once the AI app stopped changing the page for a moment; agent is its name.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude Code"
+      }
+    }
+  },
+  "externalLiveEditsOpen": "Open in Leaflet",
+  "@externalLiveEditsOpen": {
+    "description": "The small window in a corner of the screen that shows an AI app's edits: a button that opens the page in Leaflet's window, at the block it changed."
+  },
   "signinTitle": "Sync with Supabase",
   "@signinTitle": {
     "description": "The sign-in page's title."

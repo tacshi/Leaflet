@@ -361,7 +361,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	local := s.Session().SpaceID
-	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p", "mcp_edited:p1": "mark"} {
+	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p", "mcp_edited:p1": "mark", "mcp_activity:codex": "{}"} {
 		_ = s.SetValue(k, v)
 	}
 	if err := s.MoveSpace(local, "remote-a"); err != nil {
@@ -401,7 +401,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	if s.DeviceID() == device {
 		t.Error("B uses the device row A registered")
 	}
-	for _, k := range []string{"space.A", "account", "sync.cursor.pages", "mcp_edited:p1"} {
+	for _, k := range []string{"space.A", "account", "sync.cursor.pages", "mcp_edited:p1", "mcp_activity:codex"} {
 		if _, ok := s.Value(k); ok {
 			t.Errorf("%s kept", k)
 		}

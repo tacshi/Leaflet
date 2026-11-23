@@ -64,6 +64,9 @@ type Settings struct {
 	SidebarTab              int         `json:"sidebar_tab,omitempty"`
 	SidebarWidth            float32     `json:"sidebar_width,omitempty"`
 	PanelWidth              float32     `json:"panel_width,omitempty"`
+	// LiveAgentEdits shows the edits of agents outside the app, as they
+	// make them, in a small window in a corner of the screen (Mac and PC).
+	LiveAgentEdits bool `json:"live_agent_edits"`
 	// TreeOpen is the sidebar's folders and pages showing what is in them,
 	// as "folder:" or "page:" and their ID.
 	TreeOpen []string `json:"tree_open,omitempty"`
@@ -73,7 +76,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Theme: "system", TextSize: 17, AgentsReadOtherPages: true, AgentsUseWeb: true,
 		AllPagesOffline: true, KeepAudioOnDevice: "until_uploaded", SidebarOpen: true,
-		SidebarWidth: 264, PanelWidth: 360,
+		SidebarWidth: 264, PanelWidth: 360, LiveAgentEdits: true,
 		Stt: SttSettings{
 			Provider: "openai-compatible", ModelSize: "qwen3-asr-0.6b", RunOn: "auto", Language: "auto",
 			LiveTranscript: true, SonioxModel: SonioxModel, LanguageHints: []string{"en", "zh"},

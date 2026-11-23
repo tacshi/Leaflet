@@ -137,7 +137,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   providers, a cloud one's API key in the device's keychain: add a provider
   on each device you use it on.
 - Agents outside the app, such as Claude Code, Codex and Cursor, work on
-  pages through [`leaflet mcp`](#agents-outside-the-app-mcp).
+  pages through [`leaflet mcp`](#agents-outside-the-app-mcp), and while
+  Leaflet runs, a small window in a corner of the screen shows their edits
+  as they make them.
 - A [`leaflet` command](#command-line) finds, reads, makes and files pages
   from a terminal and in scripts, and adds to them.
 
@@ -310,6 +312,14 @@ pages that sync. The open app picks up
 what they write within a second and merges it with what is being typed.
 With the app closed, or no page open, `current_page` gives the page opened
 last on this device, with no selection.
+
+While the Mac or PC app runs, in front or not, a small window in a corner
+of the screen shows the part of a page an agent is changing, as it changes
+it, with a few lines before and after: the blocks it adds come in one by
+one and those it changes light up, with its name and what it did. It stays away while that page is open in front of
+you, closes itself once the agent stops, and opens the page in Leaflet at
+the change. Closed, it stays away until the agent pauses; Settings ›
+External agents turns it off.
 
 Agents read and write text color and highlight in text fields as
 `<span style="color:#ef4444;background:#fde68a">text</span>`, in hex.

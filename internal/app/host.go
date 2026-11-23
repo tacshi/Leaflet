@@ -78,36 +78,47 @@ func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
 func (h *host) Image(c *ui.Context, n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	redraw := func() { h.a.update(func() {}) }
+	pic, url, failed := h.a.blockImage(c, n, redraw)
+	if pic != nil {
+		return pic, h.a.images.player(url, n.ID, redraw), false
+	}
+	return nil, nil, failed
+}
+
+// blockImage is the picture an image block shows and the link it is read
+// by, or failed when there is none to show; redraw is called once a file it
+// waits for has downloaded.
+func (a *App) blockImage(c *ui.Context, n *doc.Node, redraw func()) (pic ui.ImageSource, url string, failed bool) {
 	downloaded := func(ok bool) {
 		if ok {
 			redraw()
 		}
 	}
-	url := n.Str("url")
+	url = n.Str("url")
 	if p, ok := strings.CutPrefix(url, "file://"); ok {
 		url = fileURL(p) // as a path, which may hold a # or a space
 	}
 	path := ""
-	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
+	if f, ok := a.fileByID(n.Str("file_id")); ok {
 		done := downloaded
-		if _, busy := h.a.downloads[f.ID]; busy {
+		if _, busy := a.downloads[f.ID]; busy {
 			done = nil
 		}
 		fetching := false
-		if path, fetching = h.a.localFile(f, done); path == "" {
-			return nil, nil, !fetching
+		if path, fetching = a.localFile(f, done); path == "" {
+			return nil, url, !fetching
 		}
 		url = fileURL(path)
 	}
-	b, failed := h.a.images.get(c, url, 0)
+	b, failed := a.images.get(c, url, 0)
 	if b != nil {
-		return b, h.a.images.player(url, n.ID, redraw), false
+		return b, url, false
 	}
 	failed = failed || url == ""
 	if failed && path != "" {
-		h.a.lost(path)
+		a.lost(path)
 	}
-	return nil, nil, failed
+	return nil, url, failed
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }

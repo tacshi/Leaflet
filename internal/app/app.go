@@ -192,6 +192,9 @@ type App struct {
 
 	fileToDelete *store.File
 
+	// watch is the corner window showing the edits of agents outside the app.
+	watch agentWatch
+
 	pub         *pubLink
 	cloudflared cloudflaredInfo
 	pubPage     struct {
@@ -389,6 +392,7 @@ func (a *App) start() error {
 			}
 		})
 	})
+	a.startWatch()
 	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })
 	a.reloadAll()
 	a.route = Route{Kind: "home"}
@@ -432,6 +436,7 @@ func (a *App) start() error {
 	a.winMu.Unlock()
 	a.startTray()
 	a.win.OnClose(a.closing)
+	a.win.OnFocus(func() { a.update(a.watchFront) })
 	mygo.App.OnBeforeQuit(a.beforeQuit)
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible {
@@ -467,6 +472,7 @@ func (a *App) closing(e *mygo.CloseEvent) {
 	a.rec.Stop()
 	a.stopPub()
 	a.endView()
+	a.closeWatch()
 }
 
 func (a *App) beforeQuit(e *mygo.QuitEvent) {
@@ -1016,6 +1022,9 @@ func (a *App) openPage(id string) {
 	a.closePreview()
 	if a.route.Kind == "page" && a.route.ID == id {
 		a.closeSettings()
+		if appInFront(a) {
+			a.watchFront()
+		}
 		return
 	}
 	for _, p := range a.ancestors(id) {
@@ -1075,6 +1084,9 @@ func (a *App) loadPage(id string) {
 	ps.setThreads(a.st.Threads(id))
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
+	if appInFront(a) {
+		a.watchFront()
+	}
 	a.pageEditable()
 	a.sync.SetOpen(id, true)
 	_ = a.st.SetValue(store.LastPageKey, id)
@@ -1213,6 +1225,7 @@ func (a *App) outsideChange() {
 	if a.page != nil {
 		a.externalContent(a.page.id)
 	}
+	a.agentsEdited()
 	a.sync.Kick()
 }
 

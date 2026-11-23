@@ -453,6 +453,7 @@ func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.
 	}
 	var out map[string]any
 	var saved, unsaved *doc.Content
+	var ops []doc.Op
 	var known sight
 	snapped, inHistory := false, ""
 	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
@@ -512,7 +513,7 @@ func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.
 			snapped = true
 		}
 		beforeSave(p.ID)
-		saved, unsaved = content, before
+		saved, unsaved, ops = content, before, x.Ops
 		return true, nil
 	})
 	switch {
@@ -529,6 +530,7 @@ func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.
 		if err := st.SetValue(editedPrefix+p.ID, editMark(t.s.agent, saved)); err != nil {
 			log.Printf("mcp: %v", err)
 		}
+		t.s.noteActivity(name, p.ID, unsaved, saved, ops)
 	}
 	return out, nil
 }
@@ -793,6 +795,7 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 	}
+	t.s.noteActivity("create_page", p.ID, nil, content, nil)
 	return map[string]any{"page_id": p.ID}, nil
 }
 

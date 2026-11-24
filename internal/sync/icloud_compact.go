@@ -2,8 +2,8 @@ package sync
 
 import (
 	"errors"
-	"maps"
 	"reflect"
+	"time"
 
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
@@ -14,9 +14,37 @@ import (
 // log as it left it, but for that.
 var quietFor = store.BinKept
 
+// Kept on the device, so that a run cut short, or an app quit before the next pass, still leaves nothing of a page
+// deleted for good in iCloud Drive: whether this device's log has yet to be compacted, when this device last heard of
+// a page deleted for good, and when it last read every batch of the devices gone quiet.
+const (
+	compactSoonKey = "icloud.compact_soon"
+	redactSinceKey = "icloud.redact_since"
+	redactedKey    = "icloud.redacted_at"
+)
+
+// redactAgain is how often the logs of quiet devices are read again while a device that has not heard of a page
+// deleted for good may yet go quiet: one never seen again goes quiet within quietFor.
+const redactAgain = 24 * time.Hour
+
+// redactDue reports whether to take what was on pages deleted for good out of the logs of quiet devices: once this
+// device has heard of one since it last read them all, and then daily until every device that was active as it heard
+// has gone quiet, or come back and compacted its own log.
+func (s *Service) redactDue(now time.Time) bool {
+	since := s.intValue(redactSinceKey)
+	if since == 0 {
+		return false
+	}
+	done := s.intValue(redactedKey)
+	if done < since {
+		return true
+	}
+	return now.Before(time.UnixMilli(since).Add(quietFor+redactAgain)) && now.Sub(time.UnixMilli(done)) >= redactAgain
+}
+
 func (s *Service) compact(me string) error {
 	seqs, _, err := s.folder().Batches(me)
-	if err != nil || len(seqs) <= compactAfter && !s.compactSoon.Load() {
+	if err != nil || len(seqs) <= compactAfter && s.intValue(compactSoonKey) == 0 {
 		return err
 	}
 	isPurged := s.purgedCheck()
@@ -87,8 +115,7 @@ func (s *Service) compact(me string) error {
 		}
 	}
 	s.forgetDamaged(me, snapshot.Seq-1)
-	s.compactSoon.Store(false)
-	return nil
+	return s.setInt(compactSoonKey, 0)
 }
 
 // redactQuiet takes what was on pages deleted for good out of the logs of the devices quiet for quietFor, each batch
@@ -170,7 +197,7 @@ func withoutPurged(entries []icloud.Entry, isPurged func(string) bool) ([]icloud
 			continue
 		}
 		if e.Kind == "row" && e.Table == "pages" && isPurged(e.ID) {
-			if row := tombstoneRow(e.Row); !reflect.DeepEqual(row, e.Row) {
+			if row := store.TombstoneRow(e.Row); !reflect.DeepEqual(row, e.Row) {
 				e.Row, changed = row, true
 			}
 		}
@@ -190,16 +217,4 @@ func ofPurgedPage(e icloud.Entry, isPurged func(string) bool) bool {
 		return pageID != "" && isPurged(pageID)
 	}
 	return false
-}
-
-// tombstoneRow is a page's row as a page deleted for good keeps it, in a version of it the log keeps: none of what it
-// was.
-func tombstoneRow(row map[string]any) map[string]any {
-	out := maps.Clone(row)
-	for k, v := range map[string]any{"title": "", "icon": nil, "tags": []any{}, "default_template_id": nil, "public_link_until": nil} {
-		if _, ok := out[k]; ok {
-			out[k] = v
-		}
-	}
-	return out
 }

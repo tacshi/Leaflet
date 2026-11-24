@@ -490,58 +490,107 @@ type todo struct {
 	Overdue   bool   `json:"overdue,omitempty"`
 }
 
-// todoGroup is a day's to-dos, or those with no date.
+// todoGroup is a day's to-dos, or those with no date, under the pages they are on.
 type todoGroup struct {
-	// Key names the day to remember it by, as 2026-11-20, or "no-date".
+	// Key names the day, as 2026-11-20, or doc.TodoNoDateKey: the app shows a day's to-dos by it.
 	Key string `json:"key"`
 	// Section is where the day falls: "overdue" for a day gone by, "today", "upcoming", or
 	// "no_date".
 	Section string `json:"section"`
-	Title   string `json:"title"`
-	Todos   []todo `json:"todos"`
+	// Title names the day, as Today, Tomorrow or Nov 20.
+	Title string `json:"title"`
+	// Date is the day's full date, as Monday, November 23, 2026, or empty for the to-dos with no
+	// date.
+	Date string `json:"date,omitempty"`
+	// Count is how many to-dos are left on the day.
+	Count int `json:"count"`
+	// Pages are the day's to-dos under their pages, each page where its first to-do is and its
+	// to-dos in the day's order.
+	Pages []pageTodos `json:"pages"`
+}
+
+// pageTodos is a page's to-dos on a day.
+type pageTodos struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Todos []todo `json:"todos"`
 }
 
 var todoSections = [...]string{doc.TodoOverdue: "overdue", doc.TodoToday: "today", doc.TodoUpcoming: "upcoming", doc.TodoNoDate: "no_date"}
 
-// Todos lists the to-dos a day at a time, each due at its time in zone, the zone the device is
-// in now, or one offset seconds east of UTC: a due is a time on the clock wherever the device
-// is, and the core keeps the zone it opened in.
+// Todos lists the to-dos a day at a time, under the pages they are on, each due at its time in
+// zone, the zone the device is in now, or one offset seconds east of UTC: a due is a time on the
+// clock wherever the device is, and the core keeps the zone it opened in.
 func (c *Core) Todos(zone string, offset int) (_ string, err error) {
 	defer catch(&err)
 	return c.todosAt(time.Now(), location(zone, offset))
 }
 
 func (c *Core) todosAt(now time.Time, loc *time.Location) (string, error) {
+	days, clock, err := c.todoDays(now, loc)
+	if err != nil {
+		return "", err
+	}
+	m := locales.In(i18n.Locale())
+	out := make([]todoGroup, 0, len(days))
+	for _, d := range days {
+		out = append(out, todoGroupOf(m, d, clock, loc))
+	}
+	return encode(out)
+}
+
+// TodoDay is the day key names as Todos lists it, in zone or one offset seconds east of UTC as
+// for Todos, or that day with no to-dos once none is left on it, so its title and date still
+// show.
+func (c *Core) TodoDay(key, zone string, offset int) (_ string, err error) {
+	defer catch(&err)
+	return c.todoDayAt(key, time.Now(), location(zone, offset))
+}
+
+func (c *Core) todoDayAt(key string, now time.Time, loc *time.Location) (string, error) {
+	days, clock, err := c.todoDays(now, loc)
+	if err != nil {
+		return "", err
+	}
+	return encode(todoGroupOf(locales.In(i18n.Locale()), doc.TodoDayAt(days, key, clock), clock, loc))
+}
+
+// todoDays is the to-dos a day at a time, and the time it is on the clock of the zone the core
+// opened in: the dues are read in that zone, so the days are made at the time there that the
+// device's clock in loc shows.
+func (c *Core) todoDays(now time.Time, loc *time.Location) ([]doc.TodoDay[store.PageTodo], time.Time, error) {
 	var todos []store.PageTodo
 	var err error
 	c.q.do(func() { todos, err = c.core.Store.Todos() })
 	if err != nil {
-		return "", err
+		return nil, time.Time{}, err
 	}
-	// The dues are read in the zone the core opened in, so the days are made at the time
-	// there that the device's clock shows.
 	clock := core.OnClock(now.In(loc), time.Local)
-	m := locales.In(i18n.Locale())
-	out := []todoGroup{}
-	for _, d := range doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, clock) {
-		title := m.TodosSectionNoDate()
-		if !d.Day.IsZero() {
-			title = doc.DueLabel(m, d.Day, false, clock)
-		}
-		group := todoGroup{Key: d.Key(), Section: todoSections[d.Section], Title: title, Todos: make([]todo, 0, len(d.Todos))}
-		for _, t := range d.Todos {
+	return doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, clock), clock, nil
+}
+
+// todoGroupOf is a day of to-dos as the app shows it, at clock, each due at its time in loc.
+func todoGroupOf(m locales.Messages, d doc.TodoDay[store.PageTodo], clock time.Time, loc *time.Location) todoGroup {
+	group := todoGroup{Key: d.Key(), Section: todoSections[d.Section], Title: m.TodosSectionNoDate(), Count: len(d.Todos), Pages: []pageTodos{}}
+	if !d.Day.IsZero() {
+		group.Title = doc.DueLabel(m, d.Day, false, clock)
+		group.Date = m.TodosDayDate(d.Day)
+	}
+	for _, todos := range d.ByPage(func(t store.PageTodo) string { return t.PageID }) {
+		page := pageTodos{ID: todos[0].PageID, Title: todos[0].PageTitle, Todos: make([]todo, 0, len(todos))}
+		for _, t := range todos {
 			due := t.Due
 			if !due.IsZero() {
 				due = core.OnClock(due, loc)
 			}
-			group.Todos = append(group.Todos, todo{
+			page.Todos = append(page.Todos, todo{
 				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(due), Timed: t.Timed, Owner: t.Owner,
 				Overdue: !t.Due.IsZero() && doc.Overdue(t.Due, t.Timed, clock),
 			})
 		}
-		out = append(out, group)
+		group.Pages = append(group.Pages, page)
 	}
-	return encode(out)
+	return group
 }
 
 // CheckTodo checks off the to-do blockID of a page, or back on with checked false, as its

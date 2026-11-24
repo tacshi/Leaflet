@@ -35,7 +35,6 @@ type Service struct {
 	Pulled func()
 
 	cloudOn                     atomic.Bool
-	compactSoon, redactSoon     atomic.Bool
 	halted                      atomic.Int32
 	kick                        chan struct{}
 	mu                          gosync.Mutex
@@ -114,8 +113,13 @@ func (s *Service) ICloudOn() bool { return s.cloudOn.Load() }
 
 func (s *Service) Uploads() bool { return s.target().ready() }
 
-// Syncs reports whether this device syncs, through an account or iCloud Drive, whether or not it can now.
-func (s *Service) Syncs() bool { return s.target().ready() }
+// Syncs reports whether this device syncs, through an account or iCloud Drive, whether or not it can now: iCloud
+// Drive is on before the app has found its folder too.
+func (s *Service) Syncs() bool { return s.cloudOn.Load() || s.be.SignedIn() }
+
+// ThroughServer reports whether this device syncs through an account's server, which orders a deletion for good with
+// what other devices did since (store.WipeOnceTaken).
+func (s *Service) ThroughServer() bool { return !s.cloudOn.Load() && s.be.SignedIn() }
 
 func (s *Service) pulled() {
 	if s.Pulled != nil {

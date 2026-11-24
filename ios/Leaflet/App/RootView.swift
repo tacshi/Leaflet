@@ -50,14 +50,15 @@ struct RootView: View {
                             min: 240, ideal: scene.sidebarToFold ?? 300,
                             max: scene.sidebarToFold ?? 420)
                 } detail: {
-                    if let day = scene.day {
-                        TodoDayScreen(key: day).id(day)
-                    } else if scene.binShown {
+                    switch scene.selection {
+                    case .day(let key):
+                        TodoDayScreen(key: key).id(key)
+                    case .bin:
                         BinScreen()
-                    } else if let selection = scene.selection {
-                        PageScreen(pageID: selection).id(selection)
+                    case .page(let id):
+                        PageScreen(pageID: id).id(id)
                             .ignoresSafeArea(.keyboard, edges: .bottom)
-                    } else {
+                    case nil:
                         NoPageScreen()
                     }
                 }
@@ -120,14 +121,16 @@ struct RootView: View {
         .onAppear {
             app.activeScene = scene
             scene.reopened()
-            scene.open(savedPage ?? opening)
+            scene.open(
+                savedPage.map(SceneModel.Selection.init(saved:)) ?? opening.map { .page($0) })
             openReminder()
             openVoiceNote()
             #if DEBUG
                 if let title = UserDefaults.standard.string(forKey: "LeafletOpen") {
                     Task {
                         await app.reload()
-                        scene.open(app.library.pages.first { $0.title.contains(title) }?.id)
+                        let page = app.library.pages.first { $0.title.contains(title) }
+                        scene.open(page.map { .page($0.id) })
                     }
                 }
             #endif
@@ -144,7 +147,7 @@ struct RootView: View {
                 }
             #endif
         }
-        .onChange(of: scene.selection) { savedPage = scene.selection }
+        .onChange(of: scene.selection) { savedPage = scene.selection?.saved }
         .onChange(of: ReminderInbox.shared.target) { openReminder() }
         .onChange(of: app.libraryLoaded) { openReminder() }
         .onChange(of: app.voiceNote) { openVoiceNote() }
@@ -318,7 +321,7 @@ private struct NoPageScreen: View {
             Text(L.shellNoPageHint)
         } actions: {
             Button(L.shellNewPage) {
-                Task { scene.open(await app.createPage()) }
+                Task { if let id = await app.createPage() { scene.open(id) } }
             }
             .buttonStyle(.borderedProminent)
             Button(L.shellAskAgent, systemImage: "sparkles") { scene.askWorkspace() }

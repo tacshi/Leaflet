@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -194,8 +195,20 @@ func (s *Store) TrashFile(id string) error {
 	return nil
 }
 
+// Wipe says when deleting a page for good takes what was on it off this device.
+type Wipe int
+
+const (
+	// WipeNow takes it off at once: no server orders the deletion with what other devices did since.
+	WipeNow Wipe = iota
+	// WipeOnceTaken keeps it until the server takes the deletion (WipePurged). The server refuses the deletion of a
+	// page another device restored, or deleted again, since the deletion this device saw: the page then comes back
+	// whole (putRemotePage).
+	WipeOnceTaken
+)
+
 // Purge deletes pages and files of the bin for good: a page with those under it deleted with it.
-func (s *Store) Purge(refs ...BinRef) error {
+func (s *Store) Purge(wipe Wipe, refs ...BinRef) error {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -207,7 +220,7 @@ func (s *Store) Purge(refs ...BinRef) error {
 			var err error
 			switch ref.Kind {
 			case BinPage:
-				gone, err = s.purgePage(tx, ref.ID, now)
+				gone, err = s.purgePage(tx, ref.ID, now, wipe)
 			case BinFile:
 				gone, err = purgeFile(tx, s.Dir, ref.ID, now)
 			}
@@ -229,22 +242,92 @@ func (s *Store) Purge(refs ...BinRef) error {
 }
 
 // EmptyBin deletes everything in the bin for good.
-func (s *Store) EmptyBin() error {
+func (s *Store) EmptyBin(wipe Wipe) error {
 	items, err := s.Bin()
 	if err != nil {
 		return err
 	}
-	return s.Purge(refs(items)...)
+	return s.Purge(wipe, refs(items)...)
 }
 
 // PurgeOld deletes for good what has been in the bin for BinDays by the time, and reports whether there was any.
-func (s *Store) PurgeOld(now time.Time) (bool, error) {
+func (s *Store) PurgeOld(now time.Time, wipe Wipe) (bool, error) {
 	items, err := s.Bin()
 	if err != nil {
 		return false, err
 	}
 	old := slices.DeleteFunc(items, func(it BinItem) bool { return it.GoesAt.After(now) })
-	return len(old) > 0, s.Purge(refs(old)...)
+	return len(old) > 0, s.Purge(wipe, refs(old)...)
+}
+
+// StoredObject is an object where pages' files and recordings are stored, by its bucket and path.
+type StoredObject struct{ Bucket, Path string }
+
+// WipePurged takes what was on a page deleted for good off this device once the server has taken its deletion, and
+// has it removed where it is stored: what this device knew of, and what the server listed, which another device, or
+// someone the page was shared with, put there. A page not deleted for good here is left as it is.
+func (s *Store) WipePurged(pageID string, listed []StoredObject) error {
+	var copies []string
+	err := s.inTx(func(tx *sql.Tx) error {
+		if gone, err := isPurged(tx, pageID); err != nil || !gone {
+			return err
+		}
+		removals, err := s.storedOn(tx, []string{pageID}, false)
+		if err != nil {
+			return err
+		}
+		if copies, err = s.wipePages(tx, []string{pageID}, true); err != nil {
+			return err
+		}
+		known := map[StoredObject]bool{}
+		for _, r := range removals {
+			known[StoredObject{S(r, "bucket"), S(r, "path")}] = true
+		}
+		for _, o := range listed {
+			if o.Bucket != "" && o.Path != "" && !known[o] {
+				known[o] = true
+				removals = append(removals, map[string]any{"bucket": o.Bucket, "path": o.Path, "page_id": pageID})
+			}
+		}
+		return queueRemovals(tx, removals)
+	})
+	if err != nil {
+		return err
+	}
+	for _, path := range copies {
+		s.removeLocalCopy(path)
+	}
+	s.Notify("outbox", pageID)
+	return nil
+}
+
+// DropUnsent removes a page made on this device that has gone nowhere yet, with all that is queued of it, and reports
+// whether it did: a page that went up, or came from elsewhere, is left as it is.
+func (s *Store) DropUnsent(id string) (bool, error) {
+	dropped := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		cols, queued, err := queuedCols(tx, "pages", id)
+		if err != nil || !queued || cols != nil {
+			return err
+		}
+		var pulled sql.NullInt64
+		if err := tx.QueryRow(`SELECT pulled_at FROM pages WHERE id = ?`, id).Scan(&pulled); err != nil || pulled.Valid {
+			return err
+		}
+		var versions int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM row_versions WHERE (tbl = 'pages' OR tbl LIKE 'pages.%') AND id = ?`, id).Scan(&versions); err != nil || versions > 0 {
+			return err
+		}
+		if _, err := s.wipePages(tx, []string{id}, false); err != nil {
+			return err
+		}
+		dropped = true
+		return nil
+	})
+	if err == nil && dropped {
+		s.Notify("*", "")
+	}
+	return dropped, err
 }
 
 func refs(items []BinItem) []BinRef {
@@ -280,7 +363,7 @@ func (s *Store) binSince() time.Time {
 
 // purgePage deletes for good a page of the space in the bin, with those under it deleted with it. A page of another
 // space is its owner's to delete for good, and is left as it is.
-func (s *Store) purgePage(tx *sql.Tx, id string, now time.Time) ([]string, error) {
+func (s *Store) purgePage(tx *sql.Tx, id string, now time.Time, wipe Wipe) ([]string, error) {
 	root, err := pageIn(tx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -294,13 +377,15 @@ func (s *Store) purgePage(tx *sql.Tx, id string, now time.Time) ([]string, error
 	if err != nil {
 		return nil, err
 	}
-	removals, err := s.storedOn(tx, ids, false)
-	if err != nil {
-		return nil, err
-	}
-	copies, err := s.wipePages(tx, ids, true)
-	if err != nil {
-		return nil, err
+	var removals []map[string]any
+	var copies []string
+	if wipe == WipeNow {
+		if removals, err = s.storedOn(tx, ids, false); err != nil {
+			return nil, err
+		}
+		if copies, err = s.wipePages(tx, ids, true); err != nil {
+			return nil, err
+		}
 	}
 	for _, pid := range ids {
 		p, err := pageIn(tx, pid)
@@ -344,8 +429,12 @@ func (s *Store) storedOn(tx *sql.Tx, ids []string, mine bool) ([]map[string]any,
 
 func queueRemovals(tx *sql.Tx, removals []map[string]any) error {
 	for _, r := range removals {
-		key := "files/" + S(r, "file_id")
-		if S(r, "bucket") == "recordings" {
+		// One known only by where it is stored, as the server listed it, goes by its path.
+		key := S(r, "bucket") + "/" + S(r, "path")
+		switch {
+		case S(r, "file_id") != "":
+			key = "files/" + S(r, "file_id")
+		case S(r, "recording_id") != "":
 			key = "recordings/" + S(r, "recording_id")
 		}
 		if err := queue(tx, "storage_delete", key, r, "deleted for good", ""); err != nil {
@@ -355,9 +444,23 @@ func queueRemovals(tx *sql.Tx, removals []map[string]any) error {
 	return nil
 }
 
-// purgedCols is what a page deleted for good changes of its row: its deletion goes with it, as what was queued of the
-// page, its deletion too, went with the rest of it.
-var purgedCols = []string{"title", "icon", "tags", "default_template_id", "deleted_at", "purged_at"}
+// purgedBlank is what a page deleted for good keeps in the columns that said what it was: nothing.
+var purgedBlank = map[string]any{"title": "", "icon": nil, "tags": []any{}, "default_template_id": nil}
+
+// purgedCols is what a page deleted for good changes of its row: its deletion goes with it, as the purge takes the
+// place of what was queued of the page, its deletion too.
+var purgedCols = append(slices.Sorted(maps.Keys(purgedBlank)), "deleted_at", "purged_at")
+
+// TombstoneRow is a page's row, as from a sync log, as a page deleted for good keeps it: none of what it was.
+func TombstoneRow(row map[string]any) map[string]any {
+	out := maps.Clone(row)
+	for k, v := range purgedBlank {
+		if _, ok := out[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
 
 func queuePurged(tx *sql.Tx, p Page) error {
 	if err := writePage(tx, p); err != nil {
@@ -422,16 +525,13 @@ func purgeFile(tx *sql.Tx, dir, id string, now time.Time) ([]string, error) {
 	return copies, queue(tx, "storage_delete", "files/"+f.ID, fileRemoval(f), "deleted file for good", f.PageID)
 }
 
-// putPurgedPage stores a page another device deleted for good, and takes everything on it off this device. On a page
-// of another space, shared with this account, what it put there is its own to remove where it is stored: the page's
-// owner may not.
+// putPurgedPage stores a page deleted for good elsewhere, and takes everything on it off this device, and where it is
+// stored what this device knew of: the device that deleted it may not have heard of all of it. On a page of another
+// space, shared with this account, only what this account put there: the rest is the page's owner's to remove.
 func (s *Store) putPurgedPage(tx *sql.Tx, p Page) ([]string, error) {
-	var removals []map[string]any
-	if p.SpaceID != s.Session().SpaceID {
-		var err error
-		if removals, err = s.storedOn(tx, []string{p.ID}, true); err != nil {
-			return nil, err
-		}
+	removals, err := s.storedOn(tx, []string{p.ID}, p.SpaceID != s.Session().SpaceID)
+	if err != nil {
+		return nil, err
 	}
 	copies, err := s.wipePages(tx, []string{p.ID}, true)
 	if err != nil {
@@ -451,6 +551,15 @@ func isPurged(q querier, pageID string) (bool, error) {
 	var n int
 	err := q.QueryRow(`SELECT COUNT(*) FROM pages WHERE id = ? AND purged_at IS NOT NULL`, pageID).Scan(&n)
 	return n > 0, err
+}
+
+// notPurged is ErrPurged for a page deleted for good, on which nothing is written again.
+func notPurged(q querier, pageID string) error {
+	gone, err := isPurged(q, pageID)
+	if err == nil && gone {
+		return ErrPurged
+	}
+	return err
 }
 
 // IsPurged reports whether the page was deleted for good.

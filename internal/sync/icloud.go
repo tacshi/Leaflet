@@ -110,12 +110,14 @@ func (s *Service) cloudSteps(ctx context.Context, me string) error {
 	if err := s.compact(me); err != nil {
 		log.Printf("icloud: compact: %v", err)
 	}
-	if s.redactSoon.Load() {
+	if now := cloudNow(); s.redactDue(now) {
 		switch whole, err := s.redactQuiet(me); {
 		case err != nil:
 			log.Printf("icloud: the logs of quiet devices: %v", err)
 		case whole:
-			s.redactSoon.Store(false)
+			if err := s.setInt(redactedKey, now.UnixMilli()); err != nil {
+				log.Printf("icloud: the logs of quiet devices: %v", err)
+			}
 		}
 	}
 	return nil
@@ -390,7 +392,12 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			if err := s.setVersion(d.e.Entity, d.e.EntityID, d.cols, d.version); err != nil {
 				return err
 			}
-			if d.e.Entity == "pages" {
+			if d.e.Entity == "pages" && s.st.IsPurged(d.e.EntityID) {
+				// What was on it is off this device once its deletion is in the log, if it was not yet, as when this
+				// device deleted it for good while syncing through the server.
+				if err := s.st.WipePurged(d.e.EntityID, nil); err != nil {
+					return err
+				}
 				s.dropPurgedPageFile(d.e.EntityID)
 			}
 		}
@@ -555,15 +562,20 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 }
 
 // dropPurgedPageFile removes every device's version of a page deleted for good from the folder, once its deletion is
-// in a batch, sent or read, and has the next pass compact this device's log and those of devices gone quiet, which
-// then keep nothing that was on it: nothing of what the page was stays in iCloud Drive. A device that had not heard of
-// the deletion, and writes its version again, removes it itself once it does.
+// in a batch, sent or read, and has this device's log compacted and those of devices gone quiet redacted, from the
+// next pass on, until they keep nothing that was on it: nothing of what the page was stays in iCloud Drive. A device
+// that had not heard of the deletion, and writes its version again, removes it itself once it does.
 func (s *Service) dropPurgedPageFile(pageID string) {
-	if !s.st.IsPurged(pageID) {
+	p, err := s.st.Page(pageID)
+	if err != nil || p.PurgedAt.IsZero() {
 		return
 	}
-	s.compactSoon.Store(true)
-	s.redactSoon.Store(true)
+	if err := s.setInt(compactSoonKey, 1); err != nil {
+		log.Printf("icloud: page %s: %v", pageID, err)
+	}
+	if err := s.setInt(redactSinceKey, cloudNow().UnixMilli()); err != nil {
+		log.Printf("icloud: page %s: %v", pageID, err)
+	}
 	devices, err := s.folder().Devices()
 	if err != nil {
 		log.Printf("icloud: page %s: %v", pageID, err)

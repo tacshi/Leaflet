@@ -3,10 +3,12 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	gosync "sync"
 	"testing"
@@ -69,7 +71,7 @@ func TestICloudCarriesTheBin(t *testing.T) {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
-	if err := b.st.EmptyBin(); err != nil {
+	if err := b.st.EmptyBin(store.WipeNow); err != nil {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
@@ -122,9 +124,11 @@ func TestPurgedPageGoesUpAndTakesItsObjects(t *testing.T) {
 	if _, err := st.DeletePage(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.EmptyBin(); err != nil {
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
 		t.Fatal(err)
 	}
+	// Put there by another of the owner's devices, whose row this one never pulled.
+	const elsewhere = "space/other/photo.png"
 	var mu gosync.Mutex
 	var patched map[string]any
 	removed := map[string][]string{}
@@ -142,6 +146,9 @@ func TestPurgedPageGoesUpAndTakesItsObjects(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&patched)
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": p.ID}})
 			return
+		case r.URL.Path == "/rest/v1/purged_objects" && r.URL.Query().Get("page_id") == "eq."+p.ID:
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"bucket_id": "files", "name": f.StoragePath}, {"bucket_id": "files", "name": elsewhere}})
+			return
 		case strings.HasPrefix(r.URL.Path, "/storage/v1/object/"):
 			var body struct {
 				Prefixes []string `json:"prefixes"`
@@ -154,22 +161,103 @@ func TestPurgedPageGoesUpAndTakesItsObjects(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	// While the page purge has not gone up yet, its files and recordings must not be removed.
+	// While the purge has not gone up yet, the page keeps what was on it, here and where it is stored.
 	if err := svc.push(context.Background()); err == nil {
 		t.Fatal("expected first push to fail on 500")
 	}
 	if len(removed) != 0 {
 		t.Fatalf("removed before page purge went up: %v", removed)
 	}
+	if _, err := st.File(f.ID); err != nil {
+		t.Errorf("the file went before the server took the purge: %v", err)
+	}
+	if _, err := st.Recording("rec1"); err != nil {
+		t.Errorf("the recording went before the server took the purge: %v", err)
+	}
 	svc.retryAt = map[outboxKey]time.Time{}
-	if err := svc.push(context.Background()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if patched["purged_at"] == nil || patched["deleted_at"] == nil || patched["title"] != "" {
 		t.Errorf("page went up as %v", patched)
 	}
-	if strings.Join(removed["files"], ",") != f.StoragePath || strings.Join(removed["recordings"], ",") != "u1/rec1.wav,u1/rec2.wav" {
+	wantFiles := []string{f.StoragePath, elsewhere}
+	slices.Sort(wantFiles)
+	slices.Sort(removed["files"])
+	if !slices.Equal(removed["files"], wantFiles) || strings.Join(removed["recordings"], ",") != "u1/rec1.wav,u1/rec2.wav" {
 		t.Errorf("removed %v", removed)
+	}
+	if _, err := st.File(f.ID); !store.IsNotFound(err) {
+		t.Errorf("the file stayed once the server took the purge: %v", err)
+	}
+	if n := st.PendingCount(); n != 0 {
+		t.Errorf("%d waiting", n)
+	}
+}
+
+// TestARefusedPurgeKeepsThePage has the server refuse a deletion for good of a page another device restored since the
+// deletion this one saw: the page comes back here as the server has it, with what was on it, and nothing of it is
+// removed where it is stored.
+func TestARefusedPurgeKeepsThePage(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := doc.Empty()
+	if err := c.Insert(doc.Position{At: "end"}, &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutRecording(store.Recording{ID: "rec1", PageID: p.ID, BlockID: "b1", AudioPath: "u1/rec1.wav", Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
+		t.Fatal(err)
+	}
+	restored := store.PageToRemote(p)
+	restored["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	var removed []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"42501","message":"page_restored"}`)
+			return
+		case r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{restored})
+			return
+		case strings.HasPrefix(r.URL.Path, "/storage/v1/object/"):
+			removed = append(removed, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.Page(p.ID)
+	if err != nil || st.IsPurged(p.ID) || !got.DeletedAt.IsZero() || got.Title != "Plans" {
+		t.Fatalf("the page is %+v, %v", got, err)
+	}
+	if content := st.Content(p.ID); content == nil || content.Find("b1") == nil {
+		t.Errorf("what was on the page went: %v", content)
+	}
+	if _, err := st.Recording("rec1"); err != nil {
+		t.Errorf("the recording went: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("removed %v of a page back in use", removed)
 	}
 	if n := st.PendingCount(); n != 0 {
 		t.Errorf("%d waiting", n)
@@ -192,7 +280,7 @@ func TestTheBinEmptiesOnlyWithWhatOtherDevicesDid(t *testing.T) {
 	told := 0
 	a.svc.Pulled = func() {
 		told++
-		if _, err := a.st.PurgeOld(later); err != nil {
+		if _, err := a.st.PurgeOld(later, store.WipeNow); err != nil {
 			t.Error(err)
 		}
 	}
@@ -257,7 +345,7 @@ func TestAPurgeLeavesNothingOfThePageInICloudDrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
-	if err := a.st.EmptyBin(); err != nil {
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
@@ -286,17 +374,24 @@ func TestAPurgeLeavesNothingOfThePageInICloudDrive(t *testing.T) {
 	if found := holding("devices/" + qid + "/pages"); len(found) != 0 {
 		t.Errorf("the version of the page of a device that had not heard stays: %v", found)
 	}
-	// It has not been seen since: the others take what was on the page out of its log.
+	// It has not been seen since: a day on, once it has gone quiet, the others take what was on the page out of its
+	// log, as a device that came back in between would have compacted its own.
+	a.sync()
+	if found := holding("devices/" + qid + "/log"); len(found) == 0 {
+		t.Fatal("the log of a device still active was changed by another")
+	}
+	was := cloudNow
+	cloudNow = func() time.Time { return time.Now().Add(redactAgain + time.Hour) }
+	t.Cleanup(func() { cloudNow = was })
 	rel, _ := icloud.DevicePath(qid)
 	var d deviceFile
 	if err := a.svc.folder().ReadJSON(rel, &d); err != nil {
 		t.Fatal(err)
 	}
-	d.LastActiveAt = time.Now().Add(-quietFor - time.Hour)
+	d.LastActiveAt = cloudNow().Add(-quietFor - time.Hour)
 	if err := a.svc.folder().WriteJSON(rel, d); err != nil {
 		t.Fatal(err)
 	}
-	a.svc.redactSoon.Store(true)
 	a.sync()
 	if found := holding(""); len(found) != 0 {
 		t.Errorf("what was on the page stays in %v", found)
@@ -392,7 +487,7 @@ func TestAPurgeRemovesARecordingSomeoneElseMadeByItsListedPath(t *testing.T) {
 	if _, err := st.DeletePage(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.EmptyBin(); err != nil {
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
 		t.Fatal(err)
 	}
 	const theirs = "u2/33333333-3333-4333-8333-333333333334.wav"
@@ -405,6 +500,9 @@ func TestAPurgeRemovesARecordingSomeoneElseMadeByItsListedPath(t *testing.T) {
 		switch {
 		case r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodPatch:
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": p.ID}})
+			return
+		case r.URL.Path == "/rest/v1/purged_objects" && r.URL.Query().Get("page_id") != "":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
 			return
 		case r.URL.Path == "/rest/v1/purged_objects":
 			asked = r.URL.Query().Get("name")
@@ -421,8 +519,10 @@ func TestAPurgeRemovesARecordingSomeoneElseMadeByItsListedPath(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	if err := svc.push(context.Background()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if asked != "like.*/33333333-3333-4333-8333-333333333334.*" {
 		t.Errorf("asked for %q", asked)

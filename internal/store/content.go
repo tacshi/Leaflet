@@ -147,10 +147,7 @@ func (s *Store) UpdateContent(pageID string, edit func(c *doc.Content, kept bool
 func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (Saved, error) {
 	var saved Saved
 	err := s.inTx(func(tx *sql.Tx) error {
-		if gone, err := isPurged(tx, pageID); err != nil || gone {
-			if gone {
-				return ErrPurged
-			}
+		if err := notPurged(tx, pageID); err != nil {
 			return err
 		}
 		var stored string

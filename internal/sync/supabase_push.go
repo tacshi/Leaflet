@@ -104,7 +104,12 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
 		}
-		return s.pushRow(ctx, e, payload)
+		_, purge := payload["purged_at"]
+		done, err := s.pushRow(ctx, e, payload)
+		if err != nil || !done || !purge {
+			return done, err
+		}
+		return s.purgeTaken(ctx, e.EntityID)
 	case "files":
 		if s.contentsWait(e) {
 			return false, nil
@@ -132,6 +137,30 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 	}
 	_, err = s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
+}
+
+// purgeTaken takes what was on a page off this device once the server has taken its deletion for good, unless the
+// server refused it and the page came back (putRemotePage), and has it removed where it is stored: what this device
+// knew of, and what the server listed of the page, as another device, or someone it was shared with, put there.
+// Until the list is read, the deletion stays queued: the server takes it again as it is.
+func (s *Service) purgeTaken(ctx context.Context, pageID string) (bool, error) {
+	if !s.st.IsPurged(pageID) {
+		return true, nil
+	}
+	rows, err := s.be.Select(ctx, "purged_objects", remote.Query{Select: "bucket_id,name",
+		Filters: []string{remote.Eq("page_id", pageID)}})
+	if err != nil {
+		return false, err
+	}
+	listed := make([]store.StoredObject, 0, len(rows))
+	for _, r := range rows {
+		listed = append(listed, store.StoredObject{Bucket: store.S(r, "bucket_id"), Path: store.S(r, "name")})
+	}
+	if err := s.st.WipePurged(pageID, listed); err != nil {
+		return false, err
+	}
+	s.KickPush()
+	return true, nil
 }
 
 func (s *Service) pushChanged(ctx context.Context, table string, payload map[string]any) (bool, error) {

@@ -27,20 +27,14 @@ func TestTodoDaysAndReminders(t *testing.T) {
 	for _, d := range todoDays(todos, now) {
 		got = append(got, fmt.Sprintf("%s %s %d", d.Key(), todoDayTitle(d, now), len(d.Todos)))
 	}
-	if want := "[2026-10-24 Oct 24 1 2026-10-26 Today 1 2026-10-27 Tomorrow 1 2026-10-29 Oct 29 1 no-date No date 1]"; fmt.Sprint(got) != want {
+	if want := "[2026-10-24 Oct 24 1 2026-10-26 Today 1 2026-10-27 Tomorrow 1 2026-10-29 Oct 29 1 " + doc.TodoNoDateKey + " No date 1]"; fmt.Sprint(got) != want {
 		t.Errorf("days %v, want %s", got, want)
 	}
 	days := todoDays(todos, now)
-	if d := todoDayAt(days, "2026-10-27", now); len(d.Todos) != 1 || d.Todos[0].BlockID != "soon" {
-		t.Errorf("tomorrow %+v", d)
-	}
-	if d := todoDayAt(days, "2026-10-25", now); len(d.Todos) != 0 || d.Section != doc.TodoOverdue || todoDayTitle(d, now) != "Yesterday" {
+	if d := doc.TodoDayAt(days, "2026-10-25", now); len(d.Todos) != 0 || todoDayTitle(d, now) != "Yesterday" {
 		t.Errorf("a day with nothing left on it %+v", d)
 	}
-	if d := todoDayAt(days, "2026-10-30", now); d.Section != doc.TodoUpcoming {
-		t.Errorf("a day to come with nothing on it %+v", d)
-	}
-	if d := todoDayAt(nil, noDateKey, now); d.Section != doc.TodoNoDate || todoDayTitle(d, now) != "No date" {
+	if d := doc.TodoDayAt[store.PageTodo](nil, doc.TodoNoDateKey, now); todoDayTitle(d, now) != "No date" {
 		t.Errorf("no date with nothing on it %+v", d)
 	}
 	reminded := map[string]bool{"late": true}
@@ -61,6 +55,29 @@ func TestTodoDaysAndReminders(t *testing.T) {
 	}
 	if r := core.DueReminders(yesterday, now, func(store.PageTodo) bool { return false }); len(r) != 0 {
 		t.Errorf("reminders of yesterday's at 10:00 %+v", r)
+	}
+}
+
+func TestTodoDaysAreKeptTillTheTodosOrTheDayChange(t *testing.T) {
+	a := templatesApp(t)
+	now := time.Date(2026, 11, 24, 23, 0, 0, 0, time.Local)
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{
+		todoNode("pack", "Pack", now),
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	days := a.todoDayList(now)
+	if len(days) != 1 || &a.todoDayList(now.Add(30 * time.Minute))[0] != &days[0] {
+		t.Fatalf("the days were made again with nothing changed: %+v", days)
+	}
+	if &a.todoDayList(now.Add(2 * time.Hour))[0] == &days[0] {
+		t.Error("the days weren't made again once the day turned")
+	}
+	days = a.todoDayList(now)
+	a.todosStale = true
+	if &a.todoDayList(now)[0] == &days[0] {
+		t.Error("the days weren't made again once the to-dos changed")
 	}
 }
 
@@ -387,13 +404,13 @@ func TestTodoDayView(t *testing.T) {
 }
 
 func TestTodoDayRoutes(t *testing.T) {
-	for _, r := range []Route{{Kind: "day", ID: "2026-11-23"}, {Kind: "day", ID: noDateKey}, {Kind: "page", ID: "p"}} {
+	for _, r := range []Route{{Kind: "day", ID: "2026-11-23"}, {Kind: "day", ID: doc.TodoNoDateKey}, {Kind: "page", ID: "p"}} {
 		if got := routeAt(r.path()); got != r {
 			t.Errorf("route %+v comes back as %+v", r, got)
 		}
 	}
 	a := templatesApp(t)
-	a.route = Route{Kind: "day", ID: noDateKey}
+	a.route = Route{Kind: "day", ID: doc.TodoNoDateKey}
 	if a.routeTitle() != "No date" || a.gone(a.route) {
 		t.Errorf("title %q, gone %v", a.routeTitle(), a.gone(a.route))
 	}

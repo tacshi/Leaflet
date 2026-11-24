@@ -9,34 +9,22 @@ struct TodoDayScreen: View {
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
     @State private var id = UUID()
-    /// The day as last listed, kept for its title once nothing is left on it.
+    /// The day as last listed, or as the core gives it once nothing is left on it, kept for its
+    /// title and date.
     @State private var last: TodoGroup?
 
     private var group: TodoGroup? { app.todos.first { $0.key == key } }
 
-    /// The day's midnight here, or nil for the to-dos with no date.
-    private var day: Date? {
-        let parts = key.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
-        return Calendar.current.date(
-            from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
-    }
-
-    private var title: String {
-        if let title = (group ?? last)?.title { return title }
-        guard let day else { return L.todosSectionNoDate }
-        return day.formatted(.dateTime.month().day())
-    }
-
     var body: some View {
-        let todos = group?.todos ?? []
+        let day = group ?? last
+        let pages = group?.pages ?? []
         List {
             Section {
                 HStack(spacing: 12) {
-                    if let day { Text(L.todosDayDate(day: day)) }
-                    if !todos.isEmpty {
-                        Text(L.todosDayLeft(count: todos.count))
-                            .foregroundStyle(group?.overdue == true ? Color.red : Color.secondary)
+                    if let date = day?.date { Text(date) }
+                    if let group, group.count > 0 {
+                        Text(L.todosDayLeft(count: group.count))
+                            .foregroundStyle(group.overdue ? Color.red : Color.secondary)
                     }
                 }
                 .font(.subheadline)
@@ -44,7 +32,7 @@ struct TodoDayScreen: View {
                 .listRowBackground(Color.clear)
             }
             .listSectionSeparator(.hidden)
-            if todos.isEmpty {
+            if pages.isEmpty {
                 ContentUnavailableView(
                     L.todosDayDoneTitle, systemImage: "checkmark.circle",
                     description: Text(L.todosDayDoneBody)
@@ -52,7 +40,7 @@ struct TodoDayScreen: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
-            ForEach(Self.byPage(todos), id: \.id) { page in
+            ForEach(pages, id: \.id) { page in
                 Section {
                     ForEach(page.todos, id: \.self) { todo in
                         DayTodoRow(
@@ -77,34 +65,17 @@ struct TodoDayScreen: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background { palette.surface.ignoresSafeArea() }
-        .navigationTitle(title)
+        .navigationTitle(day?.title ?? "")
         .navigationBarTitleDisplayMode(.large)
         .onAppear { app.showsTodos(id, true) }
         .onDisappear { app.showsTodos(id, false) }
         .onChange(of: group, initial: true) { if let group { last = group } }
-    }
-
-    /// A page's to-dos on the day.
-    struct PageTodos {
-        var id: String
-        var title: String
-        var todos: [Todo]
-    }
-
-    /// Puts a day's to-dos under their pages, each page where its first to-do is and its to-dos in
-    /// the day's order.
-    static func byPage(_ todos: [Todo]) -> [PageTodos] {
-        var out: [PageTodos] = []
-        var at: [String: Int] = [:]
-        for todo in todos {
-            if let i = at[todo.pageID] {
-                out[i].todos.append(todo)
-            } else {
-                at[todo.pageID] = out.count
-                out.append(PageTodos(id: todo.pageID, title: todo.pageTitle, todos: [todo]))
+        .task(id: group == nil) {
+            guard group == nil, let client = app.client else { return }
+            if let day = await app.read("to-do day", { try await client.todoDay(key) }) {
+                last = day
             }
         }
-        return out
     }
 }
 

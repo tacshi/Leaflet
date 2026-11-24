@@ -38,7 +38,7 @@ func TestTodoDays(t *testing.T) {
 		"2026-11-03 1 [today this morning tonight]",
 		"2026-11-04 2 [soon also soon]",
 		"2026-11-09 2 [later]",
-		"no-date 3 [owner b owner a]",
+		TodoNoDateKey + " 3 [owner b owner a]",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("days\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -48,6 +48,45 @@ func TestTodoDays(t *testing.T) {
 	}
 	if d := TodoDays([]Todo{}, func(t Todo) Todo { return t }, now); len(d) != 0 {
 		t.Errorf("no to-dos: %+v", d)
+	}
+}
+
+func TestTodoDayAt(t *testing.T) {
+	now := time.Date(2026, 10, 26, 10, 0, 0, 0, time.Local)
+	todos := []Todo{{BlockID: "soon", Due: time.Date(2026, 10, 27, 0, 0, 0, 0, time.Local)}, {BlockID: "someday"}}
+	days := TodoDays(todos, func(t Todo) Todo { return t }, now)
+	if d := TodoDayAt(days, "2026-10-27", now); len(d.Todos) != 1 || d.Todos[0].BlockID != "soon" || d.Section != TodoUpcoming {
+		t.Errorf("tomorrow %+v", d)
+	}
+	if d := TodoDayAt(days, "2026-10-25", now); len(d.Todos) != 0 || d.Section != TodoOverdue || d.Key() != "2026-10-25" {
+		t.Errorf("a day with nothing left on it %+v", d)
+	}
+	if d := TodoDayAt(days, "2026-10-26", now); len(d.Todos) != 0 || d.Section != TodoToday {
+		t.Errorf("today with nothing on it %+v", d)
+	}
+	if d := TodoDayAt(days, "2026-10-30", now); len(d.Todos) != 0 || d.Section != TodoUpcoming {
+		t.Errorf("a day to come with nothing on it %+v", d)
+	}
+	if d := TodoDayAt(days, TodoNoDateKey, now); len(d.Todos) != 1 || d.Section != TodoNoDate {
+		t.Errorf("no date %+v", d)
+	}
+	if d := TodoDayAt[Todo](nil, TodoNoDateKey, now); len(d.Todos) != 0 || d.Section != TodoNoDate || d.Key() != TodoNoDateKey {
+		t.Errorf("no date with nothing on it %+v", d)
+	}
+}
+
+func TestTodoDayByPage(t *testing.T) {
+	type pageTodo struct{ page, text string }
+	d := TodoDay[pageTodo]{Todos: []pageTodo{{"list", "Listen"}, {"work", "Invoice"}, {"list", "Retell"}}}
+	var got []string
+	for _, todos := range d.ByPage(func(t pageTodo) string { return t.page }) {
+		got = append(got, fmt.Sprint(todos))
+	}
+	if want := "[[{list Listen} {list Retell}] [{work Invoice}]]"; fmt.Sprint(got) != want {
+		t.Errorf("by page %v, want %s", got, want)
+	}
+	if got := (TodoDay[pageTodo]{}).ByPage(func(t pageTodo) string { return t.page }); len(got) != 0 {
+		t.Errorf("no to-dos: %v", got)
 	}
 }
 

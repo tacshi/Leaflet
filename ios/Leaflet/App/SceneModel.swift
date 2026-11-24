@@ -143,6 +143,18 @@ final class SceneModel {
     /// Shows the page with this ID.
     func open(_ id: String) { open(.page(id)) }
 
+    /// Shows the Trash, or, with it shown, goes back to what was shown before it.
+    func toggleBin() {
+        guard selection == .bin else { return open(.bin) }
+        while back.last == .bin { back.removeLast() }
+        if canGoBack {
+            goBack()
+        } else {
+            forward.append(.bin)
+            show(nil)
+        }
+    }
+
     func open(_ id: String, at blockID: String?, moment: Int = -1) {
         guard let blockID, !blockID.isEmpty else { return open(id) }
         if id == pageID, let editor {

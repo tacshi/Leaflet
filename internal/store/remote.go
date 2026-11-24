@@ -358,22 +358,32 @@ func (s *Store) PutRemotePage(r map[string]any) error { return s.putRemotePage(r
 func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
 	id := S(r, "id")
 	var copies []string
-	tombstoned := false
+	changed := false
 	_, err := s.putRemote("pages", id, r, over, func(tx *sql.Tx) error {
 		keep := true
 		var was sql.NullInt64
 		if err := tx.QueryRow(`SELECT keep_offline, purged_at FROM pages WHERE id = ?`, id).Scan(&keep, &was); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		// A page deleted for good stays so: a row from a device that had not heard of it brings nothing back.
-		if was.Valid {
-			return nil
-		}
 		p := PageFromRemote(r, keep)
-		if p.PurgedAt.IsZero() {
+		switch {
+		case was.Valid && p.PurgedAt.IsZero() && over == nil:
+			// A page deleted for good stays so: a row from a device that had not heard of it brings nothing back.
+			return nil
+		case was.Valid && p.PurgedAt.IsZero():
+			// The server refused this device's deletion for good, of a page another device restored, or deleted
+			// again, since the deletion this device saw: what was on it waited here (WipeOnceTaken), and the page
+			// is as the server has it.
+			changed = true
+			if err := writePage(tx, p); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`UPDATE pages SET purged_at = NULL WHERE id = ?`, id)
+			return err
+		case p.PurgedAt.IsZero():
 			return writePage(tx, p)
 		}
-		tombstoned = true
+		changed = true
 		var err error
 		copies, err = s.putPurgedPage(tx, p)
 		return err
@@ -381,7 +391,7 @@ func (s *Store) putRemotePage(r map[string]any, over *OutboxEntry) error {
 	for _, path := range copies {
 		s.removeLocalCopy(path)
 	}
-	if err == nil && tombstoned {
+	if err == nil && changed {
 		s.Notify("*", "")
 	}
 	return err

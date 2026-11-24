@@ -473,13 +473,13 @@ func (a *App) treeItem(c *ui.Context, key string) {
 
 // trashFile puts a file in the bin, with Undo.
 func (a *App) trashFile(f store.File) {
-	if err := a.st.TrashFile(f.ID); err != nil {
+	if err := a.pageCore().TrashFile(f.ID); err != nil {
 		a.toast(locales.SidebarCouldNotDelete(err.Error()))
 		return
 	}
 	reread(&a.files, a.st.Files)
 	a.toastAction(locales.AppDeleted(f.Name), locales.CommonUndo(), func() {
-		if err := a.st.RestoreFile(f.ID); err != nil {
+		if err := a.pageCore().RestoreFile(f.ID); err != nil {
 			a.toast(locales.AppErrorRestore(err.Error()))
 			return
 		}

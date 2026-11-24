@@ -149,7 +149,7 @@ func TestPurgeLeavesNothingButTheRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, _ := s.Bin()
-	if err := s.Purge(refs(items)...); err != nil {
+	if err := s.Purge(WipeNow, refs(items)...); err != nil {
 		t.Fatal(err)
 	}
 	if items, _ := s.Bin(); len(items) != 0 {
@@ -222,7 +222,7 @@ func TestPurgeFileFromTheBin(t *testing.T) {
 	if err := s.TrashFile(f.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EmptyBin(); err != nil {
+	if err := s.EmptyBin(WipeNow); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.File(f.ID)
@@ -272,13 +272,13 @@ func TestPurgeOldCountsFromTheFirstBin(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if gone, err := s.PurgeOld(now); err != nil || gone {
+	if gone, err := s.PurgeOld(now, WipeNow); err != nil || gone {
 		t.Fatalf("purged what was deleted before the bin, at once: %v %v", gone, err)
 	}
-	if gone, err := s.PurgeOld(now.Add(BinKept - time.Hour)); err != nil || gone {
+	if gone, err := s.PurgeOld(now.Add(BinKept-time.Hour), WipeNow); err != nil || gone {
 		t.Fatalf("purged before its days in the bin: %v %v", gone, err)
 	}
-	if gone, err := s.PurgeOld(now.Add(BinKept + time.Hour)); err != nil || !gone {
+	if gone, err := s.PurgeOld(now.Add(BinKept+time.Hour), WipeNow); err != nil || !gone {
 		t.Fatalf("kept past its days in the bin: %v %v", gone, err)
 	}
 	if !s.IsPurged(p.ID) {
@@ -431,7 +431,7 @@ func TestPurgeLeavesPagesOfOtherSpaces(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Purge(BinRef{Kind: BinPage, ID: theirs.ID}); err != nil {
+	if err := s.Purge(WipeNow, BinRef{Kind: BinPage, ID: theirs.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if s.IsPurged(theirs.ID) {
@@ -477,5 +477,173 @@ func TestPulledPurgeOfASharedPageRemovesWhatThisAccountStored(t *testing.T) {
 	slices.Sort(keys)
 	if want := []string{"storage_delete:files/" + mine.ID, "storage_delete:recordings/mine"}; !slices.Equal(keys, want) {
 		t.Errorf("queued %v, want %v", keys, want)
+	}
+}
+
+// TestAPurgeOnceTakenKeepsThePageUntilTheServerTakesIt deletes a page for good on a device syncing through the server:
+// the page leaves the bin at once, and what was on it stays here until the server takes the deletion, then goes,
+// here and where it is stored, what the server listed too.
+func TestAPurgeOnceTakenKeepsThePageUntilTheServerTakesIt(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	c := doc.Empty()
+	_ = c.Insert(doc.Position{At: "end"}, &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	if _, _, err := s.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	f := binFile(t, s, "", p.ID)
+	if _, err := s.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeOnceTaken, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := s.Bin(); len(items) != 0 || !s.IsPurged(p.ID) {
+		t.Fatalf("still in the bin: %+v", items)
+	}
+	if s.Content(p.ID) == nil {
+		t.Error("the content went before the server took the purge")
+	}
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		t.Errorf("the file's copy went before the server took the purge: %v", err)
+	}
+	if _, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); queued {
+		t.Error("the file is removed where it is stored before the server took the purge")
+	}
+	if err := s.WipePurged(p.ID, []StoredObject{{"files", f.StoragePath}, {"files", "space/other/photo.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if s.Content(p.ID) != nil {
+		t.Error("the content stayed once the server took the purge")
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the file's copy stayed: %v", err)
+	}
+	var keys []string
+	entries, _ := s.Queued()
+	for _, e := range entries {
+		keys = append(keys, e.Entity+":"+e.EntityID)
+	}
+	slices.Sort(keys)
+	if want := []string{"storage_delete:files/" + f.ID, "storage_delete:files/space/other/photo.png"}; !slices.Equal(keys, want) {
+		t.Errorf("queued %v, want %v", keys, want)
+	}
+}
+
+// TestARefusedPurgeBringsThePageBack takes the server's row over a purge it refused, of a page another device restored
+// since: the page is as the server has it, with what was on it, which waited here.
+func TestARefusedPurgeBringsThePageBack(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans", Icon: "x"})
+	c := doc.Empty()
+	_ = c.Insert(doc.Position{At: "end"}, &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	if _, _, err := s.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeOnceTaken, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var entry OutboxEntry
+	entries, _ := s.Queued()
+	for _, e := range entries {
+		if e.Entity == "pages" && e.EntityID == p.ID {
+			entry = e
+		}
+	}
+	if entry.ID == 0 {
+		t.Fatal("the purge is not queued")
+	}
+	there := PageToRemote(p)
+	there["updated_at"] = iso(time.Now())
+	if err := s.TakeRemote(entry, there); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Page(p.ID)
+	if err != nil || s.IsPurged(p.ID) || !got.DeletedAt.IsZero() || got.Title != "Plans" || got.Icon != "x" {
+		t.Fatalf("the page is %+v, %v", got, err)
+	}
+	if content := s.Content(p.ID); content == nil || content.Find("b1") == nil {
+		t.Errorf("what was on the page went: %v", content)
+	}
+	if n := s.PendingCount(); n != 0 {
+		t.Errorf("%d waiting to go up", n)
+	}
+	// A row of the page as it was, from a device that had not heard of a purge, still brings nothing back.
+	if _, err := s.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeNow, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemotePage(there); err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsPurged(p.ID) {
+		t.Error("a stale row brought a page deleted for good back")
+	}
+}
+
+// TestAPulledPurgeRemovesWhatThisDeviceKnewOf has a page of the space deleted for good on another device, which had
+// not heard of a file put on it here: this device removes it where it is stored.
+func TestAPulledPurgeRemovesWhatThisDeviceKnewOf(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	f := binFile(t, s, "", p.ID)
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	row := PageToRemote(p)
+	now := iso(time.Now())
+	row["updated_at"], row["deleted_at"], row["purged_at"], row["title"] = now, now, now, ""
+	if err := s.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	if _, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); !queued {
+		t.Error("the file is not removed where it is stored")
+	}
+}
+
+func TestDropUnsentLeavesWhatWentUp(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{})
+	if dropped, err := s.DropUnsent(p.ID); err != nil || !dropped {
+		t.Fatalf("a page that went nowhere was not dropped: %v %v", dropped, err)
+	}
+	if _, err := s.Page(p.ID); !IsNotFound(err) {
+		t.Errorf("the page stayed: %v", err)
+	}
+	if n := s.PendingCount(); n != 0 {
+		t.Errorf("%d waiting to go up", n)
+	}
+	sent, _ := s.CreatePage(NewPageOptions{})
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if dropped, err := s.DropUnsent(sent.ID); err != nil || dropped {
+		t.Fatalf("a page that went up was dropped: %v %v", dropped, err)
+	}
+	if _, err := s.Page(sent.ID); err != nil {
+		t.Errorf("the page that went up went: %v", err)
+	}
+}
+
+func TestTombstoneRowKeepsWhatAPurgedPageKeeps(t *testing.T) {
+	p := Page{ID: "p1", SpaceID: "s1", Title: "Secret", Icon: "x", Tags: []string{"work"}, DefaultTemplateID: "t1",
+		DeletedAt: time.Now(), PurgedAt: time.Now()}
+	want := PageToRemote(tombstone(p))
+	got := TombstoneRow(PageToRemote(p))
+	for _, k := range purgedCols {
+		if g, w := got[k], want[k]; !sameJSON(g, w) {
+			t.Errorf("%s is %v in the log, %v in the row", k, g, w)
+		}
 	}
 }

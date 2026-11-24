@@ -61,12 +61,56 @@ type TodoDay[T any] struct {
 	Todos   []T
 }
 
-// Key names the day to remember it by, as 2026-11-20, or "no-date".
+// TodoNoDateKey is the key of the day of the to-dos with no date.
+const TodoNoDateKey = "no-date"
+
+// Key names the day, as 2026-11-20, or TodoNoDateKey: the app opens a day's to-dos by it.
 func (d TodoDay[T]) Key() string {
 	if d.Day.IsZero() {
-		return "no-date"
+		return TodoNoDateKey
 	}
 	return d.Day.Format(time.DateOnly)
+}
+
+// ByPage puts the day's to-dos under the pages they are on, as page names them: each page where
+// its first to-do is, and its to-dos in the day's order.
+func (d TodoDay[T]) ByPage(page func(T) string) [][]T {
+	var out [][]T
+	at := map[string]int{}
+	for _, t := range d.Todos {
+		id := page(t)
+		i, ok := at[id]
+		if !ok {
+			i = len(out)
+			at[id] = i
+			out = append(out, nil)
+		}
+		out[i] = append(out[i], t)
+	}
+	return out
+}
+
+// TodoDayAt is the day key names among days, or that day with no to-dos when none is left on it,
+// as when the last of them was just checked off: a key that names no day is the to-dos with no
+// date.
+func TodoDayAt[T any](days []TodoDay[T], key string, now time.Time) TodoDay[T] {
+	for _, d := range days {
+		if d.Key() == key {
+			return d
+		}
+	}
+	day, err := time.ParseInLocation(time.DateOnly, key, time.Local)
+	if err != nil {
+		return TodoDay[T]{Section: TodoNoDate}
+	}
+	section := TodoUpcoming
+	switch day.Compare(localDay(now)) {
+	case -1:
+		section = TodoOverdue
+	case 0:
+		section = TodoToday
+	}
+	return TodoDay[T]{Day: day, Section: section}
 }
 
 // TodoDays puts the to-dos in a group a day by their due dates in the local time zone, the days

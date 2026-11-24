@@ -14,15 +14,25 @@ import (
 )
 
 // binState is the bin as the app shows it: what is in it, read as it is opened and again as pages and files change
-// while it shows, or why it could not be read; the item chosen and its page as Markdown; and the alert asking before
-// something goes for good, while it is open.
+// while it shows, whether it has been read yet, or why it could not be; the item chosen and its page as Markdown; and the alert asking before
+// something goes for good, while it is open. The bin and the page chosen are read off the main thread, as the bin may
+// hold many pages: a read that a later one has followed is not shown.
 type binState struct {
-	items    []store.BinItem
-	readErr  error
-	pick     string
-	shownMD  string
-	purging  *store.BinItem
-	emptying bool
+	items      []store.BinItem
+	read       bool
+	readErr    error
+	pick       store.BinRef
+	shown      binShownPage
+	purging    *store.BinItem
+	emptying   bool
+	listReads  int
+	shownReads int
+}
+
+// binShownPage is a page of the bin as Markdown.
+type binShownPage struct {
+	of store.BinRef
+	md string
 }
 
 // binName is the bin as the system names it: the Trash on a Mac, the Recycle Bin on Windows.
@@ -33,7 +43,7 @@ func binName() string {
 	return locales.BinName()
 }
 
-func binKey(it store.BinItem) string { return string(it.Kind) + ":" + it.ID }
+func binKey(ref store.BinRef) string { return string(ref.Kind) + ":" + ref.ID }
 
 func (a *App) openBin() { a.navigate(Route{Kind: "bin"}) }
 
@@ -50,29 +60,58 @@ func (a *App) toggleBin() {
 	}
 }
 
-// loadBin reads what is in the bin, and the page chosen, if one still is.
+// loadBin reads what is in the bin, and then the page chosen, if one still is.
 func (a *App) loadBin() {
-	a.bin.items, a.bin.readErr = a.st.Bin()
-	a.loadBinShown()
+	a.bin.listReads++
+	read, st := a.bin.listReads, a.st
+	var items []store.BinItem
+	var err error
+	a.offMain(func() { items, err = st.Bin() }, func() {
+		if read != a.bin.listReads {
+			return
+		}
+		a.bin.items, a.bin.read, a.bin.readErr = items, true, err
+		a.loadBinShown()
+	})
 }
 
 func (a *App) pickBin(it store.BinItem) {
-	a.bin.pick = binKey(it)
+	a.bin.pick = it.BinRef
 	a.loadBinShown()
 }
 
+// loadBinShown reads the page chosen as Markdown, its links to other pages by their titles as the sidebar has them.
 func (a *App) loadBinShown() {
-	a.bin.shownMD = ""
-	if it := a.binPicked(); it != nil && it.Kind == store.BinPage {
-		if content := a.st.Content(it.ID); content != nil {
-			a.bin.shownMD = doc.PageMarkdown("", content, a.markdownOptions())
+	a.bin.shownReads++
+	it := a.binPicked()
+	if it == nil || it.Kind != store.BinPage {
+		a.bin.shown = binShownPage{}
+		return
+	}
+	read, st, ref := a.bin.shownReads, a.st, it.BinRef
+	titles := map[string]string{}
+	for _, list := range [][]store.Page{a.pages, a.templates} {
+		for _, p := range list {
+			titles[p.ID] = p.DisplayTitle()
 		}
 	}
+	opts := a.markdownOptions()
+	opts.PageTitle = func(id string) string { return titles[id] }
+	var md string
+	a.offMain(func() {
+		if content := st.Content(ref.ID); content != nil {
+			md = doc.PageMarkdown("", content, opts)
+		}
+	}, func() {
+		if read == a.bin.shownReads {
+			a.bin.shown = binShownPage{of: ref, md: md}
+		}
+	})
 }
 
 func (a *App) binPicked() *store.BinItem {
 	for i, it := range a.bin.items {
-		if binKey(it) == a.bin.pick {
+		if it.BinRef == a.bin.pick {
 			return &a.bin.items[i]
 		}
 	}
@@ -104,6 +143,9 @@ func (a *App) binView(c *ui.Context) {
 			})
 			if err := a.bin.readErr; err != nil {
 				ui.Text(c, locales.BinCouldNotRead(binName(), err.Error())).FontSize(12.5).TextColor(pal.Danger).Padding(0, 18, 12)
+			}
+			if len(items) == 0 && !a.bin.read {
+				return
 			}
 			if len(items) == 0 {
 				ui.Column(c).Grow(1).Center().Gap(10).Padding(24).Children(func() {
@@ -144,11 +186,10 @@ func binIcon(it store.BinItem) string {
 }
 
 func (a *App) binRow(c *ui.Context, it store.BinItem, pal *theme.Palette) {
-	key := binKey(it)
-	row := ui.ButtonBase(c.Key("bin-row:"+key)).Label(it.Title).Tooltip(it.Title).Padding(8, 10).Radius(7).Gap(10).
+	row := ui.ButtonBase(c.Key("bin-row:"+binKey(it.BinRef))).Label(it.Title).Tooltip(it.Title).Padding(8, 10).Radius(7).Gap(10).
 		AlignItems(ui.Center).Justify(ui.Start).FillWidth()
 	switch {
-	case a.bin.pick == key:
+	case a.bin.pick == it.BinRef:
 		row.Background(pal.NavSelected)
 	case row.Hovered():
 		row.Background(pal.Hover)
@@ -200,7 +241,7 @@ func (a *App) binShown(c *ui.Context, it store.BinItem, pal *theme.Palette) {
 		}
 	})
 	size := float32(max(a.settings.TextSize, 12))
-	ui.Scroll(c.Key("bin-shown-scroll:" + binKey(it))).Grow(1).Children(func() {
+	ui.Scroll(c.Key("bin-shown-scroll:" + binKey(it.BinRef))).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().Padding(32, 40, 120).Gap(6).Children(func() {
 			ui.Text(c, it.Title).Font(theme.PageFamily(it.Title)).FontSize(size * 2.15).FontWeight(700).TextColor(pal.Text)
 			notes := []string{core.BinWhen(it, time.Now())}
@@ -220,8 +261,8 @@ func (a *App) binShown(c *ui.Context, it store.BinItem, pal *theme.Palette) {
 				return
 			}
 			ui.Box(c).Height(10)
-			if md := a.bin.shownMD; md != "" {
-				markdownView(c, md, &a.md).Font(theme.PageFamily(md)).FontSize(size)
+			if shown := a.bin.shown; shown.of == it.BinRef && shown.md != "" {
+				markdownView(c, shown.md, &a.md).Font(theme.PageFamily(shown.md)).FontSize(size)
 			}
 		})
 	})
@@ -261,10 +302,14 @@ func (a *App) purgeFromBin(purge func(*core.Core) error, done string) {
 		} else {
 			a.toast(done)
 		}
-		a.loadBin()
+		if a.route.Kind == "bin" {
+			a.loadBin()
+		}
 	})
 }
 
+// restoreFromBin takes an item out of the bin on the main thread, as a page coming back is linked in its parent, which
+// may be open in the editor.
 func (a *App) restoreFromBin(it store.BinItem) {
 	if err := a.pageCore().RestoreFromBin(it.BinRef); err != nil {
 		a.toast(locales.AppErrorRestore(err.Error()))
@@ -273,8 +318,8 @@ func (a *App) restoreFromBin(it store.BinItem) {
 	reread(&a.pages, a.st.Pages)
 	reread(&a.templates, a.st.Templates)
 	reread(&a.files, a.st.Files)
-	if a.bin.pick == binKey(it) {
-		a.bin.pick = ""
+	if a.bin.pick == it.BinRef {
+		a.bin.pick = store.BinRef{}
 	}
 	a.loadBin()
 	if it.Kind == store.BinFile || it.Template {

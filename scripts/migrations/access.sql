@@ -1900,6 +1900,58 @@ begin
 end;
 $$;
 
+-- A page or a file is deleted for good only as still in the bin, as the
+-- device that deletes it saw its deletion: one restored since, on another
+-- device, or deleted again since, is refused. What is on a page deleted
+-- for good is listed by page, the owner's own files and recordings too.
+do $$
+declare
+  v_page constant uuid := 'fc000000-0000-0000-0000-000000000005';
+  v_again constant uuid := 'fc000000-0000-0000-0000-000000000006';
+  v_file constant uuid := 'fc000000-0000-0000-0000-0000000000f5';
+  v_space uuid;
+  v_seen timestamptz := now() - interval '31 days';
+  v_path text;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title, deleted_at) values
+    (v_page, v_space, 'Back in use', v_seen), (v_again, v_space, 'Deleted again', v_seen);
+  v_path := v_space || '/' || v_file || '/mine.txt';
+  insert into public.files (id, space_id, page_id, name, storage_path, deleted_at, kept)
+  values (v_file, v_space, null, 'mine.txt', v_path, v_seen, true);
+
+  update public.pages set deleted_at = null, changed_at = now() where id = v_page;
+  perform pg_temp.refused(format('update public.pages set purged_at = now(), deleted_at = %L where id = %L', v_seen, v_page),
+    'page_restored');
+  update public.pages set deleted_at = now() where id = v_again;
+  perform pg_temp.refused(format('update public.pages set purged_at = now(), deleted_at = %L where id = %L', v_seen, v_again),
+    'page_restored');
+  update public.files set deleted_at = null, changed_at = now() where id = v_file;
+  perform pg_temp.refused(format('update public.files set purged_at = now(), deleted_at = %L where id = %L', v_seen, v_file),
+    'file_restored');
+  if exists (select 1 from public.pages where id in (v_page, v_again) and (purged_at is not null or title = '')) then
+    raise exception 'a page back in use, or deleted again, was deleted for good';
+  end if;
+
+  update public.files set page_id = v_page, deleted_at = null where id = v_file;
+  insert into storage.objects (bucket_id, name, owner) values ('files', v_path, auth.uid());
+  update public.pages set deleted_at = now() where id = v_page;
+  update public.pages set purged_at = now(), deleted_at = (select deleted_at from public.pages where id = v_page)
+  where id = v_page;
+  if (select purged_at from public.pages where id = v_page) is null then
+    raise exception 'a page could not be deleted for good with the deletion it has';
+  end if;
+  if pg_temp.seen(format('select 1 from public.purged_objects where page_id = %L and name = %L', v_page, v_path)) <> 1 then
+    raise exception 'the owner''s own file of a page deleted for good is not listed by its page';
+  end if;
+  delete from storage.objects where bucket_id = 'files' and name = v_path;
+  if not found then
+    raise exception 'the owner could not remove their file of a page deleted for good';
+  end if;
+end;
+$$;
+
 -- What was on that page is gone, and its invitations with it, but not its
 -- shares.
 reset role;

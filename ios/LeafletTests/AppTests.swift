@@ -28,7 +28,7 @@ struct AppTests {
 
         scene.newComment = NewComment(blockID: "b2", quote: "")
         scene.goBack()
-        #expect(scene.selection == "a")
+        #expect(scene.selection == .page("a"))
         #expect(scene.newComment == nil)
     }
 
@@ -57,14 +57,14 @@ struct AppTests {
         scene.inspectorShown = true
         scene.inspectorTab = .comments
         scene.openFromChat("made", workspace: true, sheet: true)
-        #expect(scene.selection == "made")
+        #expect(scene.selection == .page("made"))
         #expect(scene.allPages && scene.inspectorTab == .agent)
         #expect(!scene.workspaceShown && !scene.inspectorShown)
 
         scene.allPages = false
         scene.inspectorShown = true
         scene.openFromChat("other", at: "b1", moment: 83, workspace: false, sheet: false)
-        #expect(scene.selection == "other" && scene.inspectorShown && !scene.allPages)
+        #expect(scene.selection == .page("other") && scene.inspectorShown && !scene.allPages)
         #expect(scene.target == "b1" && scene.targetAt == 83)
     }
 

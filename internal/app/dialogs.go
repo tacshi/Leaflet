@@ -90,6 +90,7 @@ type dialogs struct {
 
 	historyOpen   bool
 	historyPage   string
+	historyTitle  string
 	history       []store.HistoryEntry
 	historyPick   int
 	historyView   int
@@ -512,6 +513,11 @@ func (a *App) openHistory(id string) {
 	}
 	d := &a.dialogs
 	d.historyOpen, d.historyPage, d.historyPick, d.historyDiffOf, d.versionOf, d.naming = true, id, 0, "", "", false
+	d.historyTitle = a.pageTitleOf(id)
+	// A page in the bin, which the sidebar does not list.
+	if p, err := a.st.Page(id); d.historyTitle == "" && err == nil && p.PurgedAt.IsZero() {
+		d.historyTitle = p.DisplayTitle()
+	}
 	d.history, _ = a.st.History(id)
 }
 
@@ -576,7 +582,7 @@ func (a *App) historyDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.historyOpen, 860, func() {
-		dialogHeader(c, locales.DialogHistoryTitle(), a.pageTitleOf(d.historyPage), &d.historyOpen)
+		dialogHeader(c, locales.DialogHistoryTitle(), d.historyTitle, &d.historyOpen)
 		ui.Row(c).Height(500).AlignItems(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 			ui.Column(c).Width(250).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
 				if a.canEdit(d.historyPage) {

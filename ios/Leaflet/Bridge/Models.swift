@@ -270,15 +270,28 @@ struct Todo: Codable, Hashable, Sendable {
     }
 }
 
-/// A day's to-dos from every page, or those with no date.
+/// A day's to-dos from every page, or those with no date, under the pages they are on.
 struct TodoGroup: Codable, Hashable, Sendable {
-    /// The day as 2026-11-20, or "no-date".
+    /// The day as 2026-11-20, or "no-date": the day's to-dos are shown by it.
     var key: String
     var section: String
+    /// The day's name, as Today, Tomorrow or Nov 20.
     var title: String
-    var todos: [Todo]
+    /// The day's full date, as Monday, November 23, 2026, or nil for the to-dos with no date.
+    var date: String?
+    /// How many to-dos are left on the day.
+    var count: Int
+    /// The day's to-dos under their pages, each page where its first to-do is.
+    var pages: [TodoPage]
 
     var overdue: Bool { section == "overdue" }
+}
+
+/// A page's to-dos on a day.
+struct TodoPage: Codable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var todos: [Todo]
 }
 
 struct CoreStatus: Codable, Sendable {

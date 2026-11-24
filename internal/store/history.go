@@ -24,10 +24,7 @@ func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label
 func (s *Store) AddHistoryEncoded(pageID, content, reason, aiJobID, label string) error {
 	h := HistoryEntry{ID: doc.NewRowID(), PageID: pageID, Content: content, Reason: reason, AIJobID: aiJobID, Label: label, CreatedAt: time.Now()}
 	err := s.inTx(func(tx *sql.Tx) error {
-		if gone, err := isPurged(tx, pageID); err != nil || gone {
-			if gone {
-				return ErrPurged
-			}
+		if err := notPurged(tx, pageID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO page_history (id, page_id, content, reason, ai_job_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,

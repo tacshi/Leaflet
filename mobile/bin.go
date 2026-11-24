@@ -62,9 +62,6 @@ func (c *Core) BinEmpty() (err error) {
 // TrashFile puts a file in the bin.
 func (c *Core) TrashFile(id string) (err error) {
 	defer catch(&err)
-	c.q.do(func() { err = c.core.Store.TrashFile(id) })
-	if err == nil {
-		c.core.Sync.KickPush()
-	}
+	c.q.do(func() { err = c.pageCore().TrashFile(id) })
 	return err
 }

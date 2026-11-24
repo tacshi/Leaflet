@@ -71,6 +71,7 @@ type App struct {
 	goneStarters  map[string]bool
 	todos         []store.PageTodo
 	todosStale    bool
+	dayCache      todoDayCache
 	todoState     ui.ListState
 	todoRow       int
 	todoIn        treeInput
@@ -842,27 +843,31 @@ func (a *App) isUnder(id, other string) bool {
 	return id == other || slices.ContainsFunc(a.ancestors(id), func(p store.Page) bool { return p.ID == other })
 }
 
+// routeKinds is each kind of route but home, which is at "/", and whether it names what it shows in its path: a page
+// by its id, a day of to-dos by its key.
+var routeKinds = map[string]bool{"page": true, "day": true, "signin": false, "bin": false}
+
 func (r Route) path() string {
-	switch r.Kind {
-	case "page":
-		return "/page/" + r.ID
-	case "day":
-		return "/day/" + r.ID
-	case "signin", "bin":
-		return "/" + r.Kind
+	named, ok := routeKinds[r.Kind]
+	switch {
+	case !ok:
+		return "/"
+	case named:
+		return "/" + r.Kind + "/" + r.ID
 	}
-	return "/"
+	return "/" + r.Kind
 }
 
 func routeAt(path string) Route {
 	kind, rest, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
-	switch kind {
-	case "page", "day":
+	named, ok := routeKinds[kind]
+	switch {
+	case !ok:
+		return Route{Kind: "home"}
+	case named:
 		return Route{Kind: kind, ID: rest}
-	case "signin", "bin":
-		return Route{Kind: kind}
 	}
-	return Route{Kind: "home"}
+	return Route{Kind: kind}
 }
 
 func (a *App) routeTitle() string {
@@ -871,7 +876,7 @@ func (a *App) routeTitle() string {
 		return a.pageTitleOf(a.route.ID)
 	case "day":
 		now := time.Now()
-		return todoDayTitle(todoDayAt(todoDays(a.todoList(), now), a.route.ID, now), now)
+		return todoDayTitle(a.todoDay(a.route.ID, now), now)
 	case "signin":
 		return locales.CommonSignIn()
 	case "bin":
@@ -1290,11 +1295,7 @@ func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 	}
 	a.openPage(p.ID)
 	if a.page == nil || a.page.id != p.ID {
-		// A page that never opened was never the user's: it goes for good, not to the bin, unless it is in someone
-		// else's space, where only its owner deletes for good.
-		if _, err := a.st.DeletePage(p.ID); err != nil {
-			log.Printf("page %s: %v", p.ID, err)
-		} else if err := a.st.Purge(store.BinRef{Kind: store.BinPage, ID: p.ID}); err != nil {
+		if err := a.core().DropNewPage(p.ID); err != nil {
 			log.Printf("page %s: %v", p.ID, err)
 		}
 		reread(&a.pages, a.st.Pages)
@@ -1488,10 +1489,6 @@ func (a *App) togglePanel(tab int) {
 
 func (a *App) pageTitleOf(id string) string {
 	if p := a.pageByID(id); p != nil {
-		return p.DisplayTitle()
-	}
-	// A page in the bin, whose history is open.
-	if p, err := a.st.Page(id); err == nil && p.PurgedAt.IsZero() {
 		return p.DisplayTitle()
 	}
 	return ""

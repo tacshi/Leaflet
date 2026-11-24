@@ -193,10 +193,10 @@ func TestTodosShowTheirDuesInTheZoneTheDeviceIsIn(t *testing.T) {
 		"pack": time.Date(2026, 12, 2, 0, 0, 0, 0, ny),
 		"call": time.Date(2026, 12, 2, 15, 0, 0, 0, ny),
 	}
-	if len(groups) != 1 || groups[0].Section != "today" || len(groups[0].Todos) != len(want) {
+	if len(groups) != 1 || groups[0].Section != "today" || groups[0].Count != len(want) || len(groups[0].Pages) != 1 {
 		t.Fatalf("at 8:00 in New York, to-dos %+v: want both today", groups)
 	}
-	for _, td := range groups[0].Todos {
+	for _, td := range groups[0].Pages[0].Todos {
 		if due := time.UnixMilli(td.Due); !due.Equal(want[td.BlockID]) {
 			t.Errorf("%s is due %s, want %s", td.BlockID, due.In(ny), want[td.BlockID])
 		}

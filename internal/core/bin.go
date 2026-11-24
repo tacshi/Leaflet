@@ -73,9 +73,18 @@ func (c *Core) stopBinSweep() {
 	}
 }
 
+// purgeWipe is when deleting a page for good takes what was on it off this device: once the server takes it, on a
+// device that syncs through one, which refuses it for a page another device restored since; at once otherwise.
+func (c *Core) purgeWipe() store.Wipe {
+	if c.Sync != nil && c.Sync.ThroughServer() {
+		return store.WipeOnceTaken
+	}
+	return store.WipeNow
+}
+
 // SweepBin deletes for good what has been in the bin for store.BinDays by now.
 func (c *Core) SweepBin(now time.Time) {
-	switch gone, err := c.Store.PurgeOld(now); {
+	switch gone, err := c.Store.PurgeOld(now, c.purgeWipe()); {
 	case err != nil:
 		log.Printf("bin: %v", err)
 	case gone:
@@ -86,27 +95,46 @@ func (c *Core) SweepBin(now time.Time) {
 // RestoreFromBin takes a page, with the pages deleted with it, or a file out of the bin.
 func (p Pages) RestoreFromBin(ref store.BinRef) error {
 	if ref.Kind == store.BinFile {
-		if err := p.Store.RestoreFile(ref.ID); err != nil {
-			return err
-		}
-	} else {
-		ids, err := p.Store.InBin(ref.ID)
-		if err != nil {
-			return err
-		}
-		if err := p.RestorePages(ids, doc.Position{At: "end"}); err != nil {
-			return err
-		}
+		return p.RestoreFile(ref.ID)
 	}
+	ids, err := p.Store.InBin(ref.ID)
+	if err != nil {
+		return err
+	}
+	if err := p.RestorePages(ids, doc.Position{At: "end"}); err != nil {
+		return err
+	}
+	p.kickPush()
+	return nil
+}
+
+// TrashFile puts a file in the bin, keeping its contents until it goes for good.
+func (p Pages) TrashFile(id string) error {
+	if err := p.Store.TrashFile(id); err != nil {
+		return err
+	}
+	p.kickPush()
+	return nil
+}
+
+// RestoreFile takes a file out of the bin, to its folder, or the top level once that is gone.
+func (p Pages) RestoreFile(id string) error {
+	if err := p.Store.RestoreFile(id); err != nil {
+		return err
+	}
+	p.kickPush()
+	return nil
+}
+
+func (p Pages) kickPush() {
 	if p.Sync != nil {
 		p.Sync.KickPush()
 	}
-	return nil
 }
 
 // PurgeBin deletes the items of the bin for good.
 func (c *Core) PurgeBin(refs ...store.BinRef) error {
-	if err := c.Store.Purge(refs...); err != nil {
+	if err := c.Store.Purge(c.purgeWipe(), refs...); err != nil {
 		return err
 	}
 	c.Sync.KickPush()
@@ -115,11 +143,24 @@ func (c *Core) PurgeBin(refs ...store.BinRef) error {
 
 // EmptyBin deletes everything in the bin for good.
 func (c *Core) EmptyBin() error {
-	if err := c.Store.EmptyBin(); err != nil {
+	if err := c.Store.EmptyBin(c.purgeWipe()); err != nil {
 		return err
 	}
 	c.Sync.KickPush()
 	return nil
+}
+
+// DropNewPage deletes a page made here that never opened, which was never the person's: one that has gone nowhere
+// yet goes with nothing left of it, and one that has goes for good, not to the bin, unless it is in someone else's
+// space, where only its owner deletes for good.
+func (c *Core) DropNewPage(id string) error {
+	if dropped, err := c.Store.DropUnsent(id); err != nil || dropped {
+		return err
+	}
+	if _, err := c.Store.DeletePage(id); err != nil {
+		return err
+	}
+	return c.PurgeBin(store.BinRef{Kind: store.BinPage, ID: id})
 }
 
 // BinWhen says when an item of the bin was deleted and how long it has left there, as

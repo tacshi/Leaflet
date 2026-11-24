@@ -259,6 +259,16 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// The day key names as `todos()` lists it, or that day with no to-dos once none is left on
+    /// it, so its title and date still show.
+    nonisolated(nonsending) func todoDay(_ key: String) async throws -> TodoGroup {
+        let zone = TimeZone.current
+        let (name, offset) = (zone.identifier, zone.secondsFromGMT())
+        return try await call(TodoGroup.self) { core in
+            try Self.answer { e in core.todoDay(key, zone: name, offset: offset, error: e) }
+        }
+    }
+
     /// The reminders due by now and those to come, at their times in `zone`: a due is a time on
     /// the clock wherever the device is, and the core keeps the zone it opened in.
     nonisolated(nonsending) func reminders(now: Date, limit: Int, zone: TimeZone) async throws

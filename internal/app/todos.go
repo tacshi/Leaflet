@@ -19,35 +19,16 @@ import (
 
 type todoDay = doc.TodoDay[store.PageTodo]
 
-// noDateKey is the key of the day of the to-dos with no date.
-const noDateKey = "no-date"
-
 // todoDays lists the to-dos of every page a day at a time.
 func todoDays(todos []store.PageTodo, now time.Time) []todoDay {
 	return doc.TodoDays(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
 }
 
-// todoDayAt is the day key names among days, or that day with no to-dos when none is left on
-// it, as when the last of them was just checked off.
-func todoDayAt(days []todoDay, key string, now time.Time) todoDay {
-	for _, d := range days {
-		if d.Key() == key {
-			return d
-		}
-	}
-	day, err := time.ParseInLocation(time.DateOnly, key, time.Local)
-	if err != nil {
-		return todoDay{Section: doc.TodoNoDate}
-	}
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	section := doc.TodoUpcoming
-	switch day.Compare(today) {
-	case -1:
-		section = doc.TodoOverdue
-	case 0:
-		section = doc.TodoToday
-	}
-	return todoDay{Day: day, Section: section}
+// todoDayCache is the to-dos a day at a time as last made, and the date they were made on, as
+// 2026-11-20: empty until they are made, and again once the to-dos change.
+type todoDayCache struct {
+	on   string
+	days []todoDay
 }
 
 // todoDayTitle names a day of to-dos, as Today, Tomorrow or Nov 20.
@@ -58,29 +39,6 @@ func todoDayTitle(d todoDay, now time.Time) string {
 	return editor.DueLabel(d.Day, false, now)
 }
 
-// pageTodos is a page's to-dos on a day.
-type pageTodos struct {
-	id, title string
-	todos     []store.PageTodo
-}
-
-// todosByPage puts a day's to-dos under their pages, each page where its first to-do is and its
-// to-dos in the day's order.
-func todosByPage(todos []store.PageTodo) []pageTodos {
-	var out []pageTodos
-	at := map[string]int{}
-	for _, t := range todos {
-		i, ok := at[t.PageID]
-		if !ok {
-			i = len(out)
-			at[t.PageID] = i
-			out = append(out, pageTodos{id: t.PageID, title: t.PageTitle})
-		}
-		out[i].todos = append(out[i].todos, t)
-	}
-	return out
-}
-
 func (a *App) todoList() []store.PageTodo {
 	if a.todosStale || a.todos == nil {
 		reread(&a.todos, a.st.Todos)
@@ -88,8 +46,24 @@ func (a *App) todoList() []store.PageTodo {
 			a.todos = []store.PageTodo{}
 		}
 		a.todosStale = false
+		a.dayCache = todoDayCache{}
 	}
 	return a.todos
+}
+
+// todoDayList is the to-dos of every page a day at a time, made again only once the to-dos
+// change or the day turns, so the To-dos tab, a day's view and the window's title share them.
+func (a *App) todoDayList(now time.Time) []todoDay {
+	todos := a.todoList()
+	if on := now.Format(time.DateOnly); a.dayCache.on != on {
+		a.dayCache = todoDayCache{on: on, days: todoDays(todos, now)}
+	}
+	return a.dayCache.days
+}
+
+// todoDay is the day key names, with the to-dos left on it, if any.
+func (a *App) todoDay(key string, now time.Time) todoDay {
+	return doc.TodoDayAt(a.todoDayList(now), key, now)
 }
 
 // openDay shows the to-dos due on the day key names, from every page.
@@ -107,7 +81,7 @@ func (a *App) openDay(key string) {
 func (a *App) todosList(c *ui.Context) {
 	pal := theme.Of(c)
 	now := time.Now()
-	days := todoDays(a.todoList(), now)
+	days := a.todoDayList(now)
 	if len(days) == 0 {
 		ui.Column(c).Grow(1).Padding(2, 18).Gap(4).Children(func() {
 			ui.Text(c, locales.TodosEmptyTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text)
@@ -160,7 +134,7 @@ func (a *App) dayView(c *ui.Context) {
 	pal := theme.Of(c)
 	now := time.Now()
 	key := a.route.ID
-	d := todoDayAt(todoDays(a.todoList(), now), key, now)
+	d := a.todoDay(key, now)
 	title := todoDayTitle(d, now)
 	a.titleBar(c, func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
@@ -198,9 +172,9 @@ func (a *App) dayView(c *ui.Context) {
 					})
 					return
 				}
-				for _, g := range todosByPage(d.Todos) {
-					a.dayPageHeader(c, g, size, pal)
-					for _, t := range g.todos {
+				for _, todos := range d.ByPage(func(t store.PageTodo) string { return t.PageID }) {
+					a.dayPageHeader(c, todos[0].PageID, todos[0].PageTitle, size, pal)
+					for _, t := range todos {
 						a.dayTodoRow(c, t, size, now, pal)
 					}
 				}
@@ -210,12 +184,11 @@ func (a *App) dayView(c *ui.Context) {
 }
 
 // dayPageHeader names a page over its to-dos on a day: a click on it opens the page.
-func (a *App) dayPageHeader(c *ui.Context, g pageTodos, size float32, pal *theme.Palette) {
-	title := g.title
+func (a *App) dayPageHeader(c *ui.Context, id, title string, size float32, pal *theme.Palette) {
 	if strings.TrimSpace(title) == "" {
 		title = locales.CommonUntitled()
 	}
-	h := ui.ButtonBase(c.Key("day-page:"+g.id)).Label(title).Tooltip(title).Padding(4, 6).Margin(14, 0, 2).Gap(6).Radius(6).
+	h := ui.ButtonBase(c.Key("day-page:"+id)).Label(title).Tooltip(title).Padding(4, 6).Margin(14, 0, 2).Gap(6).Radius(6).
 		AlignItems(ui.Center).Justify(ui.Start).TextColor(pal.TextMuted)
 	if h.Hovered() {
 		h.Background(pal.Hover).TextColor(pal.Text)
@@ -224,7 +197,6 @@ func (a *App) dayPageHeader(c *ui.Context, g pageTodos, size float32, pal *theme
 		ui.Icon(c, theme.Icon("file-text")).FontSize(14).Shrink(0)
 		ui.Text(c, title).FontSize(size * 0.8).FontWeight(650).SingleLine().Shrink(1)
 	})
-	id := g.id
 	h.OnClick(func() { a.openPage(id) })
 }
 

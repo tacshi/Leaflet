@@ -223,27 +223,30 @@ func TestPictureReadsOnlyPublicAddresses(t *testing.T) {
 
 func TestTodosComeADayAtATime(t *testing.T) {
 	c, _ := open(t)
-	page := create(t, c, `{"title":"Chores"}`)
 	todo := func(id, text string, due time.Time) *doc.Node {
 		n := &doc.Node{ID: id, Type: "todo_list", Data: map[string]any{"checked": false}}
 		n.SetDelta(doc.Delta{{Text: text}})
 		n.SetDue(due, false)
 		return n
 	}
-	now := time.Now()
-	var err error
-	c.q.do(func() {
-		err = c.editContent(page.ID, func(content *doc.Content) bool {
-			content.Children = []*doc.Node{
-				todo("a", "later", now.AddDate(0, 0, 9)), todo("b", "late", now.AddDate(0, 0, -3)),
-				todo("c", "soon", now.AddDate(0, 0, 2)), todo("d", "today", now), todo("e", "also soon", now.AddDate(0, 0, 2)),
-			}
-			return true
+	write := func(title string, todos ...*doc.Node) {
+		page := create(t, c, `{"title":"`+title+`"}`)
+		var err error
+		c.q.do(func() {
+			err = c.editContent(page.ID, func(content *doc.Content) bool {
+				content.Children = todos
+				return true
+			})
 		})
-	})
-	if err != nil {
-		t.Fatal(err)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
+	now := time.Now()
+	write("Chores",
+		todo("a", "later", now.AddDate(0, 0, 9)), todo("b", "late", now.AddDate(0, 0, -3)),
+		todo("c", "soon", now.AddDate(0, 0, 2)), todo("d", "today", now), todo("e", "also soon", now.AddDate(0, 0, 2)))
+	write("Work", todo("f", "invoice", now.AddDate(0, 0, 2)))
 	raw, err := c.Todos(time.Local.String(), 0)
 	if err != nil {
 		t.Fatal(err)
@@ -252,20 +255,53 @@ func TestTodosComeADayAtATime(t *testing.T) {
 	_ = json.Unmarshal([]byte(raw), &groups)
 	var got []string
 	for _, g := range groups {
-		var texts []string
-		for _, t := range g.Todos {
-			texts = append(texts, t.Text)
-		}
-		got = append(got, fmt.Sprintf("%s %s: %s", g.Key, g.Section, strings.Join(texts, ", ")))
+		got = append(got, describeDay(g))
 	}
 	day := func(d int) string { return now.AddDate(0, 0, d).Format(time.DateOnly) }
 	want := []string{
-		day(-3) + " overdue: late", day(0) + " today: today",
-		day(2) + " upcoming: soon, also soon", day(9) + " upcoming: later",
+		day(-3) + " overdue 1: Chores [late]", day(0) + " today 1: Chores [today]",
+		day(2) + " upcoming 3: Chores [soon, also soon]; Work [invoice]", day(9) + " upcoming 1: Chores [later]",
 	}
-	if !slices.Equal(got, want) || groups[1].Title != "Today" || !groups[0].Todos[0].Overdue || groups[1].Todos[0].Overdue {
-		t.Fatalf("days %s", raw)
+	if !slices.Equal(got, want) || groups[1].Title != "Today" || groups[1].Date == "" ||
+		!groups[0].Pages[0].Todos[0].Overdue || groups[1].Pages[0].Todos[0].Overdue {
+		t.Fatalf("days %s\nwant %s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+
+	at := func(key string) todoGroup {
+		raw, err := c.TodoDay(key, time.Local.String(), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var g todoGroup
+		if err := json.Unmarshal([]byte(raw), &g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	if g := at(day(2)); describeDay(g) != want[2] || g.Title != groups[2].Title || g.Date != groups[2].Date {
+		t.Errorf("the day after tomorrow on its own: %+v", g)
+	}
+	if g := at(day(-1)); g.Key != day(-1) || g.Section != "overdue" || g.Title != "Yesterday" || g.Date == "" || g.Count != 0 || g.Pages == nil {
+		t.Errorf("yesterday, with nothing on it: %+v", g)
+	}
+	if g := at(doc.TodoNoDateKey); g.Key != doc.TodoNoDateKey || g.Section != "no_date" || g.Title != "No date" || g.Date != "" || g.Count != 0 {
+		t.Errorf("the to-dos with no date, none of them left: %+v", g)
+	}
+}
+
+// describeDay tells a day's key, section and count, and its to-dos' texts under their pages,
+// the pages in order of their titles.
+func describeDay(g todoGroup) string {
+	var pages []string
+	for _, p := range g.Pages {
+		var texts []string
+		for _, t := range p.Todos {
+			texts = append(texts, t.Text)
+		}
+		pages = append(pages, fmt.Sprintf("%s [%s]", p.Title, strings.Join(texts, ", ")))
+	}
+	slices.Sort(pages)
+	return fmt.Sprintf("%s %s %d: %s", g.Key, g.Section, g.Count, strings.Join(pages, "; "))
 }
 
 func TestInFolderKeepsToTheDataFolder(t *testing.T) {
@@ -324,7 +360,7 @@ func TestCheckTodoChecksItOffInItsPage(t *testing.T) {
 		_ = json.Unmarshal([]byte(raw), &groups)
 		n := 0
 		for _, g := range groups {
-			n += len(g.Todos)
+			n += g.Count
 		}
 		return n
 	}

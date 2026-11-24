@@ -82,6 +82,9 @@ struct CoreClientTests {
 
     @Test func toDosComeADayAtATime() async throws {
         let page = try await client.createPage(NewPage(title: "Chores"))
+        let mine = { (group: TodoGroup) in
+            group.pages.filter { $0.id == page.id }.flatMap(\.todos)
+        }
         var opened = try await client.openPage(page.id)
         func todo(_ id: String, _ text: String, _ due: String) -> DocNode {
             DocNode(
@@ -98,17 +101,20 @@ struct CoreClientTests {
         try await client.editPage(
             page.id, editor: opened.editor, content: opened.content, rev: opened.rev)
         await client.closePage(page.id, editor: opened.editor)
-        let mine = try await client.todos().map { group in
-            (group, group.todos.filter { $0.pageID == page.id }.map(\.text))
-        }.filter { !$0.1.isEmpty }
-        #expect(mine.map(\.0.key) == ["2001-01-01", "2999-01-01", "2999-01-02"])
-        #expect(mine.map(\.0.section) == ["overdue", "upcoming", "upcoming"])
-        #expect(mine.first?.0.todos.first?.overdue == true)
-        #expect(mine.map(\.1) == [["Late"], ["Sooner", "Also sooner"], ["Later"]])
+        let days = try await client.todos().map { ($0, mine($0)) }.filter { !$0.1.isEmpty }
+        #expect(days.map(\.0.key) == ["2001-01-01", "2999-01-01", "2999-01-02"])
+        #expect(days.map(\.0.section) == ["overdue", "upcoming", "upcoming"])
+        #expect(days.first?.1.first?.overdue == true)
+        #expect(days.map { $0.1.map(\.text) } == [["Late"], ["Sooner", "Also sooner"], ["Later"]])
+        #expect(days.allSatisfy { $0.0.date?.isEmpty == false && $0.0.count >= $0.1.count })
 
         try await client.checkTodo(page.id, "b", checked: true)
-        let left = try await client.todos().flatMap(\.todos).filter { $0.pageID == page.id }
+        let left = try await client.todos().flatMap(mine)
         #expect(left.map(\.text) == ["Sooner", "Also sooner", "Later"])
+        let late = try await client.todoDay("2001-01-01")
+        #expect(late.key == "2001-01-01" && late.section == "overdue")
+        #expect(late.title == days.first?.0.title && late.date == days.first?.0.date)
+        #expect(mine(late).isEmpty)
     }
 
     @Test func aSignInWithSeveralProjectsAsksWhichToUse() throws {

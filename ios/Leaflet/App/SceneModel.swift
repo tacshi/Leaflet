@@ -3,11 +3,48 @@ import SwiftUI
 @MainActor
 @Observable
 final class SceneModel {
-    /// What the detail column shows: a page's ID, or `dayPrefix` and a day's key for that day's
-    /// to-dos.
-    private(set) var selection: String?
-    private var back: [String] = []
-    private var forward: [String] = []
+    /// What the detail column shows.
+    enum Selection: Hashable, Sendable {
+        /// A page, by its ID.
+        case page(String)
+        /// A day's to-dos, by the day's key: the day as 2026-11-20, or "no-date".
+        case day(String)
+        /// The Trash.
+        case bin
+
+        /// The ID of the page, if a page is shown.
+        var pageID: String? {
+            if case .page(let id) = self { id } else { nil }
+        }
+
+        /// The selection as a window keeps it across launches: a page's ID, "day:" and a day's
+        /// key, or "bin".
+        var saved: String {
+            switch self {
+            case .page(let id): id
+            case .day(let key): Self.dayPrefix + key
+            case .bin: Self.binKey
+            }
+        }
+
+        /// The selection a window kept across launches.
+        init(saved: String) {
+            if saved == Self.binKey {
+                self = .bin
+            } else if saved.hasPrefix(Self.dayPrefix) {
+                self = .day(String(saved.dropFirst(Self.dayPrefix.count)))
+            } else {
+                self = .page(saved)
+            }
+        }
+
+        private static let dayPrefix = "day:"
+        private static let binKey = "bin"
+    }
+
+    private(set) var selection: Selection?
+    private var back: [Selection] = []
+    private var forward: [Selection] = []
 
     var columns = NavigationSplitViewVisibility.automatic
     var inspectorShown = false
@@ -55,7 +92,7 @@ final class SceneModel {
     @ObservationIgnored private var closing = false
 
     func release(_ model: PageModel) {
-        if model.id == selection, !closing {
+        if model.id == pageID, !closing {
             if let held, held !== model { close(held) }
             held = model
             return
@@ -95,16 +132,20 @@ final class SceneModel {
     var heading: String?
     var writing = false
 
-    func open(_ id: String?) {
-        guard id != selection else { return }
-        if let current = selection { back.append(current) }
+    /// Shows the selection, or nothing with nil, keeping what was shown to go back to.
+    func open(_ selection: Selection?) {
+        guard selection != self.selection else { return }
+        if let current = self.selection { back.append(current) }
         forward.removeAll()
-        show(id)
+        show(selection)
     }
+
+    /// Shows the page with this ID.
+    func open(_ id: String) { open(.page(id)) }
 
     func open(_ id: String, at blockID: String?, moment: Int = -1) {
         guard let blockID, !blockID.isEmpty else { return open(id) }
-        if id == selection, let editor {
+        if id == pageID, let editor {
             editor.reveal(blockID: blockID, atTop: true)
             editor.play(blockID: blockID, at: moment)
             return
@@ -113,24 +154,8 @@ final class SceneModel {
         (target, targetAt) = (blockID, moment)
     }
 
-    /// The start of a selection that shows a day's to-dos, before the day's key: the day as
-    /// 2026-11-20, or "no-date".
-    static let dayPrefix = "day:"
-
-    /// The selection that shows the Trash.
-    static let binKey = "bin"
-
-    /// Whether the Trash is shown.
-    var binShown: Bool { selection == Self.binKey }
-
-    /// The key of the day whose to-dos are shown, if a day's are.
-    var day: String? {
-        guard let selection, selection.hasPrefix(Self.dayPrefix) else { return nil }
-        return String(selection.dropFirst(Self.dayPrefix.count))
-    }
-
     /// The ID of the page shown, if a page is.
-    var pageID: String? { day == nil && !binShown ? selection : nil }
+    var pageID: String? { selection?.pageID }
 
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
@@ -147,13 +172,13 @@ final class SceneModel {
         show(next)
     }
 
-    private func show(_ id: String?) {
-        if let held, held.id != id {
+    private func show(_ selection: Selection?) {
+        if let held, held.id != selection?.pageID {
             close(held)
             self.held = nil
         }
-        if recordOnOpen != id { recordOnOpen = nil }
-        selection = id
+        if recordOnOpen != selection?.pageID { recordOnOpen = nil }
+        self.selection = selection
         (target, targetAt) = (nil, -1)
         newComment = nil
         asking = nil
@@ -170,12 +195,10 @@ final class SceneModel {
     /// Forgets the pages no longer in ids, going back from one shown. A day's to-dos and the
     /// Trash stay.
     func keep(_ ids: Set<String>) {
-        let kept = { (id: String) in
-            ids.contains(id) || id.hasPrefix(Self.dayPrefix) || id == Self.binKey
-        }
+        let kept = { (selection: Selection) in selection.pageID.map(ids.contains) ?? true }
         back.removeAll { !kept($0) }
         forward.removeAll { !kept($0) }
-        if let id = selection, !kept(id) { show(back.popLast()) }
+        if let selection, !kept(selection) { show(back.popLast()) }
     }
 
     func showPanel(_ tab: InspectorTab) {

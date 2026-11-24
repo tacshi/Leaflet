@@ -79,13 +79,9 @@ struct SidebarView: View {
         List(
             selection: Binding(
                 get: { scene.selection },
-                set: { id in
-                    guard let id else { return scene.open(nil) }
-                    if id.hasPrefix(SceneModel.dayPrefix) || id == SceneModel.binKey
-                        || app.library.page(id) != nil
-                    {
-                        scene.open(id)
-                    }
+                set: { selection in
+                    if let id = selection?.pageID, app.library.page(id) == nil { return }
+                    scene.open(selection)
                 })
         ) {
             if !query.isEmpty {
@@ -214,7 +210,7 @@ struct SidebarView: View {
             .withoutTopLine()
         }
         Section {
-            Label(L.binName, systemImage: "trash").tag(SceneModel.binKey)
+            Label(L.binName, systemImage: "trash").tag(SceneModel.Selection.bin)
         }
     }
 
@@ -374,7 +370,7 @@ struct SidebarView: View {
         guard !q.isEmpty, let client = app.client else { return }
         query = ""
         searchFocused = false
-        if let page = scene.page, scene.selection == page.id, !stacked {
+        if let page = scene.page, scene.pageID == page.id, !stacked {
             scene.inspectorTab = .agent
             scene.allPages = false
             scene.focusChat = true
@@ -500,7 +496,7 @@ struct PageLink: View {
             }
         }
         .padding(.leading, CGFloat(depth) * Self.indent)
-        .tag(page.id)
+        .tag(SceneModel.Selection.page(page.id))
         .contextMenu {
             PageMenu(
                 page: page, rename: { actions.renamePage(page) },
@@ -605,14 +601,14 @@ struct TodoDayRowView: View {
         HStack(spacing: 8) {
             Label(group.title, systemImage: "calendar")
             Spacer(minLength: 0)
-            Text(group.todos.count, format: .number)
+            Text(group.count, format: .number)
                 .monospacedDigit()
                 .foregroundStyle(group.overdue ? Color.red : Color.secondary)
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityValue(L.todosDayLeft(count: group.todos.count))
-        .tag(SceneModel.dayPrefix + group.key)
+        .accessibilityValue(L.todosDayLeft(count: group.count))
+        .tag(SceneModel.Selection.day(group.key))
     }
 }
 

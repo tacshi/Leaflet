@@ -124,42 +124,46 @@ struct LibraryTests {
         scene.open("b")
         scene.open("c")
         scene.goBack()
-        #expect(scene.selection == "b")
+        #expect(scene.selection == .page("b"))
         #expect(scene.canGoForward)
         scene.keep(["a", "b"])
         #expect(!scene.canGoForward)
         scene.keep(["a"])
-        #expect(scene.selection == "a")
+        #expect(scene.selection == .page("a"))
         #expect(!scene.canGoBack)
     }
 
-    @Test func aDaysToDosStayInTheHistory() {
+    @Test func aDaysToDosAndTheTrashStayInTheHistory() {
         let scene = SceneModel()
         scene.open("a")
-        scene.open(SceneModel.dayPrefix + "2026-11-23")
-        #expect(scene.day == "2026-11-23")
+        scene.open(.day("2026-11-23"))
+        #expect(scene.selection == .day("2026-11-23"))
+        #expect(scene.pageID == nil)
+        scene.open(.bin)
+        #expect(scene.selection == .bin)
         #expect(scene.pageID == nil)
         scene.open("b")
-        #expect(scene.day == nil)
         #expect(scene.pageID == "b")
         scene.goBack()
+        scene.goBack()
         scene.keep(["b"])
-        #expect(scene.day == "2026-11-23")
+        #expect(scene.selection == .day("2026-11-23"))
         #expect(scene.canGoForward)
         #expect(!scene.canGoBack)
+        scene.goForward()
+        #expect(scene.selection == .bin)
     }
 
-    @Test func aDaysToDosGoUnderTheirPages() {
-        func todo(_ page: String, _ text: String) -> Todo {
-            Todo(
-                pageID: page, pageTitle: page.uppercased(), blockID: text, text: text, due: 0,
-                timed: false)
+    @Test func aWindowKeepsWhatItShowedAsBefore() {
+        let kept: [(String, SceneModel.Selection)] = [
+            ("0b6f2c1e-6a4e-4f1f-9d3a-3f8e2b1c7d90", .page("0b6f2c1e-6a4e-4f1f-9d3a-3f8e2b1c7d90")),
+            ("day:2026-11-23", .day("2026-11-23")), ("day:no-date", .day("no-date")),
+            ("bin", .bin),
+        ]
+        for (saved, selection) in kept {
+            #expect(SceneModel.Selection(saved: saved) == selection)
+            #expect(selection.saved == saved)
         }
-        let pages = TodoDayScreen.byPage([
-            todo("list", "Listen"), todo("work", "Invoice"), todo("list", "Retell"),
-        ])
-        #expect(pages.map(\.title) == ["LIST", "WORK"])
-        #expect(pages.map { $0.todos.map(\.text) } == [["Listen", "Retell"], ["Invoice"]])
     }
 
     @Test func jsonValuesRoundTrip() throws {

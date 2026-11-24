@@ -154,6 +154,23 @@ struct LibraryTests {
         #expect(scene.selection == .bin)
     }
 
+    @Test func theTrashButtonOpensTheTrashAndGoesBackFromIt() {
+        let scene = SceneModel()
+        scene.toggleBin()
+        #expect(scene.selection == .bin)
+        scene.toggleBin()
+        #expect(scene.selection == nil)
+        scene.toggleBin()
+        #expect(scene.selection == .bin)
+        scene.toggleBin()
+        #expect(scene.selection == nil)
+        scene.open("a")
+        scene.toggleBin()
+        #expect(scene.selection == .bin)
+        scene.toggleBin()
+        #expect(scene.pageID == "a")
+    }
+
     @Test func aWindowKeepsWhatItShowedAsBefore() {
         let kept: [(String, SceneModel.Selection)] = [
             ("0b6f2c1e-6a4e-4f1f-9d3a-3f8e2b1c7d90", .page("0b6f2c1e-6a4e-4f1f-9d3a-3f8e2b1c7d90")),

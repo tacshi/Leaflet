@@ -209,9 +209,6 @@ struct SidebarView: View {
             }
             .withoutTopLine()
         }
-        Section {
-            Label(L.binName, systemImage: "trash").tag(SceneModel.Selection.bin)
-        }
     }
 
     private var actions: RowActions {
@@ -447,6 +444,9 @@ struct PageRows: View {
                 expanded: row.folds ? expanded(row.page.id) : nil
             )
             .modifier(PageDrops(page: row.page))
+            // Over the drag, whose String payload otherwise stands for the row, so the list
+            // takes it for no selection and the page never opens.
+            .tag(SceneModel.Selection.page(row.page.id))
         }
     }
 
@@ -612,13 +612,20 @@ struct TodoDayRowView: View {
     }
 }
 
+/// The bar under the sidebar: how syncing is going, and the Trash.
 struct SyncStatusBar: View {
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
 
     var body: some View {
         HStack {
             status
             Spacer()
+            Button(L.binName, systemImage: "trash") { scene.toggleBin() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(scene.selection == .bin ? Color.accentColor : Color.primary)
+                .accessibilityAddTraits(scene.selection == .bin ? .isSelected : [])
         }
         .padding(.horizontal)
         .padding(.vertical, 10)

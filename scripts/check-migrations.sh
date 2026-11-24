@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="${SUPABASE_POSTGRES_IMAGE:-public.ecr.aws/supabase/postgres:17.11.0.006@sha256:c141fd17ac6a76c4323e90b3aee8ff1a23d2e89e547c2b963cfadc309c079cc2}"
+# The same image, by its digest, from Docker Hub or else from Amazon's registry, whose
+# anonymous pulls run out of data on the shared runners.
+postgres="supabase/postgres:17.11.0.006@sha256:c141fd17ac6a76c4323e90b3aee8ff1a23d2e89e547c2b963cfadc309c079cc2"
+if [[ -n "${SUPABASE_POSTGRES_IMAGE:-}" ]]; then
+	images=("$SUPABASE_POSTGRES_IMAGE")
+else
+	images=("docker.io/$postgres" "public.ecr.aws/$postgres")
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="leaflet-migrations-$$"
 
-for wait in 0 10 20 40; do
-	sleep "$wait"
-	if docker image inspect "$image" >/dev/null 2>&1 || docker pull --quiet "$image" >/dev/null; then
-		break
-	fi
-	if [[ $wait -eq 40 ]]; then
-		echo "could not pull $image" >&2
-		exit 1
-	fi
-done
+pulled() {
+	local wait
+	for wait in 0 10 20 40; do
+		sleep "$wait"
+		for image in "${images[@]}"; do
+			if docker image inspect "$image" >/dev/null 2>&1 || docker pull --quiet "$image" >/dev/null; then
+				return 0
+			fi
+		done
+	done
+	return 1
+}
+if ! pulled; then
+	echo "could not pull ${images[*]}" >&2
+	exit 1
+fi
 
 docker run --detach --rm --name "$name" --env POSTGRES_PASSWORD=postgres "$image" >/dev/null
 trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT

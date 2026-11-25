@@ -23,6 +23,7 @@ import (
 var (
 	ErrNotPublic = errors.New("not a public address")
 	ErrBadPort   = errors.New("not a port for the web")
+	ErrNotWeb    = errors.New("not a web link")
 )
 
 func Fetch(link string) ([]byte, error) {
@@ -49,8 +50,8 @@ func get(ctx context.Context, link, accept string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, errors.New("not a web link")
+	if !webScheme(u) {
+		return nil, ErrNotWeb
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
 	if err != nil {
@@ -81,12 +82,14 @@ var publicClient = &http.Client{Transport: publicTransport{}}
 // at every redirect of a client that uses it, and names Leaflet as Fetch does.
 func Transport() http.RoundTripper { return agentTransport{} }
 
+// PublicTransport goes to public addresses alone, through the system's
+// proxy, as Fetch does, leaving a request's User-Agent as its caller set
+// it: services that ask apps to name themselves, as map routers do.
+func PublicTransport() http.RoundTripper { return publicTransport{} }
+
 type agentTransport struct{}
 
 func (agentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Scheme != "http" && r.URL.Scheme != "https" {
-		return nil, errors.New("not a web link")
-	}
 	r = r.Clone(r.Context())
 	r.Header.Set("User-Agent", fetchAgent)
 	return publicTransport{}.RoundTrip(r)
@@ -116,6 +119,11 @@ var lookupIP = net.DefaultResolver.LookupNetIP
 type publicTransport struct{}
 
 func (publicTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	// A link of another scheme goes nowhere, not even to the resolver or
+	// the proxy.
+	if !webScheme(r.URL) {
+		return nil, ErrNotWeb
+	}
 	if !webPort(r.URL) {
 		return nil, ErrBadPort
 	}
@@ -246,6 +254,8 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 	}
 	return nil
 }
+
+func webScheme(u *url.URL) bool { return u.Scheme == "http" || u.Scheme == "https" }
 
 func webPort(u *url.URL) bool {
 	_, p, err := net.SplitHostPort(hostPort(u))

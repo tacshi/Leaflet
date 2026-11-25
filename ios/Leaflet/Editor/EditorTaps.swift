@@ -253,6 +253,7 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         switch type {
         case "chart": L.editorEditData
         case "card": L.editorEditCard
+        case "map": L.editorEditMap
         default: L.commonEdit
         }
     }

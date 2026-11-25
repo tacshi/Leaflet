@@ -31,6 +31,7 @@ enum Lucide {
         case "lightbulb": "lightbulb"
         case "square-pen": "square.and.pencil"
         case "id-card": "list.bullet.rectangle"
+        case "map": "map"
         case "bus": "bus"
         case "train-front": "train.side.front.car"
         case "tram-front": "tram"

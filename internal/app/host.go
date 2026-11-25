@@ -125,6 +125,7 @@ func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock
 func (h *host) VideoMenu(m *ui.Menu, n *doc.Node)               { h.a.videoMenu(m, n) }
 func (h *host) Card(c *ui.Context, n *doc.Node)                 { h.a.linkPreviewBlock(c, n) }
 func (h *host) FactCard(c *ui.Context, n *doc.Node, w float32)  { h.a.factCardBlock(c, n, w) }
+func (h *host) Map(c *ui.Context, n *doc.Node, w float32)       { h.a.mapBlock(c, n, w) }
 func (h *host) File(c *ui.Context, n *doc.Node, width float32)  { h.a.fileBlock(c, n, width) }
 func (h *host) FileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) { h.a.fileMenu(c, m, n) }
 func (h *host) Recording(c *ui.Context, n *doc.Node)            { h.a.recordingBlock(c, n) }
@@ -276,6 +277,8 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		a.addSubpageBlock()
 	case "video", "link_preview", "image":
 		a.dialogs.openLinkDialog(item.Key)
+	case "map":
+		a.dialogs.openMap("", ed)
 	case "file":
 		a.uploadIntoPage()
 	case "recording":
@@ -310,6 +313,8 @@ func (h *host) EditBlock(blockID string) {
 		h.a.dialogs.openChart(blockID, ps.editor)
 	case n.Type == "card":
 		h.a.dialogs.openCard(blockID, ps.editor)
+	case n.Type == "map":
+		h.a.dialogs.openMap(blockID, ps.editor)
 	case n.Type == "math_equation" || n.Type == "diagram":
 		h.a.dialogs.openSource(n)
 	case n.Type == "image" && n.Str("file_id") != "":

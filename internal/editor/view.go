@@ -475,6 +475,8 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			e.Host.Card(c, n)
 		case "card":
 			e.Host.FactCard(c, n, e.width-float32(depth)*indentStep)
+		case "map":
+			e.Host.Map(c, n, e.width-float32(depth)*indentStep)
 		case "file":
 			e.Host.File(c, n, e.width-float32(depth)*indentStep)
 		case "recording":
@@ -525,6 +527,8 @@ func mediaEdit(n *doc.Node) string {
 		return locales.EditorEditMediaLink()
 	case n.Type == "card":
 		return locales.EditorEditCard()
+	case n.Type == "map":
+		return locales.EditorEditMap()
 	}
 	return ""
 }

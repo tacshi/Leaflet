@@ -11,9 +11,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"leaflet/internal/doc"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/store"
 	"leaflet/internal/web"
 	"leaflet/locales"
@@ -88,6 +90,14 @@ var blockSchema = map[string]any{
 				"note": map[string]any{"type": "string", "description": "A short line under the facts, in inline markdown: what they leave out or assume."},
 				"sources": map[string]any{"type": "array", "description": "The pages the facts come from, shown as chips: links a search found or of a page you read.",
 					"items": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}}, "required": []string{"url"}}},
+			}},
+		"map": map[string]any{"type": "object", "description": "A map of places, and of a route between them that find_route found. With a route and no places, it marks the route's ends.",
+			"properties": map[string]any{
+				"title": map[string]any{"type": "string"},
+				"places": map[string]any{"type": "array", "description": "Places as find_place gave them.", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"name": map[string]any{"type": "string"}, "lat": map[string]any{"type": "number"}, "lng": map[string]any{"type": "number"},
+				}, "required": []string{"lat", "lng"}}},
+				"route": map[string]any{"type": "string", "description": "The id find_route gave the route, as \"r1\". In replace_block, none takes the map's route off; a title, places or route not given stay as they were."},
 			}},
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer", "minimum": 120, "maximum": 1200}},
@@ -224,6 +234,8 @@ type ToolContext struct {
 	Request       string
 	SearchWeb     func(query string) (Search, error)
 	ReadWeb       func(link string) (web.Page, error)
+	FindPlaces    func(query string, near *doc.LatLng) ([]mapsvc.Place, error)
+	FindRoutes    func(from, to doc.LatLng, mode string, depart time.Time) ([]doc.MapRoute, error)
 	Workspace     *Workspace
 }
 
@@ -501,6 +513,7 @@ type Executor struct {
 	found, sources   map[string]bool
 	followed         int
 	written          int
+	book             *RouteBook
 	Refused          string
 }
 
@@ -877,23 +890,39 @@ func reason(err error) string {
 
 func (x *Executor) begin() {
 	c := x.Ctx
-	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
-		x.allowed, x.loaded = map[string]bool{}, map[string]bool{}
+	guards := x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil ||
+		c.ReadWeb != nil || c.SearchWeb != nil || c.FindPlaces != nil || c.FindRoutes != nil || c.Captions != nil || c.Workspace != nil
+	if x.allowed != nil || !guards {
+		return
+	}
+	x.allowed, x.loaded = map[string]bool{}, map[string]bool{}
+	// An executor that only finds places, as leaflet mcp's, has no page.
+	if c.Content != nil {
 		views := doc.BlockViews(c.Content)
 		for _, v := range views {
 			withoutSiteInfo(v)
 		}
 		see(x.allowed, views)
-		see(x.allowed, c.Request)
 		c.Content.Walk(func(n, _ *doc.Node) {
 			see(x.loaded, doc.LoadedURL(n))
 		})
-		see(x.loaded, c.Request)
 	}
+	see(x.allowed, c.Request)
+	see(x.loaded, c.Request)
 }
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
 	x.begin()
+	switch name {
+	case "find_place":
+		return x.findPlace(args)
+	case "find_route":
+		return x.findRoute(args)
+	}
+	args, err := x.withRoutes(name, args)
+	if err != nil {
+		return nil, err
+	}
 	if x.Ctx.Workspace != nil {
 		return x.workspace(name, args)
 	}
@@ -1199,6 +1228,7 @@ func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, 
 			return n, nil
 		}
 	}
+	spec = doc.KeptMapSpec(prev, spec)
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -1396,7 +1426,7 @@ var kinds = map[string]func() string{
 	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
 	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
 	"toggle_list": locales.AgentEditToggle, "link_preview": locales.AgentEditLinkCard, "math_equation": locales.AgentEditFormula, "diagram": locales.AgentEditDiagram,
-	"subpage": locales.AgentEditSubpageLink, "card": locales.AgentEditCard,
+	"subpage": locales.AgentEditSubpageLink, "card": locales.AgentEditCard, "map": locales.AgentEditMap,
 }
 
 func summaryFor(verb func(what string) string, nodes []*doc.Node) string {

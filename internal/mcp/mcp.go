@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/store"
 )
 
@@ -65,6 +66,7 @@ func (s *Server) markSeen() {
 }
 
 func NewServer(st *store.Store, version string) *Server {
+	mapsvc.SetVersion(version)
 	s := &Server{st: st, version: version, agent: "Agent"}
 	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]sight{}}
 	return s
@@ -259,6 +261,7 @@ const instructions = `Leaflet keeps the user's pages: living documents of blocks
 - For numbers worth seeing, a chart block; for code, a code block with its language; for a note or warning, a callout; for a formula, math_equation; for a diagram, a diagram with Mermaid source; for a web page, link_preview.
 - Right-align a table's columns of numbers, prices and times: |--:| in Markdown, or align in insert_blocks. A table drawn with simple lines rather than a grid is table_style lines.
 - For facts at a glance, as a trip's time and fare or a place's address and phone numbers, a card block: figures for two to four short values side by side, details for label: value lines beside a picture, with an icon, a note and the pages they come from as sources.
+- To show where places are, or a route between them, find them with find_place and find_route, which ask map services on the web, then insert a map block with the places and the route's id, as "r1".
 - For a picture or file on this computer, as a screenshot, a photo, a recording or a PDF, use upload_files with its path: an image block takes a web link only.
 - Link another page with [Title](leaflet://page/<id>), or a block of one with [text](leaflet://page/<id>#<block_id>). A moment of a video, a recording or an audio or video file is [1:23](leaflet://page/<id>#<block_id>?t=83), t in seconds: a click plays it from there.
 - A video block's notes (video.notes) show under it, a plain-text line each: a line that starts with a time, as 0:00 or 1:02:03, plays the video from there. Write a video's summary, chapters or key moments there, with replace_block keeping its url, its times taken from a transcript, never guessed.

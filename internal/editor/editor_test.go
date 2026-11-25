@@ -37,6 +37,7 @@ func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32)    {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32)    {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)                {}
 func (h *fakeHost) FactCard(c *ui.Context, n *doc.Node, w float32) {}
+func (h *fakeHost) Map(c *ui.Context, n *doc.Node, w float32)      {}
 func (h *fakeHost) File(c *ui.Context, n *doc.Node, w float32)     {}
 func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)           {}
 func (h *fakeHost) CommentCount(string) int                        { return 0 }

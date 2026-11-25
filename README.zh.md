@@ -84,6 +84,10 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
   可左对齐、居中或右对齐。
 - 信息卡片，在标题和图标下一目了然地列出要点：数字版并排大字显示数值，
   如行程的时间和票价；详情版逐行列出，旁边可放图片；下方有备注和来源标签。
+- 地图，标出地点及它们之间的路线：步行、骑行、驾车或公共交通，每条巴士或
+  火车线路用自己的颜色。在 Mac 和 Windows 上显示 OpenFreeMap 的地图，在
+  iPhone 和 iPad 上显示 Apple 的地图。地点通过 Photon 查找，路线通过 FOSSGIS
+  的 OSRM 或 Transitous 计算，它们会收到所查询的地点。
 - Markdown 快捷输入、`/` 菜单、用 `@` 提及成员、智能体和页面、带文字颜色
   的选区工具栏、输入 `$x^2$` 即可排版的行内公式、可折叠的标题、大纲，以及
   指向页面和单个块的链接。
@@ -121,7 +125,9 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
   GLM 或 ChatGPT 套餐）。一次运行读过网络后，只写入和读取它找到的或你给的
   链接；一旦读取你的其他页面，这次运行就不再使用网络，它所在聊天或评论串的
   后续轮次也不再使用，因为之前的回复可能含有它读到的内容。
-- 智能体的回答像页面一样显示卡片，并用简洁线条绘制表格。
+- 可以使用网络时，智能体还能查找地点和路线（`find_place`、`find_route`），
+  并把它们画成地图，放进页面或回答里；回答像页面一样显示卡片、简洁线条的
+  表格和地图。
 - 支持任何兼容 OpenAI 的服务商：内置 OpenAI、Claude、xAI、OpenRouter、
   DeepSeek 和 GLM 预设，支持 ChatGPT Plus 或 Pro 登录、自定义端点，以及
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
@@ -269,6 +275,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | `move_folder` | 把文件夹移入其他文件夹，或移到顶层 |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | 像应用内的智能体一样编辑页面 |
 | `upload_files` | 按路径把这台电脑上的图片、音频、视频和 PDF 添加到页面 |
+| `find_place`、`find_route` | 通过 Photon、OSRM 和 Transitous 查找地点和路线，供地图块按路线 ID 显示 |
 
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看
 权限共享给你的页面是只读的。智能体首次编辑某个页面前会保存一份历史快照，
@@ -419,12 +426,13 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 | `internal/editor` | 块编辑器：模型、编辑、布局、输入和块 |
 | `internal/doc` | 页面文档模型：块、增量、行内 Markdown、操作、按块合并和 Markdown 导出 |
 | `internal/menu`、`internal/shortcut` | `/` 和 `@` 菜单提供的内容，以及在页面中输入的 Markdown 会变成什么（两个应用的编辑器通用） |
-| `internal/rendered` | 绘制示意图（Pele）并承载嵌入的页面，运行在不能联网的框架中 |
+| `internal/rendered` | 绘制示意图（Pele）并承载嵌入的页面，运行在不能联网的框架中；以及绘制地图（MapLibre）的页面，只连接它的瓦片服务器 |
 | `internal/mathtex` | 用 Untie 把 TeX 排成公式，供两个应用绘制，并以 SVG 写入网页 |
 | `internal/webpage` | 可独立打开的网页形式的页面：公开链接分享的、导出 › PDF 打印的都是它，两个应用共用 |
 | `internal/starters` | Leaflet 自带的模板 |
 | `internal/export` | 把所有页面连同图片、文件和录音导出为 Markdown 压缩包 |
 | `internal/web` | 链接卡片、图片、视频信息与字幕，以及供智能体阅读的网页，只从公网地址读取 |
+| `internal/maps` | 为地图块查找地点和路线，来自 Photon、FOSSGIS 的 OSRM 和 Transitous |
 | `internal/store` | SQLite（纯 Go）表、发件箱和设置 |
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
 | `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |
@@ -471,9 +479,15 @@ Open Font License 授权的 [Figtree](https://github.com/erikdkennedy/figtree)
 [Lucide](https://lucide.dev) 图标（`internal/theme/icons/LICENSE`），以及
 以 MIT 许可证授权、用于示意图的 [Pele](https://github.com/obsidianmd/pele)
 （[`internal/rendered/third_party`](internal/rendered/third_party/README.md)），
-以及用于数学公式、以 Apache 2.0 许可证授权的
+以 BSD-3-Clause 许可证授权、用于地图的 [MapLibre GL JS](https://maplibre.org)
+（同一文件夹），以及用于数学公式、以 Apache 2.0 许可证授权的
 [Untie](https://github.com/caelyreth/untie) 和以 GUST 字体许可证授权的
 New Computer Modern Math 字体（`internal/mathtex/font/GUST-FONT-LICENSE.txt`）。
+地图显示 [OpenStreetMap](https://www.openstreetmap.org/copyright) 的数据（©
+OpenStreetMap 贡献者），使用 [OpenFreeMap](https://openfreemap.org) 的瓦片；
+地点来自 [Photon](https://photon.komoot.io)，路线来自
+[FOSSGIS](https://routing.openstreetmap.de) 服务器的 OSRM 和
+[Transitous](https://transitous.org/sources/)。
 
 ## 许可证
 

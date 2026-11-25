@@ -24,7 +24,7 @@ func toolErr(format string, args ...any) error {
 var AgentTypes = []string{
 	"paragraph", "heading", "bulleted_list", "numbered_list", "todo_list", "quote",
 	"divider", "image", "table", "chart", "embed", "video", "code", "callout", "toggle_list", "link_preview", "math_equation", "diagram",
-	"card",
+	"card", "map",
 }
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
@@ -174,6 +174,13 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		n.Data = data
 	case "card":
 		data, err := CardData(asMap(spec["card"]))
+		if err != nil {
+			return nil, err
+		}
+		data["author"] = author
+		n.Data = data
+	case "map":
+		data, err := MapData(asMap(spec["map"]))
 		if err != nil {
 			return nil, err
 		}
@@ -668,6 +675,8 @@ func BlockViews(c *Content) []map[string]any {
 				v["chart"] = present(n, "chart_type", "title", "labels", "series", "caption")
 			case "card":
 				v["card"] = CardOf(n).View()
+			case "map":
+				v["map"] = MapOf(n).View()
 			case "embed":
 				v["embed"] = present(n, "title", "height", "html")
 			case "image":

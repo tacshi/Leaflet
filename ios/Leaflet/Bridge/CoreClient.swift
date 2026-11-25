@@ -36,9 +36,10 @@ final class CoreClient: Sendable {
         #else
             let dev = false
         #endif
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         let config = try JSONSerialization.data(withJSONObject: [
             "data_dir": dataDir.path, "icloud_root": iCloudRoot ?? "", "locale": locale,
-            "dev": dev,
+            "dev": dev, "version": version,
         ])
         var error: NSError?
         guard

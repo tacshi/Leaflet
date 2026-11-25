@@ -90,28 +90,82 @@ type Map struct {
 	Route  *MapRoute  `json:"route,omitempty"`
 }
 
-// MapOf reads a map block, leaving out what it cannot show.
+// MapOf reads a map block, leaving out what it cannot show: a place off
+// the map or without its lat and lng, and a route that is none. It reads
+// the block's data as it is, as often as a frame draws the map: its
+// route's paths are read as they are drawn (Shape), which leaves out a
+// leg's path that does not read, as MapData checked them as the map was
+// written.
 func MapOf(n *Node) Map {
+	m := Map{Title: n.Str("title")}
+	places, okPlaces := n.Data["places"].([]any)
+	route, okRoute := n.Data["route"].(map[string]any)
+	if !okPlaces && n.Data["places"] != nil || !okRoute && n.Data["route"] != nil {
+		return mapOfJSON(n)
+	}
+	for _, v := range places {
+		p := asMap(v)
+		lat, latOK := mapNumber(p["lat"])
+		lng, lngOK := mapNumber(p["lng"])
+		name, _ := p["name"].(string)
+		if place := (MapPlace{Name: name, Lat: lat, Lng: lng}); latOK && lngOK && place.At().Valid() {
+			m.Places = append(m.Places, place)
+		}
+	}
+	if route != nil {
+		text := func(d map[string]any, key string) string {
+			s, _ := d[key].(string)
+			return s
+		}
+		number := func(d map[string]any, key string) int { return AsInt(d[key], 0) }
+		r := &MapRoute{Mode: text(route, "mode"), Source: text(route, "source"), DurationS: number(route, "duration_s"), DistanceM: number(route, "distance_m")}
+		for _, v := range listOf(route["legs"]) {
+			l := asMap(v)
+			r.Legs = append(r.Legs, MapLeg{Mode: text(l, "mode"), Line: text(l, "line"), Agency: text(l, "agency"), Color: text(l, "color"),
+				From: text(l, "from"), To: text(l, "to"), DurationS: number(l, "duration_s"), DistanceM: number(l, "distance_m"), Path: text(l, "path")})
+		}
+		if checkRouteShape(r) == nil {
+			m.Route = r
+		}
+	}
+	return m
+}
+
+// mapOfJSON is MapOf for a block whose data holds its places or its route
+// as other than JSON's lists and objects, read through JSON.
+func mapOfJSON(n *Node) Map {
 	var m Map
 	raw, err := json.Marshal(n.Data)
 	if err != nil || json.Unmarshal(raw, &m) != nil {
 		return Map{Title: n.Str("title")}
 	}
-	m.Places = keepPlaces(m.Places)
-	if m.Route != nil && checkRoute(m.Route) != nil {
+	m.Places = slices.DeleteFunc(m.Places, func(p MapPlace) bool { return !p.At().Valid() })
+	if len(m.Places) == 0 {
+		m.Places = nil
+	}
+	if m.Route != nil && checkRouteShape(m.Route) != nil {
 		m.Route = nil
 	}
 	return m
 }
 
-func keepPlaces(places []MapPlace) []MapPlace {
-	var out []MapPlace
-	for _, p := range places {
-		if p.At().Valid() {
-			out = append(out, p)
-		}
+// mapNumber is v as a number of a map's, as JSON's are: false for none.
+func mapNumber(v any) (float64, bool) {
+	switch v.(type) {
+	case float64, int, int64, json.Number:
+		return AsFloat(v)
 	}
-	return out
+	return 0, false
+}
+
+// Equal reports whether m and o are the same map.
+func (m Map) Equal(o Map) bool {
+	if m.Title != o.Title || !slices.Equal(m.Places, o.Places) || (m.Route == nil) != (o.Route == nil) {
+		return false
+	}
+	r, s := m.Route, o.Route
+	return r == nil || r.Mode == s.Mode && r.Source == s.Source && r.DurationS == s.DurationS && r.DistanceM == s.DistanceM &&
+		slices.Equal(r.Legs, s.Legs)
 }
 
 // Data is the map as a block's data.
@@ -125,14 +179,18 @@ func (m Map) Data() map[string]any {
 	return out
 }
 
-// Paths are the points of each of the route's legs.
+// Paths are the points of each of the route's legs: none for a leg whose
+// path does not read, or leaves the map.
 func (m Map) Paths() [][]LatLng {
 	if m.Route == nil {
 		return nil
 	}
 	out := make([][]LatLng, len(m.Route.Legs))
 	for i, l := range m.Route.Legs {
-		out[i], _ = DecodePath(l.Path, PathPrecision)
+		path, err := DecodePath(l.Path, PathPrecision)
+		if err == nil && !slices.ContainsFunc(path, func(p LatLng) bool { return !p.Valid() }) {
+			out[i] = path
+		}
 	}
 	return out
 }
@@ -143,7 +201,14 @@ func (m Map) Markers() []MapPlace {
 	if len(m.Places) > 0 || m.Route == nil {
 		return m.Places
 	}
-	paths := m.Paths()
+	return m.markers(m.Paths())
+}
+
+// markers are the map's markers, paths its route's.
+func (m Map) markers(paths [][]LatLng) []MapPlace {
+	if len(m.Places) > 0 || m.Route == nil {
+		return m.Places
+	}
 	var first, last *LatLng
 	for _, p := range paths {
 		if len(p) > 0 {
@@ -162,21 +227,42 @@ func (m Map) Markers() []MapPlace {
 // Bounds is the box around the map's markers and route: south-west and
 // north-east, or false when it has neither.
 func (m Map) Bounds() (sw, ne LatLng, ok bool) {
-	sw, ne = LatLng{Lat: 90, Lng: 180}, LatLng{Lat: -90, Lng: -180}
-	add := func(p LatLng) {
-		sw.Lat, sw.Lng = math.Min(sw.Lat, p.Lat), math.Min(sw.Lng, p.Lng)
-		ne.Lat, ne.Lng = math.Max(ne.Lat, p.Lat), math.Max(ne.Lng, p.Lng)
-		ok = true
+	s := m.Shape()
+	return s.SW, s.NE, s.OK
+}
+
+// MapShape is what a map draws, its route's paths read once: its legs,
+// the points of each (Paths), its markers, and the box around them all,
+// south-west and north-east, which OK reports it has.
+type MapShape struct {
+	Legs    []MapLeg
+	Paths   [][]LatLng
+	Markers []MapPlace
+	SW, NE  LatLng
+	OK      bool
+}
+
+// Shape is what m draws.
+func (m Map) Shape() MapShape {
+	s := MapShape{Paths: m.Paths(), SW: LatLng{Lat: 90, Lng: 180}, NE: LatLng{Lat: -90, Lng: -180}}
+	if m.Route != nil {
+		s.Legs = m.Route.Legs
 	}
-	for _, p := range m.Markers() {
+	s.Markers = m.markers(s.Paths)
+	add := func(p LatLng) {
+		s.SW.Lat, s.SW.Lng = math.Min(s.SW.Lat, p.Lat), math.Min(s.SW.Lng, p.Lng)
+		s.NE.Lat, s.NE.Lng = math.Max(s.NE.Lat, p.Lat), math.Max(s.NE.Lng, p.Lng)
+		s.OK = true
+	}
+	for _, p := range s.Markers {
 		add(p.At())
 	}
-	for _, path := range m.Paths() {
+	for _, path := range s.Paths {
 		for _, p := range path {
 			add(p)
 		}
 	}
-	return sw, ne, ok
+	return s
 }
 
 // View is the map as agents read it: its route's legs without their
@@ -220,7 +306,12 @@ func MapData(spec map[string]any) (map[string]any, error) {
 		return nil, toolErr("map must be an object.")
 	}
 	var m Map
-	if err := json.Unmarshal(raw, &m); err != nil {
+	// Each place's lat and lng are read again as given or not, for a place
+	// without them to fail rather than be pinned at 0, 0.
+	var given struct {
+		Places []struct{ Lat, Lng *float64 } `json:"places"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || json.Unmarshal(raw, &given) != nil {
 		return nil, toolErr("A map's places are {name, lat, lng}, in degrees, and its route is one find_route gave: %v", err)
 	}
 	m.Title = strings.TrimSpace(m.Title)
@@ -231,6 +322,9 @@ func MapData(spec map[string]any) (map[string]any, error) {
 		return nil, toolErr("A map marks at most %d places.", maxMapPlaces)
 	}
 	for i, p := range m.Places {
+		if at := given.Places[i]; at.Lat == nil || at.Lng == nil {
+			return nil, toolErr("Place %d needs lat and lng, in degrees: find it with find_place.", i+1)
+		}
 		if !p.At().Valid() {
 			return nil, toolErr("Place %d's lat and lng are not on a map: latitude -85 to 85, longitude -180 to 180.", i+1)
 		}
@@ -249,19 +343,14 @@ func MapData(spec map[string]any) (map[string]any, error) {
 	return m.Data(), nil
 }
 
+// checkRoute checks a route a map is written with: its shape, and each
+// leg's path, read.
 func checkRoute(r *MapRoute) error {
-	if !slices.Contains(RouteModes, r.Mode) {
-		return toolErr("A route goes by %s.", strings.Join(RouteModes, ", "))
-	}
-	if len(r.Legs) == 0 || len(r.Legs) > maxMapLegs {
-		return toolErr("A route has 1 to %d legs.", maxMapLegs)
+	if err := checkRouteShape(r); err != nil {
+		return err
 	}
 	points := 0
-	for i := range r.Legs {
-		l := &r.Legs[i]
-		if !legModes[l.Mode] {
-			return toolErr("A leg goes by one of: walk, cycle, drive, bus, coach, tram, subway, rail, ferry, cable, air, transit.")
-		}
+	for i, l := range r.Legs {
 		path, err := DecodePath(l.Path, PathPrecision)
 		if err != nil || len(path) < 2 {
 			return toolErr("Leg %d's path is not a route's: use the route find_route gave.", i+1)
@@ -273,6 +362,28 @@ func checkRoute(r *MapRoute) error {
 		}
 		if points += len(path); points > maxMapPoints {
 			return toolErr("A route takes at most %d points.", maxMapPoints)
+		}
+	}
+	return nil
+}
+
+// checkRouteShape checks all of a route but its legs' paths, which take
+// long to read: how it goes, its legs, their names, times and lengths,
+// and keeps of a leg's color only one a map draws.
+func checkRouteShape(r *MapRoute) error {
+	if !slices.Contains(RouteModes, r.Mode) {
+		return toolErr("A route goes by %s.", strings.Join(RouteModes, ", "))
+	}
+	if len(r.Legs) == 0 || len(r.Legs) > maxMapLegs {
+		return toolErr("A route has 1 to %d legs.", maxMapLegs)
+	}
+	for i := range r.Legs {
+		l := &r.Legs[i]
+		if !legModes[l.Mode] {
+			return toolErr("A leg goes by one of: walk, cycle, drive, bus, coach, tram, subway, rail, ferry, cable, air, transit.")
+		}
+		if l.Path == "" {
+			return toolErr("Leg %d's path is not a route's: use the route find_route gave.", i+1)
 		}
 		l.Color = LineColor(*l)
 		if utf8.RuneCountInString(l.Line) > maxMapLineName || utf8.RuneCountInString(l.Agency) > maxMapName ||
@@ -406,13 +517,39 @@ func mapMarkdown(msgs locales.Messages, m Map, link func(text, to string) string
 }
 
 // mapFigure writes a map block as a web page and a PDF show it: its route
-// and places drawn on a plain ground, without the map under them, which
-// would load from a tile server, then its title, its route in words, its
-// places as links to them on OpenStreetMap, and whose data it shows.
+// and places drawn on a plain ground, and over them, in a web page that
+// has one, a frame of the map on its tiles (opts.Map), which shows the
+// drawing under it until its tiles load, or without scripts; in a printed
+// page, the drawing with what its script draws the map on its tiles
+// from, in its place (opts.MapData); then its title, its route in words,
+// its places as links to them on OpenStreetMap, numbered as their pins,
+// and whose data it shows.
 func (w htmlWriter) mapFigure(n *Node) {
 	m := MapOf(n)
 	msgs := locales.In(w.opts.Lang)
-	w.write("<figure", w.attrs(n, "map"), ">", MapSVG(m))
+	w.write("<figure", w.attrs(n, "map"), ">")
+	src := ""
+	if w.opts.Map != nil && !w.opts.Print {
+		src = w.opts.Map(n)
+	}
+	data := ""
+	if w.mapped {
+		data = w.opts.MapData(n)
+	}
+	switch drawing := MapSVG(m); {
+	case drawing == "":
+	case src != "":
+		title := m.Title
+		if title == "" {
+			title = msgs.HostSlashMap()
+		}
+		w.write(`<div class="mapframe">`, drawing, `<iframe src="`, html.EscapeString(src), `" title="`, html.EscapeString(title),
+			`" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`)
+	case data != "":
+		w.write(`<div class="mapshot" data-map="`, html.EscapeString(data), `">`, drawing, `</div>`)
+	default:
+		w.write(drawing)
+	}
 	if m.Title != "" || m.Route != nil {
 		w.write("<figcaption>")
 		if m.Title != "" {
@@ -434,7 +571,7 @@ func (w htmlWriter) mapFigure(n *Node) {
 		}
 		w.write("</ol>")
 	}
-	w.write(`<p class="map-credit"><a href="`, html.EscapeString(MapCreditLink(m)), `" rel="noopener noreferrer">`, html.EscapeString(MapCredit(m)), "</a></p></figure>\n")
+	w.write(`<p class="map-credit"><a href="`, html.EscapeString(MapCreditLink(m)), `" rel="noopener noreferrer">`, html.EscapeString(MapCredit(msgs, m)), "</a></p></figure>\n")
 }
 
 // MapCreditLink is the page that credits a map's data: its router's list
@@ -451,28 +588,28 @@ func MapCreditLink(m Map) string {
 	return "https://www.openstreetmap.org/copyright"
 }
 
-// MapCredit names whose data a map shows: OpenStreetMap's, and the route's
-// router.
-func MapCredit(m Map) string {
+// MapCredit names whose data a map shows, in msgs' language:
+// OpenStreetMap's, and the route's router.
+func MapCredit(msgs locales.Messages, m Map) string {
 	by := "© OpenStreetMap contributors"
-	if r := RouteCredit(m); r != "" {
+	if r := RouteCredit(msgs, m); r != "" {
 		by += " · " + r
 	}
 	return by
 }
 
 // RouteCredit names the router a map's route comes from, as MapCredit
-// does after OpenStreetMap: "" for a map without a route, or with one from
-// a router it does not know.
-func RouteCredit(m Map) string {
+// does after OpenStreetMap, as "Routes: Transitous" in msgs' language: ""
+// for a map without a route, or with one from a router it does not know.
+func RouteCredit(msgs locales.Messages, m Map) string {
 	if m.Route == nil {
 		return ""
 	}
 	switch m.Route.Source {
 	case RouteFromTransitous:
-		return "Routes: Transitous"
+		return msgs.MapRoutesBy("Transitous")
 	case RouteFromOSRM:
-		return "Routes: FOSSGIS OSRM"
+		return msgs.MapRoutesBy("FOSSGIS OSRM")
 	}
 	return ""
 }
@@ -494,13 +631,15 @@ func mercator(p LatLng) (x, y float64) {
 // MapSVG draws a map's route and markers, fitted to its box, on a plain
 // ground: as a web page and a PDF show a map, and as the Mac's map shows
 // until its tiles load, or without a network.
-func MapSVG(m Map) string {
-	sw, ne, ok := m.Bounds()
-	if !ok {
+func MapSVG(m Map) string { return m.Shape().SVG() }
+
+// SVG is MapSVG of the map whose shape s is.
+func (s MapShape) SVG() string {
+	if !s.OK {
 		return ""
 	}
-	x0, y1 := mercator(sw)
-	x1, y0 := mercator(ne)
+	x0, y1 := mercator(s.SW)
+	x1, y0 := mercator(s.NE)
 	// The box is drawn about its middle, which a box with no width or no
 	// height, as a single place's, keeps in the drawing's.
 	dx, dy := math.Max(x1-x0, 1e-7), math.Max(y1-y0, 1e-7)
@@ -513,12 +652,11 @@ func MapSVG(m Map) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg class="mapsvg" viewBox="0 0 %d %d" role="img"><rect class="ground" width="%d" height="%d" rx="8"/>`,
 		mapSVGWidth, mapSVGHeight, mapSVGWidth, mapSVGHeight)
-	paths := m.Paths()
-	for i, path := range paths {
+	for i, path := range s.Paths {
 		if len(path) < 2 {
 			continue
 		}
-		leg := m.Route.Legs[i]
+		leg := s.Legs[i]
 		step := max(len(path)/mapSVGPoints, 1)
 		var pts []string
 		for k := 0; k < len(path); k += step {
@@ -535,7 +673,7 @@ func MapSVG(m Map) string {
 		}
 		fmt.Fprintf(&b, `<polyline class="%s"%s points="%s"/>`, class, style, strings.Join(pts, " "))
 	}
-	for i, p := range m.Markers() {
+	for i, p := range s.Markers {
 		x, y := at(p.At())
 		fmt.Fprintf(&b, `<circle class="pin" cx="%.1f" cy="%.1f" r="6"/><text class="pinno" x="%.1f" y="%.1f">%d</text>`, x, y, x, y+3.5, i+1)
 	}
@@ -554,9 +692,14 @@ const MapSVGCSS = `.mapsvg{display:block;width:100%;height:auto}
 `
 
 const mapCSS = `figure.map{margin:1em 0}
-` + MapSVGCSS + `figure.map figcaption{display:flex;flex-direction:column;gap:2px}
+` + MapSVGCSS + `figure.map .mapframe{position:relative;height:300px;border-radius:8px;overflow:hidden;background:var(--code)}
+figure.map .mapframe .mapsvg,figure.map .mapframe iframe{position:absolute;inset:0;width:100%;height:100%}
+figure.map .mapframe iframe{display:block;border:0}
+figure.map .mapshot img{display:block;width:100%;height:auto;border-radius:8px}
+.mapshot-draw{position:absolute;left:-10000px;top:0;overflow:hidden}
+figure.map figcaption{display:flex;flex-direction:column;gap:2px}
 figure.map .route{color:var(--muted);font-size:.9em}
-figure.map .places{margin:.4em 0;padding-left:1.4em}
+figure.map .places{margin:.4em 0;padding-left:1.4em;list-style-type:decimal}
 .map-credit{color:var(--muted);font-size:.75em;margin:.2em 0 0}
 .map-credit a{color:inherit;text-decoration:none}
 `

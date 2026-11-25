@@ -30,10 +30,46 @@ const mapHeight = 300
 // near the window's view, let go once far, and loaded again when its map
 // or the theme changes.
 type mapViews struct {
-	views  map[string]*mygo.WebView
-	loaded map[string]uint64
-	built  map[string]bool
-	failed map[string]string
+	views map[string]*mygo.WebView
+	// pages are the pages of the maps near the window's view, each made
+	// once for as long as what it shows stays the same: a page is
+	// megabytes, MapLibre's, which a frame would build again. loaded are
+	// the ones the views show.
+	pages, loaded map[string]*mapPage
+	built         map[string]bool
+	failed        map[string]string
+	// chats are the ```map fences of chats a frame drew, by their code,
+	// read once each, and read the ones this frame drew.
+	chats map[string]*chatMap
+	read  map[string]bool
+}
+
+// mapPage is the page that shows a map, as it looks.
+type mapPage struct {
+	look mapLook
+	html string
+}
+
+// mapLook is what a map's page shows: the map, in a language, dark or
+// light, as a block or filling the page, on a ground, its route and pins
+// in an accent.
+type mapLook struct {
+	m              doc.Map
+	lang           string
+	dark, full     bool
+	ground, accent string
+}
+
+func (l mapLook) same(o mapLook) bool {
+	return l.m.Equal(o.m) && l.lang == o.lang && l.dark == o.dark && l.full == o.full && l.ground == o.ground && l.accent == o.accent
+}
+
+// chatMap is a chat's ```map fence as read: the map it holds, if it is
+// one, and the key of its view.
+type chatMap struct {
+	m   doc.Map
+	ok  bool
+	key string
 }
 
 // mapService takes what a map's page asks of the app: to leave the map
@@ -51,13 +87,13 @@ func (s *mapService) Exit(key string) {
 // mapBlock is a map block of the open page: its map, its title and its
 // route in words, and while the pointer is on it, buttons to fill the page
 // with it, open it in a maps app and edit it.
-func (a *App) mapBlock(c *ui.Context, n *doc.Node, width float32) {
+func (a *App) mapBlock(c *ui.Context, n *doc.Node) {
 	m := doc.MapOf(n)
 	editable := a.page != nil && !a.page.editor.ReadOnly
 	box := ui.Column(c.Key("mapblock:" + n.ID)).FillWidth()
 	hovered := box.Hovered()
 	box.Children(func() {
-		a.mapCard(c, m, blockView(n.ID), width, false, func() {
+		a.mapCard(c, m, blockView(n.ID), false, func() {
 			shown := map[bool]float32{true: 1, false: 0}[hovered]
 			ui.Row(c).Absolute().Top(8).Left(8).Gap(2).Padding(2).Radius(8).Background(theme.Of(c).Surface).Opacity(shown).
 				IgnoreInput(shown == 0).Children(func() {
@@ -76,19 +112,23 @@ func (a *App) mapBlock(c *ui.Context, n *doc.Node, width float32) {
 // openMapButton opens m in Apple's Maps on a Mac, and on openstreetmap.org
 // elsewhere.
 func (a *App) openMapButton(c *ui.Context, m doc.Map, shown float32) {
-	link, label := maps.OSMURL(m), locales.MapOpenInOSM()
+	link, label := maps.OSMURL, locales.MapOpenInOSM()
 	if runtime.GOOS == "darwin" {
-		link, label = maps.AppleMapsURL(m), locales.MapOpenInMaps()
+		link, label = maps.AppleMapsURL, locales.MapOpenInMaps()
 	}
-	if link != "" && barButton(c, "open", "external-link", label, shown).Clicked() {
-		openLink(link)
+	// The link is made as the button is clicked: a map of a route alone
+	// reads all of the route's paths for its ends.
+	if (len(m.Places) > 0 || m.Route != nil) && barButton(c, "open", "external-link", label, shown).Clicked() {
+		if to := link(m); to != "" {
+			openLink(to)
+		}
 	}
 }
 
-// mapCard draws a map: on its tiles in a web view keyed key, width wide,
-// then its title and its route in words; tools, when given, float over
-// the map's corner.
-func (a *App) mapCard(c *ui.Context, m doc.Map, key string, width float32, full bool, tools func()) {
+// mapCard draws a map: on its tiles in a web view keyed key, as wide as
+// it is given, then its title and its route in words; tools, when given,
+// float over the map's corner.
+func (a *App) mapCard(c *ui.Context, m doc.Map, key string, full bool, tools func()) {
 	pal := theme.Of(c)
 	card := ui.Column(c).FillWidth().Padding(5).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Role(ui.RoleGroup).Label(m.Title)
 	card.Children(func() {
@@ -100,7 +140,6 @@ func (a *App) mapCard(c *ui.Context, m doc.Map, key string, width float32, full 
 		})
 		a.mapCaption(c, m)
 	})
-	_ = width
 }
 
 // mapCaption is a map's title, its route in a line and its legs in
@@ -117,10 +156,11 @@ func (a *App) mapCaption(c *ui.Context, m doc.Map) {
 			ui.Text(c, doc.RouteSummary(msgs, r)).FontSize(13).FontWeight(500).TextColor(pal.TextSecondary)
 			ui.Text(c, doc.RouteSteps(msgs, r)).FontSize(12.5).TextColor(pal.TextMuted)
 		}
-		credit := ui.ButtonBase(c.Key("credit")).AlignSelf(ui.Start).Cursor(ui.CursorPointer).Label(doc.MapCredit(m)).
+		by := doc.MapCredit(msgs, m)
+		credit := ui.ButtonBase(c.Key("credit")).AlignSelf(ui.Start).Cursor(ui.CursorPointer).Label(by).
 			Tooltip(doc.MapCreditLink(m))
 		credit.Children(func() {
-			ui.Text(c, doc.MapCredit(m)).FontSize(11).TextColor(pal.TextMuted)
+			ui.Text(c, by).FontSize(11).TextColor(pal.TextMuted)
 		})
 		if credit.Clicked() {
 			openLink(doc.MapCreditLink(m))
@@ -134,7 +174,8 @@ func (a *App) mapView(c *ui.Context, m doc.Map, key string, full bool) {
 	pal := theme.Of(c)
 	mv := &a.mapViews
 	if mv.views == nil {
-		mv.views, mv.loaded, mv.built, mv.failed = map[string]*mygo.WebView{}, map[string]uint64{}, map[string]bool{}, map[string]string{}
+		mv.views, mv.pages, mv.loaded = map[string]*mygo.WebView{}, map[string]*mapPage{}, map[string]*mapPage{}
+		mv.built, mv.failed = map[string]bool{}, map[string]string{}
 	}
 	// The same map twice in a frame, as an answer repeated, takes a view
 	// each: the second's key numbered, as it comes second in every frame.
@@ -148,12 +189,21 @@ func (a *App) mapView(c *ui.Context, m doc.Map, key string, full bool) {
 		near, far = true, false
 	}
 	v := mv.views[key]
-	page := rendered.MapPage(m, key, pal.Dark, full, hexOf(pal.Ground), hexOf(pal.Accent))
-	if v != nil && (far || page == "") {
-		a.letGoMap(key)
-		v = nil
+	if far {
+		if v != nil {
+			a.letGoMap(key)
+			v = nil
+		}
+		delete(mv.pages, key)
 	}
-	if page == "" {
+	var page *mapPage
+	if near || v != nil {
+		page = a.mapPage(key, mapLook{m: m, lang: i18n.Locale(), dark: pal.Dark, full: full, ground: hexOf(pal.Ground), accent: hexOf(pal.Accent)})
+	}
+	if page == nil || page.html == "" {
+		if v != nil {
+			a.letGoMap(key)
+		}
 		holder.Children(func() { ui.Box(c).Fill().Background(pal.Ground) })
 		return
 	}
@@ -168,11 +218,9 @@ func (a *App) mapView(c *ui.Context, m doc.Map, key string, full bool) {
 		})
 		return
 	}
-	if v != nil {
-		if sum := pageSum(page); mv.loaded[key] != sum {
-			v.Page().LoadHTML(page, rendered.MapOrigin)
-			mv.loaded[key] = sum
-		}
+	if v != nil && mv.loaded[key] != page {
+		v.Page().LoadHTML(page.html, rendered.MapOrigin)
+		mv.loaded[key] = page
 	}
 	holder.Children(func() {
 		if v == nil {
@@ -214,6 +262,19 @@ func (a *App) newMapView(key string, full bool, pal *theme.Palette) *mygo.WebVie
 	return wv
 }
 
+// mapPage is the page of the map keyed key as look shows it: the one made
+// before while look is the same, so that a map is read and its page built
+// as it or the app's look changes, not each frame.
+func (a *App) mapPage(key string, look mapLook) *mapPage {
+	mv := &a.mapViews
+	if p := mv.pages[key]; p != nil && p.look.same(look) {
+		return p
+	}
+	p := &mapPage{look: look, html: rendered.MapPage(locales.In(look.lang), look.m, key, look.dark, look.full, look.ground, look.accent)}
+	mv.pages[key] = p
+	return p
+}
+
 func pageSum(page string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(page))
@@ -230,7 +291,8 @@ func (a *App) letGoMap(key string) {
 }
 
 // dropMaps lets go of the map views no frame built: of maps scrolled out
-// of the page, deleted, or of a page or chat closed.
+// of the page, deleted, or of a page or chat closed, with their pages, and
+// of the chats' fences no frame drew.
 func (a *App) dropMaps() {
 	mv := &a.mapViews
 	for key := range mv.views {
@@ -238,12 +300,23 @@ func (a *App) dropMaps() {
 			a.letGoMap(key)
 		}
 	}
+	for key := range mv.pages {
+		if !mv.built[key] {
+			delete(mv.pages, key)
+		}
+	}
 	for key := range mv.failed {
 		if !mv.built[key] {
 			delete(mv.failed, key)
 		}
 	}
+	for code := range mv.chats {
+		if !mv.read[code] {
+			delete(mv.chats, code)
+		}
+	}
 	clear(mv.built)
+	clear(mv.read)
 }
 
 // fullMap fills the page with a map block's map, which zooms and pans
@@ -288,19 +361,36 @@ func (a *App) chatMap(c *ui.Context, b *markdown.CodeBlockView) {
 		shimmer(c, locales.HostSlashMap(), 13)
 		return
 	}
-	code := b.Code()
-	n, ok := doc.MapNodeFromJSON(code)
-	if !ok {
+	ch := a.chatMapOf(b.Code())
+	if !ch.ok {
 		markdown.DefaultCodeBlock(c, b)
 		return
 	}
-	m := doc.MapOf(n)
-	key := "chat:" + strconv.FormatUint(pageSum(code), 36)
-	a.mapCard(c, m, key, a.panelW, false, func() {
+	a.mapCard(c, ch.m, ch.key, false, func() {
 		ui.Row(c).Absolute().Top(8).Left(8).Gap(2).Padding(2).Radius(8).Background(theme.Of(c).Surface).Children(func() {
-			a.openMapButton(c, m, 1)
+			a.openMapButton(c, ch.m, 1)
 		})
 	})
+}
+
+// chatMapOf is the map a chat's ```map fence of code holds, read the first
+// frame that draws the fence, for as long as frames do: its JSON may hold
+// a route of thousands of points, which reading it checks.
+func (a *App) chatMapOf(code string) *chatMap {
+	mv := &a.mapViews
+	if mv.chats == nil {
+		mv.chats, mv.read = map[string]*chatMap{}, map[string]bool{}
+	}
+	mv.read[code] = true
+	if ch := mv.chats[code]; ch != nil {
+		return ch
+	}
+	ch := &chatMap{key: "chat:" + strconv.FormatUint(pageSum(code), 36)}
+	if n, ok := doc.MapNodeFromJSON(code); ok {
+		ch.m, ch.ok = doc.MapOf(n), true
+	}
+	mv.chats[code] = ch
+	return ch
 }
 
 func (d *dialogs) openMap(id string, ed *editor.Editor) {

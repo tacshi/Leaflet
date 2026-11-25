@@ -4677,6 +4677,58 @@ func (msgs Messages) MapLegTransit() string {
 	return Catalog.Format(msgs.locale, "mapLegTransit", nil)
 }
 
+// MapRoutesBy says "Routes: {router}"
+// in the language the app shows.
+//
+// A map block's credit line, after "© OpenStreetMap contributors · ": the
+// service its route was found with, as "Routes: Transitous". The router's
+// name stays as it is.
+func MapRoutesBy(router string) string { return In(i18n.Locale()).MapRoutesBy(router) }
+
+// MapRoutesBy says "Routes: {router}"
+// in the language of msgs.
+//
+// A map block's credit line, after "© OpenStreetMap contributors · ": the
+// service its route was found with, as "Routes: Transitous". The router's
+// name stays as it is.
+func (msgs Messages) MapRoutesBy(router string) string {
+	return Catalog.Format(msgs.locale, "mapRoutesBy", map[string]any{"router": router})
+}
+
+// MapZoomHelp says "Use {key} + scroll to zoom the map"
+// in the language the app shows.
+//
+// Shown over a map in a page shared by a public link when a visitor scrolls
+// on it, which scrolls the page instead: the key to hold to zoom the map,
+// "Ctrl" or "⌘", which stays as it is.
+func MapZoomHelp(key string) string { return In(i18n.Locale()).MapZoomHelp(key) }
+
+// MapZoomHelp says "Use {key} + scroll to zoom the map"
+// in the language of msgs.
+//
+// Shown over a map in a page shared by a public link when a visitor scrolls
+// on it, which scrolls the page instead: the key to hold to zoom the map,
+// "Ctrl" or "⌘", which stays as it is.
+func (msgs Messages) MapZoomHelp(key string) string {
+	return Catalog.Format(msgs.locale, "mapZoomHelp", map[string]any{"key": key})
+}
+
+// MapMoveHelp says "Use two fingers to move the map"
+// in the language the app shows.
+//
+// Shown over a map in a page shared by a public link when a visitor drags
+// it with one finger on a touch screen, which scrolls the page instead.
+func MapMoveHelp() string { return In(i18n.Locale()).MapMoveHelp() }
+
+// MapMoveHelp says "Use two fingers to move the map"
+// in the language of msgs.
+//
+// Shown over a map in a page shared by a public link when a visitor drags
+// it with one finger on a touch screen, which scrolls the page instead.
+func (msgs Messages) MapMoveHelp() string {
+	return Catalog.Format(msgs.locale, "mapMoveHelp", nil)
+}
+
 // DialogCardEmpty says "Give the card a title or a fact."
 // in the language the app shows.
 //

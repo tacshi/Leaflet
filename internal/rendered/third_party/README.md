@@ -2,7 +2,8 @@
 
 Bundled into the app: Pele for diagram blocks, which render in a sandbox
 with no network, and MapLibre GL JS for map blocks on the Mac and
-Windows, whose pages reach only their tile server (OpenFreeMap). Each
+Windows, in pages a public link shares and in PDFs, whose pages reach
+only their tile server (OpenFreeMap). Each
 comes from npm, checked against the registry's integrity hash, with its
 license beside it: Pele's is MIT, MapLibre's BSD-3-Clause. The files are
 as the tarball has them; the app leaves out their source map comments as

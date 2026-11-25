@@ -2,17 +2,24 @@ package webpage
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"html"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -83,8 +90,160 @@ func TestPrintedPage(t *testing.T) {
 			t.Errorf("has %q", bad)
 		}
 	}
-	if !strings.HasPrefix(PrintCSP, "default-src 'none'; script-src 'sha256-") || !strings.HasSuffix(PrintCSP, "; img-src data: https:") {
+	if !strings.HasPrefix(PrintCSP, "default-src 'none'; script-src 'sha256-") || !strings.HasSuffix(PrintCSP, "; img-src data:") {
 		t.Errorf("policy %q", PrintCSP)
+	}
+}
+
+func TestPrintedPageDrawsItsMapsOnTheirTiles(t *testing.T) {
+	nanjing := doc.Map{Title: "Nanjing", Places: []doc.MapPlace{{Name: `</script><b>x</b>`, Lat: 32.0423, Lng: 118.8199}, {Name: "新街口", Lat: 32.0461, Lng: 118.7922}}}
+	c := doc.FromBlocks([]*doc.Node{{ID: "m1", Type: "map", Data: nanjing.Data()}, {ID: "m2", Type: "map", Data: map[string]any{"title": "Nowhere"}}})
+	page := HTML(c, Options{Title: "Trip", Lang: "en", Serve: Inline, Print: true, Map: func(*doc.Node) string { return "/tok/m/m1" }})
+	data := html.EscapeString(rendered.PrintMapData(locales.In("en"), nanjing))
+	for _, want := range []string{
+		`<meta http-equiv="Content-Security-Policy" content="` + rendered.PrintMapCSP() + `">`,
+		`<figure id="b-m1" data-block="m1" class="map"><div class="mapshot" data-map="` + data + `"><svg class="mapsvg"`,
+		`<figure id="b-m2" data-block="m2" class="map"><figcaption><strong>Nowhere</strong>`,
+		rendered.PrintMapWorker() + "<script type=\"module\">" + rendered.PrintMapJS() + "</script>",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %.200q", want)
+		}
+	}
+	// It loads nothing but its tiles, and no frame; its scripts are its own.
+	if strings.Contains(page, "<iframe") || strings.Count(page, "<script") != 2 || strings.Contains(page, "</script><b>") {
+		t.Errorf("the page frames a map, or runs what it shouldn't: %.300s", page)
+	}
+	csp := rendered.PrintMapCSP()
+	for _, want := range []string{"default-src 'none'; script-src 'sha256-", "connect-src blob: data: " + rendered.TileHost + ";", "worker-src blob: data:"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("policy %q lacks %q", csp, want)
+		}
+	}
+	if strings.Contains(csp, "https:") && strings.Count(csp, "https:") != strings.Count(csp, rendered.TileHost) {
+		t.Errorf("policy reaches more than the tile server: %q", csp)
+	}
+
+	// A page without a map to draw loads nothing.
+	for _, c := range []*doc.Content{doc.FromBlocks([]*doc.Node{{ID: "m2", Type: "map", Data: map[string]any{"title": "Nowhere"}}}), doc.Empty()} {
+		page := HTML(c, Options{Title: "Trip", Serve: Inline, Print: true})
+		if !strings.Contains(page, `content="`+PrintCSP+`"`) || strings.Contains(page, "map-worker") || strings.Contains(page, "<script") {
+			t.Errorf("a page without a map to draw: %.300s", page)
+		}
+	}
+	// A web page frames its maps instead.
+	if page := HTML(c, Options{Title: "Trip", Serve: Inline, Map: func(*doc.Node) string { return "/tok/m/m1" }}); !strings.Contains(page, `<iframe src="/tok/m/m1"`) ||
+		strings.Contains(page, `class="mapshot"`) || strings.Contains(page, "map-worker") {
+		t.Error("a web page's maps")
+	}
+	if !strings.HasPrefix(PrintOrigin, "https://") || !strings.HasSuffix(PrintOrigin, "/") || !strings.Contains(rendered.PrintMapJS(), "window.leafletMapsDrawn = ") ||
+		MapsDrawn != "await window.leafletMapsDrawn" {
+		t.Error("the app's wait for the maps")
+	}
+}
+
+func TestPrintedPageHasItsWebPictures(t *testing.T) {
+	var png1, png2 bytes.Buffer
+	if err := png.Encode(&png1, photo(40, 30, 128)); err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(&png2, photo(20, 20, 255)); err != nil {
+		t.Fatal(err)
+	}
+	jpg := encodeJPEG(t, photo(60, 40, 255), 0)
+	svg := []byte(`<?xml version="1.0"?>` + "\n" + `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>`)
+	web := map[string][]byte{
+		"https://pics.example/a.png":                       png1.Bytes(),
+		"https://pics.example/b.jpg":                       jpg,
+		"http://old.example/c.png":                         png2.Bytes(),
+		"https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg": jpg,
+		"https://pics.example/d.svg":                       svg,
+		"https://pics.example/page":                        []byte("<!doctype html><html><body>not a picture</body></html>"),
+	}
+	var mu sync.Mutex
+	asked := map[string]int{}
+	saved := fetchPicture
+	t.Cleanup(func() { fetchPicture = saved })
+	fetchPicture = func(_ context.Context, link string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		asked[link]++
+		if data, ok := web[link]; ok {
+			return data, nil
+		}
+		return nil, errors.New("not found")
+	}
+	c := doc.FromBlocks([]*doc.Node{
+		{ID: "i1", Type: "image", Data: map[string]any{"url": "https://pics.example/a.png"}},
+		{ID: "i2", Type: "image", Data: map[string]any{"url": "https://pics.example/a.png"}},
+		{ID: "i3", Type: "image", Data: map[string]any{"url": "http://old.example/c.png"}},
+		{ID: "i4", Type: "image", Data: map[string]any{"url": "https://pics.example/page"}},
+		{ID: "i5", Type: "image", Data: map[string]any{"url": "https://pics.example/gone.png"}},
+		{ID: "l1", Type: "link_preview", Data: map[string]any{"url": "https://site.example/post", "title": "Post", "image": "https://pics.example/b.jpg"}},
+		{ID: "v1", Type: "video", Data: map[string]any{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "title": "Song"}},
+		{ID: "c1", Type: "card", Data: map[string]any{"layout": "details", "title": "Hotel", "image": "https://pics.example/d.svg",
+			"facts": []any{map[string]any{"label": "Phone", "value": "123"}}}},
+	})
+	page := HTML(c, Options{Title: "Trip", Serve: Inline, Print: true})
+	inlined := func(typ string, data []byte) string {
+		return `src="data:` + typ + `;base64,` + base64.StdEncoding.EncodeToString(data) + `"`
+	}
+	for _, want := range []string{
+		`<figure id="b-i1" data-block="i1" class="image"><img ` + inlined("image/png", png1.Bytes()),
+		`<figure id="b-i2" data-block="i2" class="image"><img ` + inlined("image/png", png1.Bytes()),
+		`<figure id="b-i3" data-block="i3" class="image"><img ` + inlined("image/png", png2.Bytes()),
+		`<img ` + inlined("image/jpeg", jpg) + ` alt=""></a>`,
+		`<img class="fc-pic" ` + inlined("image/svg+xml", svg),
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if n := strings.Count(page, inlined("image/jpeg", jpg)); n != 2 {
+		t.Errorf("the link card and the video card show %d pictures", n)
+	}
+	for _, bad := range []string{`src="http`, `id="b-i4"`, `id="b-i5"`} {
+		if strings.Contains(page, bad) {
+			t.Errorf("has %q", bad)
+		}
+	}
+	for link, n := range asked {
+		if n != 1 {
+			t.Errorf("%s fetched %d times", link, n)
+		}
+	}
+	if len(asked) != 7 {
+		t.Errorf("fetched %v", asked)
+	}
+}
+
+func TestPrintedPageLeavesOutPrivatePictures(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, photo(8, 8, 255)); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer srv.Close()
+	c := doc.FromBlocks([]*doc.Node{
+		{ID: "i1", Type: "image", Data: map[string]any{"url": srv.URL + "/router.png"}},
+		{ID: "l1", Type: "link_preview", Data: map[string]any{"url": "https://site.example/post", "title": "Post", "image": srv.URL + "/card.png"}},
+	})
+	page := HTML(c, Options{Title: "Home", Serve: Inline, Print: true})
+	if strings.Contains(page, "<img") || strings.Contains(page, srv.URL) {
+		t.Errorf("a picture at a private address printed:\n%s", page)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("the private address was asked %d times", hits)
 	}
 }
 

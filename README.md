@@ -90,9 +90,10 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   beside a picture, with a note and a chip for the pages they come from.
 - Maps of places and of a route between them, walking, cycling, driving or
   by public transport, each bus or train line in its own color: on
-  OpenFreeMap's map on the Mac and Windows, on Apple's on iPhone and iPad.
-  Places are found with Photon, and routes with FOSSGIS's OSRM or
-  Transitous, which get the places asked for.
+  OpenFreeMap's map on the Mac and Windows, in a page a public link
+  shares, whose visitors' browsers load its tiles, and in a PDF; on
+  Apple's on iPhone and iPad. Places are found with Photon, and routes
+  with FOSSGIS's OSRM or Transitous, which get the places asked for.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
   pages, a selection toolbar with text colors, formulas typeset in the line
   from `$x^2$`, folding headings, an outline, and links to pages and to

@@ -339,8 +339,8 @@ func (w htmlWriter) factCard(n *Node) {
 		w.write("<strong>", html.EscapeString(c.Title), "</strong></div>")
 	}
 	w.write(`<div class="fc-body">`)
-	if c.Image != "" && c.Layout == CardDetails {
-		w.write(`<img class="fc-pic" src="`, html.EscapeString(c.Image), `" alt="`, html.EscapeString(c.Title), `"`, w.lazy(), `>`)
+	if src := w.picture(n); src != "" {
+		w.write(`<img class="fc-pic" src="`, html.EscapeString(src), `" alt="`, html.EscapeString(c.Title), `"`, w.lazy(), `>`)
 	}
 	w.write(`<div class="fc-main"><div class="fc-facts">`)
 	for _, f := range c.Facts {

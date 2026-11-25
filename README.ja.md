@@ -89,7 +89,8 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   ような数字を大きく並べるか、詳細を画像の横に1行ずつ並べ、注記と出典の
   チップを添えます。
 - 場所と、その間の経路の地図：徒歩、自転車、車、公共交通機関で。バスや電車の
-  路線はそれぞれの色で描きます。Mac と Windows では OpenFreeMap の地図、
+  路線はそれぞれの色で描きます。Mac と Windows、公開リンクで共有したページ
+  （タイルは訪問者のブラウザが読み込みます）、PDF では OpenFreeMap の地図、
   iPhone と iPad では Apple の地図に表示します。場所は Photon で、経路は
   FOSSGIS の OSRM か Transitous で探し、尋ねた場所はそれらに送られます。
 - Markdown のショートカット、`/` メニュー、メンバー・エージェント・ページへの

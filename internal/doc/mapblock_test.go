@@ -3,8 +3,12 @@ package doc
 import (
 	"encoding/json"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	"leaflet/locales"
 )
 
 func TestPathRoundTrip(t *testing.T) {
@@ -112,6 +116,72 @@ func TestMapOutputs(t *testing.T) {
 	}
 }
 
+func TestMapFrameShowsOverItsDrawing(t *testing.T) {
+	m := Map{Title: "南京", Places: []MapPlace{{Name: "① 南京博物院", Lat: 32.0423, Lng: 118.8199}, {Name: "Off the map", Lat: 95, Lng: 0},
+		{Name: "新街口", Lat: 32.0461, Lng: 118.7922}, {Lat: 32.0602, Lng: 118.8485}}}
+	n := &Node{ID: "m1", Type: "map", Data: m.Data()}
+	asked := 0
+	frame := func(n *Node) string { asked++; return `/tok/m/` + n.ID + `?"><b>` }
+	page := &Content{Children: []*Node{n}}
+	out := PageHTML("T", page, HTMLOptions{Map: frame})
+	figure := out[strings.Index(out, `<figure id="b-m1"`):]
+	svg, iframe := strings.Index(figure, `<svg class="mapsvg"`), strings.Index(figure, `<iframe src="/tok/m/m1?&#34;&gt;&lt;b&gt;" title="南京"`)
+	if !strings.HasPrefix(figure[strings.Index(figure, ">")+1:], `<div class="mapframe"><svg`) || svg < 0 || iframe < svg ||
+		!strings.Contains(figure, `loading="lazy" referrerpolicy="no-referrer"></iframe></div><figcaption><strong>南京</strong>`) {
+		t.Errorf("the frame is not over the map's drawing, before its caption: %s", figure)
+	}
+	if strings.Contains(out, `<b>`) || !strings.Contains(out, "figure.map .mapframe iframe{") {
+		t.Errorf("the frame's address or look: %s", out)
+	}
+	// The list numbers the places as the drawing's pins and the map's are.
+	pins := regexp.MustCompile(`<text class="pinno"[^>]*>(\d+)</text>`).FindAllStringSubmatch(figure, -1)
+	items := regexp.MustCompile(`<li><a href="[^"]*" rel="noopener noreferrer">([^<]*)</a></li>`).FindAllStringSubmatch(figure, -1)
+	markers := MapOf(n).Markers()
+	if len(pins) != 3 || len(items) != 3 || len(markers) != 3 || !strings.Contains(out, "figure.map .places{margin:.4em 0;padding-left:1.4em;list-style-type:decimal}") {
+		t.Fatalf("pins %v, places %v, markers %v", pins, items, markers)
+	}
+	for i, want := range [][2]string{{"① 南京博物院", "① 南京博物院"}, {"新街口", "新街口"}, {"32.06020, 118.84850", ""}} {
+		if pins[i][1] != strconv.Itoa(i+1) || items[i][1] != want[0] || markers[i].Name != want[1] {
+			t.Errorf("place %d: pin %s, listed %q, marked %q", i+1, pins[i][1], items[i][1], markers[i].Name)
+		}
+	}
+
+	// A printed page, and one without frames, show the drawing alone.
+	for _, opts := range []HTMLOptions{{Map: frame, Print: true}, {Map: func(*Node) string { return "" }}, {}} {
+		asked = 0
+		if out := PageHTML("T", page, opts); strings.Contains(out, "<iframe") || strings.Contains(out, `class="mapframe"`) || !strings.Contains(out, `<figure id="b-m1" data-block="m1" class="map"><svg class="mapsvg"`) {
+			t.Errorf("print %v: a frame, or no drawing: %s", opts.Print, out)
+		}
+		if opts.Print && asked != 0 {
+			t.Error("a printed page asks for a map's frame")
+		}
+	}
+}
+
+func TestPrintedMapIsDrawnByItsScript(t *testing.T) {
+	m := Map{Places: []MapPlace{{Name: "新街口", Lat: 32.0461, Lng: 118.7922}}}
+	page := &Content{Children: []*Node{{ID: "m1", Type: "map", Data: m.Data()}, {ID: "m2", Type: "map", Data: map[string]any{"title": "Nowhere"}}}}
+	script := func(name string) string { return map[string]string{"map": "drawMaps()"}[name] }
+	data := func(n *Node) string {
+		if n.ID == "m2" {
+			return ""
+		}
+		return `{"places":"<b>"}`
+	}
+	out := PageHTML("T", page, HTMLOptions{Print: true, MapData: data, ScriptSource: script, Map: func(*Node) string { return "/m" }})
+	if !strings.Contains(out, `<figure id="b-m1" data-block="m1" class="map"><div class="mapshot" data-map="{&#34;places&#34;:&#34;&lt;b&gt;&#34;}"><svg class="mapsvg"`) ||
+		!strings.Contains(out, `<figure id="b-m2" data-block="m2" class="map"><figcaption>`) || !strings.Contains(out, "<script type=\"module\">drawMaps()</script>") ||
+		strings.Contains(out, "<iframe") {
+		t.Errorf("printed maps: %s", out)
+	}
+	// Without the script, or what it draws from, the drawing stays alone.
+	for _, opts := range []HTMLOptions{{Print: true, MapData: data}, {Print: true, ScriptSource: script}, {MapData: data, ScriptSource: script}} {
+		if out := PageHTML("T", page, opts); strings.Contains(out, `class="mapshot"`) || strings.Contains(out, "drawMaps") {
+			t.Errorf("print %v: %s", opts.Print, out)
+		}
+	}
+}
+
 func TestMapFenceMakesAMap(t *testing.T) {
 	m := Map{Places: []MapPlace{{Name: "Sha Tin", Lat: 22.3825, Lng: 114.1873}}}
 	raw, _ := json.Marshal(m)
@@ -155,11 +225,15 @@ func TestMapSVGDrawsOnlyALinesColor(t *testing.T) {
 
 func TestRouteCredit(t *testing.T) {
 	r := busRoute()
-	if got := MapCredit(Map{Route: r}); got != "© OpenStreetMap contributors · Routes: Transitous" {
+	en, ja := locales.In("en"), locales.In("ja")
+	if got := MapCredit(en, Map{Route: r}); got != "© OpenStreetMap contributors · Routes: Transitous" {
 		t.Errorf("credit %q", got)
 	}
+	if got := RouteCredit(ja, Map{Route: r}); got != "経路：Transitous" {
+		t.Errorf("credit in Japanese %q", got)
+	}
 	r.Source = ""
-	if got, by := MapCredit(Map{Route: r}), RouteCredit(Map{Route: r}); got != "© OpenStreetMap contributors" || by != "" {
+	if got, by := MapCredit(en, Map{Route: r}), RouteCredit(en, Map{Route: r}); got != "© OpenStreetMap contributors" || by != "" {
 		t.Errorf("a route from no router known: %q, %q", got, by)
 	}
 }
@@ -189,5 +263,106 @@ func TestEditFencesLeavesOtherCodeAsItIs(t *testing.T) {
 	})
 	if strings.Join(edited, ",") != "a,c" {
 		t.Errorf("plain fences' bodies %q", edited)
+	}
+}
+
+func TestMapPlaceNeedsItsLatAndLng(t *testing.T) {
+	for _, place := range []map[string]any{
+		{"name": "Sha Tin"},
+		{"name": "Sha Tin", "lat": 22.3825},
+		{"name": "Sha Tin", "lat": 22.3825, "lng": nil},
+	} {
+		_, err := MapData(map[string]any{"places": []any{place}})
+		if err == nil || !strings.Contains(err.Error(), "Place 1 needs lat and lng") || !strings.Contains(err.Error(), "find_place") {
+			t.Errorf("%v: %v", place, err)
+		}
+	}
+	if _, err := MapData(map[string]any{"places": []any{map[string]any{"name": "Null Island", "lat": 0.0, "lng": 0.0}}}); err != nil {
+		t.Errorf("a place at 0, 0: %v", err)
+	}
+	// A map kept with such a place leaves it out.
+	n := &Node{Type: "map", Data: map[string]any{"places": []any{
+		map[string]any{"name": "Sha Tin"}, map[string]any{"name": "Tai Wai", "lat": 22.3727, "lng": 114.1786},
+	}}}
+	if got := MapOf(n).Places; len(got) != 1 || got[0].Name != "Tai Wai" {
+		t.Errorf("places %+v", got)
+	}
+}
+
+func TestMapOfLeavesOutWhatItCannotShow(t *testing.T) {
+	r := busRoute()
+	n := &Node{Type: "map", Data: Map{Title: "x", Route: r}.Data()}
+	if m := MapOf(n); !m.Equal(Map{Title: "x", Route: busRoute()}) {
+		t.Errorf("read as %+v", m)
+	}
+	// A leg whose path does not read draws nothing; the rest of the route
+	// stays.
+	n.Data["route"].(map[string]any)["legs"].([]any)[0].(map[string]any)["path"] = "\x01\x02"
+	m := MapOf(n)
+	if m.Route == nil || len(m.Route.Legs) != 2 {
+		t.Fatalf("route %+v", m.Route)
+	}
+	if s := m.Shape(); !s.OK || s.Paths[0] != nil || len(s.Paths[1]) != 3 || len(s.Markers) != 2 || s.Markers[0].Lat != 22.3784 {
+		t.Errorf("shape %+v", s)
+	}
+	for _, bad := range []func(r map[string]any){
+		func(r map[string]any) { r["mode"] = "teleport" },
+		func(r map[string]any) { r["legs"] = []any{} },
+		func(r map[string]any) { r["legs"].([]any)[1].(map[string]any)["mode"] = "rocket" },
+		func(r map[string]any) { r["duration_s"] = -1.0 },
+	} {
+		n := &Node{Type: "map", Data: Map{Route: busRoute()}.Data()}
+		bad(n.Data["route"].(map[string]any))
+		if m := MapOf(n); m.Route != nil {
+			t.Errorf("a route that is none read as %+v", m.Route)
+		}
+	}
+	// A block whose data holds its map as other than JSON's reads alike.
+	if m := MapOf(&Node{Type: "map", Data: map[string]any{"route": busRoute()}}); !m.Equal(Map{Route: busRoute()}) {
+		t.Errorf("read through JSON as %+v", m)
+	}
+}
+
+func TestMapEqual(t *testing.T) {
+	a, b := Map{Title: "x", Route: busRoute()}, Map{Title: "x", Route: busRoute()}
+	if !a.Equal(b) || a.Equal(Map{Title: "x"}) {
+		t.Error("maps alike differ, or a map without its route is alike")
+	}
+	b.Route.Legs[1].Line = "B9"
+	if a.Equal(b) {
+		t.Error("a leg's line changed and the maps are alike")
+	}
+}
+
+// longRoute is a map of a route of 20 legs, 20,000 points in all.
+func longRoute() *Node {
+	var legs []any
+	for l := range 20 {
+		var pts []LatLng
+		for i := range 1000 {
+			pts = append(pts, LatLng{Lat: 22.3 + float64(l*1000+i)*1e-5, Lng: 114.1 + float64(i%7)*1e-5})
+		}
+		legs = append(legs, map[string]any{"mode": "bus", "duration_s": 60.0, "path": EncodePath(pts, PathPrecision)})
+	}
+	data, err := MapData(map[string]any{"title": "x", "route": map[string]any{"mode": "transit", "duration_s": 600.0, "legs": legs}})
+	if err != nil {
+		panic(err)
+	}
+	return &Node{ID: "m", Type: "map", Data: data}
+}
+
+// A map is read as often as a frame draws it: its paths are read only as
+// they are drawn.
+func BenchmarkMapOfLongRoute(b *testing.B) {
+	n := longRoute()
+	for b.Loop() {
+		_ = MapOf(n)
+	}
+}
+
+func BenchmarkMapShapeOfLongRoute(b *testing.B) {
+	m := MapOf(longRoute())
+	for b.Loop() {
+		_ = m.Shape()
 	}
 }

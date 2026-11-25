@@ -1623,6 +1623,28 @@
   "@mapLegTransit": {
     "description": "A map block's route: a leg of public transport of another kind, before its line's name."
   },
+  "mapRoutesBy": "Routes: {router}",
+  "@mapRoutesBy": {
+    "description": "A map block's credit line, after \"© OpenStreetMap contributors · \": the service its route was found with, as \"Routes: Transitous\". The router's name stays as it is.",
+    "placeholders": {
+      "router": {
+        "type": "String"
+      }
+    }
+  },
+  "mapZoomHelp": "Use {key} + scroll to zoom the map",
+  "@mapZoomHelp": {
+    "description": "Shown over a map in a page shared by a public link when a visitor scrolls on it, which scrolls the page instead: the key to hold to zoom the map, \"Ctrl\" or \"⌘\", which stays as it is.",
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "mapMoveHelp": "Use two fingers to move the map",
+  "@mapMoveHelp": {
+    "description": "Shown over a map in a page shared by a public link when a visitor drags it with one finger on a touch screen, which scrolls the page instead."
+  },
   "dialogCardEmpty": "Give the card a title or a fact.",
   "@dialogCardEmpty": {
     "description": "The fact card dialog's error when both the title and the facts are empty."

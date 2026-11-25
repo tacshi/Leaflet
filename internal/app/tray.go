@@ -119,15 +119,18 @@ func (a *App) keepLookingForUpdates() {
 	if !a.updatable {
 		return
 	}
-	a.findUpdate(false)
+	a.findUpdate()
 	a.later(updateEvery, a.keepLookingForUpdates)
 }
 
-func (a *App) findUpdate(asked bool) {
-	if !a.updatable || a.updateBusy != "" || a.updateReady != "" {
+// findUpdate looks for a newer version and installs it, quietly: only an
+// update found shows, as it downloads and once it waits for a restart. The
+// app and menu bar menus' Check for Updates is the check that answers.
+func (a *App) findUpdate() {
+	if !a.updatable || a.updateLooking || a.updateReady != "" {
 		return
 	}
-	a.updateBusy = locales.SidebarCheckingForUpdates()
+	a.updateLooking = true
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
@@ -143,21 +146,14 @@ func (a *App) findUpdate(asked bool) {
 			log.Printf("update: %v", err)
 		}
 		a.update(func() {
-			a.updateBusy = ""
+			a.updateLooking, a.updateBusy = false, ""
 			switch {
-			case err != nil:
-				if asked {
-					a.toast(locales.SidebarCheckForUpdatesFailed())
-				}
+			case err != nil || up == nil:
 			case installErr != nil:
-				if asked || a.updateFailed != up.version {
+				if a.updateFailed != up.version {
 					a.toast(locales.SidebarInstallUpdateFailed(up.version))
 				}
 				a.updateFailed = up.version
-			case up == nil:
-				if asked {
-					a.toast(locales.SidebarUpToDate(mygo.App.Version()))
-				}
 			default:
 				a.updateReady = up.version
 				a.refreshTray()

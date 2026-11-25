@@ -53,10 +53,10 @@ func TestUpdateThatFailsToInstallSaysSo(t *testing.T) {
 	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
 		return &newerVersion{version, func(context.Context) error { return errors.New("bin is in use") }}, nil
 	})
-	look := func(asked bool, want ...string) {
+	look := func(want ...string) {
 		t.Helper()
-		a.findUpdate(asked)
-		for a.updateBusy != "" {
+		a.findUpdate()
+		for a.updateLooking {
 			(<-posted)()
 		}
 		var got []string
@@ -65,36 +65,58 @@ func TestUpdateThatFailsToInstallSaysSo(t *testing.T) {
 		}
 		a.toasts = nil
 		if len(got) != len(want) || len(want) == 1 && got[0] != want[0] {
-			t.Errorf("asked %v: said %q, want %q", asked, got, want)
+			t.Errorf("said %q, want %q", got, want)
 		}
-		if a.updateReady != "" {
-			t.Errorf("asked %v: %s waits as if it installed", asked, a.updateReady)
+		if a.updateReady != "" || a.updateBusy != "" {
+			t.Errorf("%q waits as if it installed, %q still downloads", a.updateReady, a.updateBusy)
 		}
 	}
 	failed := locales.SidebarInstallUpdateFailed
-	look(false, failed("2.0.0"))
-	look(false)
-	look(true, failed("2.0.0"))
+	look(failed("2.0.0"))
+	look()
 	version = "2.0.1"
-	look(false, failed("2.0.1"))
+	look(failed("2.0.1"))
 }
 
-func TestCheckThatFailsSaysSoOnlyAsked(t *testing.T) {
+func TestCheckThatFailsSaysNothing(t *testing.T) {
 	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
 		return nil, errors.New("offline")
 	})
-	a.findUpdate(false)
-	for a.updateBusy != "" {
+	a.findUpdate()
+	for a.updateLooking {
 		(<-posted)()
 	}
-	if len(a.toasts) != 0 {
-		t.Errorf("unasked, a failed check said %+v", a.toasts)
+	if len(a.toasts) != 0 || a.updateBusy != "" || a.updateReady != "" {
+		t.Errorf("a failed check said %+v, shows %q, waits with %q", a.toasts, a.updateBusy, a.updateReady)
 	}
-	a.findUpdate(true)
-	for a.updateBusy != "" {
+}
+
+func TestOnlyAnUpdateFoundShows(t *testing.T) {
+	found, installing, finish := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	a, posted := standInForUpdates(t, func(context.Context) (*newerVersion, error) {
+		<-found
+		return &newerVersion{"2.0.0", func(context.Context) error {
+			close(installing)
+			<-finish
+			return nil
+		}}, nil
+	})
+	a.findUpdate()
+	if !a.updateLooking || a.updateBusy != "" {
+		t.Errorf("checking shows %q", a.updateBusy)
+	}
+	a.findUpdate() // a second look while the first runs does nothing
+	close(found)
+	(<-posted)()
+	<-installing
+	if want := locales.SidebarDownloadingUpdate("2.0.0"); a.updateBusy != want {
+		t.Errorf("downloading shows %q, want %q", a.updateBusy, want)
+	}
+	close(finish)
+	for a.updateLooking {
 		(<-posted)()
 	}
-	if len(a.toasts) != 1 || a.toasts[0].text != locales.SidebarCheckForUpdatesFailed() {
-		t.Errorf("asked, a failed check said %+v", a.toasts)
+	if a.updateBusy != "" || a.updateReady != "2.0.0" || len(a.toasts) != 0 {
+		t.Errorf("installed: shows %q, waits with %q, said %+v", a.updateBusy, a.updateReady, a.toasts)
 	}
 }

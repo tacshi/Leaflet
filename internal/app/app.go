@@ -183,20 +183,21 @@ type App struct {
 	drafts                   map[string]*pageDrafts
 	widthsTimer              *time.Timer
 
-	tray         *mygo.Tray
-	trayShown    trayState
-	trayBuilt    bool
-	updatable    bool
-	updateBusy   string
-	updateReady  string
-	updateFailed string
-	quitting     bool
-	recKeeping   bool
-	relaunching  bool
-	recKeptAt    time.Time
-	running      func() // releases holdRunning's hold on App Nap
-	openView     store.OpenView
-	viewTimer    *time.Timer
+	tray          *mygo.Tray
+	trayShown     trayState
+	trayBuilt     bool
+	updatable     bool
+	updateLooking bool
+	updateBusy    string
+	updateReady   string
+	updateFailed  string
+	quitting      bool
+	recKeeping    bool
+	relaunching   bool
+	recKeptAt     time.Time
+	running       func() // releases holdRunning's hold on App Nap
+	openView      store.OpenView
+	viewTimer     *time.Timer
 
 	// watch is the corner window showing the edits of agents outside the app.
 	watch agentWatch

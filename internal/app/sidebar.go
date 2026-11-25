@@ -915,12 +915,8 @@ func (a *App) sidebarFooter(c *ui.Context) {
 					a.restartToUpdate()
 				}
 			case a.updateBusy != "":
-				b := ui.Button(c.Key("check-update"), "").Label(a.updateBusy).Tooltip(a.updateBusy).Padding(6).Disabled(true)
+				b := ui.Button(c.Key("update"), "").Label(a.updateBusy).Tooltip(a.updateBusy).Padding(6).Disabled(true)
 				b.Children(func() { ui.Spinner(c).Size(16, 16) })
-			case a.updatable:
-				if iconButton(c, "check-update", "circle-fading-arrow-up", locales.SidebarCheckForUpdates()).Clicked() {
-					a.findUpdate(true)
-				}
 			}
 			bin := iconButton(c, "bin", "trash", binName())
 			if a.route.Kind == "bin" {

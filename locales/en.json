@@ -3571,14 +3571,6 @@
       }
     }
   },
-  "sidebarCheckForUpdates": "Check for Updates",
-  "@sidebarCheckForUpdates": {
-    "description": "Sidebar footer: tooltip of the button that checks for a newer version."
-  },
-  "sidebarCheckingForUpdates": "Checking for updates…",
-  "@sidebarCheckingForUpdates": {
-    "description": "Sidebar footer: tooltip of the update button while a check is under way."
-  },
   "sidebarDownloadingUpdate": "Downloading {version}…",
   "@sidebarDownloadingUpdate": {
     "description": "Sidebar footer: tooltip of the update button while a newer version downloads.",
@@ -3588,20 +3580,6 @@
         "example": "1.2.0"
       }
     }
-  },
-  "sidebarUpToDate": "Leaflet {version} is up to date",
-  "@sidebarUpToDate": {
-    "description": "Toast after checking for updates found no newer version.",
-    "placeholders": {
-      "version": {
-        "type": "String",
-        "example": "1.2.0"
-      }
-    }
-  },
-  "sidebarCheckForUpdatesFailed": "Could not check for updates",
-  "@sidebarCheckForUpdatesFailed": {
-    "description": "Toast after checking for updates failed."
   },
   "sidebarInstallUpdateFailed": "Could not install Leaflet {version}",
   "@sidebarInstallUpdateFailed": {

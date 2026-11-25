@@ -1139,6 +1139,7 @@
   "externalConnect": "连接",
   "externalUpdate": "更新",
   "externalDisconnect": "断开连接",
+  "externalConnected": "已连接",
   "externalLastUsed": "已连接 · 上次使用 {when}",
   "externalAdded": "已添加。重启 {app}，然后让它处理一个页面。",
   "externalAddedChatGPT": "已添加。把 ChatGPT 切换到 Codex，然后让它处理一个页面。",

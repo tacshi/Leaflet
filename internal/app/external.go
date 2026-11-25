@@ -97,6 +97,8 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 		icon, text, color = "circle-alert", locales.ExternalNotSetUp(), pal.WarnText
 	case !s.seen.IsZero():
 		icon, text, color = "check", locales.ExternalLastUsed(humanTime(s.seen)), pal.OkText
+	case !s.connected.IsZero():
+		icon, text, color = "check", locales.ExternalConnected(), pal.OkText
 	case id == "chatgpt":
 		icon, text, color = "rotate-cw", locales.ExternalAddedChatGPT(), pal.WarnText
 	default:
@@ -181,7 +183,7 @@ func (a *App) checkAgents() {
 }
 
 func (a *App) findAgents() []agentStatus {
-	return detectAgents(currentAgentEnv(), a.st.ValuesWithPrefix(mcp.SeenPrefix))
+	return detectAgents(currentAgentEnv(), a.st.ValuesWithPrefix(mcp.SeenPrefix), a.st.ValuesWithPrefix(mcp.ConnectedPrefix))
 }
 
 func (a *App) foundAgents(found []agentStatus) {

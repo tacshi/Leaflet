@@ -1139,6 +1139,7 @@
   "externalConnect": "接続",
   "externalUpdate": "更新",
   "externalDisconnect": "接続を解除",
+  "externalConnected": "接続済み",
   "externalLastUsed": "接続済み · 最終使用 {when}",
   "externalAdded": "追加しました。{app} を再起動してから、ページの作業を頼んでください。",
   "externalAddedChatGPT": "追加しました。ChatGPT を Codex に切り替えてから、ページの作業を頼んでください。",

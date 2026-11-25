@@ -17061,6 +17061,22 @@ func (msgs Messages) ExternalDisconnect() string {
 	return Catalog.Format(msgs.locale, "externalDisconnect", nil)
 }
 
+// ExternalConnected says "Connected"
+// in the language the app shows.
+//
+// Settings › External agents: an AI app that has started Leaflet but not
+// used it on a page yet.
+func ExternalConnected() string { return In(i18n.Locale()).ExternalConnected() }
+
+// ExternalConnected says "Connected"
+// in the language of msgs.
+//
+// Settings › External agents: an AI app that has started Leaflet but not
+// used it on a page yet.
+func (msgs Messages) ExternalConnected() string {
+	return Catalog.Format(msgs.locale, "externalConnected", nil)
+}
+
 // ExternalLastUsed says "Connected · last used {when}"
 // in the language the app shows.
 //

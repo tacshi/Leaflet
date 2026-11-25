@@ -97,6 +97,29 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         return !folded.contains(info.id)
     }
 
+    /// An empty block at the end has no characters of its own: TextKit lays
+    /// it out as the line after the last newline, with that newline's font
+    /// and paragraph style, which are the block's before it. Under a heading,
+    /// an empty to-do took the heading's room above and its taller line, and
+    /// sat far below it. The newline takes the empty block's look here, in
+    /// what is laid out only; the block before keeps its own, which TextKit
+    /// takes from its first character.
+    func textContentStorage(
+        _ textContentStorage: NSTextContentStorage, textParagraphWith range: NSRange
+    ) -> NSTextParagraph? {
+        guard let trailing = text.trailing, range.length > 1, NSMaxRange(range) == storage.length,
+            (storage.string as NSString).character(at: NSMaxRange(range) - 1) == 0x0A
+        else { return nil }
+        let s = NSMutableAttributedString(
+            attributedString: storage.attributedSubstring(from: range))
+        s.addAttributes(
+            [
+                .font: editor.style.baseFont(trailing),
+                .paragraphStyle: editor.style.paragraphStyle(trailing),
+            ], range: NSRange(location: s.length - 1, length: 1))
+        return NSTextParagraph(attributedString: s)
+    }
+
     func textLayoutManager(
         _ textLayoutManager: NSTextLayoutManager,
         textLayoutFragmentFor location: any NSTextLocation,
@@ -123,6 +146,11 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         guard let start = tlm.location(tlm.documentRange.location, offsetBy: last.location),
             let range = NSTextRange(location: start, end: tlm.documentRange.endLocation)
         else { return }
+        // The last paragraph is made again, for its newline to take the
+        // look of the block now at the end.
+        storage.beginEditing()
+        storage.edited(.editedAttributes, range: last, changeInLength: 0)
+        storage.endEditing()
         let look = trailingLook()
         tlm.enumerateTextLayoutFragments(from: start, options: []) { f in
             (f as? BlockLayoutFragment)?.trailing = look

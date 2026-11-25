@@ -112,3 +112,25 @@ func TestConnectOpensTheInstallLinkAgain(t *testing.T) {
 		t.Errorf("opened %q, waiting for %q until %v", opened, a.external.waiting, time.Unix(0, a.external.waitUntil.Load()))
 	}
 }
+
+// An app that has started Leaflet since it was added is connected, though it
+// has not worked on a page yet: it needs no restart.
+func TestAgentRowConnectedBeforeUse(t *testing.T) {
+	a := templatesApp(t)
+	exe, dir := "/Applications/Leaflet.app/Contents/MacOS/Leaflet", t.TempDir()
+	entry := &serverEntry{Command: exe, Args: []string{"mcp"}, Env: map[string]string{"LEAFLET_DATA_DIR": dir}}
+	app := agentApp{id: "claude-desktop", label: "Claude Desktop"}
+	for _, tc := range []struct {
+		s    agentStatus
+		want string
+	}{
+		{agentStatus{app: app, installed: true, entry: entry}, locales.ExternalAdded("Claude Desktop")},
+		{agentStatus{app: app, installed: true, entry: entry, connected: time.Now()}, locales.ExternalConnected()},
+	} {
+		tt := ui.NewTester(func(c *ui.Context) { a.agentRow(c, tc.s, exe, dir, false, true) }, 700, 100)
+		tt.Frame()
+		if !tt.HasText(tc.want) {
+			t.Errorf("connected at %v: row %v, want %q", tc.s.connected, tt.Texts(), tc.want)
+		}
+	}
+}

@@ -91,6 +91,9 @@ func TestHandshake(t *testing.T) {
 	if seen := st.ValuesWithPrefix(SeenPrefix); len(seen) != 0 {
 		t.Errorf("seen %v before a tool call", seen)
 	}
+	if connected := st.ValuesWithPrefix(ConnectedPrefix); connected["claude-code"] == "" {
+		t.Errorf("connected %v after initialize, want claude-code", connected)
+	}
 	session(t, s, call(4, "list_pages", nil))
 	if seen := st.ValuesWithPrefix(SeenPrefix); seen["claude-code"] == "" {
 		t.Errorf("seen %v after a tool call, want claude-code", seen)

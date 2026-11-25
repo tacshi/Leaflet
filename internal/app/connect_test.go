@@ -173,7 +173,8 @@ func TestDetectAgents(t *testing.T) {
 	if err := os.WriteFile(cursor, []byte(`{"mcpServers": {"leaflet": {"command": "/old/Leaflet", "env": {"LEAFLET_DATA_DIR": "`+testDir+`"}}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	found := detectAgents(env, map[string]string{"cursor-vscode": "1700000000", "claude-code": "1600000000", "claude-ai": "x"})
+	found := detectAgents(env, map[string]string{"cursor-vscode": "1700000000", "claude-code": "1600000000", "claude-ai": "x"},
+		map[string]string{"claude-ai": "1650000000", "local-agent-mode-leaflet": "1660000000"})
 	by := map[string]agentStatus{}
 	for _, s := range found {
 		by[s.app.id] = s
@@ -184,14 +185,17 @@ func TestDetectAgents(t *testing.T) {
 	if c := by["codex"]; c.entry != nil {
 		t.Errorf("codex: %+v", c)
 	}
-	if c := by["claude-desktop"]; !c.seen.IsZero() {
-		t.Errorf("claude desktop seen at %v", c.seen)
+	if c := by["claude-desktop"]; !c.seen.IsZero() || c.connected.Unix() != 1660000000 {
+		t.Errorf("claude desktop seen at %v, connected at %v", c.seen, c.connected)
+	}
+	if c := by["cursor"]; !c.connected.IsZero() {
+		t.Errorf("cursor connected at %v", c.connected)
 	}
 }
 
 func TestClientOf(t *testing.T) {
 	for name, want := range map[string]string{
-		"claude-code": "claude", "claude-ai": "claude-desktop", "codex-mcp-client": "codex", "Codex": "codex",
+		"claude-code": "claude", "claude-ai": "claude-desktop", "local-agent-mode-leaflet": "claude-desktop", "codex-mcp-client": "codex", "Codex": "codex",
 		"cursor-vscode": "cursor", "opencode": "opencode", "OpenCode": "opencode", "Visual Studio Code": "", "goose": "",
 	} {
 		if got := clientOf(name); got != want {
@@ -387,7 +391,7 @@ func TestChatGPTSharesCodex(t *testing.T) {
 	if err := connectAgent("codex", "", env, testExe, testDir); err != nil {
 		t.Fatal(err)
 	}
-	found := detectAgents(env, map[string]string{"codex-mcp-client": "1700000000"})
+	found := detectAgents(env, map[string]string{"codex-mcp-client": "1700000000"}, nil)
 	by := map[string]agentStatus{}
 	for _, s := range found {
 		by[s.app.id] = s

@@ -79,6 +79,7 @@ type agentStatus struct {
 	installed bool
 	entry     *serverEntry
 	seen      time.Time
+	connected time.Time
 }
 
 func (s agentStatus) current(exe, dir string) bool {
@@ -86,7 +87,9 @@ func (s agentStatus) current(exe, dir string) bool {
 	return e != nil && !e.Off && e.Command == exe && slices.Equal(e.Args, []string{"mcp"}) && e.Env["LEAFLET_DATA_DIR"] == dir
 }
 
-func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
+// detectAgents finds the agents on this computer, with when each last used
+// Leaflet (seen) and last started it (connected), by client name.
+func detectAgents(env agentEnv, seen, connected map[string]string) []agentStatus {
 	var out []agentStatus
 	for _, app := range agentApps {
 		s := agentStatus{app: app}
@@ -105,17 +108,26 @@ func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 			s.installed = s.installed || exists(filepath.Dir(path))
 		}
 		s.entry, _ = readEntry(app.settingsID(), env)
-		for name, v := range seen {
-			if clientOf(name) != app.settingsID() {
-				continue
-			}
-			if unix, err := strconv.ParseInt(v, 10, 64); err == nil && time.Unix(unix, 0).After(s.seen) {
-				s.seen = time.Unix(unix, 0)
-			}
-		}
+		s.seen = lastBy(seen, app.settingsID())
+		s.connected = lastBy(connected, app.settingsID())
 		out = append(out, s)
 	}
 	return out
+}
+
+// lastBy is the latest of the times, by client name, of the clients that are
+// the agent id.
+func lastBy(times map[string]string, id string) time.Time {
+	var last time.Time
+	for name, v := range times {
+		if clientOf(name) != id {
+			continue
+		}
+		if unix, err := strconv.ParseInt(v, 10, 64); err == nil && time.Unix(unix, 0).After(last) {
+			last = time.Unix(unix, 0)
+		}
+	}
+	return last
 }
 
 func clientOf(name string) string {
@@ -125,7 +137,9 @@ func clientOf(name string) string {
 		return "cursor"
 	case strings.Contains(n, "claude-code"), strings.Contains(n, "claude code"):
 		return "claude"
-	case strings.Contains(n, "claude"):
+	// Claude Desktop's agent mode names itself after the server, as
+	// local-agent-mode-leaflet.
+	case strings.Contains(n, "claude"), strings.HasPrefix(n, "local-agent-mode"):
 		return "claude-desktop"
 	case strings.Contains(n, "codex"):
 		return "codex"

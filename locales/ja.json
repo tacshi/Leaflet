@@ -1167,7 +1167,7 @@
   "welcomeTagMeetings": "会議",
   "welcomeTryTag": "このページのタイトルの下の行にポインタを合わせ、タグボタンを押してタグを付けます",
   "welcomeWritingHeading": "書く",
-  "welcomeWritingMarkdown": "Markdown は入力しながら書式が付きます：**太字**、*斜体*、`コード`、~~取り消し線~~、[リンク](https://github.com/egoist/mygo)、そして TeX をドル記号で囲むと $E = mc^2$ のような数式になります。テキストを選択すると、<span style=\"color:#ef4444\">文字色</span>や<span style=\"background:#fde68a\">ハイライト</span>を付けられます。",
+  "welcomeWritingMarkdown": "Markdown は入力しながら書式が付きます：**太字**、*斜体*、`コード`、~~取り消し線~~、[リンク](https://github.com/egoist/mygo)、そして TeX をドル記号で囲むと $E = mc^2$ のような数式になります。テキストを選択すると、<span style=\"color:#ef4444\">文字色</span>や<span style=\"background:#eab30840\">ハイライト</span>を付けられます。",
   "welcomeWritingLines": "行頭で `#` は見出し、`-` は箇条書き、`1.` は番号付きリスト、`[]` は ToDo、`>` は引用、`---` は区切り線になります。**Tab** でリスト項目を入れ子にでき、貼り付けた Markdown は構造をそのまま保ちます。",
   "welcomeBlocksHeading": "ブロック",
   "welcomeBlocksTable": "**/** でどんなブロックでも追加できます。表では **Tab** で次のセルに移動し、最後のセルでは行が追加されます。この表は右クリックメニューの**シンプルな罫線**で、時間の列はセルの編集中に下に出るボタンで右揃えにしています。最後のショートカットの表は格子のままです。",

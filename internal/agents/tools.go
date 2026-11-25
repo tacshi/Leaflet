@@ -49,7 +49,7 @@ var blockSchema = map[string]any{
 	"description": "A block to write.",
 	"properties": map[string]any{
 		"type":      map[string]any{"type": "string", "enum": append(slices.Clone(doc.AgentTypes), "file")},
-		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, $x^2$ for a formula in the line in TeX, [text](url), and text color and highlight as <span style=\"color:#ef4444;background:#fde68a\">text</span>, either alone, in hex, not nested. Keep the spans read_page shows when rewriting text. No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
+		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, $x^2$ for a formula in the line in TeX, [text](url), and text color and highlight as <span style=\"color:#ef4444;background:#eab30840\">text</span>, either alone, in hex, not nested. Keep the spans read_page shows when rewriting text. No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
 		"language":  map[string]any{"type": "string", "description": "A code block's language, such as go, python or typescript."},
 		"tone":      map[string]any{"type": "string", "enum": []string{"info", "tip", "warning", "danger"}, "description": "A callout's tone."},
 		"collapsed": map[string]any{"type": "boolean", "description": "Whether a toggle_list starts folded, its children hidden."},
@@ -168,6 +168,7 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	}
 	if !readOnly {
 		out = append(out, editTools()...)
+		out = append(out, SkillToolDefinition(false))
 	}
 	if crossPage {
 		out = append(out,
@@ -181,7 +182,7 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 func pageSchema(place ...prop) ordered {
 	o := ordered{
 		{"title", map[string]any{"type": "string"}},
-		{"markdown", map[string]any{"type": "string", "description": "The page's content in Markdown, the way to write text: a block a line, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers. Not with blocks."}},
+		{"markdown", map[string]any{"type": "string", "description": "The page's content in Markdown, the way to write text: a block a line, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; > [!NOTE], [!TIP], [!WARNING] or [!CAUTION] for a callout, its text on the > lines after it, $$ lines around a formula, a ```mermaid diagram, and ```chart, ```card and ```map fences holding the chart's, card's or map's JSON as insert_blocks takes it. Not with blocks."}},
 		{"blocks", map[string]any{"type": "array", "items": blockSchema}},
 	}
 	return append(o, place...)
@@ -199,7 +200,7 @@ func WebToolDefinitions(search bool) []map[string]any {
 
 func editTools() []map[string]any {
 	return []map[string]any{
-		tool("write_markdown", "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. It goes into the page as you write it.",
+		tool("write_markdown", "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; > [!NOTE], [!TIP], [!WARNING] or [!CAUTION] for a callout, its text on the > lines after it, $$ lines around a formula, a ```mermaid diagram, and ```chart, ```card and ```map fences holding the chart's, card's or map's JSON as insert_blocks takes it. Blank lines only separate them. It goes into the page as you write it.",
 			ordered{{"position", writeSchema}, {"markdown", map[string]any{"type": "string"}}}, "position", "markdown"),
 		tool("insert_blocks", "Insert new blocks at a position.", ordered{{"position", positionSchema}, {"blocks", map[string]any{"type": "array", "minItems": 1, "items": blockSchema}}}, "position", "blocks"),
 		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", ordered{{"id", map[string]any{"type": "string"}}, {"block", blockSchema}}, "id", "block"),
@@ -918,6 +919,8 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		return x.findPlace(args)
 	case "find_route":
 		return x.findRoute(args)
+	case "read_skill":
+		return ReadSkill(args, false)
 	}
 	args, err := x.withRoutes(name, args)
 	if err != nil {
@@ -1163,6 +1166,9 @@ func (x *Executor) write(args map[string]any) (map[string]any, error) {
 	if err := doc.CallNodes(nodes); err != nil {
 		return nil, err
 	}
+	if err := doc.FenceError(nodes); err != nil {
+		return nil, err
+	}
 	if err := x.room(nodes); err != nil {
 		return nil, err
 	}
@@ -1326,6 +1332,9 @@ func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) 
 		}
 	} else if nodes = doc.MarkdownBlocks(md); len(nodes) > 0 {
 		if err := doc.CallNodes(nodes); err != nil {
+			return "", nil, err
+		}
+		if err := doc.FenceError(nodes); err != nil {
 			return "", nil, err
 		}
 	}

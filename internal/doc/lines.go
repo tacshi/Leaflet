@@ -344,6 +344,7 @@ func (p *lineParser) closeCode() {
 		kids[last] = DiagramNode(text)
 	case p.code.Str("language") == "card" && cardFence(text, &kids[last]):
 	case p.code.Str("language") == "map" && mapFence(text, &kids[last]):
+	case p.code.Str("language") == "chart" && chartFence(text, &kids[last]):
 	default:
 		p.code.SetDelta(Delta{{Text: text}}.Compact())
 	}
@@ -355,6 +356,16 @@ func (p *lineParser) closeCode() {
 // code.
 func cardFence(text string, at **Node) bool {
 	n, ok := CardNodeFromJSON(text)
+	if ok {
+		*at = n
+	}
+	return ok
+}
+
+// chartFence makes *at the chart a ```chart fence's JSON is, reporting
+// whether it is one; a fence that is not stays code.
+func chartFence(text string, at **Node) bool {
+	n, ok := ChartNodeFromJSON(text)
 	if ok {
 		*at = n
 	}

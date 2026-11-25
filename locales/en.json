@@ -6141,7 +6141,7 @@
   "@welcomeWritingHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeWritingMarkdown": "Markdown formats as you type: **bold**, *italic*, `code`, ~~strikethrough~~, [links](https://github.com/egoist/mygo), and dollar signs around TeX for a formula such as $E = mc^2$. Select text to give it a <span style=\"color:#ef4444\">color</span> or a <span style=\"background:#fde68a\">highlight</span>.",
+  "welcomeWritingMarkdown": "Markdown formats as you type: **bold**, *italic*, `code`, ~~strikethrough~~, [links](https://github.com/egoist/mygo), and dollar signs around TeX for a formula such as $E = mc^2$. Select text to give it a <span style=\"color:#ef4444\">color</span> or a <span style=\"background:#eab30840\">highlight</span>.",
   "@welcomeWritingMarkdown": {
     "description": "The welcome guide page, made once on first run: a paragraph showing inline Markdown; keep the Markdown and the link."
   },

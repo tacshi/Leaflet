@@ -71,7 +71,8 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 		tool("create_folder", "Create a folder for top-level pages, last among the folders where it goes: at the top level, or in another folder.",
 			ordered{{"name", map[string]any{"type": "string"}}, {"parent_folder_id", parentFolder}}, "name"),
 		tool("move_folder", "Move a folder, with what is in it, last into another folder, or with no parent_folder_id to the top level.",
-			ordered{{"folder_id", map[string]any{"type": "string", "description": "The folder to move, from list_folders."}}, {"parent_folder_id", parentFolder}}, "folder_id"))
+			ordered{{"folder_id", map[string]any{"type": "string", "description": "The folder to move, from list_folders."}}, {"parent_folder_id", parentFolder}}, "folder_id"),
+		SkillToolDefinition(false))
 }
 
 var parentFolder = map[string]any{"type": "string", "description": "The folder to put it in, from list_folders; none for the top level."}

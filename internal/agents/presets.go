@@ -109,11 +109,11 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 			newPage = "- Asked for a new page, make one with create_page: a page of its own, " + where + ". Use create_subpage only when the user asks for a page inside or under this one, or for a part of this page's own content. Write the new page's content in the call, not in this page, and say in your reply where the page is.\n"
 		}
 		b.WriteString("How to work:\n- If the page's blocks are not in the request, call read_page before you edit it.\n" +
-			"- Make every change you are asked for with the tools (" + tools + "); never paste content meant for the page into your reply instead. An answer to a question is not a change: it goes in your reply.\n" + newPage)
+			"- Make every change you are asked for with the tools (" + tools + "); never paste content meant for the page into your reply instead. An answer to a question is not a change: it goes in your reply.\n" + newPage + SkillPrompt)
 		b.WriteString(`- Asked to write, copy or save an article, a web page or other text into a page, write all of it as it is, its headings, lists and links kept: not a summary, unless the user asks for one.
-- To write text (a story, a draft, notes, a summary, any run of paragraphs, headings and lists), use write_markdown: one block per line, in Markdown, never several paragraphs in one block. Where your focus block is empty, write in its place with position {"replace": its ID}. Keep insert_blocks for charts, embeds, videos, callouts, formulas, diagrams and other blocks Markdown cannot write, and replace_block for rewriting one block.
+- To write text (a story, a draft, notes, a summary, any run of paragraphs, headings and lists), use write_markdown: one block per line, in Markdown, never several paragraphs in one block. Where your focus block is empty, write in its place with position {"replace": its ID}. Keep insert_blocks for embeds, videos, link previews, lines tables, dated to-dos and other blocks Markdown cannot write, and replace_block for rewriting one block.
 - Address blocks by their IDs. Keep edits small and precise, in the page's existing style and language. Keep block IDs stable: rewrite a block with replace_block rather than deleting and re-inserting it, so comments stay attached.
-- Text fields take inline markdown only (**bold**, *italic*, ` + "`code`" + `, $x^2$ for a formula in the line, in TeX, [link](url), and <span style="color:#ef4444;background:#fde68a">text</span> for text color and highlight, either alone, in hex). Keep the spans you read when rewriting text. Use block types for structure: heading, bulleted_list, numbered_list, todo_list, quote, table.
+- Text fields take inline markdown only (**bold**, *italic*, ` + "`code`" + `, $x^2$ for a formula in the line, in TeX, [link](url), and <span style="color:#ef4444;background:#eab30840">text</span> for text color and highlight, either alone, in hex). Keep the spans you read when rewriting text. Use block types for structure: heading, bulleted_list, numbered_list, todo_list, quote, table.
 - For numbers worth seeing, insert a chart block (bar, line, or pie) with labels and series.
 - Right-align a table's columns of numbers, prices and times: |--:| in Markdown, or align in insert_blocks. A table drawn with simple lines rather than a grid, a bold header and a hairline between rows, is table_style lines.
 - For facts at a glance, as a trip's time and fare or a place's address and phone numbers, insert a card: figures for two to four short values side by side, details for label: value lines beside a picture, with an icon, a note and the pages the facts come from as its sources.
@@ -169,12 +169,12 @@ func WorkspacePrompt(agentName string, reading, supportsTools, web, search bool)
 - Make every change you are asked for with the tools (create_page, move_page, rename_page, set_page_tags, create_folder, move_folder); never paste content meant for a page into your reply instead. An answer to a question is not a change: it goes in your reply.
 - Asked for a new page, or to save something in one, make it with create_page, its content in the call. It goes at the top level of the user's pages, with neither parent_id nor folder_id, unless the user says where: in a folder they name (its folder_id from list_folders), or inside a page (its parent_id) only when they ask for a subpage or a page in or under one. A page being open, or the new page being about it, does not put the new page inside it.
 - Asked to write, copy or save an article, a web page or other text into a page, write all of it as it is, its headings, lists and links kept: not a summary, unless the user asks for one.
-- Give a page's content in markdown, a block a line (# headings, - lists, - [ ] to-dos, > quotes, ` + "```" + ` code, | tables); keep blocks for charts, embeds, videos, callouts, formulas, diagrams and link cards.
+- Give a page's content in markdown, a block a line (# headings, - lists, - [ ] to-dos, > quotes, ` + "```" + ` code, | tables, > [!NOTE] callouts, $$ formulas, and ` + "```mermaid, ```chart and ```card" + ` fences as create_page's markdown says); keep blocks for embeds, videos, link cards, lines tables, dated to-dos and other blocks Markdown cannot write.
 - A page shared ("shared" in list_pages) you leave as it is: you change nothing of it, nor put a page in it. One shared with other people ("shared_with_people"), who write in it too, you cannot read either: for it, the user asks the agent on that page.
 - Name a page in your reply with a link to it: [Title](leaflet://page/<page id>).
 - If a tool returns an error, fix the call and try again.
 - All your changes in this run are one undo step for the user, so finish the job rather than asking for permission mid-way.
-`)
+` + SkillPrompt)
 		if reading {
 			b.WriteString("- Find the user's pages with list_pages and search_pages, and read one with read_page.\n")
 		} else {

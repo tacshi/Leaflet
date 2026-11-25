@@ -141,6 +141,10 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
 - ウェブを使えるとき、エージェントは場所と経路も探し（`find_place`、
   `find_route`）、ページや返信に地図として示します。返信はページと同じように
   カード、罫線の表、地図を表示します。
+- エージェントは Leaflet のスキル（`read_skill`）を、作業に必要なときに読み
+  込みます。どの内容をどのブロック（表、グラフ、カード、地図、図、コールアウト、
+  埋め込み）で示すとよいか、強調・文字色・ハイライトの使い方、そして
+  インタラクティブな埋め込みの作り方を説明するガイドです。
 - OpenAI 互換のプロバイダならどれでも使えます：OpenAI、Claude、xAI、
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
@@ -308,6 +312,14 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
 | `upload_files` | このコンピュータ上の画像、音声、動画、PDF をパスで指定してページに追加する |
 | `find_place`、`find_route` | Photon、OSRM、Transitous で場所と経路を探し、地図ブロックが経路の ID で示せるようにする |
+| `read_skill` | スキルを読む：ページを表現豊かにするガイド、インタラクティブな埋め込みの作り方、会話で決まったことを保存するガイド |
+
+サーバーの説明は、エージェントがページを書く前にスキル `expressive-pages` を
+読むよう求めます。そのため、表、グラフ、カード、地図、図、コールアウトを内容に
+合わせて使い、色はアプリのパレットから選びます。また、会話で決まったことのうち
+アプリの外にも残す価値のあるもの（決定、計画、調べた結果、繰り返す手順など）を
+Leaflet に保存するか、短い質問で一度だけ尋ね、了承されたときだけ保存するよう
+求めます。リポジトリにあるコード、その場限りの答え、秘密情報は対象外です。
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて
 いても動作します。閲覧のみで共有されたページは読み取り専用です。エージェントが
@@ -336,8 +348,9 @@ Mac や PC のアプリの実行中は、手前にあってもなくても、エ
 しばらく止まるまで表示されません。設定 › 外部エージェントでオフにできます。
 
 エージェントはテキストフィールドで文字色とハイライトを
-`<span style="color:#ef4444;background:#fde68a">テキスト</span>` のように 16 進数で
-読み書きします。`leaflet cat` とエクスポートには色は含まれません。行の中の数式は
+`<span style="color:#ef4444;background:#eab30840">テキスト</span>` のように 16 進数で
+読み書きします。ハイライトはパレットの色にアルファ値 `40` を付けたもので、
+ダークの外観でも読みやすく保たれます。`leaflet cat` とエクスポートには色は含まれません。行の中の数式は
 TeX で `$x^2$` のように書きます。
 
 開発ビルドで試すには、開発版アプリのデータフォルダをバイナリに渡します：
@@ -365,6 +378,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet tag PAGE [TAG...]` | ページのタグを設定する、または出力する。`--clear` ですべて外す |
 | `leaflet folder new NAME [--in FOLDER]`、`leaflet folder rename FOLDER NAME` | フォルダの作成（トップレベルまたは別のフォルダの中）と名前の変更 |
 | `leaflet folder mv FOLDER --in FOLDER \| --top` | フォルダを別のフォルダの中、またはトップレベルへ移動する |
+| `leaflet skills [NAME]` | AI エージェント向けのページの書き方ガイド（スキル）を一覧するか、1 つを SKILL.md として表示する |
 
 ページはタイトル、ID、または `ls` が表示する ID の先頭部分で指定できます。
 `--json` は MCP ツールが返す内容を出力し、`leaflet completion zsh`（または bash、

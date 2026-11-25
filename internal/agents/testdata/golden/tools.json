@@ -1576,6 +1576,21 @@
       ],
       "type": "object"
     },
+    "read_skill": {
+      "properties": {
+        "name": {
+          "enum": [
+            "expressive-pages",
+            "interactive-embeds"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "list_pages": {
       "properties": {},
       "required": [],
@@ -2115,6 +2130,21 @@
       },
       "required": [
         "folder_id"
+      ],
+      "type": "object"
+    },
+    "read_skill": {
+      "properties": {
+        "name": {
+          "enum": [
+            "expressive-pages",
+            "interactive-embeds"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     }

@@ -95,4 +95,4 @@ An embed is a small web page inside a Leaflet page: something the reader plays w
 
 ## Changing one
 
-read_page leaves out an embed's html longer than 30,000 characters and gives its `html_length`: to change such an embed, write its html whole, with replace_block. Keep its title, and its height unless the content changes size.
+read_page leaves out an embed's html longer than 30,000 characters and gives its `html_length`: to change such an embed, write its html whole, with replace_block where you have it. Keep its title, and its height unless the content changes size.

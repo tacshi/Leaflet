@@ -3,6 +3,9 @@ package core
 import (
 	"testing"
 
+	"github.com/egoist/mygo/i18n"
+
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -19,6 +22,35 @@ func TestHistoryLabel(t *testing.T) {
 		if got := HistoryLabel(h); got != want {
 			t.Errorf("%+v: %q, want %q", h, got, want)
 		}
+	}
+}
+
+// The snapshots from before an agent's edits are named in the app's language
+// as they show, the agent and its request kept as they are, as are those
+// earlier versions kept in English.
+func TestAgentHistoryLabelsInTheAppsLanguage(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "zh-Hans" })
+	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
+	for label, want := range map[string]string{
+		agents.RunLabel("Claude Code", ""):           "Claude Code 编辑前",
+		agents.RunLabel(agents.CommandLine, ""):      "命令行 编辑前",
+		agents.RunLabel("", ""):                      "智能体 编辑前",
+		agents.RunLabel("Claude", "Tidy: the notes"): "Claude 运行前：Tidy: the notes",
+		"Before Codex":                               "Codex 编辑前",
+		"Before Command line":                        "命令行 编辑前",
+		"Before Agent":                               "智能体 编辑前",
+		"Before Claude: tidy the notes":              "Claude 运行前：tidy the notes",
+		"":                                           "智能体运行前",
+	} {
+		if got := HistoryLabel(store.HistoryEntry{Reason: "agent_run", Label: label}); got != want {
+			t.Errorf("%q: %q, want %q", label, got, want)
+		}
+	}
+	if got := HistoryLabel(store.HistoryEntry{Reason: "autosave", Label: "Autosave"}); got != "自动保存" {
+		t.Errorf("an autosave: %q", got)
+	}
+	if got := HistoryLabel(store.HistoryEntry{Reason: "manual", Label: "Before launch"}); got != "Before launch" {
+		t.Errorf("a version the user named: %q", got)
 	}
 }
 

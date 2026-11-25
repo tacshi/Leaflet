@@ -5,12 +5,26 @@ import (
 	"strings"
 	"time"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
+// HistoryLabel is how a version of a page's history is named, in the app's
+// language: the name the user gave it, or why it was kept.
 func HistoryLabel(h store.HistoryEntry) string {
+	switch h.Reason {
+	case "agent_run":
+		if text, ok := agents.RunLabelText(h.Label); ok {
+			return text
+		}
+	case "autosave":
+		// Autosaves are kept with their reason as their label, in English.
+		if h.Label == "Autosave" {
+			return locales.DialogHistoryAutosave()
+		}
+	}
 	if h.Label != "" {
 		return h.Label
 	}

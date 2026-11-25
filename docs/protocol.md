@@ -146,7 +146,25 @@ in `conflict`. So does one that takes out, with the block it deletes or
 rewrites with nested blocks of its own, a nested block the client never saw,
 as someone added it since, or one changed since it saw it, whatever the
 block's version; a rewrite that keeps the nested blocks, as one of a list
-item's text does, replaces nothing of them.
+item's text does, replaces nothing of them. A session keeps what the client
+saw of 256 pages and 200,000 of their blocks, the pages seen longest ago let
+go past that: until the client reads a page let go again, an edit that
+replaces or deletes a block of it keeps the page before it as a `conflict`,
+and its `conflict` says Leaflet cannot tell whether the block changed.
+Its `list_pages` takes `offset?` and gives `{ pages, folders?, total_pages,
+next_offset? }`: at most 250 pages a part, fewer where they would take more
+than 40,000 bytes of JSON, the folders with the first part, and
+`next_offset`, while there are more, the `offset` to list on from (the
+`leaflet` command reads them all at once). A request's `id` is a string or
+an integer: one of `null`, a fraction, an object or a list is answered
+`-32600` (Invalid Request), and a notification, with none, not at all.
+`leaflet mcp`, as every command of `leaflet`, opens the data folder's
+database only where the app made it, and exits with an error otherwise, so
+a mistyped `LEAFLET_DATA_DIR` makes no database the app never shows. Its
+changes go by the client's name (`clientInfo.title` or `name`), the
+`leaflet` command's by `leaflet-command-line`, which the app shows as
+"Command line" in its language, and a client's of no name by none, shown as
+"Agent".
 It also has `upload_files`: `page_id`, `files: [{path, alt?, position?}]`,
 at most 100, returning `{ inserted_ids }`. It copies each file on this
 computer into the page as the app's Upload does (`store.AddFile`, its
@@ -154,7 +172,10 @@ computer into the page as the app's Upload does (`store.AddFile`, its
 one before it, the first at the end of the page, or where its `position`
 says; the edit then goes as `insert_blocks`' does, with its snapshot. The
 files are copied once the page takes every position and taken off again
-when the page is not saved. Agents add pictures, audio, video and PDFs only,
+when the page is not saved. On Windows a path is one on this computer's own
+drives, as `C:\`, or under `~\`: not another computer's share
+(`\\host\share`, `//host/share`, `file:////host/share`, `\\?\UNC\…`), which
+Windows would open with the user's sign-in. Agents add pictures, audio, video and PDFs only,
 and none to a page other people have or with a public link, as this
 device's record or the app's last read of the other devices' leases says,
 nor move a page into one. With pages syncing and no read of the leases from
@@ -386,7 +407,13 @@ keys, counts and `leaflet mcp`'s versions among them, one block at least,
 and in the first part (`offset` 0 or none) the subpages and the
 comments take at most a quarter of that each, before the blocks. `offset`
 and `limit` are whole numbers, 0 and 1 at least; an `offset` past the last
-block gives none.
+block gives none. The results of a run's calls take at most 120,000
+characters of what the model is sent: past that, the oldest result of more
+than 2,000 is replaced with `{"dropped": …}`, which asks the model to call
+the tool again if it needs it, the newest kept whole, and once they take
+three quarters of that, the newest says so, for the model to keep what it
+needs of each as it goes. `replace_block` counts the blocks it writes, a
+nested block it keeps not among them, towards the 5,000 a run writes.
 
 A public link can start on the page while a run that may read the user's
 other pages works on it, on its device or another. The run reads again
@@ -435,6 +462,10 @@ makes it no better. Reading one tells its site the same, so a run reads at
 most 10 links it picked from pages it read, one that failed among them; the
 pages the instruction, this page or a search gave it are not counted. Once a
 run reads another page, the web is closed to it.
+The run's answer keeps to the same: a ```` ```card ```` fence in it, which
+the chat draws with its picture, loses a picture the run may not load, its
+`image` made `""`, as it streams in and as it is kept (the fences found as
+the Mac and PC app's Markdown view and the phone's blocks find them).
 
 `find_place` and `find_route` are offered with the web's tools, as they
 ask services on the web what a run gives them: Photon (komoot) for places,
@@ -577,8 +608,13 @@ run reads (§2, §7).
    stream in: all of a run's ops are one undo step. A page that is not open
    gets them in its stored content as the run ends.
 4. Before its first op reaches the page, the run keeps the page as it was
-   in `page_history` (`reason: "agent_run"`). A snapshot that can't be kept
-   stops the edits: none is stored that the page can't go back from. A run
+   in `page_history` (`reason: "agent_run"`), its `label` the JSON
+   `{"agent", "request"}`, the agent's name and the start of what it was
+   asked, which the app words in its language as it shows the snapshot
+   (`leaflet mcp`'s is `{"agent"}`; a label earlier versions kept in
+   English, `Before <agent>: <request>`, shows so too). A snapshot that
+   can't be kept stops the edits: none is stored that the page can't go
+   back from. A run
    that fails, runs out of time or is stopped keeps what it changed, for
    Undo.
 5. The run's job stays on the device, in its own `ai_jobs` table, which

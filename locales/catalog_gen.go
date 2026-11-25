@@ -3563,6 +3563,44 @@ func (msgs Messages) DialogHistoryAgentRun() string {
 	return Catalog.Format(msgs.locale, "dialogHistoryAgentRun", nil)
 }
 
+// DialogHistoryBeforeAgent says "Before {agent}"
+// in the language the app shows.
+//
+// Page history: why a version was kept: before an AI app outside Leaflet,
+// or the leaflet command, edited the page; agent is its name.
+func DialogHistoryBeforeAgent(agent string) string {
+	return In(i18n.Locale()).DialogHistoryBeforeAgent(agent)
+}
+
+// DialogHistoryBeforeAgent says "Before {agent}"
+// in the language of msgs.
+//
+// Page history: why a version was kept: before an AI app outside Leaflet,
+// or the leaflet command, edited the page; agent is its name.
+func (msgs Messages) DialogHistoryBeforeAgent(agent string) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryBeforeAgent", map[string]any{"agent": agent})
+}
+
+// DialogHistoryBeforeAgentRun says "Before {agent}: {request}"
+// in the language the app shows.
+//
+// Page history: why a version was kept: before an agent in the app edited
+// the page as asked; agent is the agent's name, request the start of what
+// it was asked, in the user's own words.
+func DialogHistoryBeforeAgentRun(agent string, request string) string {
+	return In(i18n.Locale()).DialogHistoryBeforeAgentRun(agent, request)
+}
+
+// DialogHistoryBeforeAgentRun says "Before {agent}: {request}"
+// in the language of msgs.
+//
+// Page history: why a version was kept: before an agent in the app edited
+// the page as asked; agent is the agent's name, request the start of what
+// it was asked, in the user's own words.
+func (msgs Messages) DialogHistoryBeforeAgentRun(agent string, request string) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryBeforeAgentRun", map[string]any{"agent": agent, "request": request})
+}
+
 // DialogHistoryAutosave says "Autosave"
 // in the language the app shows.
 //
@@ -8099,6 +8137,56 @@ func AgentModelCutOff() string { return In(i18n.Locale()).AgentModelCutOff() }
 // complete.
 func (msgs Messages) AgentModelCutOff() string {
 	return Catalog.Format(msgs.locale, "agentModelCutOff", nil)
+}
+
+// AgentModelStoppedAnswering says "The model stopped answering. Try again."
+// in the language the app shows.
+//
+// Why an agent run or a connection test failed: the model's server sent
+// nothing more for minutes, in the middle of its answer.
+func AgentModelStoppedAnswering() string { return In(i18n.Locale()).AgentModelStoppedAnswering() }
+
+// AgentModelStoppedAnswering says "The model stopped answering. Try again."
+// in the language of msgs.
+//
+// Why an agent run or a connection test failed: the model's server sent
+// nothing more for minutes, in the middle of its answer.
+func (msgs Messages) AgentModelStoppedAnswering() string {
+	return Catalog.Format(msgs.locale, "agentModelStoppedAnswering", nil)
+}
+
+// AgentAnswerTooLong says "The answer was too long to read."
+// in the language the app shows.
+//
+// Why an agent run, a web search or signing in with ChatGPT failed: the
+// server's answer was larger than Leaflet reads.
+func AgentAnswerTooLong() string { return In(i18n.Locale()).AgentAnswerTooLong() }
+
+// AgentAnswerTooLong says "The answer was too long to read."
+// in the language of msgs.
+//
+// Why an agent run, a web search or signing in with ChatGPT failed: the
+// server's answer was larger than Leaflet reads.
+func (msgs Messages) AgentAnswerTooLong() string {
+	return Catalog.Format(msgs.locale, "agentAnswerTooLong", nil)
+}
+
+// AgentRedirected says "The server answered with a redirect to another address, which Leaflet doesn't follow."
+// in the language the app shows.
+//
+// Why an agent run, a connection test or signing in with ChatGPT failed:
+// the server answered with an HTTP redirect, which Leaflet does not follow
+// for agents.
+func AgentRedirected() string { return In(i18n.Locale()).AgentRedirected() }
+
+// AgentRedirected says "The server answered with a redirect to another address, which Leaflet doesn't follow."
+// in the language of msgs.
+//
+// Why an agent run, a connection test or signing in with ChatGPT failed:
+// the server answered with an HTTP redirect, which Leaflet does not follow
+// for agents.
+func (msgs Messages) AgentRedirected() string {
+	return Catalog.Format(msgs.locale, "agentRedirected", nil)
 }
 
 // AgentChatgptCouldNotAnswer says "ChatGPT could not answer"
@@ -16847,6 +16935,26 @@ func ExternalLiveEditsTitle() string { return In(i18n.Locale()).ExternalLiveEdit
 // lists.
 func (msgs Messages) ExternalLiveEditsTitle() string {
 	return Catalog.Format(msgs.locale, "externalLiveEditsTitle", nil)
+}
+
+// ExternalLiveEditsCommandLine says "Command line"
+// in the language the app shows.
+//
+// The name the leaflet command's own changes go by: the user, or a script,
+// running leaflet commands in a terminal. It shows as the agent's name in
+// the small corner window (externalLiveEditsEditing) and in page history
+// (dialogHistoryBeforeAgent).
+func ExternalLiveEditsCommandLine() string { return In(i18n.Locale()).ExternalLiveEditsCommandLine() }
+
+// ExternalLiveEditsCommandLine says "Command line"
+// in the language of msgs.
+//
+// The name the leaflet command's own changes go by: the user, or a script,
+// running leaflet commands in a terminal. It shows as the agent's name in
+// the small corner window (externalLiveEditsEditing) and in page history
+// (dialogHistoryBeforeAgent).
+func (msgs Messages) ExternalLiveEditsCommandLine() string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsCommandLine", nil)
 }
 
 // ExternalLiveEditsEditing says "{agent} is editing"

@@ -449,12 +449,12 @@ func (a *App) watchView(c *ui.Context) {
 	width, _ := c.Size()
 	root.Children(func() {
 		ui.Row(c.Key("head")).FillWidth().Padding(10, 8, 10, 14).Gap(10).AlignItems(ui.Center).DragWindow().Children(func() {
-			avatar(c, w.act.Agent, 26, true)
+			avatar(c, w.act.ShownAgent(), 26, true)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 				if busy {
-					shimmer(c, locales.ExternalLiveEditsEditing(w.act.Agent), 12)
+					shimmer(c, locales.ExternalLiveEditsEditing(w.act.ShownAgent()), 12)
 				} else {
-					ui.Text(c, locales.ExternalLiveEditsEdited(w.act.Agent)).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+					ui.Text(c, locales.ExternalLiveEditsEdited(w.act.ShownAgent())).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 				}
 				ui.Text(c, title).FontSize(14).FontWeight(600).TextColor(pal.Text).SingleLine()
 			})

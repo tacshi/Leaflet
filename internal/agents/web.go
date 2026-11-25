@@ -2,11 +2,8 @@ package agents
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -104,32 +101,14 @@ func (c *Client) SearchWeb(ctx context.Context, model, query string) (Search, er
 }
 
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if path == "/messages" {
-		req.Header.Set("x-api-key", c.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	} else if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	}
-	res, err := c.HTTP.Do(req)
+	res, err := c.send(ctx, c.HTTP, "POST", path, body)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = res.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxSearchBytes))
+	data, err := readAll(res.Body, maxSearchBytes)
 	if err != nil {
 		return err
-	}
-	if res.StatusCode >= 400 {
-		return &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data), RetryAfter: retryAfter(res.Header)}
 	}
 	return json.Unmarshal(data, out)
 }

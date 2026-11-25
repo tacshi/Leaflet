@@ -70,7 +70,7 @@ type delivery struct {
 	run       *Run
 }
 
-func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
+func (h *Hub) newDelivery(pageID string, run *Run) *delivery {
 	return &delivery{run: run, conflict: func(c *doc.Content) error {
 		return h.st.AddHistory(pageID, c, "conflict", run.ID, "")
 	}}

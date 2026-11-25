@@ -1249,6 +1249,30 @@
   "@dialogHistoryAgentRun": {
     "description": "Page history: why a version was kept: before an agent edited the page."
   },
+  "dialogHistoryBeforeAgent": "Before {agent}",
+  "@dialogHistoryBeforeAgent": {
+    "description": "Page history: why a version was kept: before an AI app outside Leaflet, or the leaflet command, edited the page; agent is its name.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude Code"
+      }
+    }
+  },
+  "dialogHistoryBeforeAgentRun": "Before {agent}: {request}",
+  "@dialogHistoryBeforeAgentRun": {
+    "description": "Page history: why a version was kept: before an agent in the app edited the page as asked; agent is the agent's name, request the start of what it was asked, in the user's own words.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      },
+      "request": {
+        "type": "String",
+        "example": "Tidy up these notes"
+      }
+    }
+  },
   "dialogHistoryAutosave": "Autosave",
   "@dialogHistoryAutosave": {
     "description": "Page history: why a version was kept: saved automatically."
@@ -2864,6 +2888,18 @@
   "agentModelCutOff": "The model's answer was cut off.",
   "@agentModelCutOff": {
     "description": "Why an agent run failed: the model's streamed answer ended before it was complete."
+  },
+  "agentModelStoppedAnswering": "The model stopped answering. Try again.",
+  "@agentModelStoppedAnswering": {
+    "description": "Why an agent run or a connection test failed: the model's server sent nothing more for minutes, in the middle of its answer."
+  },
+  "agentAnswerTooLong": "The answer was too long to read.",
+  "@agentAnswerTooLong": {
+    "description": "Why an agent run, a web search or signing in with ChatGPT failed: the server's answer was larger than Leaflet reads."
+  },
+  "agentRedirected": "The server answered with a redirect to another address, which Leaflet doesn't follow.",
+  "@agentRedirected": {
+    "description": "Why an agent run, a connection test or signing in with ChatGPT failed: the server answered with an HTTP redirect, which Leaflet does not follow for agents."
   },
   "agentChatgptCouldNotAnswer": "ChatGPT could not answer",
   "@agentChatgptCouldNotAnswer": {
@@ -5946,6 +5982,10 @@
   "externalLiveEditsTitle": "Live edits",
   "@externalLiveEditsTitle": {
     "description": "The name of the small window in a corner of the screen that shows an AI app's edits as it makes them, for screen readers and the system's window lists."
+  },
+  "externalLiveEditsCommandLine": "Command line",
+  "@externalLiveEditsCommandLine": {
+    "description": "The name the leaflet command's own changes go by: the user, or a script, running leaflet commands in a terminal. It shows as the agent's name in the small corner window (externalLiveEditsEditing) and in page history (dialogHistoryBeforeAgent)."
   },
   "externalLiveEditsEditing": "{agent} is editing",
   "@externalLiveEditsEditing": {

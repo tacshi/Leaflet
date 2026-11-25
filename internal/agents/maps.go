@@ -369,9 +369,12 @@ func (x *Executor) mapFences(md string) (string, error) {
 }
 
 // Answer is an answer of this run as it is kept: its ```map fences' routes
-// resolved, as the chat shows them. A route it names that this run did
-// not find stays an id, which the chat shows as code.
-func (x *Executor) Answer(reply string) string { return doc.EditFences(reply, "map", x.answerFence) }
+// resolved, as the chat shows them, and its cards without the pictures the
+// run may not load. A route it names that this run did not find stays an
+// id, which the chat shows as code.
+func (x *Executor) Answer(reply string) string {
+	return x.unloadedCards(doc.EditFences(reply, "map", x.answerFence))
+}
 
 // answerFence is the body of an answer's ```map fence as the answer keeps
 // it: its route resolved, or as it is.
@@ -390,22 +393,24 @@ func (x *Executor) answerFence(src string) string {
 
 // streamedAnswer is Answer for an answer as it streams in, again with each
 // piece: a fence's route is resolved once, as the pieces repeat it, and one
-// not found yet is looked for again, as a later call may find it.
+// not found yet is looked for again, as a later call may find it. The cards
+// lose the pictures the run may not load as each piece shows, since the app
+// draws a card as soon as its fence holds one.
 func (x *Executor) streamedAnswer() func(text string) string {
 	made := map[string]string{}
 	return func(text string) string {
-		if !strings.Contains(text, "```") {
-			return text
-		}
-		return doc.EditFences(text, "map", func(src string) string {
-			if out, ok := made[src]; ok {
+		if strings.Contains(text, "```") {
+			text = doc.EditFences(text, "map", func(src string) string {
+				if out, ok := made[src]; ok {
+					return out
+				}
+				out := x.answerFence(src)
+				if out != src {
+					made[src] = out
+				}
 				return out
-			}
-			out := x.answerFence(src)
-			if out != src {
-				made[src] = out
-			}
-			return out
-		})
+			})
+		}
+		return x.unloadedCards(text)
 	}
 }

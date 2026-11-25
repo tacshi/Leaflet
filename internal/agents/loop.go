@@ -259,6 +259,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		}
 		return res, drafted, err
 	}
+	var kept keptResults
 	for round := 0; round < MaxRounds; round++ {
 		made := len(exec.Ops)
 		res, drafted, err := answer()
@@ -307,12 +308,72 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 				log.Printf("agent tool %s refused: %s", call.Name, made.refused)
 			}
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": cutResult(resultJSON(made.out))})
+			kept.add(messages, len(messages)-1)
 			if exec.ended {
 				return result(""), errLinkedStop
 			}
 		}
+		kept.fit(messages)
 	}
 	return result(locales.AgentStoppedAfterRounds(MaxRounds)), nil
+}
+
+const (
+	// resultsBudget is how much of the conversation, in UTF-16 units of
+	// their JSON, the tool results of a run take at most, with room left
+	// for the page, the prompt and the answer in a model's context.
+	resultsBudget = 2 * toolResultLimit
+	// droppedAbove is the size of a result worth dropping to make room.
+	droppedAbove = 2_000
+)
+
+const resultDropped = `{"dropped":"This result was taken out to make room for newer ones. Call the tool again if you need it."}`
+
+const resultsNearlyFull = "\n\nNote: the results of this run's calls take nearly all the room it has, so the oldest are taken out as new ones come. Keep what you need of each as you go, and read only what you still need."
+
+// keptResults is the tool results a run's messages hold, by where they are,
+// with their sizes, the oldest first.
+type keptResults struct {
+	at, size []int
+	total    int
+}
+
+func (k *keptResults) add(messages []map[string]any, i int) {
+	n := utf16Len(messages[i]["content"].(string))
+	k.at, k.size = append(k.at, i), append(k.size, n)
+	k.total += n
+}
+
+// fit drops the oldest large results while they take more than the budget,
+// keeping the newest whole, and tells the model, in the newest, when what is
+// left nearly fills it.
+func (k *keptResults) fit(messages []map[string]any) {
+	if len(k.at) == 0 {
+		return
+	}
+	newest := len(k.at) - 1
+	for i := 0; i < newest && k.total > resultsBudget; i++ {
+		if k.size[i] <= droppedAbove {
+			continue
+		}
+		messages[k.at[i]]["content"] = resultDropped
+		k.total += utf16Len(resultDropped) - k.size[i]
+		k.size[i] = utf16Len(resultDropped)
+	}
+	if k.total > resultsBudget*3/4 {
+		m := messages[k.at[newest]]
+		m["content"] = m["content"].(string) + resultsNearlyFull
+		k.total += utf16Len(resultsNearlyFull)
+		k.size[newest] += utf16Len(resultsNearlyFull)
+	}
+}
+
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
 }
 
 type madeCall struct {

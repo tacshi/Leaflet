@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,7 +25,9 @@ import (
 	"leaflet/internal/store"
 )
 
-const Agent = "Command line"
+// Agent is the name the command's changes go by, which the app shows in its
+// own words.
+const Agent = agents.CommandLine
 
 type Options struct {
 	Name    string
@@ -354,11 +355,6 @@ func (r *runner) with(run func(args []string) error) func(*cobra.Command, []stri
 func (r *runner) open() error {
 	if r.st != nil {
 		return nil
-	}
-	if _, err := os.Stat(store.Path(r.o.Dir)); errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("no pages in %s: open Leaflet once first, or set LEAFLET_DATA_DIR to its data folder", r.o.Dir)
-	} else if err != nil {
-		return err
 	}
 	st, err := mcp.Open(r.o.Dir)
 	if err != nil {

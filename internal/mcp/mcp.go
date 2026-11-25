@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +31,15 @@ func Main(dir string, version string, in io.Reader, out io.Writer) error {
 	return NewServer(st, version).Serve(in, out)
 }
 
+// Open opens the database of the app's data folder dir. A folder that holds
+// none is not one the app keeps its pages in, as a mistyped LEAFLET_DATA_DIR
+// names: a database made there would take edits the app never shows.
 func Open(dir string) (*store.Store, error) {
+	if _, err := os.Stat(store.Path(dir)); errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("no pages in %s: open Leaflet once first, or set LEAFLET_DATA_DIR to its data folder", dir)
+	} else if err != nil {
+		return nil, err
+	}
 	st, err := store.Open(dir)
 	if err != nil {
 		return nil, err
@@ -67,16 +78,24 @@ func (s *Server) markSeen() {
 
 func NewServer(st *store.Store, version string) *Server {
 	mapsvc.SetVersion(version)
-	s := &Server{st: st, version: version, agent: "Agent"}
-	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]sight{}}
+	s := &Server{st: st, version: version}
+	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]sight{}, forgot: map[string]bool{}}
 	return s
 }
 
+// SetAgent names the agent the server's changes go by, as agents.CommandLine
+// names the leaflet command; without one, and before a client names itself,
+// they go by none, which the app shows as an agent's.
 func (s *Server) SetAgent(name string) { s.agent = name }
 
 func (s *Server) Call(name string, args map[string]any) map[string]any {
 	return s.pages.call(name, args)
 }
+
+// Listing is every page and folder of the user's, as list_pages lists them,
+// in one answer however many there are: for the leaflet command, which reads
+// them all, where list_pages gives an agent a part at a time.
+func (s *Server) Listing() (map[string]any, error) { return s.pages.listPages() }
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -160,6 +179,9 @@ func (s *Server) answer(msg []byte) *response {
 		}
 		return &response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}
 	}
+	if len(req.ID) > 0 && !validID(req.ID) {
+		return &response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32600, "Invalid Request"}}
+	}
 	result, rerr := s.handle(req)
 	if len(req.ID) == 0 {
 		return nil
@@ -198,7 +220,7 @@ func (s *Server) handle(req request) (any, *rpcError) {
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": toolList()}, nil
+		return map[string]any{"tools": tools()}, nil
 	case "tools/call":
 		var p struct {
 			Name      string         `json:"name"`
@@ -207,7 +229,7 @@ func (s *Server) handle(req request) (any, *rpcError) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, &rpcError{-32602, "Invalid params"}
 		}
-		if !slices.ContainsFunc(toolList(), func(t map[string]any) bool { return t["name"] == p.Name }) {
+		if !toolNames()[p.Name] {
 			return nil, &rpcError{-32602, fmt.Sprintf("Unknown tool: %s", p.Name)}
 		}
 		if p.Arguments == nil {
@@ -231,6 +253,24 @@ func (s *Server) handle(req request) (any, *rpcError) {
 	}
 	log.Printf("mcp: no method %q", req.Method)
 	return nil, &rpcError{-32601, fmt.Sprintf("Method not found: %s", req.Method)}
+}
+
+// validID is whether a request's id is one MCP takes: a string or an
+// integer, not null, a fraction, an object or a list.
+func validID(id json.RawMessage) bool {
+	var v any
+	d := json.NewDecoder(bytes.NewReader(id))
+	d.UseNumber()
+	if d.Decode(&v) != nil {
+		return false
+	}
+	switch v := v.(type) {
+	case string:
+		return true
+	case json.Number:
+		return !strings.ContainsAny(v.String(), ".eE")
+	}
+	return false
 }
 
 func jsonText(v any) string {

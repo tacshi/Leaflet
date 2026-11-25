@@ -154,11 +154,7 @@ func keyKept(providerID string) bool {
 
 func SetLocalKey(providerID, key string) error {
 	if key == "" {
-		err := keychain.Delete("provider." + providerID + ".key")
-		if errors.Is(err, keychain.ErrNotFound) {
-			return nil
-		}
-		return err
+		return keychain.Delete("provider." + providerID + ".key")
 	}
 	return keychain.Set("provider."+providerID+".key", []byte(key))
 }

@@ -162,22 +162,27 @@ func localFile(path string) (string, error) {
 	if path == "" {
 		return "", toolErr("Each file needs its path.")
 	}
+	windows := runtime.GOOS == "windows"
 	if strings.HasPrefix(strings.ToLower(path), "file://") {
-		p, err := fileURLPath(path, runtime.GOOS == "windows")
+		p, err := fileURLPath(path, windows)
 		if err != nil {
 			return "", err
 		}
 		path = p
 	}
-	if rest, ok := cutHomePrefix(path, runtime.GOOS == "windows"); ok {
-		home, err := os.UserHomeDir()
+	rest, home := cutHomePrefix(path, windows)
+	if home {
+		dir, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		path = filepath.Join(home, rest)
+		path = filepath.Join(dir, rest)
 	}
 	if !filepath.IsAbs(path) {
 		return "", toolErr(path + " is not an absolute path: give the file's whole path.")
+	}
+	if !home && !onThisComputer(path, windows) {
+		return "", toolErr(path + " is not on this computer's own drives: Leaflet adds files from them only.")
 	}
 	path = filepath.Clean(path)
 	info, err := os.Stat(path)
@@ -207,6 +212,17 @@ func fileURLPath(raw string, windows bool) (string, error) {
 		p = strings.ReplaceAll(p, "/", `\`)
 	}
 	return p, nil
+}
+
+// onThisComputer is whether path, an absolute path, as Windows takes it with
+// windows, is on a drive of this computer, as C:\: Windows opens a share of
+// another (\\host\share, //host/share, \\?\UNC\host\share) or a device path
+// over the network, handing the host a path names the user's sign-in.
+func onThisComputer(path string, windows bool) bool {
+	if !windows {
+		return true
+	}
+	return len(path) >= 3 && isDriveLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
 }
 
 func isDriveLetter(b byte) bool {

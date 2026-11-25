@@ -700,7 +700,7 @@ func TestWorkspaceRunKeepsItsOpsAsTheyCome(t *testing.T) {
 	run := &Run{ID: "r1", Status: "running", Local: true, At: time.Now()}
 	s.Runs, s.Messages = []*Run{run}, []*Message{{Mine: true, Text: "File them"}, reply}
 	option := Option{Provider: store.Provider{Name: "Local"}}
-	d := w.h.newDelivery(WorkspaceID, run, option)
+	d := w.h.newDelivery(WorkspaceID, run)
 	o := RunOptions{Surface: "workspace", Reply: reply}
 	for i, op := range []doc.Op{
 		{Op: "rename_page", PageID: w.mine.ID, Title: "Mine 2", PrevTitle: "Mine"},

@@ -62,6 +62,9 @@ var blockSchema = map[string]any{
 			"items": map[string]any{"type": "object"}},
 		"rows": map[string]any{"type": "array", "description": "Table rows; the first row is the header.",
 			"items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+		"table_style": map[string]any{"type": "string", "enum": []string{"grid", "lines"}, "description": "A table's look: grid, the default, or lines: simple lines, a bold header with a rule under it and a hairline between rows, with no borders. replace_block keeps the table's look when not given."},
+		"align": map[string]any{"type": "array", "description": "How each of a table's columns aligns, in order: left, center or right, or \"\" for the default. Right-align columns of numbers, prices and times. replace_block keeps the table's alignment when not given.",
+			"items": map[string]any{"type": "string", "enum": []string{"", "left", "center", "right"}}},
 		"chart": map[string]any{"type": "object", "properties": map[string]any{
 			"chart_type": map[string]any{"type": "string", "enum": []string{"bar", "line", "pie"}},
 			"title":      map[string]any{"type": "string"},
@@ -1192,6 +1195,7 @@ func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, 
 	if err != nil {
 		return nil, err
 	}
+	doc.KeepTableLook(prev, n, spec)
 	if err := x.checkURLs([]*doc.Node{n}); err != nil {
 		return nil, err
 	}

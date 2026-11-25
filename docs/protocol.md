@@ -50,6 +50,13 @@ metadata:
   was; if the other side changed any of it, it comes back whole, and the
   conflict is kept with the deleted side's node null, so the user can delete
   it again.
+- A table's own data, as its style and its columns' alignments, merges key
+  by key when both sides changed it: a key only one side changed takes that
+  side's value, so a look one side gave a table and a row the other added
+  are both kept. Only a key both sides changed, and not alike, other than
+  the table's size, is a conflict, the times deciding it.
+- A block that ends up as one side has it, its place included, carries at
+  least that side's time.
 - A table's cells are a grid. Rows or columns both sides added at the same
   places are both kept: those of the side whose latest edit is older go
   after the other's, stamped as changed after either side's edits, and the
@@ -78,7 +85,7 @@ metadata:
 | `toggle_list` | `delta`, `collapsed` | any blocks nest in `children`, hidden while collapsed |
 | `divider` | — | |
 | `image` | `url`, `align`, `alt`, `width`, `height`, `file_id?` | a picture kept with the page has `file_id`, and `url` is `file://<file_id>/<name>`, as a `file`'s is |
-| `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
+| `table` | `colsLen`, `rowsLen`, `style?`, `aligns?`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph`; `style` `lines` draws it with simple lines (a bold header and a hairline under it and between rows, with no borders) rather than as a grid; `aligns` is how each column aligns, in order, `left`, `center`, `right` or `""` as text does, as Markdown's delimiter row (`:---`, `:---:`, `---:`) says, a list that stops at its last column aligned so |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
@@ -170,6 +177,8 @@ picture, its `alt` changed, given the `file://` url `read_page` shows.
   "due": "2026-11-02T09:30",
   "children": [ { "type": "bulleted_list", "text": "nested item" } ],
   "rows": [["Header A", "Header B"], ["a", "b"]],
+  "table_style": "lines",
+  "align": ["", "right"],
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
   "embed": { "title": "Phase timeline", "html": "<!doctype html>…", "height": 320 },
   "image": { "url": "https://…", "alt": "…" },
@@ -180,6 +189,13 @@ picture, its `alt` changed, given the `file://` url `read_page` shows.
 
 `replace_block` also takes `{ "type": "file", "file": { "notes": "0:05 …" } }`
 on a file block: only its notes change. No tool makes a file block.
+
+A table's `table_style` is `grid`, the default, or `lines`, and `align`
+lists how its columns align, in order: `left`, `center`, `right` or `""`.
+`replace_block` keeps a table's style and alignments where the spec names
+none (no key, a null, `""` or an empty list), so a model rewriting its
+cells leaves its look as it was. A Markdown table written with
+`write_markdown` takes its alignments from its delimiter row.
 
 ### Position
 
@@ -217,9 +233,11 @@ says where whatever other keys the position has.
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
 | `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
 
-`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`:
+`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, table_style?, align?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`:
 `text` only for text blocks and
-code (a code block's is its code, not markdown); `chart` is
+code (a code block's is its code, not markdown); a table's `table_style`
+only when it is `lines`, and its `align`, a value for each column, only
+when a column aligns otherwise than as text does; `chart` is
 `{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
 `image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
 `{url, title, description}`; `file` `{name, mime, size, notes?}`; `recording`

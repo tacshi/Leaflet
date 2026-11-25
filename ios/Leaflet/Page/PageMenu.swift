@@ -214,10 +214,12 @@ struct HistorySheet: View {
                         VersionChanges(old: v.markdown, new: current)
                     } else {
                         ScrollView {
-                            MarkdownPreview(markdown: v.markdown, size: app.textSize)
-                                .foregroundStyle(palette.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(24)
+                            MarkdownPreview(
+                                markdown: v.markdown, size: app.textSize, simpleTables: false
+                            )
+                            .foregroundStyle(palette.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(24)
                         }
                     }
                 }
@@ -302,6 +304,9 @@ struct HistorySheet: View {
 struct MarkdownPreview: View {
     let markdown: String
     var size: Double?
+    /// Whether tables draw with simple lines whatever they say, as agents'
+    /// answers show them, or as their own look says, as a page's do.
+    var simpleTables = true
     @Environment(\.palette) private var palette
     @State private var last: Read?
 
@@ -443,8 +448,11 @@ struct MarkdownPreview: View {
                 .background(palette.code, in: .rect(cornerRadius: 8))
                 .padding(.leading, indent)
         case "table":
-            table(row.cells)
-                .padding(.leading, indent)
+            let look = TableLook(n)
+            table(
+                row.cells, look: TableLook(lines: simpleTables || look.lines, aligns: look.aligns)
+            )
+            .padding(.leading, indent)
         case "divider":
             Divider().padding(.vertical, 4)
         default:
@@ -469,24 +477,37 @@ struct MarkdownPreview: View {
         }
     }
 
-    private func table(_ rows: [[String]]) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+    private func table(_ rows: [[String]], look: TableLook) -> some View {
+        let columns = rows.map(\.count).max() ?? 0
+        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             ForEach(rows.indices, id: \.self) { r in
                 GridRow {
                     ForEach(rows[r].indices, id: \.self) { c in
                         Text(rows[r][c])
                             .font(font(0.88, style: .subheadline))
                             .fontWeight(r == 0 ? .semibold : .regular)
+                            .multilineTextAlignment(look.textAlignment(c))
                             .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(r == 0 ? palette.panel : .clear)
-                            .border(palette.divider, width: 0.5)
+                            .padding(.leading, look.lines && c == 0 ? 0 : 10)
+                            .padding(.trailing, look.lines && c == columns - 1 ? 0 : 10)
+                            // As tall as its row, so that its lines are the row's.
+                            .frame(
+                                maxWidth: .infinity, maxHeight: .infinity,
+                                alignment: look.alignment(c, vertical: .center)
+                            )
+                            .background(r == 0 && !look.lines ? palette.panel : .clear)
+                            .border(look.lines ? .clear : palette.divider, width: 0.5)
+                            .overlay(alignment: .top) {
+                                if look.lines && r > 0 {
+                                    Rectangle().fill(palette.divider).frame(height: 0.5)
+                                }
+                            }
                     }
                 }
             }
         }
-        .clipShape(.rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border))
+        .clipShape(.rect(cornerRadius: look.lines ? 0 : 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).stroke(look.lines ? .clear : palette.border))
     }
 }

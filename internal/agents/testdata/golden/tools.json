@@ -66,6 +66,18 @@
         "blocks": {
           "items": {
             "properties": {
+              "align": {
+                "items": {
+                  "enum": [
+                    "",
+                    "center",
+                    "left",
+                    "right"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -207,6 +219,13 @@
               "source": {
                 "type": "string"
               },
+              "table_style": {
+                "enum": [
+                  "grid",
+                  "lines"
+                ],
+                "type": "string"
+              },
               "text": {
                 "type": "string"
               },
@@ -301,6 +320,18 @@
       "properties": {
         "block": {
           "properties": {
+            "align": {
+              "items": {
+                "enum": [
+                  "",
+                  "center",
+                  "left",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
             "chart": {
               "properties": {
                 "caption": {
@@ -442,6 +473,13 @@
             "source": {
               "type": "string"
             },
+            "table_style": {
+              "enum": [
+                "grid",
+                "lines"
+              ],
+              "type": "string"
+            },
             "text": {
               "type": "string"
             },
@@ -564,6 +602,18 @@
         "blocks": {
           "items": {
             "properties": {
+              "align": {
+                "items": {
+                  "enum": [
+                    "",
+                    "center",
+                    "left",
+                    "right"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -703,6 +753,13 @@
                 "type": "array"
               },
               "source": {
+                "type": "string"
+              },
+              "table_style": {
+                "enum": [
+                  "grid",
+                  "lines"
+                ],
                 "type": "string"
               },
               "text": {
@@ -783,6 +840,18 @@
         "blocks": {
           "items": {
             "properties": {
+              "align": {
+                "items": {
+                  "enum": [
+                    "",
+                    "center",
+                    "left",
+                    "right"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -922,6 +991,13 @@
                 "type": "array"
               },
               "source": {
+                "type": "string"
+              },
+              "table_style": {
+                "enum": [
+                  "grid",
+                  "lines"
+                ],
                 "type": "string"
               },
               "text": {
@@ -1100,6 +1176,18 @@
         "blocks": {
           "items": {
             "properties": {
+              "align": {
+                "items": {
+                  "enum": [
+                    "",
+                    "center",
+                    "left",
+                    "right"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -1239,6 +1327,13 @@
                 "type": "array"
               },
               "source": {
+                "type": "string"
+              },
+              "table_style": {
+                "enum": [
+                  "grid",
+                  "lines"
+                ],
                 "type": "string"
               },
               "text": {

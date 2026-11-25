@@ -134,8 +134,10 @@ type App struct {
 
 	dialogs                  dialogs
 	bin                      binState
-	md                       markdown.Options
-	commentMD                markdown.Options
+	md                       markdown.Options // agents' answers, their tables drawn with simple lines
+	commentMD                markdown.Options // comments, as agents' answers
+	cellMD                   markdown.Options // a cell of a table of md or commentMD
+	pageMD                   markdown.Options // a page as Markdown, as its history and the Trash show it
 	images                   *imageCache
 	downloads                map[string][]func(bool)
 	downloadFails            map[string]time.Time
@@ -377,8 +379,14 @@ func (a *App) start() error {
 			_ = mygo.Shell.OpenExternal(url)
 		}
 	}
-	a.commentMD.OnLink = a.md.OnLink
-	a.md.CodeLink, a.commentMD.CodeLink = a.codeLink, a.codeLink
+	for _, o := range []*markdown.Options{&a.commentMD, &a.cellMD, &a.pageMD} {
+		o.OnLink = a.md.OnLink
+	}
+	for _, o := range []*markdown.Options{&a.md, &a.commentMD, &a.cellMD, &a.pageMD} {
+		o.CodeLink = a.codeLink
+	}
+	linesTables(&a.md, &a.cellMD)
+	linesTables(&a.commentMD, &a.cellMD)
 	a.hub.PublicLink = a.publiclyLinked
 	go func() {
 		defer guard.Recover()

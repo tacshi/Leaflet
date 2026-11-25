@@ -3950,6 +3950,26 @@
   "@editorTableRemoveThisColumn": {
     "description": "Table block: what the − Column button does, as its tooltip and VoiceOver say: take away the column of the cell being edited."
   },
+  "editorTableSimpleLines": "Simple lines",
+  "@editorTableSimpleLines": {
+    "description": "Table block: the right-click menu item, and the button under a table while one of its cells is being edited, that switch the table between a grid and simple lines (a bold header with a rule under it and a hairline between rows, with no borders), checked or lit while on. On iPhone and iPad, the switch of the table editor."
+  },
+  "editorTableAlignLeft": "Align column left",
+  "@editorTableAlignLeft": {
+    "description": "Table block: the button (an icon) under a table while one of its cells is being edited, as its tooltip and VoiceOver say, that aligns that cell's column to the left. On iPhone and iPad, the item of the table editor's alignment menu that does the same."
+  },
+  "editorTableAlignCenter": "Center column",
+  "@editorTableAlignCenter": {
+    "description": "Table block: the button (an icon) under a table while one of its cells is being edited, as its tooltip and VoiceOver say, that centers that cell's column. On iPhone and iPad, the item of the table editor's alignment menu that does the same."
+  },
+  "editorTableAlignRight": "Align column right",
+  "@editorTableAlignRight": {
+    "description": "Table block: the button (an icon) under a table while one of its cells is being edited, as its tooltip and VoiceOver say, that aligns that cell's column to the right, as for numbers and prices. On iPhone and iPad, the item of the table editor's alignment menu that does the same."
+  },
+  "editorTableAlignment": "Column alignment",
+  "@editorTableAlignment": {
+    "description": "Table editor (iPhone and iPad): the menu under the cells that aligns the column of the cell being edited: left, center or right."
+  },
   "editorTableAddRow": "Add row",
   "@editorTableAddRow": {
     "description": "Table editor (iPhone and iPad): the button under the cells that adds a row at the end, as VoiceOver reads it."
@@ -5835,7 +5855,7 @@
   "@welcomeBlocksHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeBlocksTable": "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end.",
+  "welcomeBlocksTable": "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end. This table has **Simple lines** from its right-click menu, and its hours align right with the buttons under a cell being edited; the shortcuts table at the end keeps the grid.",
   "@welcomeBlocksTable": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -5850,6 +5870,10 @@
   "welcomeTableDue": "Due",
   "@welcomeTableDue": {
     "description": "The welcome guide page, made once on first run: a column heading of the example tables."
+  },
+  "welcomeTableHours": "Hours",
+  "@welcomeTableHours": {
+    "description": "The welcome guide: the header of the milestones table's column of hours each milestone takes, aligned right."
   },
   "welcomeTableTask": "Task",
   "@welcomeTableTask": {
@@ -5907,7 +5931,7 @@
   "@welcomeToggleInside": {
     "description": "The welcome guide page, made once on first run: the paragraph inside the example toggle (Markdown)."
   },
-  "welcomeMathDiagram": "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source.",
+  "welcomeMathDiagram": "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. A **Diagram** is Mermaid: **Edit** opens their source.",
   "@welcomeMathDiagram": {
     "description": "The welcome guide page, made once on first run: a paragraph naming blocks of the / menu (Markdown)."
   },

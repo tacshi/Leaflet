@@ -106,7 +106,8 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "image":
 				block(indent, "!"+linkTo(n.Str("alt"), kept(n)))
 			case "table":
-				block(indent, tableMarkdown(ReadableTableRows(n)))
+				_, cols := TableSize(n)
+				block(indent, tableMarkdown(ReadableTableRows(n), TableAligns(n, cols)))
 			case "chart":
 				if t := n.Str("title"); t != "" {
 					block(indent, "**"+escapeCommonMark(t)+"**")
@@ -124,7 +125,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					}
 					rows = append(rows, row)
 				}
-				block(indent, tableMarkdown(rows))
+				block(indent, tableMarkdown(rows, nil))
 				if cap := n.Str("caption"); cap != "" {
 					block(indent, "*"+escapeCommonMark(cap)+"*")
 				}
@@ -423,13 +424,23 @@ func summaryMarkdown(md string) string {
 	return strings.Join(lines, "\n")
 }
 
-func tableMarkdown(rows [][]string) string {
+// tableMarkdown is a table of rows, the first its header, whose columns
+// align as aligns says, each of those after its end as Markdown's do.
+func tableMarkdown(rows [][]string, aligns []string) string {
 	if len(rows) == 0 {
 		return ""
 	}
 	cols := 0
 	for _, r := range rows {
 		cols = max(cols, len(r))
+	}
+	rule := "|"
+	for i := range cols {
+		align := ""
+		if i < len(aligns) {
+			align = aligns[i]
+		}
+		rule += " " + tableRuleCell(align) + " |"
 	}
 	line := func(r []string) string {
 		cells := make([]string, cols)
@@ -440,7 +451,7 @@ func tableMarkdown(rows [][]string) string {
 		}
 		return "| " + strings.Join(cells, " | ") + " |"
 	}
-	lines := []string{line(rows[0]), "|" + strings.Repeat(" --- |", cols)}
+	lines := []string{line(rows[0]), rule}
 	for _, r := range rows[1:] {
 		lines = append(lines, line(r))
 	}

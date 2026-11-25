@@ -262,7 +262,7 @@ func (a *App) binShown(c *ui.Context, it store.BinItem, pal *theme.Palette) {
 			}
 			ui.Box(c).Height(10)
 			if shown := a.bin.shown; shown.of == it.BinRef && shown.md != "" {
-				markdownView(c, shown.md, &a.md).Font(theme.PageFamily(shown.md)).FontSize(size)
+				markdownView(c, shown.md, &a.pageMD).Font(theme.PageFamily(shown.md)).FontSize(size)
 			}
 		})
 	})

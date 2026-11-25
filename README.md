@@ -83,6 +83,8 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   dates, quotes, callouts, toggles, tables, code with syntax highlighting,
   math, diagrams, charts, images, files, videos, link cards and sandboxed
   interactive embeds.
+- Tables as a grid or with simple lines, a bold header and a hairline
+  between rows, each column aligned left, center or right.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
   pages, a selection toolbar with text colors, formulas typeset in the line
   from `$x^2$`, folding headings, an outline, and links to pages and to
@@ -131,6 +133,7 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   gave it, and once it reads your other pages, the web is closed to it and
   to the later turns of its chat or comment thread, whose earlier replies
   may hold what it read.
+- Agents' answers draw their tables with simple lines.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and

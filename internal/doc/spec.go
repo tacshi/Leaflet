@@ -157,6 +157,9 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		if err != nil {
 			return nil, err
 		}
+		if err := specTableLook(t, spec, cols); err != nil {
+			return nil, err
+		}
 		n = t
 	case "chart":
 		data, err := ChartData(asMap(spec["chart"]))
@@ -307,6 +310,41 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 		"series":     series,
 		"caption":    caption,
 	}, nil
+}
+
+// specTableLook gives a table the style and column alignments a spec asks
+// for, table_style and align, its cols columns' at most.
+func specTableLook(t *Node, spec map[string]any, cols int) error {
+	style, ok := spec["table_style"].(string)
+	if v := spec["table_style"]; v != nil && !ok {
+		return toolErr("table_style must be grid or lines.")
+	}
+	switch strings.TrimSpace(style) {
+	case "", "grid":
+	case TableLines:
+		SetTableStyle(t, TableLines)
+	default:
+		return toolErr("table_style must be grid or lines.")
+	}
+	const badAlign = "align takes a list of left, center or right for each column, or \"\" for the default."
+	raw, ok := spec["align"].([]any)
+	if v := spec["align"]; v != nil && !ok {
+		return toolErr(badAlign)
+	}
+	aligns := make([]string, 0, len(raw))
+	for _, a := range raw {
+		s, ok := a.(string)
+		if a != nil && !ok {
+			return toolErr(badAlign)
+		}
+		align := TableAlign(s)
+		if align == "" && strings.TrimSpace(s) != "" {
+			return toolErr(badAlign)
+		}
+		aligns = append(aligns, align)
+	}
+	SetTableAligns(t, aligns[:min(len(aligns), cols)])
+	return nil
 }
 
 func rowsOf(v any) ([][]string, bool) {
@@ -500,6 +538,7 @@ func SetTableRows(n *Node, rows [][]string) error {
 	n.Children = kept
 	n.Set("rowsLen", len(rows))
 	n.Set("colsLen", cols)
+	SetTableAligns(n, TableAligns(n, cols))
 	return nil
 }
 
@@ -610,6 +649,13 @@ func BlockViews(c *Content) []map[string]any {
 				}
 			case "table":
 				v["rows"] = TableRows(n)
+				if TableStyle(n) == TableLines {
+					v["table_style"] = TableLines
+				}
+				_, cols := TableSize(n)
+				if aligns := TableAligns(n, cols); slices.ContainsFunc(aligns, func(a string) bool { return a != "" }) {
+					v["align"] = aligns
+				}
 			case "chart":
 				v["chart"] = present(n, "chart_type", "title", "labels", "series", "caption")
 			case "embed":

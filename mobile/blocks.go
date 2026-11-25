@@ -2,6 +2,7 @@ package mobile
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/menu"
@@ -61,6 +62,28 @@ func SetTableRows(node, rows string) (_ string, err error) {
 	if err := doc.SetTableRows(&n, grid); err != nil {
 		return "", err
 	}
+	return encode(&n)
+}
+
+// SetTableLook gives the table node its style, "lines" for simple lines or
+// "" for a grid, and its columns' alignments, aligns, a JSON list of
+// "left", "center", "right" or "" for each column in order.
+func SetTableLook(node, style, aligns string) (_ string, err error) {
+	defer catch(&err)
+	var n doc.Node
+	var list []string
+	if err := json.Unmarshal([]byte(node), &n); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal([]byte(aligns), &list); err != nil {
+		return "", err
+	}
+	if n.Type != "table" {
+		return "", fmt.Errorf("block %s is a %s, not a table", n.ID, n.Type)
+	}
+	doc.SetTableStyle(&n, style)
+	_, cols := doc.TableSize(&n)
+	doc.SetTableAligns(&n, list[:min(len(list), cols)])
 	return encode(&n)
 }
 

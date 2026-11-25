@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -379,6 +380,39 @@ func TestReplaceTableWithList(t *testing.T) {
 	}
 	if len(x.Ops) != 1 || len(x.Ops[0].Node.Children) != 0 {
 		t.Errorf("ops %+v", x.Ops)
+	}
+}
+
+func TestReplaceTableKeepsItsLook(t *testing.T) {
+	table, _ := doc.TableNode([][]string{{"Item", "Price", "Note"}, {"Tea", "$3", ""}}, "t")
+	doc.SetTableStyle(table, doc.TableLines)
+	doc.SetTableAlign(table, 1, doc.AlignRight)
+	c := doc.FromBlocks([]*doc.Node{table})
+	x := executor(c)
+	rows := []any{[]any{"Item", "Price"}, []any{"Tea", "$4"}}
+	for _, tc := range []struct {
+		name   string
+		block  map[string]any
+		style  string
+		aligns []string
+	}{
+		{"none named", map[string]any{"type": "table", "rows": rows}, doc.TableLines, []string{"", "right"}},
+		{"every key, empty", map[string]any{"type": "table", "rows": rows, "table_style": "", "align": []any{}}, doc.TableLines, []string{"", "right"}},
+		{"named", map[string]any{"type": "table", "rows": rows, "table_style": "grid", "align": []any{"center", ""}}, "", []string{"center", ""}},
+	} {
+		out := x.Call("replace_block", map[string]any{"id": "t", "block": tc.block})
+		if e, ok := out["error"]; ok {
+			t.Fatalf("%s: %v", tc.name, e)
+		}
+		n := x.Ops[len(x.Ops)-1].Node
+		if doc.TableStyle(n) != tc.style || !reflect.DeepEqual(doc.TableAligns(n, 2), tc.aligns) {
+			t.Errorf("%s: style %q, aligns %q", tc.name, doc.TableStyle(n), doc.TableAligns(n, 2))
+		}
+		if err := c.Apply(x.Ops[len(x.Ops)-1]); err != nil {
+			t.Fatal(err)
+		}
+		doc.SetTableStyle(c.Find("t"), doc.TableLines)
+		doc.SetTableAligns(c.Find("t"), []string{"", doc.AlignRight})
 	}
 }
 

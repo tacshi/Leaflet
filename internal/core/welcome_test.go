@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
@@ -88,17 +89,25 @@ func TestWelcomePage(t *testing.T) {
 			t.Errorf("the guide does not say %q", says)
 		}
 	}
-	var formula, colored, highlit, notes bool
+	var formula, root, colored, highlit, notes bool
+	var tables []*doc.Node
 	for _, n := range c.All() {
 		for _, r := range n.Delta() {
 			formula = formula || r.Attrs.Math && r.Text == "E = mc^2"
+			root = root || r.Attrs.Math && r.Text == `\sqrt{a^2 + b^2}`
 			colored = colored || r.Attrs.Color != ""
 			highlit = highlit || r.Attrs.Background != ""
 		}
 		notes = notes || n.Type == "video" && strings.HasPrefix(n.Str("notes"), "0:00 ")
+		if n.Type == "table" {
+			tables = append(tables, n)
+		}
 	}
-	if !formula || !colored || !highlit || !notes {
-		t.Errorf("the guide shows a formula %v, a color %v, a highlight %v, a video's notes %v", formula, colored, highlit, notes)
+	if !formula || !root || !colored || !highlit || !notes {
+		t.Errorf("the guide shows a formula %v and one in its Math paragraph %v, a color %v, a highlight %v, a video's notes %v", formula, root, colored, highlit, notes)
+	}
+	if len(tables) != 2 || doc.TableStyle(tables[0]) != doc.TableLines || !slices.Equal(doc.TableAligns(tables[0], 4), []string{"", "", "", "right"}) || doc.TableStyle(tables[1]) != "" {
+		t.Errorf("the guide's tables do not show both looks and a column aligned right")
 	}
 	templates, _ := st.Templates()
 	if len(templates) != 1 || templates[0].Title != "Weekly team sync" || !slices.Equal(templates[0].Tags, []string{"meetings"}) {
@@ -185,7 +194,8 @@ func TestWelcomeTranslated(t *testing.T) {
 				}
 			}
 			text, english := n.Delta().Plain(), e.Delta().Plain()
-			if text != "" && text == english && !strings.ContainsAny(text, "⌘⇧") {
+			// Keys and figures, as ⌘J or 1.5, read the same in every language.
+			if text != "" && text == english && !strings.ContainsAny(text, "⌘⇧") && strings.ContainsFunc(text, unicode.IsLetter) {
 				t.Errorf("%s: %s block %q is in English", lang, n.Type, text)
 			}
 			var data, englishData []byte

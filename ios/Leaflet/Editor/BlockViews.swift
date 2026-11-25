@@ -928,6 +928,7 @@ struct TableGrid: View {
         let columns = rows.map(\.count).max() ?? 0
         let palette = BlockLook.palette
         let rowHeight = BlockCard.scaled(40)
+        let look = TableLook(node)
         return TableLayout(
             columns: columns, room: room, rowHeight: rowHeight, wrapTo: BlockCard.scaled(160)
         ) {
@@ -937,17 +938,92 @@ struct TableGrid: View {
                     .font(Fonts.pageText(size: BlockLook.textSize * 0.88))
                     .fontWeight(r == 0 ? .semibold : .regular)
                     .foregroundStyle(palette.text)
+                    .multilineTextAlignment(look.textAlignment(c))
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10)
+                    .padding(.leading, look.lines && c == 0 ? 0 : 10)
+                    .padding(.trailing, look.lines && c == columns - 1 ? 0 : 10)
                     .padding(.vertical, 8)
-                    .frame(minHeight: rowHeight, alignment: .leading)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(r == 0 ? palette.panel : .clear)
-                    .border(palette.divider, width: 0.5)
+                    .frame(minHeight: rowHeight, alignment: look.alignment(c, vertical: .center))
+                    .frame(
+                        maxWidth: .infinity, maxHeight: .infinity,
+                        alignment: look.alignment(c, vertical: .top)
+                    )
+                    .background(r == 0 && !look.lines ? palette.panel : .clear)
+                    .border(look.lines ? .clear : palette.divider, width: 0.5)
+                    .overlay(alignment: .top) {
+                        if look.lines && r > 0 {
+                            Rectangle().fill(palette.divider).frame(height: 0.5)
+                        }
+                    }
             }
         }
-        .clipShape(.rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+        .clipShape(.rect(cornerRadius: look.lines ? 0 : 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(look.lines ? .clear : palette.border, lineWidth: 1))
+    }
+}
+
+/// How a table draws: as a grid, or with simple lines (a bold header and a
+/// hairline under it and between rows, with no borders), and how each of
+/// its columns aligns: "left", "center", "right", or "" as text does.
+struct TableLook: Equatable {
+    var lines = false
+    var aligns: [String] = []
+
+    init(lines: Bool = false, aligns: [String] = []) {
+        self.lines = lines
+        self.aligns = aligns
+    }
+
+    init(_ node: DocNode) {
+        lines = node.data?["style"]?.string == "lines"
+        aligns = Self.ending(node.data?["aligns"]?.array?.map { $0.string ?? "" } ?? [])
+    }
+
+    func align(_ column: Int) -> String {
+        column >= 0 && column < aligns.count ? aligns[column] : ""
+    }
+
+    func textAlignment(_ column: Int) -> TextAlignment {
+        switch align(column) {
+        case "center": .center
+        case "right": .trailing
+        default: .leading
+        }
+    }
+
+    func alignment(_ column: Int, vertical: VerticalAlignment) -> Alignment {
+        switch align(column) {
+        case "center": Alignment(horizontal: .center, vertical: vertical)
+        case "right": Alignment(horizontal: .trailing, vertical: vertical)
+        default: Alignment(horizontal: .leading, vertical: vertical)
+        }
+    }
+
+    /// The look with column aligned so, its aligns as long as it needs.
+    func aligning(_ column: Int, _ align: String) -> TableLook {
+        var out = self
+        while out.aligns.count <= column { out.aligns.append("") }
+        out.aligns[column] = align
+        out.aligns = Self.ending(out.aligns)
+        return out
+    }
+
+    /// The look of the table with columns columns, as it keeps no
+    /// alignment for a column taken off it.
+    func keeping(columns: Int) -> TableLook {
+        var out = self
+        out.aligns = Self.ending(Array(aligns.prefix(max(columns, 0))))
+        return out
+    }
+
+    /// Aligns that end at the last column aligned otherwise than as text
+    /// does, as a table keeps them: a look put back as it was is the same.
+    private static func ending(_ aligns: [String]) -> [String] {
+        var out = aligns
+        while out.last == "" { out.removeLast() }
+        return out
     }
 }
 

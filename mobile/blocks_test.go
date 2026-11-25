@@ -84,3 +84,34 @@ func TestATableSheetSavesIntoTheTableAsItIsNow(t *testing.T) {
 		t.Error("rows that aren't JSON saved")
 	}
 }
+
+func TestATableSheetSavesTheTablesLook(t *testing.T) {
+	table, _ := doc.TableNode([][]string{{"Time", "Price", "Note"}, {"8am", "$400", "x"}}, "t")
+	raw, _ := json.Marshal(table)
+	out, err := SetTableLook(string(raw), doc.TableLines, `["","right","center","left"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got doc.Node
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if doc.TableStyle(&got) != doc.TableLines || !reflect.DeepEqual(doc.TableAligns(&got, 3), []string{"", "right", "center"}) {
+		t.Errorf("saved %v", got.Data)
+	}
+	was, _ := json.Marshal(doc.TableRows(&got))
+	out, err = ChangeTableRows(out, string(was), `[["Time","Price"],["8am","$400"]]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if aligns, _ := got.Data["aligns"].([]any); len(aligns) != 2 {
+		t.Errorf("after the sheet took a column off, aligns %v", got.Data["aligns"])
+	}
+	para, _ := json.Marshal(&doc.Node{ID: "p", Type: "paragraph"})
+	if _, err := SetTableLook(string(para), doc.TableLines, "[]"); err == nil {
+		t.Error("a paragraph took a table's look")
+	}
+}

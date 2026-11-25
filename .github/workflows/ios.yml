@@ -55,13 +55,14 @@ jobs:
           persist-credentials: false
       # SwiftLint at the commit of its 0.65.1 tag, built as Homebrew builds it.
       # The build takes minutes, so the binary is kept for the next runs, by
-      # that commit and the Swift toolchain that built it.
+      # that commit and the Swift toolchain that built it. It is saved as soon
+      # as it is built, so a run whose lint fails keeps it too.
       - name: Find the Swift toolchain
         id: toolchain
         run: echo "swift=$(xcrun swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >>"$GITHUB_OUTPUT"
       - name: Restore SwiftLint
         id: swiftlint
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/swiftlint-bin
           key: swiftlint-6aba03e3d8302b33f106e0f922210f35ca4b52cf-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.toolchain.outputs.swift }}
@@ -74,6 +75,12 @@ jobs:
           swift build --package-path "$RUNNER_TEMP/SwiftLint" --configuration release --product swiftlint
           mkdir -p "$RUNNER_TEMP/swiftlint-bin"
           cp "$RUNNER_TEMP/SwiftLint/.build/release/swiftlint" "$RUNNER_TEMP/swiftlint-bin/"
+      - name: Save SwiftLint
+        if: steps.swiftlint.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/swiftlint-bin
+          key: ${{ steps.swiftlint.outputs.cache-primary-key }}
       - name: Use SwiftLint
         run: |
           echo "$RUNNER_TEMP/swiftlint-bin" >>"$GITHUB_PATH"

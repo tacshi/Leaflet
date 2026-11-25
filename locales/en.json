@@ -1506,6 +1506,96 @@
   "@dialogCardSave": {
     "description": "The fact card dialog's button that saves the card."
   },
+  "mapModeWalk": "Walking",
+  "@mapModeWalk": {
+    "description": "A map block's route: how it goes, first in its summary line, as \"Walking · 25 min · 2 km\"."
+  },
+  "mapModeCycle": "Cycling",
+  "@mapModeCycle": {
+    "description": "A map block's route: how it goes, first in its summary line."
+  },
+  "mapModeDrive": "Driving",
+  "@mapModeDrive": {
+    "description": "A map block's route: how it goes, first in its summary line."
+  },
+  "mapModeTransit": "Public transport",
+  "@mapModeTransit": {
+    "description": "A map block's route: how it goes, first in its summary line, as \"Public transport · 43 min · 27 km\"."
+  },
+  "mapMinutes": "{n} min",
+  "@mapMinutes": {
+    "description": "A map block's route: a time in minutes, of the route or of one of its legs.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "mapHoursMinutes": "{h} h {m} min",
+  "@mapHoursMinutes": {
+    "description": "A map block's route: a time of an hour or more.",
+    "placeholders": {
+      "h": {
+        "type": "int"
+      },
+      "m": {
+        "type": "int"
+      }
+    }
+  },
+  "mapKilometers": "{km} km",
+  "@mapKilometers": {
+    "description": "A map block's route: its length in kilometers, as 27 or 2.4.",
+    "placeholders": {
+      "km": {
+        "type": "String"
+      }
+    }
+  },
+  "mapLegWalk": "Walk",
+  "@mapLegWalk": {
+    "description": "A map block's route: a leg gone on foot, in the line of its legs, as \"Walk 4 min → Bus B8 40 min\"."
+  },
+  "mapLegCycle": "Cycle",
+  "@mapLegCycle": {
+    "description": "A map block's route: a leg gone by bike, in the line of its legs."
+  },
+  "mapLegDrive": "Drive",
+  "@mapLegDrive": {
+    "description": "A map block's route: a leg gone by car, in the line of its legs."
+  },
+  "mapLegBus": "Bus",
+  "@mapLegBus": {
+    "description": "A map block's route: a leg by bus, before its line's name, as \"Bus B8\"."
+  },
+  "mapLegTram": "Tram",
+  "@mapLegTram": {
+    "description": "A map block's route: a leg by tram, before its line's name."
+  },
+  "mapLegSubway": "Metro",
+  "@mapLegSubway": {
+    "description": "A map block's route: a leg by metro or subway, before its line's name."
+  },
+  "mapLegRail": "Train",
+  "@mapLegRail": {
+    "description": "A map block's route: a leg by train, before its line's name."
+  },
+  "mapLegFerry": "Ferry",
+  "@mapLegFerry": {
+    "description": "A map block's route: a leg by ferry, before its line's name."
+  },
+  "mapLegCable": "Cable car",
+  "@mapLegCable": {
+    "description": "A map block's route: a leg by cable car or funicular, before its line's name."
+  },
+  "mapLegAir": "Flight",
+  "@mapLegAir": {
+    "description": "A map block's route: a leg by plane, before its flight's name."
+  },
+  "mapLegTransit": "Transit",
+  "@mapLegTransit": {
+    "description": "A map block's route: a leg of public transport of another kind, before its line's name."
+  },
   "dialogCardEmpty": "Give the card a title or a fact.",
   "@dialogCardEmpty": {
     "description": "The fact card dialog's error when both the title and the facts are empty."
@@ -1531,6 +1621,84 @@
         "type": "int"
       }
     }
+  },
+  "hostSlashMap": "Map",
+  "@hostSlashMap": {
+    "description": "The / menu: a map block, places on a map and a route between them."
+  },
+  "hostSlashMapHint": "Places, and a route between them",
+  "@hostSlashMapHint": {
+    "description": "The / menu: what a map block is, under its name."
+  },
+  "dialogMapTitle": "Map",
+  "@dialogMapTitle": {
+    "description": "The map dialog's title, where a map's title, places and route are written."
+  },
+  "dialogMapSubtitle": "A place a line: a name or an address to find on OpenStreetMap, or Name | lat, lng. A route goes from the first place to the last.",
+  "@dialogMapSubtitle": {
+    "description": "The map dialog: under its title, how to write the places and where the route goes."
+  },
+  "dialogMapPlaces": "Places, a line each",
+  "@dialogMapPlaces": {
+    "description": "The map dialog: placeholder of the box of places, a line each."
+  },
+  "dialogMapRoute": "Route",
+  "@dialogMapRoute": {
+    "description": "The map dialog and editor: the label of the choice of how the route goes."
+  },
+  "dialogMapNoRoute": "No route",
+  "@dialogMapNoRoute": {
+    "description": "The map dialog and editor: the choice of no route, places alone."
+  },
+  "dialogMapSave": "Save map",
+  "@dialogMapSave": {
+    "description": "The map dialog's button that finds the places and the route and saves the map."
+  },
+  "dialogMapFinding": "Finding the places and the route…",
+  "@dialogMapFinding": {
+    "description": "The map dialog, while it asks the map services for the places and the route."
+  },
+  "dialogMapNotFound": "No place named {name} was found.",
+  "@dialogMapNotFound": {
+    "description": "The map dialog's error when a search finds no place by a line's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogMapNoRouteFound": "No route was found that way from the first place to the last.",
+  "@dialogMapNoRouteFound": {
+    "description": "The map dialog's error when the router finds no route by the way chosen."
+  },
+  "dialogMapEmpty": "Name at least one place.",
+  "@dialogMapEmpty": {
+    "description": "The map dialog's error when the box of places is empty."
+  },
+  "dialogMapFailed": "The map could not be made: {error}",
+  "@dialogMapFailed": {
+    "description": "The map dialog's error when a map service could not be reached or answered with an error.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogMapPrivacy": "Places are found with Photon, and routes with OSRM or Transitous: they get the places written here.",
+  "@dialogMapPrivacy": {
+    "description": "The map dialog: under the places, which services get them, as they are on the web."
+  },
+  "editorEditMap": "Edit map",
+  "@editorEditMap": {
+    "description": "A map block's right-click menu item and hover button (Mac and PC), and its long-press menu item (iPhone and iPad), that open the map dialog."
+  },
+  "mapOpenInMaps": "Open in Maps",
+  "@mapOpenInMaps": {
+    "description": "A map block's button (Mac, iPhone and iPad) that opens its route, or its first place, in Apple's Maps app."
+  },
+  "mapOpenInOSM": "Open in OpenStreetMap",
+  "@mapOpenInOSM": {
+    "description": "A map block's button (Windows) that opens its route, or its first place, on openstreetmap.org."
   },
   "editorEditCard": "Edit card",
   "@editorEditCard": {
@@ -2598,6 +2766,10 @@
   "agentEditCard": "a card",
   "@agentEditCard": {
     "description": "A card block (facts at a glance: a title, figures or label and value lines, a note and its sources), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditMap": "a map",
+  "@agentEditMap": {
+    "description": "A map block (places, and a route between them), in agentEditInserted, agentEditWrote and agentEditRewrote."
   },
   "agentEditSubpageLink": "a subpage link",
   "@agentEditSubpageLink": {
@@ -6001,9 +6173,9 @@
   "@welcomeTableHours": {
     "description": "The welcome guide: the header of the milestones table's column of hours each milestone takes, aligned right."
   },
-  "welcomeCardsHeading": "Fact cards",
+  "welcomeCardsHeading": "Cards and maps",
   "@welcomeCardsHeading": {
-    "description": "The welcome guide: the heading of the section on fact cards."
+    "description": "The welcome guide: the heading of the section on fact cards and map blocks."
   },
   "welcomeCardsIntro": "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a picture, with a note and a chip for the pages they come from. **Edit card** in its right-click menu changes it.",
   "@welcomeCardsIntro": {
@@ -6032,6 +6204,26 @@
   "welcomeCardSource": "Leaflet on GitHub",
   "@welcomeCardSource": {
     "description": "The welcome guide's example fact card: the name of its source, Leaflet's GitHub repository."
+  },
+  "welcomeMapsIntro": "A **Map** shows places and a route between them, walking, cycling, driving or by public transport: **/** › **Map** finds the places you name. Open it full screen to look around, and **Edit map** changes its places and its route.",
+  "@welcomeMapsIntro": {
+    "description": "The welcome guide: what a map block is, before the example map."
+  },
+  "welcomeMapTitle": "A walk across the Golden Gate Bridge",
+  "@welcomeMapTitle": {
+    "description": "The welcome guide's example map: its title, a walk across the Golden Gate Bridge in San Francisco."
+  },
+  "welcomeMapFrom": "Welcome Center",
+  "@welcomeMapFrom": {
+    "description": "The welcome guide's example map: the place the walk starts, the Golden Gate Bridge Welcome Center."
+  },
+  "welcomeMapTo": "Vista Point",
+  "@welcomeMapTo": {
+    "description": "The welcome guide's example map: the place the walk ends, Vista Point at the bridge's north end."
+  },
+  "welcomeAgentsMaps": "Where agents may use the web, they find places and routes and draw them on a map, and their answers show tables, cards and maps as a page does: “@ how do I get from the airport to the old town?”",
+  "@welcomeAgentsMaps": {
+    "description": "The welcome guide, in the list of what agents do: maps and rich answers."
   },
   "welcomeTableTask": "Task",
   "@welcomeTableTask": {

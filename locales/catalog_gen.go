@@ -4363,6 +4363,270 @@ func (msgs Messages) DialogCardSave() string {
 	return Catalog.Format(msgs.locale, "dialogCardSave", nil)
 }
 
+// MapModeWalk says "Walking"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line, as "Walking
+// · 25 min · 2 km".
+func MapModeWalk() string { return In(i18n.Locale()).MapModeWalk() }
+
+// MapModeWalk says "Walking"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line, as "Walking
+// · 25 min · 2 km".
+func (msgs Messages) MapModeWalk() string {
+	return Catalog.Format(msgs.locale, "mapModeWalk", nil)
+}
+
+// MapModeCycle says "Cycling"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line.
+func MapModeCycle() string { return In(i18n.Locale()).MapModeCycle() }
+
+// MapModeCycle says "Cycling"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line.
+func (msgs Messages) MapModeCycle() string {
+	return Catalog.Format(msgs.locale, "mapModeCycle", nil)
+}
+
+// MapModeDrive says "Driving"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line.
+func MapModeDrive() string { return In(i18n.Locale()).MapModeDrive() }
+
+// MapModeDrive says "Driving"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line.
+func (msgs Messages) MapModeDrive() string {
+	return Catalog.Format(msgs.locale, "mapModeDrive", nil)
+}
+
+// MapModeTransit says "Public transport"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line, as "Public
+// transport · 43 min · 27 km".
+func MapModeTransit() string { return In(i18n.Locale()).MapModeTransit() }
+
+// MapModeTransit says "Public transport"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line, as "Public
+// transport · 43 min · 27 km".
+func (msgs Messages) MapModeTransit() string {
+	return Catalog.Format(msgs.locale, "mapModeTransit", nil)
+}
+
+// MapMinutes says "{n} min"
+// in the language the app shows.
+//
+// A map block's route: a time in minutes, of the route or of one of its
+// legs.
+func MapMinutes(n int) string { return In(i18n.Locale()).MapMinutes(n) }
+
+// MapMinutes says "{n} min"
+// in the language of msgs.
+//
+// A map block's route: a time in minutes, of the route or of one of its
+// legs.
+func (msgs Messages) MapMinutes(n int) string {
+	return Catalog.Format(msgs.locale, "mapMinutes", map[string]any{"n": n})
+}
+
+// MapHoursMinutes says "{h} h {m} min"
+// in the language the app shows.
+//
+// A map block's route: a time of an hour or more.
+func MapHoursMinutes(h int, m int) string { return In(i18n.Locale()).MapHoursMinutes(h, m) }
+
+// MapHoursMinutes says "{h} h {m} min"
+// in the language of msgs.
+//
+// A map block's route: a time of an hour or more.
+func (msgs Messages) MapHoursMinutes(h int, m int) string {
+	return Catalog.Format(msgs.locale, "mapHoursMinutes", map[string]any{"h": h, "m": m})
+}
+
+// MapKilometers says "{km} km"
+// in the language the app shows.
+//
+// A map block's route: its length in kilometers, as 27 or 2.4.
+func MapKilometers(km string) string { return In(i18n.Locale()).MapKilometers(km) }
+
+// MapKilometers says "{km} km"
+// in the language of msgs.
+//
+// A map block's route: its length in kilometers, as 27 or 2.4.
+func (msgs Messages) MapKilometers(km string) string {
+	return Catalog.Format(msgs.locale, "mapKilometers", map[string]any{"km": km})
+}
+
+// MapLegWalk says "Walk"
+// in the language the app shows.
+//
+// A map block's route: a leg gone on foot, in the line of its legs, as
+// "Walk 4 min → Bus B8 40 min".
+func MapLegWalk() string { return In(i18n.Locale()).MapLegWalk() }
+
+// MapLegWalk says "Walk"
+// in the language of msgs.
+//
+// A map block's route: a leg gone on foot, in the line of its legs, as
+// "Walk 4 min → Bus B8 40 min".
+func (msgs Messages) MapLegWalk() string {
+	return Catalog.Format(msgs.locale, "mapLegWalk", nil)
+}
+
+// MapLegCycle says "Cycle"
+// in the language the app shows.
+//
+// A map block's route: a leg gone by bike, in the line of its legs.
+func MapLegCycle() string { return In(i18n.Locale()).MapLegCycle() }
+
+// MapLegCycle says "Cycle"
+// in the language of msgs.
+//
+// A map block's route: a leg gone by bike, in the line of its legs.
+func (msgs Messages) MapLegCycle() string {
+	return Catalog.Format(msgs.locale, "mapLegCycle", nil)
+}
+
+// MapLegDrive says "Drive"
+// in the language the app shows.
+//
+// A map block's route: a leg gone by car, in the line of its legs.
+func MapLegDrive() string { return In(i18n.Locale()).MapLegDrive() }
+
+// MapLegDrive says "Drive"
+// in the language of msgs.
+//
+// A map block's route: a leg gone by car, in the line of its legs.
+func (msgs Messages) MapLegDrive() string {
+	return Catalog.Format(msgs.locale, "mapLegDrive", nil)
+}
+
+// MapLegBus says "Bus"
+// in the language the app shows.
+//
+// A map block's route: a leg by bus, before its line's name, as "Bus B8".
+func MapLegBus() string { return In(i18n.Locale()).MapLegBus() }
+
+// MapLegBus says "Bus"
+// in the language of msgs.
+//
+// A map block's route: a leg by bus, before its line's name, as "Bus B8".
+func (msgs Messages) MapLegBus() string {
+	return Catalog.Format(msgs.locale, "mapLegBus", nil)
+}
+
+// MapLegTram says "Tram"
+// in the language the app shows.
+//
+// A map block's route: a leg by tram, before its line's name.
+func MapLegTram() string { return In(i18n.Locale()).MapLegTram() }
+
+// MapLegTram says "Tram"
+// in the language of msgs.
+//
+// A map block's route: a leg by tram, before its line's name.
+func (msgs Messages) MapLegTram() string {
+	return Catalog.Format(msgs.locale, "mapLegTram", nil)
+}
+
+// MapLegSubway says "Metro"
+// in the language the app shows.
+//
+// A map block's route: a leg by metro or subway, before its line's name.
+func MapLegSubway() string { return In(i18n.Locale()).MapLegSubway() }
+
+// MapLegSubway says "Metro"
+// in the language of msgs.
+//
+// A map block's route: a leg by metro or subway, before its line's name.
+func (msgs Messages) MapLegSubway() string {
+	return Catalog.Format(msgs.locale, "mapLegSubway", nil)
+}
+
+// MapLegRail says "Train"
+// in the language the app shows.
+//
+// A map block's route: a leg by train, before its line's name.
+func MapLegRail() string { return In(i18n.Locale()).MapLegRail() }
+
+// MapLegRail says "Train"
+// in the language of msgs.
+//
+// A map block's route: a leg by train, before its line's name.
+func (msgs Messages) MapLegRail() string {
+	return Catalog.Format(msgs.locale, "mapLegRail", nil)
+}
+
+// MapLegFerry says "Ferry"
+// in the language the app shows.
+//
+// A map block's route: a leg by ferry, before its line's name.
+func MapLegFerry() string { return In(i18n.Locale()).MapLegFerry() }
+
+// MapLegFerry says "Ferry"
+// in the language of msgs.
+//
+// A map block's route: a leg by ferry, before its line's name.
+func (msgs Messages) MapLegFerry() string {
+	return Catalog.Format(msgs.locale, "mapLegFerry", nil)
+}
+
+// MapLegCable says "Cable car"
+// in the language the app shows.
+//
+// A map block's route: a leg by cable car or funicular, before its line's
+// name.
+func MapLegCable() string { return In(i18n.Locale()).MapLegCable() }
+
+// MapLegCable says "Cable car"
+// in the language of msgs.
+//
+// A map block's route: a leg by cable car or funicular, before its line's
+// name.
+func (msgs Messages) MapLegCable() string {
+	return Catalog.Format(msgs.locale, "mapLegCable", nil)
+}
+
+// MapLegAir says "Flight"
+// in the language the app shows.
+//
+// A map block's route: a leg by plane, before its flight's name.
+func MapLegAir() string { return In(i18n.Locale()).MapLegAir() }
+
+// MapLegAir says "Flight"
+// in the language of msgs.
+//
+// A map block's route: a leg by plane, before its flight's name.
+func (msgs Messages) MapLegAir() string {
+	return Catalog.Format(msgs.locale, "mapLegAir", nil)
+}
+
+// MapLegTransit says "Transit"
+// in the language the app shows.
+//
+// A map block's route: a leg of public transport of another kind, before
+// its line's name.
+func MapLegTransit() string { return In(i18n.Locale()).MapLegTransit() }
+
+// MapLegTransit says "Transit"
+// in the language of msgs.
+//
+// A map block's route: a leg of public transport of another kind, before
+// its line's name.
+func (msgs Messages) MapLegTransit() string {
+	return Catalog.Format(msgs.locale, "mapLegTransit", nil)
+}
+
 // DialogCardEmpty says "Give the card a title or a fact."
 // in the language the app shows.
 //
@@ -4423,6 +4687,262 @@ func DialogCardTooManyFacts(count int) string { return In(i18n.Locale()).DialogC
 // holds.
 func (msgs Messages) DialogCardTooManyFacts(count int) string {
 	return Catalog.Format(msgs.locale, "dialogCardTooManyFacts", map[string]any{"count": count})
+}
+
+// HostSlashMap says "Map"
+// in the language the app shows.
+//
+// The / menu: a map block, places on a map and a route between them.
+func HostSlashMap() string { return In(i18n.Locale()).HostSlashMap() }
+
+// HostSlashMap says "Map"
+// in the language of msgs.
+//
+// The / menu: a map block, places on a map and a route between them.
+func (msgs Messages) HostSlashMap() string {
+	return Catalog.Format(msgs.locale, "hostSlashMap", nil)
+}
+
+// HostSlashMapHint says "Places, and a route between them"
+// in the language the app shows.
+//
+// The / menu: what a map block is, under its name.
+func HostSlashMapHint() string { return In(i18n.Locale()).HostSlashMapHint() }
+
+// HostSlashMapHint says "Places, and a route between them"
+// in the language of msgs.
+//
+// The / menu: what a map block is, under its name.
+func (msgs Messages) HostSlashMapHint() string {
+	return Catalog.Format(msgs.locale, "hostSlashMapHint", nil)
+}
+
+// DialogMapTitle says "Map"
+// in the language the app shows.
+//
+// The map dialog's title, where a map's title, places and route are
+// written.
+func DialogMapTitle() string { return In(i18n.Locale()).DialogMapTitle() }
+
+// DialogMapTitle says "Map"
+// in the language of msgs.
+//
+// The map dialog's title, where a map's title, places and route are
+// written.
+func (msgs Messages) DialogMapTitle() string {
+	return Catalog.Format(msgs.locale, "dialogMapTitle", nil)
+}
+
+// DialogMapSubtitle says "A place a line: a name or an address to find on OpenStreetMap, or Name | lat, lng. A route goes from the first place …"
+// in the language the app shows.
+//
+// The map dialog: under its title, how to write the places and where the
+// route goes.
+func DialogMapSubtitle() string { return In(i18n.Locale()).DialogMapSubtitle() }
+
+// DialogMapSubtitle says "A place a line: a name or an address to find on OpenStreetMap, or Name | lat, lng. A route goes from the first place …"
+// in the language of msgs.
+//
+// The map dialog: under its title, how to write the places and where the
+// route goes.
+func (msgs Messages) DialogMapSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogMapSubtitle", nil)
+}
+
+// DialogMapPlaces says "Places, a line each"
+// in the language the app shows.
+//
+// The map dialog: placeholder of the box of places, a line each.
+func DialogMapPlaces() string { return In(i18n.Locale()).DialogMapPlaces() }
+
+// DialogMapPlaces says "Places, a line each"
+// in the language of msgs.
+//
+// The map dialog: placeholder of the box of places, a line each.
+func (msgs Messages) DialogMapPlaces() string {
+	return Catalog.Format(msgs.locale, "dialogMapPlaces", nil)
+}
+
+// DialogMapRoute says "Route"
+// in the language the app shows.
+//
+// The map dialog and editor: the label of the choice of how the route goes.
+func DialogMapRoute() string { return In(i18n.Locale()).DialogMapRoute() }
+
+// DialogMapRoute says "Route"
+// in the language of msgs.
+//
+// The map dialog and editor: the label of the choice of how the route goes.
+func (msgs Messages) DialogMapRoute() string {
+	return Catalog.Format(msgs.locale, "dialogMapRoute", nil)
+}
+
+// DialogMapNoRoute says "No route"
+// in the language the app shows.
+//
+// The map dialog and editor: the choice of no route, places alone.
+func DialogMapNoRoute() string { return In(i18n.Locale()).DialogMapNoRoute() }
+
+// DialogMapNoRoute says "No route"
+// in the language of msgs.
+//
+// The map dialog and editor: the choice of no route, places alone.
+func (msgs Messages) DialogMapNoRoute() string {
+	return Catalog.Format(msgs.locale, "dialogMapNoRoute", nil)
+}
+
+// DialogMapSave says "Save map"
+// in the language the app shows.
+//
+// The map dialog's button that finds the places and the route and saves the
+// map.
+func DialogMapSave() string { return In(i18n.Locale()).DialogMapSave() }
+
+// DialogMapSave says "Save map"
+// in the language of msgs.
+//
+// The map dialog's button that finds the places and the route and saves the
+// map.
+func (msgs Messages) DialogMapSave() string {
+	return Catalog.Format(msgs.locale, "dialogMapSave", nil)
+}
+
+// DialogMapFinding says "Finding the places and the route…"
+// in the language the app shows.
+//
+// The map dialog, while it asks the map services for the places and the
+// route.
+func DialogMapFinding() string { return In(i18n.Locale()).DialogMapFinding() }
+
+// DialogMapFinding says "Finding the places and the route…"
+// in the language of msgs.
+//
+// The map dialog, while it asks the map services for the places and the
+// route.
+func (msgs Messages) DialogMapFinding() string {
+	return Catalog.Format(msgs.locale, "dialogMapFinding", nil)
+}
+
+// DialogMapNotFound says "No place named {name} was found."
+// in the language the app shows.
+//
+// The map dialog's error when a search finds no place by a line's name.
+func DialogMapNotFound(name string) string { return In(i18n.Locale()).DialogMapNotFound(name) }
+
+// DialogMapNotFound says "No place named {name} was found."
+// in the language of msgs.
+//
+// The map dialog's error when a search finds no place by a line's name.
+func (msgs Messages) DialogMapNotFound(name string) string {
+	return Catalog.Format(msgs.locale, "dialogMapNotFound", map[string]any{"name": name})
+}
+
+// DialogMapNoRouteFound says "No route was found that way from the first place to the last."
+// in the language the app shows.
+//
+// The map dialog's error when the router finds no route by the way chosen.
+func DialogMapNoRouteFound() string { return In(i18n.Locale()).DialogMapNoRouteFound() }
+
+// DialogMapNoRouteFound says "No route was found that way from the first place to the last."
+// in the language of msgs.
+//
+// The map dialog's error when the router finds no route by the way chosen.
+func (msgs Messages) DialogMapNoRouteFound() string {
+	return Catalog.Format(msgs.locale, "dialogMapNoRouteFound", nil)
+}
+
+// DialogMapEmpty says "Name at least one place."
+// in the language the app shows.
+//
+// The map dialog's error when the box of places is empty.
+func DialogMapEmpty() string { return In(i18n.Locale()).DialogMapEmpty() }
+
+// DialogMapEmpty says "Name at least one place."
+// in the language of msgs.
+//
+// The map dialog's error when the box of places is empty.
+func (msgs Messages) DialogMapEmpty() string {
+	return Catalog.Format(msgs.locale, "dialogMapEmpty", nil)
+}
+
+// DialogMapFailed says "The map could not be made: {error}"
+// in the language the app shows.
+//
+// The map dialog's error when a map service could not be reached or
+// answered with an error.
+func DialogMapFailed(error string) string { return In(i18n.Locale()).DialogMapFailed(error) }
+
+// DialogMapFailed says "The map could not be made: {error}"
+// in the language of msgs.
+//
+// The map dialog's error when a map service could not be reached or
+// answered with an error.
+func (msgs Messages) DialogMapFailed(error string) string {
+	return Catalog.Format(msgs.locale, "dialogMapFailed", map[string]any{"error": error})
+}
+
+// DialogMapPrivacy says "Places are found with Photon, and routes with OSRM or Transitous: they get the places written here."
+// in the language the app shows.
+//
+// The map dialog: under the places, which services get them, as they are on
+// the web.
+func DialogMapPrivacy() string { return In(i18n.Locale()).DialogMapPrivacy() }
+
+// DialogMapPrivacy says "Places are found with Photon, and routes with OSRM or Transitous: they get the places written here."
+// in the language of msgs.
+//
+// The map dialog: under the places, which services get them, as they are on
+// the web.
+func (msgs Messages) DialogMapPrivacy() string {
+	return Catalog.Format(msgs.locale, "dialogMapPrivacy", nil)
+}
+
+// EditorEditMap says "Edit map"
+// in the language the app shows.
+//
+// A map block's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the map dialog.
+func EditorEditMap() string { return In(i18n.Locale()).EditorEditMap() }
+
+// EditorEditMap says "Edit map"
+// in the language of msgs.
+//
+// A map block's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the map dialog.
+func (msgs Messages) EditorEditMap() string {
+	return Catalog.Format(msgs.locale, "editorEditMap", nil)
+}
+
+// MapOpenInMaps says "Open in Maps"
+// in the language the app shows.
+//
+// A map block's button (Mac, iPhone and iPad) that opens its route, or its
+// first place, in Apple's Maps app.
+func MapOpenInMaps() string { return In(i18n.Locale()).MapOpenInMaps() }
+
+// MapOpenInMaps says "Open in Maps"
+// in the language of msgs.
+//
+// A map block's button (Mac, iPhone and iPad) that opens its route, or its
+// first place, in Apple's Maps app.
+func (msgs Messages) MapOpenInMaps() string {
+	return Catalog.Format(msgs.locale, "mapOpenInMaps", nil)
+}
+
+// MapOpenInOSM says "Open in OpenStreetMap"
+// in the language the app shows.
+//
+// A map block's button (Windows) that opens its route, or its first place,
+// on openstreetmap.org.
+func MapOpenInOSM() string { return In(i18n.Locale()).MapOpenInOSM() }
+
+// MapOpenInOSM says "Open in OpenStreetMap"
+// in the language of msgs.
+//
+// A map block's button (Windows) that opens its route, or its first place,
+// on openstreetmap.org.
+func (msgs Messages) MapOpenInOSM() string {
+	return Catalog.Format(msgs.locale, "mapOpenInOSM", nil)
 }
 
 // EditorEditCard says "Edit card"
@@ -7303,6 +7823,22 @@ func AgentEditCard() string { return In(i18n.Locale()).AgentEditCard() }
 // agentEditRewrote.
 func (msgs Messages) AgentEditCard() string {
 	return Catalog.Format(msgs.locale, "agentEditCard", nil)
+}
+
+// AgentEditMap says "a map"
+// in the language the app shows.
+//
+// A map block (places, and a route between them), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func AgentEditMap() string { return In(i18n.Locale()).AgentEditMap() }
+
+// AgentEditMap says "a map"
+// in the language of msgs.
+//
+// A map block (places, and a route between them), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditMap() string {
+	return Catalog.Format(msgs.locale, "agentEditMap", nil)
 }
 
 // AgentEditSubpageLink says "a subpage link"
@@ -17109,16 +17645,18 @@ func (msgs Messages) WelcomeTableHours() string {
 	return Catalog.Format(msgs.locale, "welcomeTableHours", nil)
 }
 
-// WelcomeCardsHeading says "Fact cards"
+// WelcomeCardsHeading says "Cards and maps"
 // in the language the app shows.
 //
-// The welcome guide: the heading of the section on fact cards.
+// The welcome guide: the heading of the section on fact cards and map
+// blocks.
 func WelcomeCardsHeading() string { return In(i18n.Locale()).WelcomeCardsHeading() }
 
-// WelcomeCardsHeading says "Fact cards"
+// WelcomeCardsHeading says "Cards and maps"
 // in the language of msgs.
 //
-// The welcome guide: the heading of the section on fact cards.
+// The welcome guide: the heading of the section on fact cards and map
+// blocks.
 func (msgs Messages) WelcomeCardsHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeCardsHeading", nil)
 }
@@ -17229,6 +17767,82 @@ func WelcomeCardSource() string { return In(i18n.Locale()).WelcomeCardSource() }
 // GitHub repository.
 func (msgs Messages) WelcomeCardSource() string {
 	return Catalog.Format(msgs.locale, "welcomeCardSource", nil)
+}
+
+// WelcomeMapsIntro says "A **Map** shows places and a route between them, walking, cycling, driving or by public transport: **/** › **Map** …"
+// in the language the app shows.
+//
+// The welcome guide: what a map block is, before the example map.
+func WelcomeMapsIntro() string { return In(i18n.Locale()).WelcomeMapsIntro() }
+
+// WelcomeMapsIntro says "A **Map** shows places and a route between them, walking, cycling, driving or by public transport: **/** › **Map** …"
+// in the language of msgs.
+//
+// The welcome guide: what a map block is, before the example map.
+func (msgs Messages) WelcomeMapsIntro() string {
+	return Catalog.Format(msgs.locale, "welcomeMapsIntro", nil)
+}
+
+// WelcomeMapTitle says "A walk across the Golden Gate Bridge"
+// in the language the app shows.
+//
+// The welcome guide's example map: its title, a walk across the Golden Gate
+// Bridge in San Francisco.
+func WelcomeMapTitle() string { return In(i18n.Locale()).WelcomeMapTitle() }
+
+// WelcomeMapTitle says "A walk across the Golden Gate Bridge"
+// in the language of msgs.
+//
+// The welcome guide's example map: its title, a walk across the Golden Gate
+// Bridge in San Francisco.
+func (msgs Messages) WelcomeMapTitle() string {
+	return Catalog.Format(msgs.locale, "welcomeMapTitle", nil)
+}
+
+// WelcomeMapFrom says "Welcome Center"
+// in the language the app shows.
+//
+// The welcome guide's example map: the place the walk starts, the Golden
+// Gate Bridge Welcome Center.
+func WelcomeMapFrom() string { return In(i18n.Locale()).WelcomeMapFrom() }
+
+// WelcomeMapFrom says "Welcome Center"
+// in the language of msgs.
+//
+// The welcome guide's example map: the place the walk starts, the Golden
+// Gate Bridge Welcome Center.
+func (msgs Messages) WelcomeMapFrom() string {
+	return Catalog.Format(msgs.locale, "welcomeMapFrom", nil)
+}
+
+// WelcomeMapTo says "Vista Point"
+// in the language the app shows.
+//
+// The welcome guide's example map: the place the walk ends, Vista Point at
+// the bridge's north end.
+func WelcomeMapTo() string { return In(i18n.Locale()).WelcomeMapTo() }
+
+// WelcomeMapTo says "Vista Point"
+// in the language of msgs.
+//
+// The welcome guide's example map: the place the walk ends, Vista Point at
+// the bridge's north end.
+func (msgs Messages) WelcomeMapTo() string {
+	return Catalog.Format(msgs.locale, "welcomeMapTo", nil)
+}
+
+// WelcomeAgentsMaps says "Where agents may use the web, they find places and routes and draw them on a map, and their answers show tables, card…"
+// in the language the app shows.
+//
+// The welcome guide, in the list of what agents do: maps and rich answers.
+func WelcomeAgentsMaps() string { return In(i18n.Locale()).WelcomeAgentsMaps() }
+
+// WelcomeAgentsMaps says "Where agents may use the web, they find places and routes and draw them on a map, and their answers show tables, card…"
+// in the language of msgs.
+//
+// The welcome guide, in the list of what agents do: maps and rich answers.
+func (msgs Messages) WelcomeAgentsMaps() string {
+	return Catalog.Format(msgs.locale, "welcomeAgentsMaps", nil)
 }
 
 // WelcomeTableTask says "Task"

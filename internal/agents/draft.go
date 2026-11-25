@@ -58,6 +58,12 @@ func (x *Executor) Draft(name, raw string) {
 	}
 	if name == "write_markdown" {
 		md, _ := args["markdown"].(string)
+		// A map fence still being written is left as it is until it closes.
+		md, err := x.mapFences(md)
+		if err != nil {
+			x.draft.frozen = true
+			return
+		}
 		nodes := doc.MarkdownBlocks(md)
 		if !x.fits(nodes) {
 			return
@@ -72,7 +78,7 @@ func (x *Executor) Draft(name, raw string) {
 		if t, _ := m["type"].(string); i == len(list)-1 && !doc.TextTypes[t] {
 			break
 		}
-		n, err := doc.SpecToNode(m, "", x.Ctx.AgentName)
+		n, err := x.draftedNode(m)
 		if err != nil {
 			if i < len(list)-1 {
 				x.draft.frozen = true
@@ -85,6 +91,21 @@ func (x *Executor) Draft(name, raw string) {
 		return
 	}
 	_ = x.syncDraft(nodes, len(list)-1)
+}
+
+// draftedNode is the block a spec of insert_blocks makes, its map's route
+// the route find_route gave its id, as the whole call's blocks are; a spec
+// that is no object makes none, as the call refuses it.
+func (x *Executor) draftedNode(spec map[string]any) (*doc.Node, error) {
+	if spec == nil {
+		return nil, terr("Each block must be an object.")
+	}
+	resolved, err := x.mapSpec(spec)
+	if err != nil {
+		return nil, err
+	}
+	m, _ := resolved.(map[string]any)
+	return doc.SpecToNode(m, "", x.Ctx.AgentName)
 }
 
 func (x *Executor) fits(nodes []*doc.Node) bool {
@@ -129,6 +150,10 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 	if json.Unmarshal([]byte(raw), &args) != nil {
 		return fail(terr("Arguments were not valid JSON."))
 	}
+	args, err := x.withRoutes(name, args)
+	if err != nil {
+		return fail(err)
+	}
 	var nodes []*doc.Node
 	if name == "write_markdown" {
 		md, _ := args["markdown"].(string)
@@ -138,11 +163,8 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 		if err := doc.CallNodes(nodes); err != nil {
 			return fail(err)
 		}
-	} else {
-		var err error
-		if nodes, err = x.specs(args["blocks"]); err != nil {
-			return fail(err)
-		}
+	} else if nodes, err = x.specs(args["blocks"]); err != nil {
+		return fail(err)
 	}
 	if err := x.room(nodes); err != nil {
 		return fail(err)

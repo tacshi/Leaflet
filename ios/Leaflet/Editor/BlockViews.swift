@@ -118,6 +118,7 @@ struct BlockCard: View {
         case "video": BlockHeights.of(node.id, width: width) ?? min(width * 9 / 16, 420) + 44
         case "chart": scaled(300)
         case "card": BlockHeights.of(node.id, width: width) ?? scaled(160)
+        case "map": BlockHeights.of(node.id, width: width) ?? MapBlockView.mapHeight + scaled(80)
         case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         case "recording", "file": BlockHeights.of(node.id, width: width) ?? scaled(64)
         case "embed":
@@ -157,6 +158,8 @@ struct BlockCard: View {
             LinkCardBlock(node: node)
         case "card":
             FactCardView(node: node, onHeight: onHeight)
+        case "map":
+            MapBlockView(node: node, onHeight: onHeight)
         case "file":
             FileBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         default:
@@ -783,6 +786,7 @@ struct CardBlock: View {
         case "table": L.hostSlashTable
         case "chart": L.hostSlashChart
         case "card": L.hostSlashCard
+        case "map": L.hostSlashMap
         case "math_equation": L.hostSlashMath
         case "diagram": L.hostSlashDiagram
         case "divider": L.hostSlashDivider

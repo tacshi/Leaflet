@@ -146,11 +146,15 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 // the tools or without them.
 const cardFence = "a ```card fence holding a card's JSON, {\"layout\": \"figures\" or \"details\", \"icon\", \"title\", \"image\", \"facts\": [{\"label\", \"value\"}], \"note\", \"sources\": [{\"url\", \"title\"}]}"
 
+// mapPrompt says how to show places and routes, with the tools that find
+// them, offered with the web's.
+const mapPrompt = "- To show where places are, or how to go from one to another, find them with find_place and find_route, then show them on a map: a map block, where you write in a page, with the places and the route's id, or in your reply a ```map fence holding {\"title\", \"places\", \"route\": id}. Say the route in words too, or in a card: its time and its legs, as find_route gave them, never guessed.\n"
+
 func webPrompt(search bool) string {
 	if search {
-		return "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links, each one a search's results or a page you read link to, not one their text only names: a call that writes any other address is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n"
+		return "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links, each one a search's results or a page you read link to, not one their text only names: a call that writes any other address is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n" + mapPrompt
 	}
-	return "- You can read a web page with read_web_page, one the user gave or that is on this page; you cannot search the web. Once you have read a page, link only to an address the user gave, one on this page, or one a page you read links to: a call that writes any other is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n"
+	return "- You can read a web page with read_web_page, one the user gave or that is on this page; you cannot search the web. Once you have read a page, link only to an address the user gave, one on this page, or one a page you read links to: a call that writes any other is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n" + mapPrompt
 }
 
 func WorkspacePrompt(agentName string, reading, supportsTools, web, search bool) string {

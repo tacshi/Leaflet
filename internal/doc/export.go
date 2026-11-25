@@ -152,6 +152,8 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "card":
 				block(indent, cardMarkdown(CardOf(n), link))
+			case "map":
+				block(indent, mapMarkdown(msgs, MapOf(n), link))
 			case "file":
 				block(indent, linkTo(fileTitle(n), kept(n)))
 				to := href(n.Str("url"))

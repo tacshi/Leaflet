@@ -50,6 +50,7 @@ func Slash(templates []Item) []Item {
 		{"video", locales.HostSlashVideo(), locales.HostSlashVideoHint(), "play", blocks, "video youtube vimeo bilibili dailymotion niconico movie film mp4"},
 		{"link_preview", locales.HostSlashLinkCard(), locales.HostSlashLinkCardHint(), "globe", blocks, "link card bookmark preview url web"},
 		{"card", locales.HostSlashCard(), locales.HostSlashCardHint(), "id-card", blocks, "card fact facts figures details info summary key"},
+		{"map", locales.HostSlashMap(), locales.HostSlashMapHint(), "map", blocks, "map route directions place location transit bus walk drive"},
 		{"file", locales.HostSlashFile(), locales.HostSlashFileHint(), "paperclip", blocks, "file attach attachment upload document pdf"},
 		{"recording", locales.CommonRecording(), locales.HostSlashRecordingHint(), "audio-lines", blocks, "record audio voice transcript"},
 	}

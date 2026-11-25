@@ -88,6 +88,11 @@ iPad app is SwiftUI and UIKit, on the same Go core.
 - Fact cards, for facts at a glance under a title and an icon: figures
   large side by side, as a trip's time and fare, or details a line each
   beside a picture, with a note and a chip for the pages they come from.
+- Maps of places and of a route between them, walking, cycling, driving or
+  by public transport, each bus or train line in its own color: on
+  OpenFreeMap's map on the Mac and Windows, on Apple's on iPhone and iPad.
+  Places are found with Photon, and routes with FOSSGIS's OSRM or
+  Transitous, which get the places asked for.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
   pages, a selection toolbar with text colors, formulas typeset in the line
   from `$x^2$`, folding headings, an outline, and links to pages and to
@@ -136,8 +141,9 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   gave it, and once it reads your other pages, the web is closed to it and
   to the later turns of its chat or comment thread, whose earlier replies
   may hold what it read.
-- Agents' answers show cards as a page does, and draw their tables with
-  simple lines.
+- With the web, agents also find places and routes (`find_place`,
+  `find_route`) and show them as maps, in a page or in their answers, which
+  show cards, simple-lines tables and maps as a page does.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
@@ -302,6 +308,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 | `move_folder` | Move a folder into another folder or to the top level |
 | `write_markdown`, `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 | `upload_files` | Add pictures, audio, video and PDFs on this computer to a page, by their paths |
+| `find_place`, `find_route` | Find places and routes, for a map block to show by the route's id, through Photon, OSRM and Transitous |
 
 The server opens the same database as the app, so it works with the app
 open or closed. Pages shared with you to view are read-only. Edits keep a
@@ -470,12 +477,13 @@ rules.
 | `internal/editor` | The block editor: model, editing, layout, input and blocks |
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
 | `internal/menu`, `internal/shortcut` | What the `/` and `@` menus offer, and what Markdown typed in a page becomes, for both apps' editors |
-| `internal/rendered` | The pages that draw diagrams (Pele) and hold embeds, in frames with no network |
+| `internal/rendered` | The pages that draw diagrams (Pele) and hold embeds, in frames with no network, and maps (MapLibre), which reach only their tile server |
 | `internal/mathtex` | Formulas laid out from TeX with Untie, for both apps to draw and for web pages as SVG |
 | `internal/webpage` | A page as a web page that stands alone, as a public link shares it and Export › PDF prints it, on both apps |
 | `internal/starters` | The templates that come with Leaflet |
 | `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
 | `internal/web` | Link cards, pictures, video info, videos' captions and pages for agents, read from public addresses only |
+| `internal/maps` | Places and routes for map blocks, from Photon, FOSSGIS's OSRM and Transitous |
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |
@@ -529,9 +537,15 @@ Open Font License (`internal/theme/fonts/OFL-*.txt`),
 (`internal/theme/icons/LICENSE`),
 [Pele](https://github.com/obsidianmd/pele) under the MIT license for
 diagrams ([`internal/rendered/third_party`](internal/rendered/third_party/README.md)),
-and, for formulas, [Untie](https://github.com/caelyreth/untie) under the
+[MapLibre GL JS](https://maplibre.org) under the BSD-3-Clause license for
+maps (same folder), and, for formulas, [Untie](https://github.com/caelyreth/untie) under the
 Apache 2.0 license with the New Computer Modern Math font under the GUST
 Font License (`internal/mathtex/font/GUST-FONT-LICENSE.txt`).
+Maps show [OpenStreetMap](https://www.openstreetmap.org/copyright) data, ©
+its contributors, on [OpenFreeMap](https://openfreemap.org)'s tiles; places
+come from [Photon](https://photon.komoot.io), and routes from the
+[FOSSGIS](https://routing.openstreetmap.de) servers' OSRM and from
+[Transitous](https://transitous.org/sources/).
 
 ## License
 

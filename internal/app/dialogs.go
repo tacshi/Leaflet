@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -118,6 +119,20 @@ type dialogs struct {
 	chartCap    string
 	chartError  string
 
+	mapOpen   bool
+	mapID     string
+	mapEditor *editor.Editor
+	mapWas    doc.Map
+	mapTitle  string
+	mapPlaces string
+	mapMode   int
+	mapBusy   bool
+	mapError  string
+	// mapRun counts the map dialog's searches: one that ends after another
+	// began, or after the dialog closed, is let go.
+	mapRun    int
+	mapCancel context.CancelFunc
+
 	cardOpen    bool
 	cardID      string
 	cardEditor  *editor.Editor
@@ -193,6 +208,12 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.cardOpen {
 		a.cardDialog(c)
+	}
+	if d.mapOpen {
+		a.mapDialog(c)
+	} else if d.mapCancel != nil {
+		// Closed while it searched, by its ✕, Escape or a click outside.
+		d.stopMap()
 	}
 	if d.embedOpen {
 		a.embedDialog(c)

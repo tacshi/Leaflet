@@ -13,6 +13,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/locales"
@@ -1466,5 +1467,49 @@ func TestNestedFolders(t *testing.T) {
 	}
 	if parents["Home"] != work || parents["Plans"] != nil || parents["Work"] != nil {
 		t.Errorf("folders %v", out["folders"])
+	}
+}
+
+func TestFindRouteThenAMapAcrossCalls(t *testing.T) {
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "0.1.0")
+	s.pages.findPlaces = func(q string, _ *doc.LatLng) ([]mapsvc.Place, error) {
+		return []mapsvc.Place{{Name: q, Lat: 22.55206, Lng: 114.15382}}, nil
+	}
+	path := doc.EncodePath([]doc.LatLng{{Lat: 22.3825, Lng: 114.1873}, {Lat: 22.55206, Lng: 114.15382}}, doc.PathPrecision)
+	s.pages.findRoutes = func(from, to doc.LatLng, mode string, _ time.Time) ([]doc.MapRoute, error) {
+		return []doc.MapRoute{{Mode: mode, Source: doc.RouteFromOSRM, DurationS: 1600, DistanceM: 30_000, Legs: []doc.MapLeg{{Mode: mode, DurationS: 1600, Path: path}}}}, nil
+	}
+	got := session(t, s, initialize,
+		call(2, "find_route", map[string]any{"from": map[string]any{"name": "Sha Tin", "lat": 22.3825, "lng": 114.1873}, "to": "Heung Yuen Wai", "mode": "drive"}))
+	found, failed := result(t, got[2])
+	if failed || found["routes"].([]any)[0].(map[string]any)["id"] != "r1" {
+		t.Fatalf("find_route %v", found)
+	}
+	got = session(t, s, call(3, "insert_blocks", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"},
+		"blocks": []any{map[string]any{"type": "map", "map": map[string]any{"title": "By car", "route": "r1"}}}}))
+	if out, failed := result(t, got[3]); failed {
+		t.Fatalf("insert_blocks %v", out)
+	}
+	var made *doc.Node
+	st.Content(p.ID).Walk(func(n, _ *doc.Node) {
+		if n.Type == "map" {
+			made = n
+		}
+	})
+	if m := doc.MapOf(made); made == nil || m.Route == nil || len(m.Places) != 2 || m.Places[1].Name != "Heung Yuen Wai" {
+		t.Fatalf("map %+v", made)
+	}
+	got = session(t, s, call(4, "create_page", map[string]any{"title": "Again", "markdown": "```map\n{\"route\": \"r1\"}\n```"}))
+	out, failed := result(t, got[4])
+	if failed {
+		t.Fatalf("create_page %v", out)
+	}
+	if n := st.Content(out["page_id"].(string)).Children; len(n) != 1 || n[0].Type != "map" {
+		t.Errorf("the new page holds %+v", n)
 	}
 }

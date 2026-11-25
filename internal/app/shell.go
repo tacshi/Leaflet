@@ -19,6 +19,7 @@ func (a *App) view(c *ui.Context) {
 		if a.images != nil {
 			a.images.release(time.Now())
 		}
+		a.dropMaps()
 	}()
 	theme.Apply(c)
 	pal := theme.Of(c)

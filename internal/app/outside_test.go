@@ -500,6 +500,9 @@ func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	a.dialogs.embedOpen, a.dialogs.linkOpen, a.dialogs.sourceOpen, a.dialogs.chartOpen = true, true, true, true
 	a.dialogs.chartEditor = a.page.editor
 	a.dialogs.openCard("", a.page.editor)
+	a.dialogs.openMap("", a.page.editor)
+	stopped := false
+	a.dialogs.mapBusy, a.dialogs.mapCancel = true, func() { stopped = true }
 	a.openPage(second.ID)
 	if a.page == nil || a.page.id != second.ID {
 		t.Fatal("the second page did not open")
@@ -511,8 +514,11 @@ func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	if d.embedOpen || d.linkOpen || d.sourceOpen || d.chartOpen || d.chartEditor != nil {
 		t.Error("a dialog changing the first page's blocks stayed open")
 	}
-	if d.cardOpen || d.cardEditor != nil {
-		t.Error("the card dialog of the first page stayed open")
+	if d.cardOpen || d.cardEditor != nil || d.mapOpen || d.mapEditor != nil {
+		t.Error("the card or the map dialog of the first page stayed open")
+	}
+	if !stopped || d.mapBusy || d.mapCancel != nil {
+		t.Error("the map dialog's search went on")
 	}
 }
 

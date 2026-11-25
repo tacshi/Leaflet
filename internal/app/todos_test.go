@@ -415,3 +415,24 @@ func TestTodoDayRoutes(t *testing.T) {
 		t.Errorf("title %q, gone %v", a.routeTitle(), a.gone(a.route))
 	}
 }
+
+// A to-do without text is called untitled as it is finished, as in its list.
+func TestFinishingAnUntitledTodo(t *testing.T) {
+	a := templatesApp(t)
+	n := &doc.Node{ID: "t1", Type: "todo_list"}
+	n.SetDelta(doc.Delta{{Text: " "}})
+	n.Set("checked", false)
+	n.SetDue(time.Now(), false)
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Plans", Content: doc.FromBlocks([]*doc.Node{n})}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	todos := a.todoList()
+	if len(todos) != 1 {
+		t.Fatalf("%d to-dos", len(todos))
+	}
+	a.finishTodo(todos[0])
+	if len(a.toasts) != 1 || a.toasts[0].text != locales.TodosFinished(locales.TodosUntitled()) {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+}

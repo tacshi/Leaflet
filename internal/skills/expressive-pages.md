@@ -28,7 +28,7 @@ The form follows the content. A letter, a story, a poem or a short answer stays 
 | Code, a command, a config | `code` with its `language` | backticks around several lines |
 | Words someone said or wrote | `quote` | quotation marks around a paragraph |
 | A web page worth opening | `link_preview` | a bare link |
-| A picture: a photo, a screenshot, a figure from a paper | `image` with a web link and what it shows as its alt; a file on this computer with upload_files or the leaflet command's upload | a link to it |
+| A picture: a photo, a screenshot, a figure from a paper | `image` with a web link and what it shows as its alt; outside the app, a file on this computer with upload_files or the leaflet command's upload, where you have them | a link to it |
 | A video | `video`, its chapters or key moments in its notes | a link |
 | Something to try: a simulation, a calculator, an explorable explainer, a small game | `embed` (read the skill interactive-embeds first) | a description of it |
 | A long page's parts | `heading`s, level 1 to 3; a `divider` between major parts, sparingly | one long scroll |
@@ -68,6 +68,7 @@ The form follows the content. A letter, a story, a poem or a short answer stays 
 
 - Find each place with find_place and a route with find_route, where you have them, then make a `map` with the places and the route's id, as "r1". Never guess coordinates, times or distances.
 - Tell the route in words or a `figures` card too: its time, its distance, its legs.
+- A map numbers its places 1, 2, 3 on their pins, in the order you give them, as the list under it in a web page of it does: name each by its name alone ("南京博物院", not "① 南京博物院"), and refer to them by those numbers in the title or the text where it helps.
 
 ## Diagrams
 
@@ -107,7 +108,7 @@ The form follows the content. A letter, a story, a poem or a short answer stays 
 
 ## Writing the blocks
 
-In Markdown (write_markdown, a page's markdown, or the leaflet command's new and append), each line is a block:
+In Markdown (write_markdown, a page's markdown, or outside the app the leaflet command's new and append), each line is a block:
 
 - `#` to `###` headings, `-` and `1.` lists (indent two spaces to nest), `- [ ]` to-dos, `>` quotes, `---` dividers, `|` tables with `|--:|` to right-align a column, and fenced code with its language.
 - A callout: `> [!NOTE]` (info), `> [!TIP]`, `> [!WARNING]` or `> [!CAUTION]` (danger) on a line, its text on the `>` lines after it.

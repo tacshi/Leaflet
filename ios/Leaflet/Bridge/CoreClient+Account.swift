@@ -30,14 +30,12 @@ struct AccountInfo: Codable, Sendable {
     var email: String
     var displayName: String
     var project: String
-    var projectRef: String
     var projectNeedsSignIn: Bool
 
     enum CodingKeys: String, CodingKey {
         case email, project
         case signedIn = "signed_in"
         case displayName = "display_name"
-        case projectRef = "project_ref"
         case projectNeedsSignIn = "project_needs_sign_in"
     }
 }

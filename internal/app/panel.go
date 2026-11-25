@@ -125,7 +125,7 @@ func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 				ui.Column(c).Gap(10).Padding(12, 2).Children(func() {
 					ui.Text(c, o.empty).FontSize(13.5).TextColor(pal.TextMuted)
 					for i, s := range o.suggestions {
-						if ghost(c, fmt.Sprintf("suggest:%d", i), "sparkles", s).Border(1, pal.Divider).Justify(ui.Start).Height(32).Clicked() {
+						if button(c, fmt.Sprintf("suggest:%d", i), "sparkles", s).Border(1, pal.Divider).Justify(ui.Start).Height(32).Clicked() {
 							o.send(s)
 						}
 					}
@@ -436,7 +436,7 @@ func (a *App) commentsPanel(c *ui.Context) {
 				if showResolved {
 					label = locales.PanelHideResolved()
 				}
-				if ghost(c, "toggle-resolved", "", label).Clicked() {
+				if button(c, "toggle-resolved", "", label).Clicked() {
 					a.dialogs.showResolved = !showResolved
 				}
 			}

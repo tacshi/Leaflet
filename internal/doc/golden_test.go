@@ -182,7 +182,6 @@ func TestLinkKinds(t *testing.T) {
 	for i, c := range cases {
 		v, video := ParseVideoURL(c.URL)
 		f.Check(WebURL(c.URL), i, "web")
-		f.Check(agentURL(c.URL), i, "agent")
 		f.Check(video, i, "video")
 		if !video || !c.Video || c.VideoOf == nil {
 			continue

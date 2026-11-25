@@ -263,7 +263,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		req.PageID, req.PageTitle, req.AllowCrossPage = "", "", settings.AgentsReadOtherPages
 		req.OpenPage = h.openPage(o.OpenPage)
 	}
-	d := h.newDelivery(pageID, run, option)
+	d := h.newDelivery(pageID, run)
 	d.read = read
 	stream := &replyStream{h: h, pageID: pageID, run: run, reply: o.Reply}
 	events := Events{
@@ -415,8 +415,7 @@ func (h *Hub) keepBefore(pageID string, run *Run, option Option, before *doc.Con
 	if run.kept || pageID == WorkspaceID {
 		return nil
 	}
-	label := "Before " + option.Name() + ": " + short(run.Instruction)
-	if err := h.st.AddHistory(pageID, before, "agent_run", run.ID, label); err != nil {
+	if err := h.st.AddHistory(pageID, before, "agent_run", run.ID, RunLabel(option.Name(), short(run.Instruction))); err != nil {
 		return err
 	}
 	run.kept = true

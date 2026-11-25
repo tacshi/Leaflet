@@ -15,17 +15,24 @@ var tables = []struct{ name, page string }{
 
 var accountRows = map[string]string{
 	"model_providers": `FALSE`,
-	"key_values": `key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting')
-		OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%' OR key LIKE 'mcp_edited:%' OR key LIKE 'mcp_activity:%'`,
+	"key_values": `key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting', 'sync.trees_waiting')
+		OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%' OR key LIKE 'mcp_edited:%' OR key LIKE 'mcp_activity:%'
+		OR key LIKE 'reminded:%'`,
 }
 
-func (s *Store) Wipe() error {
+// ForgetAll takes everything off this device, as the account is deleted: its pages and what is on them, settings and
+// providers too. When this device first had the bin stays: it is of the device.
+func (s *Store) ForgetAll() error {
 	err := s.inTx(func(tx *sql.Tx) error {
 		if err := forgetSearch(tx); err != nil {
 			return err
 		}
 		for _, t := range tables {
-			if _, err := tx.Exec("DELETE FROM " + t.name); err != nil { // #nosec G202
+			q := "DELETE FROM " + t.name
+			if t.name == "key_values" {
+				q += " WHERE key <> '" + binSinceKey + "'"
+			}
+			if _, err := tx.Exec(q); err != nil { // #nosec G202
 				return err
 			}
 		}
@@ -152,9 +159,14 @@ func (s *Store) wipePages(tx *sql.Tx, ids []string, keepRows bool) ([]string, er
 	if err != nil {
 		return nil, err
 	}
+	// What waits to go up of the pages' files goes, an upload too, and, as the pages go from this device rows and all,
+	// a removal of where one is stored. Pages deleted for good keep their files' removals: those of files deleted for
+	// good before them, whose rows no longer say where they are stored, and those the caller queues again.
+	key := "files/"
 	for _, f := range files {
 		if _, err := tx.Exec(`DELETE FROM outbox WHERE (entity = 'files' AND entity_id = ?)
-			OR (entity IN ('storage', 'storage_delete') AND entity_id = ?)`, f.ID, "files/"+f.ID); err != nil {
+			OR (entity = 'storage' AND entity_id = ?) OR (? AND entity = 'storage_delete' AND entity_id = ?)`,
+			f.ID, key+f.ID, !keepRows, key+f.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -166,8 +178,12 @@ func (s *Store) wipePages(tx *sql.Tx, ids []string, keepRows bool) ([]string, er
 			return nil, err
 		}
 	}
+	// What this device keeps of a page by its id: its agent chats, what an agent last wrote on it, and the reminders of
+	// its to-dos already given (reminded:{page}#{block}).
 	for _, id := range ids {
-		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?, ?)`, "chat."+id, "chat.past."+id, "chat.running."+id); err != nil {
+		reminded := "reminded:" + id + "#"
+		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?, ?, ?) OR substr(key, 1, ?) = ?`,
+			"chat."+id, "chat.past."+id, "chat.running."+id, "mcp_edited:"+id, len(reminded), reminded); err != nil {
 			return nil, err
 		}
 	}

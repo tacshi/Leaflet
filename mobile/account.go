@@ -419,7 +419,7 @@ func (c *Core) DeleteAccount() (err error) {
 	if err := c.core.DeleteAccount(); err != nil {
 		return err
 	}
-	_, err = c.leave(c.core.Store.Wipe, false)
+	_, err = c.leave(c.core.Store.ForgetAll, false)
 	if err != nil {
 		err = errors.New(locales.SettingsRemovePagesFailed(err.Error()))
 	}

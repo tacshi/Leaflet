@@ -65,7 +65,7 @@ struct AskSheet: View {
                     Section {
                         if run.running {
                             if let answer = run.answer, !answer.isEmpty {
-                                MarkdownPreview(markdown: answer)
+                                MarkdownPreview(markdown: answer, streaming: run.running)
                             } else if let activity = run.activity, !activity.isEmpty {
                                 Label(activity, systemImage: "globe")
                             } else {
@@ -174,8 +174,7 @@ struct AskSheet: View {
                     selection: request.selection,
                     agent: request.agent)
                 await model.refreshAgents()
-                let runs = try? await client.agentState(model.id).runs
-                guard !id.isEmpty, runs?.contains(where: { $0.id == id }) ?? true else {
+                guard !id.isEmpty, model.agents.runs.contains(where: { $0.id == id }) else {
                     failure = LI.agentNotStarted
                     return
                 }

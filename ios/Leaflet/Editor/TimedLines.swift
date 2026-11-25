@@ -38,6 +38,12 @@ struct TimeStyle {
     static let lineInset: CGFloat = 6
     static let lineLift: CGFloat = 3
 
+    /// The font of a transcript's lines in a card, a little smaller than the
+    /// page's text, as large as the person reads text (`scale`).
+    @MainActor static func lineFont(_ scale: CGFloat) -> Font {
+        .system(size: (BlockLook.textSize - 2) * scale)
+    }
+
     func indent(_ widest: String) -> CGFloat {
         let font = UIFont.monospacedDigitSystemFont(
             ofSize: UIFont.preferredFont(forTextStyle: uiFont).pointSize, weight: .regular)
@@ -75,6 +81,8 @@ struct RollingLines<Row: View>: View {
     let spacing: CGFloat
     @ViewBuilder let row: (Int) -> Row
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// How much larger than at the default text size the person reads text.
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
     private static var before: Int { 1 }
 
@@ -89,7 +97,8 @@ struct RollingLines<Row: View>: View {
             }
             .scrollDisabled(true)
             .scrollIndicators(.hidden)
-            .frame(height: BlockLook.textSize * 11)
+            // As many lines whatever size the text is.
+            .frame(height: BlockLook.textSize * 11 * scale)
             .mask {
                 LinearGradient(
                     stops: [
@@ -187,6 +196,7 @@ private struct NoteRow: View {
     let follow: ((CGFloat) -> Void)?
     let look: NotesPanel.Look
     let play: (Int) -> Void
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
     var body: some View {
         let palette = BlockLook.palette
@@ -213,7 +223,7 @@ private struct NoteRow: View {
         }
         .font(
             look.inCard
-                ? .system(size: BlockLook.textSize - 2) : Fonts.pageText(size: BlockLook.textSize)
+                ? TimeStyle.lineFont(scale) : Fonts.pageText(size: BlockLook.textSize)
         )
         .foregroundStyle(palette.text)
         .padding(.horizontal, look.inCard ? TimeStyle.lineInset : 0)

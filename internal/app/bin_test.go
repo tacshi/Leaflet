@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -23,6 +24,7 @@ func TestBinShowsRestoresAndDeletesForever(t *testing.T) {
 		}
 	}
 	a.reloadAll()
+	subscribe(a)
 	a.openBin()
 	tt := ui.NewTester(a.main, 1100, 700)
 	tt.Frame()
@@ -67,6 +69,85 @@ func TestBinShowsRestoresAndDeletesForever(t *testing.T) {
 	}
 	if !tt.HasText(locales.BinNothing(binName())) {
 		t.Errorf("the bin is not empty: %v", tt.Texts())
+	}
+}
+
+// subscribe has the app take in the store's changes, as it does running.
+func subscribe(a *App) {
+	a.st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
+}
+
+// Restoring, deleting for good and emptying the bin each read it once more, as the store tells what changed.
+func TestBinReadOnceAChange(t *testing.T) {
+	a := templatesApp(t)
+	for _, title := range []string{"One", "Two", "Three"} {
+		p, _ := a.st.CreatePage(store.NewPageOptions{Title: title})
+		if _, err := a.st.DeletePage(p.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	subscribe(a)
+	a.openBin()
+	if len(a.bin.items) != 3 {
+		t.Fatalf("the bin lists %d", len(a.bin.items))
+	}
+	reads := func(what string, do func()) {
+		t.Helper()
+		was := a.bin.listReads
+		do()
+		if n := a.bin.listReads - was; n != 1 {
+			t.Errorf("%s read the bin %d times", what, n)
+		}
+	}
+	back := a.bin.items[0]
+	reads("restoring", func() { a.restoreFromBin(back) })
+	if len(a.bin.items) != 2 || a.pageByID(back.ID) == nil {
+		t.Errorf("after restoring the bin lists %d, the page listed %v", len(a.bin.items), a.pageByID(back.ID) != nil)
+	}
+	reads("deleting for good", func() {
+		ref := a.bin.items[0].BinRef
+		a.purgeFromBin(func(cr *core.Core) error { return cr.PurgeBin(ref) }, "")
+	})
+	reads("emptying", func() { a.purgeFromBin((*core.Core).EmptyBin, "") })
+	if len(a.bin.items) != 0 {
+		t.Errorf("after emptying the bin lists %d", len(a.bin.items))
+	}
+}
+
+// A bin that cannot be read keeps what it listed, says why, and doesn't say it is empty.
+func TestBinThatCannotBeReadKeepsItsList(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Still here"})
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openBin()
+	tt := ui.NewTester(a.binView, 1100, 700)
+	tt.Frame()
+	if !tt.HasText("Still here") {
+		t.Fatalf("not listed: %v", tt.Texts())
+	}
+	if err := a.st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a.loadBin()
+	tt.Frame()
+	if a.bin.readErr == nil {
+		t.Fatal("the bin was read from a closed store")
+	}
+	if !tt.HasText("Still here") || tt.HasText(locales.BinNothing(binName())) {
+		t.Errorf("after a failed read: %v", tt.Texts())
+	}
+	if !tt.HasText(locales.BinCouldNotRead(binName(), a.bin.readErr.Error())) {
+		t.Errorf("no error in %v", tt.Texts())
+	}
+
+	a.bin.items = nil
+	tt.Frame()
+	if tt.HasText(locales.BinNothing(binName())) {
+		t.Errorf("a bin that could not be read shows as empty: %v", tt.Texts())
 	}
 }
 

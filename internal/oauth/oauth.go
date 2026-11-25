@@ -28,9 +28,8 @@ func Challenge(verifier string) string {
 
 func RandomString(n int) string {
 	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
+	// Read never fails: the program ends if the system's source does.
+	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 

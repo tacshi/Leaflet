@@ -48,23 +48,29 @@ func MapView(node, locale string) (_ string, err error) {
 	}
 	m := doc.MapOf(&n)
 	msgs := locales.In(locale)
-	v := mapView{Title: m.Title, Places: m.Markers(), Legs: []mapLegView{}, Credit: doc.MapCredit(m), Sources: doc.MapCreditLink(m), Apple: maps.AppleMapsURL(m)}
+	// The route's paths are read once, for its legs, its markers and its
+	// box, and for the link to Maps the markers stand as its places,
+	// which it would read the paths again for.
+	s := m.Shape()
+	opened := m
+	opened.Places = s.Markers
+	v := mapView{Title: m.Title, Places: s.Markers, Legs: []mapLegView{}, Credit: doc.MapCredit(msgs, m), Sources: doc.MapCreditLink(m), Apple: maps.AppleMapsURL(opened)}
 	if v.Places == nil {
 		v.Places = []doc.MapPlace{}
 	}
 	if r := m.Route; r != nil {
 		v.Summary, v.Steps = doc.RouteSummary(msgs, r), doc.RouteSteps(msgs, r)
 	}
-	for i, path := range m.Paths() {
-		leg := m.Route.Legs[i]
+	for i, path := range s.Paths {
+		leg := s.Legs[i]
 		coords := make([][2]float64, len(path))
 		for k, p := range path {
 			coords[k] = [2]float64{p.Lat, p.Lng}
 		}
 		v.Legs = append(v.Legs, mapLegView{Walk: leg.Mode == doc.RouteWalk, Color: leg.Color, Coords: coords})
 	}
-	if sw, ne, ok := m.Bounds(); ok {
-		v.South, v.West, v.North, v.East = sw.Lat, sw.Lng, ne.Lat, ne.Lng
+	if s.OK {
+		v.South, v.West, v.North, v.East = s.SW.Lat, s.SW.Lng, s.NE.Lat, s.NE.Lng
 	}
 	return encode(v)
 }

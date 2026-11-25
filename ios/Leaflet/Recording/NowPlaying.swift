@@ -100,7 +100,7 @@ final class NowPlaying {
             Task { @MainActor in NowPlaying.shared.toggle() }
             return .success
         }
-        let skip = 15.0
+        let skip = PlaySpeed.skip
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: skip)]
         center.skipForwardCommand.addTarget { _ in
             Task { @MainActor in NowPlaying.shared.skip(skip) }
@@ -120,7 +120,7 @@ final class NowPlaying {
             return .success
         }
         center.changePlaybackRateCommand.supportedPlaybackRates =
-            [0.75, 1, 1.25, 1.5, 1.75, 2].map { NSNumber(value: $0) }
+            PlaySpeed.all.map { NSNumber(value: $0) }
         center.changePlaybackRateCommand.addTarget { event in
             guard let event = event as? MPChangePlaybackRateCommandEvent else {
                 return .commandFailed

@@ -40,7 +40,10 @@ struct CardSheet: View {
     ]
 
     private var fields: [String] {
-        [layout, icon, title, image, Self.json(facts), note, Self.json(sources)]
+        [
+            layout, icon, title, image, (try? jsonString(facts)) ?? "", note,
+            (try? jsonString(sources)) ?? "",
+        ]
     }
     private var dirty: Bool { original.map { $0 != fields } ?? false }
 
@@ -49,6 +52,44 @@ struct CardSheet: View {
         let raw = MobileCardIcons(&error)
         return (try? JSONDecoder().decode([String].self, from: Data(raw.utf8))) ?? []
     }()
+
+    /// A card icon's name, one of the core's card icons by Lucide's name, in
+    /// the app's language, as the desktop's icon menu names it.
+    static func iconName(_ icon: String) -> String {
+        switch icon {
+        case "bus": L.cardIconBus
+        case "train-front": L.cardIconTrainFront
+        case "tram-front": L.cardIconTramFront
+        case "car": L.cardIconCar
+        case "bike": L.cardIconBike
+        case "footprints": L.cardIconFootprints
+        case "plane": L.cardIconPlane
+        case "ship": L.cardIconShip
+        case "map-pin": L.cardIconMapPin
+        case "clock": L.cardIconClock
+        case "calendar": L.cardIconCalendar
+        case "ticket": L.cardIconTicket
+        case "banknote": L.cardIconBanknote
+        case "wallet": L.cardIconWallet
+        case "phone": L.cardIconPhone
+        case "hospital": L.cardIconHospital
+        case "utensils": L.cardIconUtensils
+        case "bed-double": L.cardIconBedDouble
+        case "building-2": L.cardIconBuilding2
+        case "graduation-cap": L.cardIconGraduationCap
+        case "shopping-bag": L.cardIconShoppingBag
+        case "info": L.cardIconInfo
+        case "star": L.cardIconStar
+        case "sun": L.cardIconSun
+        case "cloud-rain": L.cardIconCloudRain
+        case "thermometer": L.cardIconThermometer
+        case "globe": L.cardIconGlobe
+        case "user": L.cardIconUser
+        case "package": L.cardIconPackage
+        case "trending-up": L.cardIconTrendingUp
+        default: icon
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -63,7 +104,8 @@ struct CardSheet: View {
                         Picker(L.dialogCardIcon, selection: $icon) {
                             Text(L.dialogCardNoIcon).tag("")
                             ForEach(Self.icons, id: \.self) { name in
-                                Label(name, systemImage: Lucide.symbol(name)).tag(name)
+                                Label(Self.iconName(name), systemImage: Lucide.symbol(name))
+                                    .tag(name)
                             }
                         }
                         TextField(L.dialogFieldTitle, text: $title)
@@ -131,10 +173,6 @@ struct CardSheet: View {
         .onAppear(perform: load)
     }
 
-    private static func json(_ value: some Encodable) -> String {
-        (try? JSONEncoder().encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? ""
-    }
-
     private func load() {
         let d = node.data ?? [:]
         layout = d["layout"]?.string == "figures" ? "figures" : "details"
@@ -161,17 +199,16 @@ struct CardSheet: View {
             "sources": .array(
                 sources.map { .object(["url": .string($0.url), "title": .string($0.title)]) }),
         ]
-        var error: NSError?
-        let raw = MobileCardData(Self.json(spec), &error)
-        if let error {
-            failure = error.localizedDescription
-            return
-        }
         let data: [String: JSONValue]
         do {
-            data = try JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
+            data = try coreValue(spec, MobileCardData)
         } catch {
-            failure = L.appErrorInternal(error: error.localizedDescription)
+            // The core says what is wrong with the fields; JSON that would
+            // not do is the app's own fault.
+            failure =
+                error is DecodingError || error is EncodingError
+                ? L.appErrorInternal(error: error.localizedDescription)
+                : error.localizedDescription
             return
         }
         var now = fields

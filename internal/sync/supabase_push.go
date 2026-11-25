@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -104,7 +106,7 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
 		}
-		_, purge := payload["purged_at"]
+		purge := s.purgeSeen(e, payload)
 		done, err := s.pushRow(ctx, e, payload)
 		if err != nil || !done || !purge {
 			return done, err
@@ -114,7 +116,13 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 		if s.contentsWait(e) {
 			return false, nil
 		}
-		return s.pushRow(ctx, e, payload)
+		purge := s.purgeSeen(e, payload)
+		done, err := s.pushRow(ctx, e, payload)
+		if err != nil || !done || !purge {
+			return done, err
+		}
+		// The copy here goes once the server has the deletion; one it refused came back with the file.
+		return true, s.st.WipePurgedFile(e.EntityID)
 	case "folders":
 		return s.pushRow(ctx, e, payload)
 	case "recordings":
@@ -135,26 +143,61 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 		err := s.be.InsertNew(ctx, e.Entity, payload)
 		return err == nil, err
 	}
-	_, err = s.be.Upsert(ctx, e.Entity, payload, "")
-	return err == nil, err
+	// Nothing else is queued to go up: an entry of another kind, as from a Leaflet that queued one this one does not
+	// know, is no table's to write.
+	log.Printf("outbox %s/%s: nothing goes up for it here; dropped", e.Entity, e.EntityID)
+	return true, nil
 }
 
-// purgeTaken takes what was on a page off this device once the server has taken its deletion for good, unless the
-// server refused it and the page came back (putRemotePage), and has it removed where it is stored: what this device
-// knew of, and what the server listed of the page, as another device, or someone it was shared with, put there.
-// Until the list is read, the deletion stays queued: the server takes it again as it is.
+// seenKey is the column a deletion for good sends the server's updated_at of the row with, as this device last had
+// it: the server refuses the deletion of a row that changed there since, as one another device restored, or deleted
+// again, whatever the devices' clocks say.
+const seenKey = "seen_updated_at"
+
+// purgeSeen reports whether the payload deletes its row for good, and has it send the row's updated_at as this device
+// last had it from the server, if it had it.
+func (s *Service) purgeSeen(e store.OutboxEntry, payload map[string]any) bool {
+	if _, purge := payload["purged_at"]; !purge {
+		return false
+	}
+	at, ok := s.st.SeenAt(e.Entity, e.EntityID)
+	if !ok {
+		return true
+	}
+	cols, partial := payload[store.ChangedKey].([]any)
+	if !partial {
+		// A whole row goes as a change of every column of it first: an upsert tries its insert first, which leaves
+		// the update it falls to on a row the server has without what this device saw.
+		for _, k := range slices.Sorted(maps.Keys(payload)) {
+			if k != "id" && !strings.HasPrefix(k, "_") {
+				cols = append(cols, k)
+			}
+		}
+	}
+	payload[seenKey] = at.UTC().Format(time.RFC3339Nano)
+	if !slices.Contains(cols, any(seenKey)) {
+		cols = append(cols, seenKey)
+	}
+	payload[store.ChangedKey] = cols
+	return true
+}
+
+// purgeTaken takes what was on a page off this device once the server has taken its deletion for good, and has it
+// removed where it is stored: what this device knew of, and what the server listed of the page, as another device, or
+// someone it was shared with, put there. Until the list is read, the deletion stays queued: the server takes it again
+// as it is. A deletion the server refused brought the page back as the server has it (putRemotePage), with what was
+// on it, which waited here; what came for it meanwhile, which a pull passed by as of a page deleted for good, comes
+// again.
 func (s *Service) purgeTaken(ctx context.Context, pageID string) (bool, error) {
 	if !s.st.IsPurged(pageID) {
+		if err := s.pullTreeAgain(ctx, pageID); err != nil {
+			log.Printf("page %s, back from the bin: %v; pulled again later", pageID, err)
+		}
 		return true, nil
 	}
-	rows, err := s.be.Select(ctx, "purged_objects", remote.Query{Select: "bucket_id,name",
-		Filters: []string{remote.Eq("page_id", pageID)}})
+	listed, err := s.purgedObjects(ctx, pageID)
 	if err != nil {
 		return false, err
-	}
-	listed := make([]store.StoredObject, 0, len(rows))
-	for _, r := range rows {
-		listed = append(listed, store.StoredObject{Bucket: store.S(r, "bucket_id"), Path: store.S(r, "name")})
 	}
 	if err := s.st.WipePurged(pageID, listed); err != nil {
 		return false, err
@@ -163,7 +206,36 @@ func (s *Service) purgeTaken(ctx context.Context, pageID string) (bool, error) {
 	return true, nil
 }
 
-func (s *Service) pushChanged(ctx context.Context, table string, payload map[string]any) (bool, error) {
+// purgedObjects is every object the server lists of a page deleted for good, a page of the list at a time, in the order
+// of its key.
+func (s *Service) purgedObjects(ctx context.Context, pageID string) ([]store.StoredObject, error) {
+	var listed []store.StoredObject
+	var after *store.StoredObject
+	for {
+		filters := []string{remote.Eq("page_id", pageID)}
+		if after != nil {
+			filters = append(filters, "or=(bucket_id.gt."+quote(after.Bucket)+",and(bucket_id.eq."+quote(after.Bucket)+
+				",name.gt."+quote(after.Path)+"))")
+		}
+		rows, err := s.be.Select(ctx, "purged_objects", remote.Query{Select: "bucket_id,name", Filters: filters,
+			Order: "bucket_id,name", Limit: treeRows})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			listed = append(listed, store.StoredObject{Bucket: store.S(r, "bucket_id"), Path: store.S(r, "name")})
+		}
+		if len(rows) < treeRows {
+			return listed, nil
+		}
+		last := listed[len(listed)-1]
+		after = &last
+	}
+}
+
+// pushChanged writes what the payload changed of its row, or the whole row when the server has none of it, and is the
+// row as the server took it, when it says.
+func (s *Service) pushChanged(ctx context.Context, table string, payload map[string]any) (map[string]any, bool, error) {
 	cols, partial := payload[store.ChangedKey].([]any)
 	delete(payload, store.ChangedKey)
 	if partial {
@@ -174,16 +246,23 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 			}
 		}
 		if len(changes) == 0 {
-			return true, nil
+			return nil, true, nil
 		}
 		withChangedAt(changes, payload)
 		rows, err := s.be.Update(ctx, table, []string{remote.Eq("id", store.S(payload, "id"))}, changes)
 		if err != nil || len(rows) > 0 {
-			return err == nil, err
+			return firstRow(rows), err == nil, err
 		}
 	}
-	_, err := s.be.Upsert(ctx, table, payload, "")
-	return err == nil, err
+	rows, err := s.be.Upsert(ctx, table, payload, "")
+	return firstRow(rows), err == nil, err
+}
+
+func firstRow(rows []map[string]any) map[string]any {
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows[0]
 }
 
 func withChangedAt(changes, payload map[string]any) {
@@ -209,7 +288,14 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 	if s.parentStuck(e, payload) {
 		return false, nil
 	}
-	done, err := s.pushChanged(ctx, e.Entity, payload)
+	row, done, err := s.pushChanged(ctx, e.Entity, payload)
+	if at := store.S(row, "updated_at"); err == nil && at != "" {
+		// The server has the row as this device wrote it, as of then: a deletion for good of it from here on is of
+		// what the server had then, and of nothing another device did since.
+		if err := s.st.NoteSeen(e.Entity, e.EntityID, store.Time(at)); err != nil {
+			log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
+		}
+	}
 	switch {
 	case err == nil || remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil:
 		return done, err
@@ -458,7 +544,10 @@ func (s *Service) removeStored(ctx context.Context, payload map[string]any) (boo
 		path = recordingPath(uid, recID)
 		listed, err := s.be.SelectOne(ctx, "purged_objects", remote.Query{Select: "name",
 			Filters: []string{remote.Eq("bucket_id", bucket), remote.Like("name", "*/"+recID+".*")}})
-		if err == nil && listed != nil {
+		if err != nil {
+			return false, err
+		}
+		if listed != nil {
 			path = store.S(listed, "name")
 		}
 	}

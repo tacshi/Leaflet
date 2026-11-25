@@ -2,8 +2,14 @@ package agents
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +22,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func TestChatGPTResponses(t *testing.T) {
@@ -558,8 +565,146 @@ func TestSignInCallbackAnsweredTwice(t *testing.T) {
 			_ = res.Body.Close()
 		}
 	}
-	if _, err := SignInChatGPT(ctx, "host", "", open); err == nil || ctx.Err() != nil {
+	if _, err := SignInChatGPT(ctx, "host", nil, open); err == nil || ctx.Err() != nil {
 		t.Errorf("sign-in %v, %v", err, ctx.Err())
+	}
+}
+
+// A code OpenAI turns down after the browser step says to sign in again,
+// in the app's language, rather than OpenAI's own code for it.
+func TestSignInCodeTurnedDownSaysToSignInAgain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{AuthorizationEndpoint: srv.URL + "/authorize", TokenEndpoint: srv.URL + "/token"})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	open := func(link string) {
+		u, err := url.Parse(link)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q := u.Query()
+		req, _ := http.NewRequestWithContext(ctx, "GET",
+			q.Get("redirect_uri")+"?code=x&client_id=oaiapp_test1&state="+url.QueryEscape(q.Get("state")), nil)
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = res.Body.Close()
+		} else {
+			t.Error(err)
+		}
+	}
+	_, err := SignInChatGPT(ctx, "host", nil, open)
+	if err == nil || err.Error() != locales.AgentChatgptCodeRefused() {
+		t.Errorf("sign-in said %v", err)
+	}
+}
+
+// A browser's answer that names an issuer other than OpenAI's is not
+// exchanged: its code never reaches the token endpoint.
+func TestSignInFromAnotherIssuerIsNotExchanged(t *testing.T) {
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		http.Error(w, "{}", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{AuthorizationEndpoint: srv.URL + "/authorize", TokenEndpoint: srv.URL + "/token"})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	open := func(link string) {
+		u, _ := url.Parse(link)
+		q := u.Query()
+		req, _ := http.NewRequestWithContext(ctx, "GET", q.Get("redirect_uri")+"?code=x&client_id=oaiapp_test1&iss="+
+			url.QueryEscape("https://auth.example.com")+"&state="+url.QueryEscape(q.Get("state")), nil)
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = res.Body.Close()
+		} else {
+			t.Error(err)
+		}
+	}
+	_, err := SignInChatGPT(ctx, "host", nil, open)
+	if err == nil || err.Error() != locales.AgentChatgptUnverified() || posts.Load() != 0 {
+		t.Errorf("sign-in said %v after %d token requests", err, posts.Load())
+	}
+}
+
+// A sign-in keeps the identity token it was given, and a sign-in again as
+// that account sends it with the account's email, under the account's own
+// registration, so that OpenAI goes straight to that account.
+func TestSignInKeepsWhatSignsTheAccountInAgain(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding.EncodeToString
+	var mu sync.Mutex
+	var nonce, token string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/jwks":
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{
+				{"kid": "k1", "kty": "RSA", "n": b64(key.N.Bytes()), "e": b64(big.NewInt(int64(key.E)).Bytes())},
+			}})
+		case "/token":
+			claims, _ := json.Marshal(map[string]any{
+				"iss": chatgptIssuer, "aud": r.FormValue("client_id"), "exp": time.Now().Add(time.Hour).Unix(),
+				"sub": "user-1", "email": "me@example.com", "nonce": func() string { mu.Lock(); defer mu.Unlock(); return nonce }(),
+			})
+			signed := b64([]byte(`{"alg":"RS256","kid":"k1"}`)) + "." + b64(claims)
+			digest := sha256.Sum256([]byte(signed))
+			sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+			if err != nil {
+				t.Error(err)
+			}
+			mu.Lock()
+			token = signed + "." + b64(sig)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "a1", "refresh_token": "r1", "expires_in": 3600, "id_token": token,
+				"scope": "openid email " + chatgptPlan,
+			})
+		}
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{AuthorizationEndpoint: srv.URL + "/authorize", TokenEndpoint: srv.URL + "/token", JWKSURI: srv.URL + "/jwks"})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var asked url.Values
+	open := func(link string) {
+		u, _ := url.Parse(link)
+		asked = u.Query()
+		mu.Lock()
+		nonce = asked.Get("nonce")
+		mu.Unlock()
+		req, _ := http.NewRequestWithContext(ctx, "GET",
+			asked.Get("redirect_uri")+"?code=c1&client_id=oaiapp_mine&state="+url.QueryEscape(asked.Get("state")), nil)
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = res.Body.Close()
+		} else {
+			t.Error(err)
+		}
+	}
+	g, err := SignInChatGPT(ctx, "host", nil, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := g.Account()
+	mu.Lock()
+	want := ChatGPTAccount{ClientID: "oaiapp_mine", Email: "me@example.com", Subject: "user-1", RefreshToken: "r1", IDToken: token}
+	mu.Unlock()
+	if first != want {
+		t.Errorf("kept %+v", first)
+	}
+	if _, err := SignInChatGPT(ctx, "host", &first, open); err != nil {
+		t.Fatal(err)
+	}
+	if asked.Get("client_id") != "oaiapp_mine" || asked.Get("login_hint") != "me@example.com" || asked.Get("id_token_hint") != first.IDToken {
+		t.Errorf("a sign-in again asked %v", asked)
 	}
 }
 

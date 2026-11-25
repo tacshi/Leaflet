@@ -346,15 +346,6 @@ func (a *App) bylineTags(c *ui.Context, p store.Page, hovered bool) {
 	})
 }
 
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 func humanTime(t time.Time) string { return locales.When(t, time.Now()) }
 
 func (a *App) caretAtEnd() {
@@ -484,9 +475,7 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 		x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13).TextColor(pal.OnInverse.Alpha(0.7)) })
 		if x.Clicked() {
 			a.dialogs.hideRun = run.ID
-			for k := range a.page.tinted {
-				delete(a.page.tinted, k)
-			}
+			clear(a.page.tinted)
 		}
 	})
 }

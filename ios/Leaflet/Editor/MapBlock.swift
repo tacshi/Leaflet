@@ -35,20 +35,14 @@ struct MapLook: Decodable, Equatable, Sendable {
     let north: Double
     let east: Double
 
-    @MainActor private static var read: [String: (DocNode, String, MapLook)] = [:]
+    @MainActor private static var read = NodeCache<MapLook>(most: 64)
 
+    /// The map block as the core reads it, in the app's language.
     @MainActor static func of(_ node: DocNode) -> MapLook? {
         let language = L.language
-        if let (kept, lang, look) = read[node.id], kept == node, lang == language { return look }
-        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
-        var error: NSError?
-        let json = MobileMapView(raw ?? "{}", language, &error)
-        guard error == nil,
-            let look = try? JSONDecoder().decode(MapLook.self, from: Data(json.utf8))
-        else { return nil }
-        if read.count >= 64 { read.removeAll(keepingCapacity: true) }
-        read[node.id] = (node, language, look)
-        return look
+        return read.value(of: node, with: language) { n in
+            try? coreValue(n, as: MapLook.self) { MobileMapView($0, language, $1) }
+        }
     }
 
     /// The part of the map that shows it all, with room around it.

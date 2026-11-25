@@ -68,7 +68,7 @@ func (a *App) signInView(c *ui.Context) {
 					notice(c, "ok", "check", s.info, nil)
 				}
 				ui.Divider(c)
-				if ghost(c, "local", "laptop", locales.SigninContinueLocal()).Clicked() {
+				if button(c, "local", "laptop", locales.SigninContinueLocal()).Clicked() {
 					a.cancelSupabase()
 					s.leave()
 					a.back()
@@ -226,11 +226,11 @@ func (a *App) emailCodeForm(c *ui.Context) {
 		a.doVerify()
 	}
 	ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		if ghost(c, "resend", "", locales.SigninResendCode()).Disabled(s.busy).Clicked() {
+		if button(c, "resend", "", locales.SigninResendCode()).Disabled(s.busy).Clicked() {
 			a.doSendCode()
 		}
 		ui.Text(c, "·").FontSize(13).TextColor(pal.TextMuted)
-		if ghost(c, "change", "", locales.SigninChangeEmail()).Disabled(s.busy).Clicked() {
+		if button(c, "change", "", locales.SigninChangeEmail()).Disabled(s.busy).Clicked() {
 			s.leave()
 			s.sent, s.code, s.err, s.info = false, "", "", ""
 		}
@@ -317,6 +317,7 @@ func (a *App) usedAccount(user *store.User, replaces bool, err error) {
 	if replaces {
 		delete(a.drafts, agents.WorkspaceID)
 		a.images.clear()
+		a.resetWatch()
 	}
 	a.signIn = signInState{}
 	a.account.nameEdited = false

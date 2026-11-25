@@ -400,6 +400,33 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 
+	// A table's alignments go with their columns, wherever its cells put them: each side's, merged column by
+	// column, and a column both sides aligned anew, unalike, a conflict, unless the table is one already.
+	for _, n := range result.All() {
+		p, o := primaryFlat[n.ID], otherFlat[n.ID]
+		if n.Type != "table" || p == nil || o == nil {
+			continue
+		}
+		var b *Node
+		if f := baseFlat[n.ID]; f != nil {
+			b = f.node
+		}
+		aligns, clash := mergedAligns(n, b, p.node, o.node, otherWins(n.ID, true, true, o.own > p.own))
+		was := canonical(n.Data["aligns"])
+		if SetTableAligns(n, aligns); canonical(n.Data["aligns"]) != was {
+			times[n.ID] = max(localLatest, remoteLatest) + 1
+		}
+		if clash && !slices.ContainsFunc(conflicts, func(c Conflict) bool { return c.BlockID == n.ID }) {
+			conflicts = append(conflicts, Conflict{
+				BlockID:        n.ID,
+				Local:          localFlat[n.ID].node.Clone(),
+				Remote:         remoteFlat[n.ID].node.Clone(),
+				LocalEditedAt:  timeOf(local, n.ID),
+				RemoteEditedAt: timeOf(remote, n.ID),
+			})
+		}
+	}
+
 	result.Children = liftStranded(result.Children)
 
 	// A block that ends up as a side has it, its place included, is that side's version: it is at least as new.
@@ -474,6 +501,54 @@ func placeCells(table, primary, other *Node, times map[string]int64, at int64) {
 		times[table.ID] = at
 	}
 	SortTableCells(table)
+}
+
+// mergedAligns is how each column of table, merged of primary and other,
+// aligns. A side's alignment is its column's, the column found in table by
+// a cell of it table keeps, so that it goes with its column however the
+// merge moved it, and a column table no longer has takes its alignment
+// out. Each column takes the alignment of the side that changed it from
+// base's, as mergedTableData takes a key's value: other's, when both did
+// and otherWins, which clash reports when they differ.
+func mergedAligns(table, base, primary, other *Node, otherWins bool) (aligns []string, clash bool) {
+	at := make(map[string]int, len(table.Children))
+	for _, cell := range table.Children {
+		at[cell.ID] = cell.Int("colPosition", -1)
+	}
+	_, cols := TableSize(table)
+	byColumn := func(side *Node) map[int]string {
+		out := map[int]string{}
+		if side == nil || side.Type != "table" {
+			return out
+		}
+		_, n := TableSize(side)
+		own := TableAligns(side, n)
+		for _, cell := range side.Children {
+			c := cell.Int("colPosition", -1)
+			to, ok := at[cell.ID]
+			if _, seen := out[to]; ok && !seen && c >= 0 && c < n && to >= 0 && to < cols {
+				out[to] = own[c]
+			}
+		}
+		return out
+	}
+	b, p, o := byColumn(base), byColumn(primary), byColumn(other)
+	aligns = make([]string, cols)
+	for c := range aligns {
+		switch {
+		case p[c] == o[c], o[c] == b[c]:
+			aligns[c] = p[c]
+		case p[c] == b[c]:
+			aligns[c] = o[c]
+		default:
+			clash = true
+			aligns[c] = p[c]
+			if otherWins {
+				aligns[c] = o[c]
+			}
+		}
+	}
+	return aligns, clash
 }
 
 func cellLines(table, primary, other *Node, key string) (lines map[string]int, shared bool) {

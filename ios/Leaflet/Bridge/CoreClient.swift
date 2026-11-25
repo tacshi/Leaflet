@@ -115,10 +115,6 @@ final class CoreClient: Sendable {
         try JSONDecoder().decode(type, from: Data(json.utf8))
     }
 
-    private func encode<T: Encodable>(_ value: T) throws -> String {
-        String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-    }
-
     nonisolated(nonsending) func start() async {
         platform.setInFront(true)
         try? await call { $0.start() }
@@ -151,7 +147,7 @@ final class CoreClient: Sendable {
     }
 
     nonisolated(nonsending) func createPage(_ page: NewPage) async throws -> PageRow {
-        let json = try encode(page)
+        let json = try jsonString(page)
         return try await call(PageRow.self, waiting: page.start) { core in
             try Self.answer { e in core.createPage(json, error: e) }
         }
@@ -188,7 +184,7 @@ final class CoreClient: Sendable {
     }
 
     nonisolated(nonsending) func setTags(_ id: String, tags: [String]) async throws {
-        let json = try encode(tags)
+        let json = try jsonString(tags)
         try await call { try $0.setPageTags(id, tags: json) }
     }
 
@@ -285,7 +281,7 @@ final class CoreClient: Sendable {
     }
 
     nonisolated(nonsending) func remindedOf(_ reminders: [Reminder]) async throws {
-        let json = try encode(reminders)
+        let json = try jsonString(reminders)
         try await call { try $0.reminded(of: json) }
     }
 
@@ -318,7 +314,7 @@ final class CoreClient: Sendable {
         _ id: String, editor: Int64, content: DocContent, rev: Int64
     ) async throws -> Int64 {
         try await call { core in
-            let json = try self.encode(content)
+            let json = try jsonString(content)
             var left: Int64 = 0
             try core.editPage(id, editor: editor, content: json, rev: rev, left: &left)
             return left
@@ -332,7 +328,7 @@ final class CoreClient: Sendable {
         _ id: String, editor: Int64, rev: Int64, content: DocContent? = nil
     ) async throws {
         try await call { core in
-            let json = try content.map { try self.encode($0) } ?? ""
+            let json = try content.map { try jsonString($0) } ?? ""
             try core.showedRev(id, editor: editor, rev: rev, content: json)
         }
     }

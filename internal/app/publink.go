@@ -81,6 +81,8 @@ type pubSnapshot struct {
 	html   string
 	files  map[string]pubFile
 	embeds map[string]string
+	// maps are the pages of the page's map blocks, by their IDs.
+	maps   map[string]string
 	blocks map[string]string
 	taken  map[string]bool
 }
@@ -548,15 +550,16 @@ func (p *pubLink) render(job pubJob) {
 	}
 	blocks := map[string]string{}
 	c.Walk(func(n, _ *doc.Node) { blocks[n.ID] = squash(n.Delta().Plain()) })
-	embeds := map[string]string{}
+	embeds, mapPages := map[string]string{}, map[string]string{}
 	threads := map[string][]store.Thread{}
-	var all []store.Thread
+	var all, shown []store.Thread
 	if len(job.threads) > 0 || job.comments {
 		all, _ = job.st.Threads(job.page)
 	}
 	for _, t := range all {
 		if job.threads[t.Root.ID] && !t.Root.Resolved {
 			threads[t.Root.BlockID] = append(threads[t.Root.BlockID], t)
+			shown = append(shown, t)
 		}
 	}
 	prefix := "/" + job.token + "/"
@@ -591,6 +594,16 @@ func (p *pubLink) render(job pubJob) {
 			embeds[n.ID] = src
 			return prefix + "e/" + url.PathEscape(n.ID)
 		},
+		Map: func(n *doc.Node) string {
+			names := pubStatic().names
+			files := rendered.MapFiles{Script: prefix + names["map.js"], Worker: prefix + names["map-worker.js"], Style: prefix + names["map.css"]}
+			page := rendered.WebMapPage(locales.In(i18n.Locale()), doc.MapOf(n), files, hexOf(theme.For(false).Accent), hexOf(theme.For(true).Accent))
+			if page == "" {
+				return ""
+			}
+			mapPages[n.ID] = page
+			return prefix + "m/" + url.PathEscape(n.ID)
+		},
 		Serve: srv,
 		Code:  codeHTML,
 		Chart: chartHTML,
@@ -601,13 +614,17 @@ func (p *pubLink) render(job pubJob) {
 		return
 	}
 	p.shown = job.seq
-	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, blocks: blocks, taken: job.taken(all)}
+	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, maps: mapPages, blocks: blocks, taken: job.taken(shown)}
 }
 
-// taken is what a visitor can't go by, as nameKey reads names: the names
-// of the page's owner, of the agents and of the others whose comments are
-// on the page, and the words the page or the app shows in place of the
-// owner's name.
+// taken is what a visitor can't go by, as nameKey reads names, so as not to
+// pass for someone else on the page: the names of the page's owner, of the
+// agents and of the others whose comments are in threads, the threads the
+// public page shows, and the words the page or the app shows in place of
+// the owner's name. The names of those who commented only in threads it
+// doesn't show are not taken, so that what a visitor may go by tells
+// nothing of them; a visitor's comment shows in the app as one through the
+// public link whatever its name.
 func (j pubJob) taken(threads []store.Thread) map[string]bool {
 	taken := map[string]bool{}
 	add := func(name string) {
@@ -711,6 +728,9 @@ func (s *pubServer) serve(f pubFile, ext string) string {
 func (s *pubServer) Image(path, typ string) string {
 	return s.serve(pubFile{typ: typ, path: path}, servedExt(path))
 }
+
+// Picture leaves a picture at a web link to the visitor's browser.
+func (s *pubServer) Picture(_ context.Context, link string) string { return link }
 
 func (s *pubServer) File(path, name string) string {
 	typ := "application/octet-stream"
@@ -965,6 +985,14 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; "+rendered.NestedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
 			serve("text/html; charset=utf-8", pubEmbedPage(src))
+		case strings.HasPrefix(rest, "m/"):
+			page, ok := snap.maps[strings.TrimPrefix(rest, "m/")]
+			if !ok {
+				refuse(http.StatusNotFound)
+				return
+			}
+			h.Set("Content-Security-Policy", rendered.WebMapCSP)
+			serve("text/html; charset=utf-8", page)
 		case strings.HasPrefix(rest, "f/"):
 			f, ok := snap.files[strings.TrimPrefix(rest, "f/")]
 			if !ok {
@@ -1173,6 +1201,10 @@ var pubStatic = sync.OnceValue(func() pubAssets {
 	add("embed", ".js", js, embedScript)
 	add("recording", ".js", js, recordingScript)
 	add("video", ".js", js, videoScript)
+	mapFiles := rendered.WebMapFiles()
+	add("map", ".js", js, mapFiles.Script)
+	add("map-worker", ".js", js, mapFiles.Worker)
+	add("map", ".css", "text/css; charset=utf-8", mapFiles.Style)
 	add("favicon", ".png", "image/png", string(pubFavicon))
 	return a
 })
@@ -1255,7 +1287,7 @@ const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;
   document.querySelectorAll("figure.embed iframe").forEach(function (f) {
-    if (f.contentWindow === e.source) f.style.height = Math.max(+f.dataset.height, Math.min(z[0], 1200)) + "px";
+    if (f.contentWindow === e.source) f.style.height = Math.max(120, Math.min(z[0], 1200)) + "px";
   });
 });`
 

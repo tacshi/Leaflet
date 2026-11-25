@@ -407,6 +407,68 @@ func TestFunctionRefusingATokenRetries(t *testing.T) {
 	}
 }
 
+// A check that refused a row is no stale token, though the row, in the
+// answer's details, says JWT: the token is kept, and the row not sent again.
+func TestRefusedRowKeepsTheToken(t *testing.T) {
+	var refreshes, calls atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			refreshes.Add(1)
+			_, _ = io.WriteString(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+			return
+		}
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"code":"23514","details":"Failing row contains (1, JWT notes).","hint":null,"message":"new row for relation \"pages\" violates check constraint \"pages_title_check\""}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	_, err := c.Insert(context.Background(), "pages", map[string]any{"id": "1", "title": "JWT notes"})
+	if re, ok := errors.AsType[*Error](err); !ok || re.Code != "23514" {
+		t.Errorf("insert: %v", err)
+	}
+	if refreshes.Load() != 0 || calls.Load() != 1 {
+		t.Errorf("%d refreshes, %d calls", refreshes.Load(), calls.Load())
+	}
+}
+
+func TestStaleTokenAsEachServiceSaysIt(t *testing.T) {
+	gateway := func(code string) http.Header { return http.Header{"Sb-Error-Code": {code}} }
+	for _, tc := range []struct {
+		name   string
+		status int
+		header http.Header
+		body   string
+		want   bool
+	}{
+		{"PostgREST 12, expired", 401, nil, `{"code":"PGRST301","details":null,"hint":null,"message":"JWT expired"}`, true},
+		{"PostgREST 13, expired", 401, nil, `{"code":"PGRST303","details":null,"hint":null,"message":"JWT expired"}`, true},
+		{"PostgREST, a check", 400, nil, `{"code":"23514","details":"Failing row contains (1, JWT notes).","hint":null,"message":"new row for relation \"pages\" violates check constraint \"pages_title_check\""}`, false},
+		{"PostgREST, a policy", 403, nil, `{"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"pages\""}`, false},
+		{"Storage, expired", 400, nil, `{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"\"exp\" claim timestamp check failed"}`, true},
+		{"Storage, before its codes", 400, nil, `{"statusCode":"403","error":"Unauthorized","message":"invalid JWT: unable to parse or verify signature"}`, true},
+		{"Storage, a policy", 400, nil, `{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"new row violates row-level security policy"}`, false},
+		{"Storage, an invalid JWT", 400, nil, `{"statusCode":"400","code":"InvalidJWT","error":"InvalidJWT","message":"Invalid JWT"}`, true},
+		{"Storage, a key", 400, nil, `{"statusCode":"400","code":"InvalidKey","error":"InvalidKey","message":"Invalid key: u1/JWT notes.pdf"}`, false},
+		{"Auth, expired", 403, nil, `{"code":403,"error_code":"bad_jwt","msg":"invalid JWT: unable to parse or verify signature, token has invalid claims: token is expired"}`, true},
+		{"Auth, a session gone", 403, nil, `{"code":403,"error_code":"session_not_found","msg":"Session from session_id claim in JWT does not exist"}`, true},
+		{"Auth, a field", 400, nil, `{"code":400,"error_code":"validation_failed","msg":"display name JWT is taken"}`, false},
+		{"Auth, before its codes", 401, nil, `{"code":401,"msg":"invalid JWT: unable to parse or verify signature, token is expired by 5m0s"}`, true},
+		{"Functions gateway, expired", 401, gateway("UNAUTHORIZED_LEGACY_JWT"), `{"code":"UNAUTHORIZED_LEGACY_JWT","message":"Invalid JWT"}`, true},
+		{"Functions gateway, signed with a new key", 401, gateway("UNAUTHORIZED_ASYMMETRIC_JWT"), `{"message":"Invalid JWT"}`, true},
+		{"Functions gateway, no header", 401, gateway("UNAUTHORIZED_NO_AUTH_HEADER"), `{"message":"Missing authorization header"}`, false},
+		{"Functions gateway, before its codes", 401, nil, `{"code":401,"message":"Invalid JWT"}`, true},
+		{"a function's own refusal", 401, nil, `{"error":"Sign in first"}`, false},
+		{"a server's failure", 500, nil, `{"code":"PGRST301","message":"JWT expired"}`, false},
+		{"a page, not JSON", 401, nil, `<html>JWT</html>`, false},
+	} {
+		if got := staleToken(tc.status, tc.header, []byte(tc.body)); got != tc.want {
+			t.Errorf("%s: stale %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestIsNetwork(t *testing.T) {
 	c := SignedInForTest("http://127.0.0.1:1", nil, "u1")
 	_, refused := c.Select(context.Background(), "pages", Query{})

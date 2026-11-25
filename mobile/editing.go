@@ -164,13 +164,33 @@ func LinkHref(typed string) string {
 	return href
 }
 
-func TableText(node string) (_ string, err error) {
+// TableCells is a table block's cells, row by row, as the app draws them:
+// each the delta of its text with its marks (bold, color, links, inline
+// math), its paragraphs a space apart, as the desktop's cells show them.
+func TableCells(node string) (_ string, err error) {
 	defer catch(&err)
 	var n doc.Node
 	if err := json.Unmarshal([]byte(node), &n); err != nil {
 		return "", err
 	}
-	return encode(doc.PlainTableRows(&n))
+	cells := doc.TableCells(&n)
+	grid := make([][][]any, len(cells))
+	for r, row := range cells {
+		grid[r] = make([][]any, len(row))
+		for c, cell := range row {
+			var d doc.Delta
+			if cell != nil {
+				for i, k := range cell.Children {
+					if i > 0 {
+						d = append(d, doc.Run{Text: " "})
+					}
+					d = append(d, k.Delta()...)
+				}
+			}
+			grid[r][c] = d.JSON()
+		}
+	}
+	return encode(grid)
 }
 
 type due struct {

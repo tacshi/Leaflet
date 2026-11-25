@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -123,6 +125,7 @@ func TestHandshake(t *testing.T) {
 	for name, want := range map[string][3]any{
 		"read_page": {true, nil, false}, "insert_blocks": {false, false, true}, "delete_blocks": {false, true, true},
 		"move_page": {false, true, true}, "rename_page": {false, true, true}, "move_block": {false, true, true},
+		"find_place": {true, nil, true}, "find_route": {true, nil, true}, "list_pages": {true, nil, false},
 	} {
 		a := names[name]["annotations"].(map[string]any)
 		if a["readOnlyHint"] != want[0] || a["destructiveHint"] != want[1] || a["openWorldHint"] != want[2] || a["title"] == "" {
@@ -215,7 +218,7 @@ func TestCreateAndEditPage(t *testing.T) {
 		t.Errorf("content %q", text)
 	}
 	history, _ := st.History(id)
-	if len(history) != 1 || history[0].Label != "Before Claude Code" || strings.Contains(history[0].Content, "Founded") {
+	if len(history) != 1 || core.HistoryLabel(history[0]) != locales.DialogHistoryBeforeAgent("Claude Code") || strings.Contains(history[0].Content, "Founded") {
 		t.Errorf("history %+v", history)
 	}
 
@@ -229,7 +232,7 @@ func TestCreateAndEditPage(t *testing.T) {
 	edit("Claude Code")
 	edit("Codex")
 	edit("Codex")
-	if history, _ := st.History(id); len(history) != 2 || history[0].Label != "Before Codex" {
+	if history, _ := st.History(id); len(history) != 2 || core.HistoryLabel(history[0]) != locales.DialogHistoryBeforeAgent("Codex") {
 		t.Errorf("history after clients started again %+v", history)
 	}
 }
@@ -687,7 +690,10 @@ func TestEditNotSavedWithoutItsSnapshot(t *testing.T) {
 	}
 }
 
-func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
+// An edit saved again, as the page changed while it was saved, keeps the
+// page as it was just before the edit that went in: going back to it keeps
+// what someone wrote in between.
+func TestEditRunAgainKeepsThePageJustBefore(t *testing.T) {
 	st := newStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{})
 	if err != nil {
@@ -712,12 +718,25 @@ func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 	if out["error"] != nil {
 		t.Fatal(out)
 	}
-	if h, err := st.History(p.ID); err != nil || len(h) != 1 {
-		t.Errorf("history %d, %v", len(h), err)
+	h, err := st.History(p.ID)
+	if err != nil || len(h) == 0 || h[0].Reason != "agent_run" {
+		t.Fatalf("history %+v, %v", h, err)
+	}
+	if kept, err := doc.Decode(h[0].Content); err != nil || kept.Find("theirs") == nil || strings.Contains(kept.PlainText(), "Inserted") {
+		t.Errorf("the snapshot before the edit holds %s, %v", h[0].Content, err)
 	}
 	c := st.Content(p.ID)
 	if saves != 2 || c.Find("theirs") == nil || !strings.Contains(c.PlainText(), "Inserted") {
 		t.Errorf("%d saves, stored %q", saves, c.PlainText())
+	}
+	// Saved again as the page stood, the edit keeps no second snapshot.
+	saves = 1
+	if out := s.pages.call("insert_blocks", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"},
+		"blocks": []any{map[string]any{"type": "paragraph", "text": "More"}}}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if again, _ := st.History(p.ID); len(again) != len(h) {
+		t.Errorf("history %d, then %d", len(h), len(again))
 	}
 }
 
@@ -1511,5 +1530,237 @@ func TestFindRouteThenAMapAcrossCalls(t *testing.T) {
 	}
 	if n := st.Content(out["page_id"].(string)).Children; len(n) != 1 || n[0].Type != "map" {
 		t.Errorf("the new page holds %+v", n)
+	}
+}
+
+// A view the app left as it crashed is of no app: current_page answers as it
+// does with the app closed.
+func TestCurrentPageOfAnAppThatEnded(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "1.0.0")
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Roadmap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue(store.LastPageKey, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	ended := exec.Command(os.Args[0], "-test.run=^$") // #nosec G204
+	if err := ended.Run(); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now().Add(-time.Hour)
+	for _, c := range []struct {
+		pid   int
+		began time.Time
+		open  bool
+	}{
+		{os.Getpid(), time.Now(), true},
+		{ended.Process.Pid, began, false},
+		{os.Getpid(), began, false},
+		{0, time.Time{}, true},
+	} {
+		raw, _ := json.Marshal(map[string]any{"page_id": p.ID, "selection": map[string]any{"text": "it"}, "updated_at": time.Now(), "pid": c.pid, "began": c.began})
+		if err := st.SetValue("open.view", string(raw)); err != nil {
+			t.Fatal(err)
+		}
+		out, isErr := result(t, session(t, s, initialize, call(2, "current_page", nil))[2])
+		if isErr || out["open"] != c.open || out["page_id"] != p.ID || (out["selection"] != nil) != c.open {
+			t.Errorf("the app of process %d, begun %v: %v", c.pid, c.began, out)
+		}
+	}
+}
+
+// list_pages answers in parts a client reads whole, however many pages the
+// user has.
+func TestListPagesInParts(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "test")
+	parent, _ := st.CreatePage(store.NewPageOptions{Title: "Projects"})
+	if _, err := st.CreateFolderIn("Work", ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 800 {
+		if _, err := st.CreatePage(store.NewPageOptions{ParentID: parent.ID, Title: fmt.Sprintf("Meeting notes %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	next := any(nil)
+	for parts := 0; ; parts++ {
+		if parts > 10 {
+			t.Fatal("list_pages never ends")
+		}
+		args := map[string]any{}
+		if next != nil {
+			args["offset"] = next
+		}
+		got := session(t, s, initialize, call(2, "list_pages", args))
+		r := got[2]["result"].(map[string]any)
+		text := r["content"].([]any)[0].(map[string]any)["text"].(string)
+		if len(text) > listBytes+1_000 {
+			t.Errorf("part %d is %d bytes", parts, len(text))
+		}
+		out, failed := result(t, got[2])
+		if failed || out["total_pages"] != 801.0 || (out["folders"] != nil) != (parts == 0) {
+			t.Fatalf("part %d: %v", parts, out["error"])
+		}
+		for _, p := range out["pages"].([]any) {
+			seen[p.(map[string]any)["id"].(string)] = true
+		}
+		if next = out["next_offset"]; next == nil {
+			break
+		}
+	}
+	if len(seen) != 801 {
+		t.Errorf("listed %d pages of 801", len(seen))
+	}
+	if out := s.Call("list_pages", map[string]any{"offset": -1.0}); out["error"] == nil {
+		t.Errorf("offset -1 listed %v", out)
+	}
+	all, err := s.Listing()
+	if err != nil || len(all["pages"].([]map[string]any)) != 801 || len(all["folders"].([]map[string]any)) != 1 {
+		t.Errorf("the whole listing: %v", err)
+	}
+}
+
+// An edit of a page read so long ago that what was read of it is let go
+// replaces what may have changed since: it is kept as a conflict, and the
+// agent told.
+func TestEditOfAPageReadLongAgoKeepsAConflict(t *testing.T) {
+	st := newStore(t)
+	b1 := &doc.Node{ID: "b1", Type: "paragraph"}
+	b1.SetDelta(doc.Delta{{Text: "draft"}})
+	p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks([]*doc.Node{b1})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	if out := s.pages.call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	for i := range keptReads {
+		q, _ := st.CreatePage(store.NewPageOptions{Title: fmt.Sprint("P", i), Content: doc.FromBlocks(nil)})
+		s.pages.call("read_page", map[string]any{"page_id": q.ID})
+	}
+	if s.pages.read[p.ID] != nil {
+		t.Fatal("the first page's sight is still kept")
+	}
+	c := st.Content(p.ID)
+	c.Find("b1").SetDelta(doc.Delta{{Text: "the user's fix"}})
+	if _, _, err := st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	conflicts := func() int {
+		h, _ := st.History(p.ID)
+		n := 0
+		for _, e := range h {
+			if e.Reason == "conflict" {
+				n++
+			}
+		}
+		return n
+	}
+	out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "agent's"}})
+	if note, _ := out["conflict"].(string); out["error"] != nil || !strings.Contains(note, "too long ago") || conflicts() != 1 {
+		t.Fatalf("after its sight was let go: %v, %d conflicts", out, conflicts())
+	}
+	// Read again, the page is seen as it is.
+	if out := s.pages.call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "again"}}); out["conflict"] != nil || out["error"] != nil {
+		t.Errorf("after reading again: %v", out)
+	}
+}
+
+// A sight keeps each block as a hash, so a session keeps many pages': no
+// fewer than a long session reads.
+func TestSightsOfManyPagesAreKept(t *testing.T) {
+	if keptReads < 200 {
+		t.Errorf("a session keeps the sights of %d pages", keptReads)
+	}
+	tools := pageTools{read: map[string]sight{}, forgot: map[string]bool{}}
+	big := sight{}
+	for i := range keptBlocks / 2 {
+		big[fmt.Sprint(i)] = 1
+	}
+	tools.keep("a", big)
+	tools.keep("b", big)
+	tools.keep("c", sight{"x": 1})
+	if tools.read["a"] != nil || !tools.forgot["a"] || tools.read["b"] == nil || tools.read["c"] == nil || tools.kept != len(big)+1 {
+		t.Errorf("kept %v, forgot %v, %d blocks", slices.Collect(maps.Keys(tools.read)), tools.forgot, tools.kept)
+	}
+}
+
+func TestRenameTakesTheSpaceAround(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "test")
+	p, _ := st.CreatePage(store.NewPageOptions{Title: "x"})
+	if out := s.pages.call("rename_page", map[string]any{"page_id": p.ID, "title": "  Plan\n"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if q, _ := st.Page(p.ID); q.Title != "Plan" {
+		t.Errorf("renamed %q", q.Title)
+	}
+	if out := s.pages.call("rename_page", map[string]any{"page_id": p.ID, "title": " \n"}); out["error"] == nil {
+		t.Errorf("renamed to nothing: %v", out)
+	}
+}
+
+// The page and folder tools read their arguments as the workspace agent's do.
+func TestPageToolsReadTheirArgumentsAsTheWorkspaceDoes(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "test")
+	p, _ := st.CreatePage(store.NewPageOptions{Title: "x"})
+	if out := s.pages.call("set_page_tags", map[string]any{"page_id": p.ID, "tags": []any{"work", 3.0}}); out["error"] != "tags must be a list of words." {
+		t.Errorf("a tag that is no word: %v", out)
+	}
+	if q, _ := st.Page(p.ID); len(q.Tags) != 0 {
+		t.Errorf("tags %v", q.Tags)
+	}
+	out := s.pages.call("create_folder", map[string]any{"name": " Work "})
+	f, err := st.Folder(fmt.Sprint(out["folder_id"]))
+	if err != nil || f.Name != "Work" {
+		t.Fatalf("folder %+v, %v", f, err)
+	}
+	if out := s.pages.call("create_page", map[string]any{"title": "y", "parent_id": p.ID, "folder_id": f.ID}); !strings.Contains(fmt.Sprint(out["error"]), "not both") {
+		t.Errorf("both: %v", out)
+	}
+	// A write takes no offset, which read_page alone does.
+	if out := s.pages.call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "More.", "offset": -1.0}); out["error"] != nil {
+		t.Errorf("a write with a stray offset: %v", out)
+	}
+}
+
+func TestRequestIDs(t *testing.T) {
+	s := NewServer(newStore(t), "test")
+	var out bytes.Buffer
+	in := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":null,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":{"a":1},"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":[1],"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":1.5,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":true,"method":"ping"}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":"a","method":"ping"}`,
+		`{"jsonrpc":"2.0","id":7,"method":"ping"}`,
+	}, "\n")
+	if err := s.Serve(strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 7 {
+		t.Fatalf("answers %q", lines)
+	}
+	for _, l := range lines[:5] {
+		var m map[string]any
+		_ = json.Unmarshal([]byte(l), &m)
+		if e, _ := m["error"].(map[string]any); e == nil || e["code"] != -32600.0 || m["id"] != nil || m["result"] != nil {
+			t.Errorf("a request of a bad id answered %s", l)
+		}
+	}
+	if lines[5] != `{"jsonrpc":"2.0","id":"a","result":{}}` || lines[6] != `{"jsonrpc":"2.0","id":7,"result":{}}` {
+		t.Errorf("answers %q", lines[5:])
 	}
 }

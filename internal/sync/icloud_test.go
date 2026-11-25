@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1433,15 +1434,9 @@ func TestICloudFileThatLivesKeepsItsCopy(t *testing.T) {
 	if _, err := os.Stat(blob); err != nil {
 		t.Fatalf("no copy in the folder: %v", err)
 	}
-	if err := a.st.DeleteFile(f); err != nil {
-		t.Fatal(err)
-	}
-	lives, err := a.st.File(f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lives.DeletedAt = time.Time{}
-	if err := a.st.PutFile(lives); err != nil {
+	// The removal of its contents waits, as from a deletion the file came back from.
+	removal := map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}
+	if err := a.st.Queue("storage_delete", "files/"+f.ID, removal, "deleted file for good", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2189,7 +2184,7 @@ func TestICloudPageFilesAreReadAgainOnceTheirBasesGo(t *testing.T) {
 		t.Fatalf("B has %q", b.text(p.ID, "a1"))
 	}
 	b.svc.SetICloud(false)
-	if err := b.st.Wipe(); err != nil {
+	if err := b.st.ForgetAll(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.st.LoadSession(nil); err != nil {
@@ -2597,4 +2592,425 @@ func heldOf(t *testing.T, svc *Service, table, id string) []icloud.Entry {
 		t.Fatal(err)
 	}
 	return held
+}
+
+// hideBatches has every batch of the device look not downloaded yet, and returns what brings them back.
+func hideBatches(t *testing.T, root, device string) func() {
+	t.Helper()
+	dir := filepath.Join(root, "devices", device, "log")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moved [][2]string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		from, to := filepath.Join(dir, e.Name()), filepath.Join(dir, "."+e.Name()+".icloud")
+		if err := os.Rename(from, to); err != nil {
+			t.Fatal(err)
+		}
+		moved = append(moved, [2]string{from, to})
+	}
+	was := icloud.StartDownload
+	icloud.StartDownload = func(string) error { return nil }
+	return func() {
+		icloud.StartDownload = was
+		for _, m := range moved {
+			if err := os.Rename(m[1], m[0]); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// holding is the files under the folder's dir whose contents have the word.
+func holding(t *testing.T, root, dir, word string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := os.ReadFile(path) // #nosec G304
+		if err == nil && strings.Contains(string(raw), word) {
+			found = append(found, strings.TrimPrefix(path, root))
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+// goQuiet has the device look not active for longer than quietFor, as its device.json says.
+func goQuiet(t *testing.T, reader, quiet *cloudDevice) {
+	t.Helper()
+	rel, _ := icloud.DevicePath(quiet.st.DeviceID())
+	var d deviceFile
+	if err := reader.svc.folder().ReadJSON(rel, &d); err != nil {
+		t.Fatal(err)
+	}
+	d.LastActiveAt = cloudNow().Add(-quietFor - time.Hour)
+	if err := reader.svc.folder().WriteJSON(rel, d); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// laterBy has the devices' clock run the time ahead until the test ends.
+func laterBy(t *testing.T, d time.Duration) {
+	was := cloudNow
+	t.Cleanup(func() { cloudNow = was })
+	cloudNow = func() time.Time { return time.Now().Add(d) }
+}
+
+// TestICloudPurgeOutlastsARowSentAgainWhole has a device restore a page, as another deletes it for good, before it
+// hears of that, and then send all it has again: its whole row is later than the deletion, which still applies, on
+// every device.
+func TestICloudPurgeOutlastsARowSentAgainWhole(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plans", &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	a.edit(p.ID, "b1", "secret")
+	syncAll(a, b)
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	nextStamp()
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	show := hideBatches(t, root, a.st.DeviceID())
+	nextStamp()
+	if err := b.st.RestorePages([]string{p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if err := b.svc.requeueAll(context.Background(), b.st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	show()
+	c := newCloudDevice(t, root)
+	syncAll(a, b, c)
+	syncAll(c, b, a)
+	for name, d := range map[string]*cloudDevice{"A": a, "B": b, "C": c} {
+		if !d.st.IsPurged(p.ID) || d.st.Content(p.ID) != nil {
+			t.Errorf("%s keeps the page deleted for good: purged %v", name, d.st.IsPurged(p.ID))
+		}
+	}
+}
+
+// TestICloudVersionOfAPurgedPageGoesFromAQuietDevice has a device that had not heard of a page deleted for good write
+// its version of it again, and go quiet: the device that reads the batch naming it removes it, as the others did
+// theirs, and waits for none.
+func TestICloudVersionOfAPurgedPageGoesFromAQuietDevice(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plans", &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	a.edit(p.ID, "b1", "first")
+	syncAll(a, b)
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	nextStamp()
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	show := hideBatches(t, root, a.st.DeviceID())
+	nextStamp()
+	if err := b.st.RestorePages([]string{p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	a.sync()
+	nextStamp()
+	b.edit(p.ID, "b1", "whispered")
+	b.sync()
+	show()
+	a.sync()
+	laterBy(t, quietFor+time.Hour)
+	goQuiet(t, a, b)
+	a.sync()
+	a.sync()
+	if !a.st.IsPurged(p.ID) {
+		t.Fatal("not purged on A")
+	}
+	if found := holding(t, root, "", "whispered"); len(found) != 0 {
+		t.Errorf("what was on the page stays in %v", found)
+	}
+	if want := a.st.ValuesWithPrefix("icloud.want."); len(want) != 0 {
+		t.Errorf("A waits for versions of a page deleted for good: %v", want)
+	}
+}
+
+// TestICloudRedactionTakesTheVersionsOfAPurgedPageOfQuietDevices finds a quiet device's version of a page deleted for
+// good that came after the batch naming it was read: it goes as the quiet device's log is redacted.
+func TestICloudRedactionTakesTheVersionsOfAPurgedPageOfQuietDevices(t *testing.T) {
+	root := cloudRoot(t)
+	a, quiet := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plans", &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	syncAll(a, quiet)
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	rel, _ := icloud.PagePath(quiet.st.DeviceID(), p.ID)
+	late := icloud.PageFile{Format: icloud.Format, PageID: p.ID, Version: 1, Content: json.RawMessage(`{"whispered":true}`)}
+	if err := a.svc.folder().WriteJSON(rel, late); err != nil {
+		t.Fatal(err)
+	}
+	laterBy(t, quietFor+time.Hour)
+	goQuiet(t, a, quiet)
+	a.sync()
+	if a.svc.folder().Exists(rel) {
+		t.Error("a quiet device's version of a page deleted for good stays")
+	}
+}
+
+// TestICloudPurgedFileLeavesItsNameOutOfTheFolder deletes a file for good: what it was, its name too, is in no file
+// of the folder once the logs are compacted, nor on the devices.
+func TestICloudPurgedFileLeavesItsNameOutOfTheFolder(t *testing.T) {
+	old := compactAfter
+	compactAfter = 0
+	t.Cleanup(func() { compactAfter = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "divorce-lawyer-letter.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if err := a.st.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	syncAll(a, b)
+	if found := holding(t, root, "", "divorce-lawyer"); len(found) != 0 {
+		t.Errorf("the name of a file deleted for good stays in %v", found)
+	}
+	for name, d := range map[string]*cloudDevice{"A": a, "B": b} {
+		if got, err := d.st.File(f.ID); err != nil || got.PurgedAt.IsZero() || got.Name != "" {
+			t.Errorf("%s keeps the file deleted for good as %+v, %v", name, got, err)
+		}
+	}
+}
+
+// TestICloudFileRestoredAsItIsPurgedElsewhereIsListedNowhere restores a file on one device while another deletes it
+// for good: the deletion holds on both, and neither lists it.
+func TestICloudFileRestoredAsItIsPurgedElsewhereIsListedNowhere(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if err := a.st.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	nextStamp()
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	show := hideBatches(t, root, a.st.DeviceID())
+	nextStamp()
+	if err := b.st.RestoreFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	show()
+	syncAll(a, b)
+	for name, d := range map[string]*cloudDevice{"A": a, "B": b} {
+		got, _ := d.st.File(f.ID)
+		if got.PurgedAt.IsZero() || got.DeletedAt.IsZero() {
+			t.Errorf("%s has the file as %+v", name, got)
+		}
+		listed, _ := d.st.Files()
+		for _, x := range listed {
+			if x.ID == f.ID {
+				t.Errorf("%s lists a file deleted for good", name)
+			}
+		}
+	}
+}
+
+// TestICloudCopyOfARedactedBatchKeepsTheDevicesID finds, as a quiet device comes back, a copy iCloud made of one of
+// its batches as two devices redacted it at once: the copy goes, and the device keeps its ID.
+func TestICloudCopyOfARedactedBatchKeepsTheDevicesID(t *testing.T) {
+	root := cloudRoot(t)
+	a, quiet := newCloudDevice(t, root), newCloudDevice(t, root)
+	quiet.page("Quiet's page")
+	syncAll(a, quiet)
+	qid := quiet.st.DeviceID()
+	rel, _ := icloud.BatchPath(qid, 1)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	data, err := os.ReadFile(path) // #nosec G304
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := strings.TrimSuffix(path, ".json") + " 2.json"
+	if err := os.WriteFile(copied, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	quiet.sync()
+	if quiet.st.DeviceID() != qid {
+		t.Errorf("the device took a new ID: %s, %d waiting", quiet.st.DeviceID(), quiet.st.PendingCount())
+	}
+	if _, err := os.Stat(copied); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stays: %v", err)
+	}
+}
+
+// TestICloudOneDeviceRedactsAQuietDevicesLog has two active devices hear of a page deleted for good: only the one
+// with the lower ID rewrites the batches of the device gone quiet, so that iCloud keeps no two versions of them.
+func TestICloudOneDeviceRedactsAQuietDevicesLog(t *testing.T) {
+	root := cloudRoot(t)
+	a, b, quiet := newCloudDevice(t, root), newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plans", &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	syncAll(a, b, quiet)
+	if _, err := quiet.st.AddComment(p.ID, "b1", "hidden aside", "", "", "user", "Q"); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(quiet, a, b)
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	goQuiet(t, a, quiet)
+	first, second := a, b
+	if b.st.DeviceID() < a.st.DeviceID() {
+		first, second = b, a
+	}
+	if err := second.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	second.sync()
+	second.sync()
+	log := "devices/" + quiet.st.DeviceID() + "/log"
+	if !second.st.IsPurged(p.ID) {
+		t.Fatal("not purged")
+	}
+	if found := holding(t, root, log, "hidden"); len(found) == 0 {
+		t.Fatal("the device with the higher ID rewrote the quiet device's log")
+	}
+	first.sync()
+	first.sync()
+	if found := holding(t, root, log, "hidden"); len(found) != 0 {
+		t.Errorf("what was on the page stays in %v", found)
+	}
+}
+
+// TestICloudDamagedQuietBatchCountsAsRead has a quiet device's batch not parse: it holds nothing to take out, and the
+// redaction of quiet logs is done, not due on every pass for good.
+func TestICloudDamagedQuietBatchCountsAsRead(t *testing.T) {
+	root := cloudRoot(t)
+	a, quiet := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plans", &doc.Node{ID: "b1", Type: "paragraph", Data: map[string]any{}})
+	quiet.page("Quiet's own")
+	syncAll(a, quiet)
+	quiet.page("Quiet's other")
+	quiet.sync()
+	rel, _ := icloud.BatchPath(quiet.st.DeviceID(), 1)
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entries":[`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if err := a.st.EmptyBin(store.WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	laterBy(t, quietFor+time.Hour)
+	a.sync()
+	if a.svc.intValue(redactedKey) == 0 {
+		t.Error("the quiet logs are not read through for a batch that does not parse")
+	}
+	if now := time.Now().Add(quietFor + 90*24*time.Hour); a.svc.redactDue(now) {
+		t.Error("the redaction is due long after its days")
+	}
+}
+
+// TestICloudDamagedBatchGoesOnFromTheSnapshotItsDeviceNames has a device's batch not parse, with a snapshot after it:
+// the reader goes on from the snapshot its device.json names, reading none of the batches between.
+func TestICloudDamagedBatchGoesOnFromTheSnapshotItsDeviceNames(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan")
+	syncAll(a, b)
+	for _, title := range []string{"Plan 1", "Plan 2", "Plan last"} {
+		if err := a.st.RenamePage(p.ID, title); err != nil {
+			t.Fatal(err)
+		}
+		a.sync()
+	}
+	me := a.st.DeviceID()
+	seqs, _, _ := a.svc.folder().Batches(me)
+	damaged, between, snapshot := seqs[len(seqs)-3], seqs[len(seqs)-2], seqs[len(seqs)-1]
+	at := func(seq int64) string {
+		rel, _ := icloud.BatchPath(me, seq)
+		return filepath.Join(root, filepath.FromSlash(rel))
+	}
+	if err := os.WriteFile(at(damaged), []byte(`{"format":1,"entries":[`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The last batch is a snapshot, which device.json names; the one before it is not downloaded.
+	last, err := a.svc.readBatch(me, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last.Snapshot = true
+	rel, _ := icloud.BatchPath(me, snapshot)
+	if err := a.svc.folder().WriteJSON(rel, last); err != nil {
+		t.Fatal(err)
+	}
+	devRel, _ := icloud.DevicePath(me)
+	var d deviceFile
+	if err := a.svc.folder().ReadJSON(devRel, &d); err != nil {
+		t.Fatal(err)
+	}
+	d.LogFrom = snapshot
+	if err := a.svc.folder().WriteJSON(devRel, d); err != nil {
+		t.Fatal(err)
+	}
+	hidden := filepath.Join(filepath.Dir(at(between)), "."+filepath.Base(at(between))+".icloud")
+	if err := os.Rename(at(between), hidden); err != nil {
+		t.Fatal(err)
+	}
+	asked := map[string]bool{}
+	was := icloud.StartDownload
+	icloud.StartDownload = func(p string) error { asked[p] = true; return nil }
+	t.Cleanup(func() { icloud.StartDownload = was })
+	b.sync()
+	if b.title(p.ID) != "Plan last" {
+		t.Errorf("B has %q", b.title(p.ID))
+	}
+	if asked[at(between)] {
+		t.Error("the batch before the snapshot was read")
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -692,7 +693,7 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 		}
 		data, _ := io.ReadAll(res.Body)
 		_ = res.Body.Close()
-		stale := staleToken(res.StatusCode, data)
+		stale := staleToken(res.StatusCode, res.Header, data)
 		if stale {
 			// Refused even when the request cannot go again, as an upload's body read once: the next request
 			// renews the token rather than send it again until it runs out.
@@ -732,12 +733,57 @@ func (c *Client) refuse(tok string) {
 	}
 }
 
-func staleToken(status int, body []byte) bool {
+// functionTokenCodes are the codes the Edge Functions gateway gives a JWT it
+// could not verify, one run out or signed with a key the project no longer
+// takes, in its sb-error-code header.
+var functionTokenCodes = []string{"UNAUTHORIZED_ASYMMETRIC_JWT", "UNAUTHORIZED_LEGACY_JWT"}
+
+// authTokenCodes are Auth's codes for a token it cannot take: one it cannot
+// verify, or whose session or user is gone, which a refresh tells.
+var authTokenCodes = []string{"bad_jwt", "session_not_found", "user_not_found"}
+
+// staleToken reports whether a refusal is of the request's token, one run
+// out or no longer good, so the request may go again with a fresh one. Each
+// service says so its own way: PostgREST and Auth with a code, the Edge
+// Functions gateway with a header, Storage with its AccessDenied and jose's
+// words for a token it could not verify, and the gateway and Auth before
+// their codes with words alone. The rest of an answer is not read, as the
+// details of a row a check refused, which hold the user's own words.
+func staleToken(status int, header http.Header, body []byte) bool {
 	if status != http.StatusUnauthorized && status != http.StatusBadRequest && status != http.StatusForbidden {
 		return false
 	}
-	b := strings.ToLower(string(body))
-	return strings.Contains(b, "jwt") || strings.Contains(b, "claim timestamp check failed")
+	if code := header.Get("sb-error-code"); code != "" {
+		return slices.Contains(functionTokenCodes, code)
+	}
+	var e struct {
+		// PostgREST's and Storage's code is a name, Auth's and the
+		// gateway's the HTTP status.
+		Code      any    `json:"code"`
+		ErrorCode string `json:"error_code"`
+		Error     string `json:"error"`
+		Message   string `json:"message"`
+		Msg       string `json:"msg"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return false
+	}
+	code, _ := e.Code.(string)
+	switch {
+	case strings.HasPrefix(code, "PGRST30"):
+		// PostgREST could not decode the JWT, or its claims, as its expiry, failed.
+		return true
+	case e.ErrorCode != "":
+		return slices.Contains(authTokenCodes, e.ErrorCode)
+	case slices.Contains(functionTokenCodes, code), code == "InvalidJWT", e.Error == "InvalidJWT":
+		return true
+	case code != "" && code != "AccessDenied":
+		// Any other code, as a database's, is not of the token.
+		return false
+	}
+	// Storage denies access for a policy as for a token it could not verify.
+	words := strings.ToLower(e.Message + "\n" + e.Msg)
+	return strings.Contains(words, "jwt") || strings.Contains(words, "claim timestamp check failed")
 }
 
 func decodeRows(res *http.Response) ([]map[string]any, error) {

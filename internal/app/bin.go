@@ -60,7 +60,8 @@ func (a *App) toggleBin() {
 	}
 }
 
-// loadBin reads what is in the bin, and then the page chosen, if one still is.
+// loadBin reads what is in the bin, and then the page chosen, if one still is. A read that fails keeps what an earlier
+// one listed, with why.
 func (a *App) loadBin() {
 	a.bin.listReads++
 	read, st := a.bin.listReads, a.st
@@ -70,7 +71,9 @@ func (a *App) loadBin() {
 		if read != a.bin.listReads {
 			return
 		}
-		a.bin.items, a.bin.read, a.bin.readErr = items, true, err
+		if a.bin.readErr = err; err == nil {
+			a.bin.items, a.bin.read = items, true
+		}
 		a.loadBinShown()
 	})
 }
@@ -144,7 +147,8 @@ func (a *App) binView(c *ui.Context) {
 			if err := a.bin.readErr; err != nil {
 				ui.Text(c, locales.BinCouldNotRead(binName(), err.Error())).FontSize(12.5).TextColor(pal.Danger).Padding(0, 18, 12)
 			}
-			if len(items) == 0 && !a.bin.read {
+			// The bin shows as empty only as its last read found it so.
+			if len(items) == 0 && (!a.bin.read || a.bin.readErr != nil) {
 				return
 			}
 			if len(items) == 0 {
@@ -292,7 +296,8 @@ func (a *App) binAlerts(c *ui.Context) {
 	}
 }
 
-// purgeFromBin deletes for good off the main thread, as the whole bin may hold many pages and files.
+// purgeFromBin deletes for good off the main thread, as the whole bin may hold many pages and files. The bin shows anew
+// as the store tells what changed (reload).
 func (a *App) purgeFromBin(purge func(*core.Core) error, done string) {
 	cr := a.core()
 	var err error
@@ -302,14 +307,12 @@ func (a *App) purgeFromBin(purge func(*core.Core) error, done string) {
 		} else {
 			a.toast(done)
 		}
-		if a.route.Kind == "bin" {
-			a.loadBin()
-		}
 	})
 }
 
 // restoreFromBin takes an item out of the bin on the main thread, as a page coming back is linked in its parent, which
-// may be open in the editor.
+// may be open in the editor. Its page is listed at once, for the toast's Open; the bin shows anew as the store tells
+// what changed (reload).
 func (a *App) restoreFromBin(it store.BinItem) {
 	if err := a.pageCore().RestoreFromBin(it.BinRef); err != nil {
 		a.toast(locales.AppErrorRestore(err.Error()))
@@ -321,7 +324,6 @@ func (a *App) restoreFromBin(it store.BinItem) {
 	if a.bin.pick == it.BinRef {
 		a.bin.pick = store.BinRef{}
 	}
-	a.loadBin()
 	if it.Kind == store.BinFile || it.Template {
 		a.toast(locales.BinRestored(it.Title))
 		return

@@ -94,7 +94,12 @@ var idleTimeout = 2 * time.Minute
 
 var streamIdleTimeout = 10 * time.Minute
 
-var errIdle = errors.New("the model stopped answering")
+// errIdle is a model's answer that stopped coming in.
+var errIdle error = errModelIdle{}
+
+type errModelIdle struct{}
+
+func (errModelIdle) Error() string { return locales.AgentModelStoppedAnswering() }
 
 var (
 	answerTransport         = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &idleTimeout) })
@@ -161,7 +166,12 @@ const (
 	maxAnswerBytes = 32 << 20
 )
 
-var errTooLong = errors.New("the answer is too long to read")
+// errTooLong is an answer larger than Leaflet reads.
+var errTooLong error = errAnswerTooLong{}
+
+type errAnswerTooLong struct{}
+
+func (errAnswerTooLong) Error() string { return locales.AgentAnswerTooLong() }
 
 func readAll(r io.Reader, limit int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(r, limit+1))
@@ -194,9 +204,13 @@ func (c *cappedReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func noRedirect(*http.Request, []*http.Request) error {
-	return errors.New("redirected")
-}
+func noRedirect(*http.Request, []*http.Request) error { return errRedirect }
+
+var errRedirect error = errRedirected{}
+
+type errRedirected struct{}
+
+func (errRedirected) Error() string { return locales.AgentRedirected() }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
 	res, err := c.send(ctx, c.HTTP, method, path, body)
@@ -222,8 +236,14 @@ func (c *Client) send(ctx context.Context, hc *http.Client, method, path string,
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-		if strings.Contains(c.BaseURL, "anthropic.com") {
+		anthropic := strings.Contains(c.BaseURL, "anthropic.com")
+		// Anthropic's own Messages API takes the key as x-api-key alone, a
+		// bearer token there being a sign-in's; its OpenAI-compatible
+		// endpoints take either.
+		if !anthropic || path != "/messages" {
+			req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		}
+		if anthropic {
 			req.Header.Set("x-api-key", c.APIKey)
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}

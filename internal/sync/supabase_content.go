@@ -346,7 +346,7 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 
 func (s *Service) pullContents(ctx context.Context) error {
 	s.contentsAsked, s.contentsSlow = false, false
-	err := s.paged("page_content", func(bool) (bool, error) { return s.pullContentsPage(ctx) })
+	err := s.paged("page_content", func(first bool) (bool, error) { return s.pullContentsPage(ctx, first) })
 	if err == nil {
 		err = s.pullWaiting(ctx)
 	}
@@ -358,8 +358,8 @@ func (s *Service) pullContents(ctx context.Context) error {
 
 var contentBatch = 50
 
-func (s *Service) pullContentsPage(ctx context.Context) (bool, error) {
-	rows, full, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), 200)
+func (s *Service) pullContentsPage(ctx context.Context, first bool) (bool, error) {
+	rows, full, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), first, 200)
 	if err != nil {
 		return false, err
 	}

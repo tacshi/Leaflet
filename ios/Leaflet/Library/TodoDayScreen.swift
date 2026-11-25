@@ -117,7 +117,7 @@ private struct DayTodoRow: View {
                 }
                 Spacer(minLength: 0)
                 if todo.timed, let due = todo.dueDate {
-                    Text(due, format: .dateTime.hour().minute())
+                    Text(L.todosDueTime(due: due))
                         .font(.footnote)
                         .monospacedDigit()
                         .foregroundStyle(todo.overdue == true ? Color.red : Color.secondary)

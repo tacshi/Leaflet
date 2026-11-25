@@ -261,23 +261,23 @@
     "node": {
       "type": "chart",
       "data": {
+        "author": "",
+        "caption": "",
         "chart_type": "line",
-        "title": "",
         "labels": [
           "a",
           ""
         ],
         "series": [
           {
-            "name": "Series 1",
+            "name": "",
             "values": [
               1,
               2
             ]
           }
         ],
-        "caption": "",
-        "author": ""
+        "title": ""
       }
     }
   },
@@ -607,8 +607,9 @@
     "node": {
       "type": "chart",
       "data": {
+        "author": "",
+        "caption": "",
         "chart_type": "bar",
-        "title": "",
         "labels": [
           "a",
           "b",
@@ -618,7 +619,7 @@
         ],
         "series": [
           {
-            "name": "Series 1",
+            "name": "",
             "values": [
               0,
               0,
@@ -628,8 +629,7 @@
             ]
           }
         ],
-        "caption": "",
-        "author": ""
+        "title": ""
       }
     }
   },
@@ -654,21 +654,21 @@
     "node": {
       "type": "chart",
       "data": {
+        "author": "",
+        "caption": "",
         "chart_type": "bar",
-        "title": "",
         "labels": [
           "a"
         ],
         "series": [
           {
-            "name": "Series 1",
+            "name": "",
             "values": [
               1
             ]
           }
         ],
-        "caption": "",
-        "author": ""
+        "title": ""
       }
     }
   },

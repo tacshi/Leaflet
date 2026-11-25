@@ -528,6 +528,23 @@ func TestWhen(t *testing.T) {
 	}
 }
 
+func TestFileSizeIsInTheAppsLanguage(t *testing.T) {
+	for _, c := range []struct {
+		locale string
+		size   int64
+		want   string
+	}{
+		{"en", 2_500_000, "2.4 MB"},
+		{"en", 3 << 10, "3 KB"},
+		{"ja", 12, "12 バイト"},
+		{"zh-Hans", 12, "12 字节"},
+	} {
+		if got := FileSize(c.locale, c.size); got != c.want {
+			t.Errorf("FileSize(%q, %d) = %q, want %q", c.locale, c.size, got, c.want)
+		}
+	}
+}
+
 func TestText(t *testing.T) {
 	for _, c := range []struct{ locale, key, args, want string }{
 		{"en", "commonCancel", "", "Cancel"},

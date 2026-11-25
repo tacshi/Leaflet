@@ -51,6 +51,26 @@ func (s *Store) ValuesWithPrefix(prefix string) map[string]string {
 	return out
 }
 
+// UpdateValue sets key to what update makes of its value, read and written
+// in one transaction, so two processes updating it at once each build on
+// the other's: ok is whether the key has a value.
+func (s *Store) UpdateValue(key string, update func(value string, ok bool) (string, error)) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		v, ok, err := lookup(tx, key)
+		if err != nil {
+			return err
+		}
+		if v, err = update(v, ok); err != nil {
+			return err
+		}
+		return setValue(tx, key, v)
+	})
+	if err == nil {
+		s.Notify("key_values", "")
+	}
+	return err
+}
+
 func (s *Store) DeleteValue(key string) error {
 	_, err := s.db.Exec(`DELETE FROM key_values WHERE key = ?`, key)
 	return err

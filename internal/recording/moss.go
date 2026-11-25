@@ -1,12 +1,10 @@
 package recording
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"regexp"
 	"strings"
@@ -41,10 +39,7 @@ func MossKey() string {
 
 func SetMossKey(key string) error {
 	if key = strings.TrimSpace(key); key == "" {
-		if err := keychain.Delete("stt.moss.key"); !errors.Is(err, keychain.ErrNotFound) {
-			return err
-		}
-		return nil
+		return keychain.Delete("stt.moss.key")
 	}
 	return keychain.Set("stt.moss.key", []byte(key))
 }
@@ -64,100 +59,33 @@ func TranscribeMoss(ctx context.Context, key string, audio io.Reader, size int64
 	if size > mossMaxBytes {
 		return nil, errors.New(locales.RecErrMossTooLarge())
 	}
-	call := func(ctx context.Context, method, path string, body []byte, out any) error {
-		req, err := http.NewRequestWithContext(ctx, method, mossAPI+path, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		return mossDo(req, key, out)
+	j := fileJob{
+		provider: Moss, api: mossAPI, key: key, do: mossDo, left: left, poll: mossPoll,
+		failed: errors.New(locales.RecErrMossFailed("")),
+		fields: [][2]string{{"purpose", "audio"}},
+		start:  "/audio/transcriptions",
+		job: func(file string) map[string]any {
+			return map[string]any{"model": mossModel, "version": mossVersion, "file_id": file, "diarize": true, "response_format": "json", "async": true}
+		},
+		check: func(ctx context.Context, call apiCall, id string) ([]store.Segment, bool, time.Duration, error) {
+			var res mossTask
+			if err := call(ctx, "GET", "/audio/tasks/"+id, nil, &res); err != nil {
+				return nil, false, 0, err
+			}
+			switch strings.ToLower(res.Status) {
+			case "success", "completed":
+				return res.segments(speakers), true, 0, nil
+			case "failed", "error":
+				return nil, false, 0, errors.New(locales.RecErrMossFailed(res.Error.message()))
+			}
+			pause := mossPoll
+			if res.RetryAfter > 0 {
+				pause = time.Duration(min(res.RetryAfter, 30)) * time.Second
+			}
+			return nil, false, pause, nil
+		},
 	}
-
-	var form bytes.Buffer
-	w := multipart.NewWriter(&form)
-	if err := w.WriteField("purpose", "audio"); err != nil {
-		return nil, err
-	}
-	if _, err := w.CreateFormFile("file", name); err != nil {
-		return nil, err
-	}
-	head := form.Len()
-	if err := w.Close(); err != nil {
-		return nil, err
-	}
-	tail := form.Bytes()[head:]
-	up, cancel := context.WithTimeout(ctx, transferWait(size))
-	req, err := http.NewRequestWithContext(up, "POST", mossAPI+"/files",
-		io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(audio, size), bytes.NewReader(tail)))
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	req.ContentLength = int64(head) + size + int64(len(tail))
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	var file struct {
-		ID string `json:"id"`
-	}
-	err = mossDo(req, key, &file)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-	if file.ID == "" {
-		return nil, errors.New(locales.RecErrMossFailed(""))
-	}
-	// The audio uploaded is noted as soon as MOSS names it, and deleted when
-	// the transcription ends, however it ends.
-	left.keep(Moss, "/files/"+file.ID)
-	defer left.remove(Moss, key, "/files/"+file.ID)
-
-	create, _ := json.Marshal(map[string]any{
-		"model": mossModel, "version": mossVersion, "file_id": file.ID,
-		"diarize": true, "response_format": "json", "async": true,
-	})
-	var task struct {
-		TaskID string `json:"task_id"`
-		ID     string `json:"id"`
-	}
-	start, cancel := context.WithTimeout(ctx, jobWait)
-	err = call(start, "POST", "/audio/transcriptions", create, &task)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-	id := task.TaskID
-	if id == "" {
-		id = task.ID
-	}
-	if id == "" {
-		return nil, errors.New(locales.RecErrMossFailed(""))
-	}
-
-	wait, cancel := context.WithTimeout(ctx, fileWait(size))
-	defer cancel()
-	for {
-		var res mossTask
-		if err := polled(wait, mossPoll, func() error { res = mossTask{}; return call(wait, "GET", "/audio/tasks/"+id, nil, &res) }); err != nil {
-			return nil, err
-		}
-		switch strings.ToLower(res.Status) {
-		case "success", "completed":
-			return res.segments(speakers), nil
-		case "failed", "error":
-			return nil, errors.New(locales.RecErrMossFailed(res.Error.message()))
-		}
-		pause := mossPoll
-		if res.RetryAfter > 0 {
-			pause = time.Duration(min(res.RetryAfter, 30)) * time.Second
-		}
-		select {
-		case <-wait.Done():
-			return nil, wait.Err()
-		case <-time.After(pause):
-		}
-	}
+	return j.transcribe(ctx, audio, size, name)
 }
 
 type mossTask struct {

@@ -1,5 +1,6 @@
 import LeafletCore
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class EditorClipboard {
@@ -48,8 +49,34 @@ final class EditorClipboard {
     }
 
     func copiedOut() {
-        Self.clip?.out = UIPasteboard.general.changeCount
-        if Self.clip?.inline != nil { Self.clip?.count = UIPasteboard.general.changeCount }
+        let board = UIPasteboard.general
+        // A copy inside one block leaves its text to the system, line breaks
+        // within the block and all: they go out as line ends, as every other
+        // copy writes them, and the clip reads so to know its paste.
+        if Self.clip?.inline != nil, let text = Self.clip?.text, text.contains(lineBreak) {
+            let plain = Self.lineEnds(text)
+            board.items = Self.plainText(board.items, as: plain)
+            Self.clip?.text = plain
+        }
+        Self.clip?.out = board.changeCount
+        if Self.clip?.inline != nil { Self.clip?.count = board.changeCount }
+    }
+
+    /// Text with the editor's line breaks inside a paragraph as line ends.
+    static func lineEnds(_ text: String) -> String {
+        text.replacingOccurrences(of: String(lineBreak), with: "\n")
+    }
+
+    /// Pasteboard items with their plain text as `text`, and the rest of
+    /// what they hold, as their rich text, kept.
+    static func plainText(_ items: [[String: Any]], as text: String) -> [[String: Any]] {
+        items.map { item in
+            var item = item
+            for type in item.keys where UTType(type)?.conforms(to: .plainText) == true {
+                item[type] = text
+            }
+            return item
+        }
     }
 
     func copyPlainText() {

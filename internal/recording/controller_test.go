@@ -704,6 +704,150 @@ type silentLost struct{ lostStream }
 func (silentLost) Finish() ([]store.Segment, error) { return nil, nil }
 func (silentLost) Lost() error                      { return errNoEnd }
 
+// droppedStream heard three seconds of words before its connection went.
+type droppedStream struct{ lostStream }
+
+func (droppedStream) Finish() ([]store.Segment, error) {
+	return []store.Segment{{EndMs: 3000, Text: "Hello there."}}, nil
+}
+
+// recordedWav writes ms of a recording's audio and returns its path.
+func recordedWav(t *testing.T, ms int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "r.wav")
+	if err := os.WriteFile(path, WavFromPCM(make([]byte, AudioSize(ms))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestDroppedStreamTranscribesTheRestFromTheFile(t *testing.T) {
+	var mu sync.Mutex
+	uploaded := -1
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/files":
+			file, _, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, "bad upload", http.StatusBadRequest)
+				return
+			}
+			data, _ := io.ReadAll(file)
+			mu.Lock()
+			uploaded = len(data)
+			mu.Unlock()
+			_, _ = io.WriteString(w, `{"id":"f1"}`)
+		case r.Method == "POST" && r.URL.Path == "/transcriptions":
+			_, _ = io.WriteString(w, `{"id":"t1"}`)
+		case r.Method == "GET" && r.URL.Path == "/transcriptions/t1":
+			_, _ = io.WriteString(w, `{"status":"completed"}`)
+		case r.Method == "GET" && r.URL.Path == "/transcriptions/t1/transcript":
+			// The audio sent starts a second before the words heard end, so
+			// "there." is heard again.
+			_, _ = io.WriteString(w, `{"tokens":[{"text":"there.","start_ms":300,"end_ms":900},`+
+				`{"text":"How","start_ms":2200,"end_ms":2400},{"text":" are you?","start_ms":2400,"end_ms":2900}]}`)
+		}
+	}))
+	defer srv.Close()
+	api, poll := sonioxAPI, sonioxPoll
+	sonioxAPI, sonioxPoll = srv.URL, time.Millisecond
+	defer func() { sonioxAPI, sonioxPoll = api, poll }()
+
+	r, st, _ := newTestController(t)
+	path := recordedWav(t, 5000)
+	rec, err := st.CreateRecording("p1", "b1", "soniox", "", path, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.finish(rec, path, droppedStream{}, store.SttSettings{Provider: "soniox"})
+	got, _ := st.Recording(rec.ID)
+	want := []store.Segment{{EndMs: 3000, Text: "Hello there."}, {StartMs: 4200, EndMs: 4900, Text: "How are you?"}}
+	if got.Status != "ready" || got.Error != "" || !slices.Equal(got.Transcript, want) {
+		t.Errorf("recording %s %q %+v, want %+v", got.Status, got.Error, got.Transcript, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := 44 + int(AudioSize(3000)); uploaded != want {
+		t.Errorf("sent %d bytes of audio, want the last three seconds, %d", uploaded, want)
+	}
+}
+
+// diedStream is a transcription on the device whose helper died.
+type diedStream struct{ lostStream }
+
+func (diedStream) Finish() ([]store.Segment, error) {
+	return nil, errors.New(locales.RecErrOnDeviceEnded())
+}
+func (diedStream) Lost() error { return nil }
+
+// fileEngine transcribes files alone, noting the size of each.
+type fileEngine struct {
+	sizes *[]int64
+	segs  []store.Segment
+	err   error
+}
+
+func (fileEngine) Stream(string, func(string)) (Stream, error) { return nil, errors.New("no stream") }
+func (e fileEngine) File(path, _ string) ([]store.Segment, error) {
+	if fi, err := os.Stat(path); err == nil {
+		*e.sizes = append(*e.sizes, fi.Size())
+	}
+	return e.segs, e.err
+}
+
+func TestDiedStreamOnTheDeviceTranscribesTheFile(t *testing.T) {
+	for _, works := range []bool{true, false} {
+		r, st, _ := newTestController(t)
+		var sizes []int64
+		e := fileEngine{sizes: &sizes, segs: []store.Segment{{EndMs: 4000, Text: "All of it."}}}
+		if !works {
+			e.segs, e.err = nil, errors.New("no words")
+		}
+		r.SetEngine(e)
+		path := recordedWav(t, 5000)
+		rec, err := st.CreateRecording("p1", "b1", OnDevice, "", path, "auto")
+		if err != nil {
+			t.Fatal(err)
+		}
+		live := []store.Segment{{EndMs: 5000, Text: "All of"}}
+		if rec, err = st.UpdateRecording(rec.ID, func(x *store.Recording) { x.Status, x.Transcript = "transcribing", live }); err != nil {
+			t.Fatal(err)
+		}
+		r.finish(rec, path, diedStream{}, store.SttSettings{Provider: OnDevice})
+		got, _ := st.Recording(rec.ID)
+		switch {
+		case len(sizes) != 1 || sizes[0] != 44+AudioSize(5000):
+			t.Errorf("transcribed files of %v bytes, want the whole recording", sizes)
+		case works && (got.Status != "ready" || got.Error != "" || !slices.Equal(got.Transcript, e.segs)):
+			t.Errorf("recording %s %q %+v", got.Status, got.Error, got.Transcript)
+		case !works && (got.Status != "failed" || got.Error != locales.RecErrOnDeviceEnded() || !slices.Equal(got.Transcript, live)):
+			t.Errorf("both failed: recording %s %q %+v", got.Status, got.Error, got.Transcript)
+		}
+	}
+}
+
+func TestJoinRestLeavesOutWhatWasHeard(t *testing.T) {
+	heard := []store.Segment{{EndMs: 3000, Text: "Hello there"}}
+	rest := []store.Segment{{EndMs: 800, Text: "there"}, {StartMs: 500, EndMs: 2500, Text: "There, how are you"}, {StartMs: 2600, EndMs: 3000, Text: "Fine."}}
+	want := []store.Segment{{EndMs: 3000, Text: "Hello there"}, {StartMs: 3000, EndMs: 4500, Text: "how are you"}, {StartMs: 4600, EndMs: 5000, Text: "Fine."}}
+	if got := joinRest(heard, rest, 2000); !slices.Equal(got, want) {
+		t.Errorf("joined %+v, want %+v", got, want)
+	}
+	if got := joinRest(nil, rest, 0); !slices.Equal(got, rest) {
+		t.Errorf("with nothing heard, joined %+v", got)
+	}
+}
+
+func TestSonioxTakesNoMoreAudioOnceLost(t *testing.T) {
+	s := &Soniox{queue: make(chan []byte, maxQueued)}
+	s.Send([]byte{1, 2})
+	s.lose(errBehind)
+	s.Send([]byte{3, 4})
+	if n := len(s.queue); n != 1 {
+		t.Errorf("%d chunks queued, want the one before the loss", n)
+	}
+}
+
 func TestSonioxFinishEndsTheStreamAsSonioxAsks(t *testing.T) {
 	was := finishWait
 	finishWait = 2 * time.Second

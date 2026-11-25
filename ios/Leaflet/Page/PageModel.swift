@@ -49,8 +49,7 @@ final class PageModel {
     @ObservationIgnored private(set) var closed = false
     var blank = false
     @ObservationIgnored private var asked = Newest()
-    @ObservationIgnored private var agentsReading: Task<Void, Never>?
-    @ObservationIgnored private var agentsQueued: Task<Void, Never>?
+    @ObservationIgnored private let agentReads = AgentReads()
     private(set) var outline: [OutlineRow] = []
     @ObservationIgnored private var outlined: [DocNode] = []
     @ObservationIgnored private var outlining: Task<Void, Never>?
@@ -214,21 +213,11 @@ final class PageModel {
     func flush() async { await editing?.value }
 
     func refreshAgents() async {
-        if let queued = agentsQueued {
-            await queued.value
-            return
-        }
-        let before = agentsReading
-        let read = Task { [weak self] in
-            await before?.value
+        await agentReads.run { [weak self] in
             guard let self else { return }
-            self.agentsQueued = nil
             if let s = try? await self.app.client?.agentState(self.id) { self.agents = s }
             if !self.agentsLoaded { self.agentsLoaded = true }
         }
-        agentsQueued = read
-        agentsReading = read
-        await read.value
     }
 
     func refreshThreads() async {
@@ -241,7 +230,12 @@ final class PageModel {
         if let m = try? await app.client?.members(id), asked.answered(n, "members") { members = m }
     }
 
+    /// The changes after which anyone's place in a page may be another, as
+    /// the core takes them: everything read again, or another sign-in.
+    static let sharingChanges: Set<String> = ["*", "session"]
+
     func handle(_ event: CoreEvent) {
+        if AgentReads.changes(event, of: id) { Task { await refreshAgents() } }
         switch event {
         case .pageUpdated(let pageID, let c, let newRev, let reason, _) where pageID == id:
             guard newRev > (held?.rev ?? rev), newRev >= edited else { return }
@@ -256,17 +250,11 @@ final class PageModel {
             saving = on
         case .tint(let pageID, let ids) where pageID == id:
             tinted = Set(ids)
-        case .agentsChanged(let pageID) where pageID.isEmpty || pageID == id:
-            Task { await refreshAgents() }
-        case .changed(let table, _)
-        where ["model_providers", "key_values", "session", "*"].contains(table):
-            Task { await refreshAgents() }
-        case .changed(let table, let pageID)
-        where table == "comments" && (pageID.isEmpty || pageID == id):
-            Task { await refreshThreads() }
-        case .changed(let table, let pageID)
-        where table == "page_members" && (pageID.isEmpty || pageID == id):
-            Task { await refreshMembers() }
+        case .changed(let table, let pageID):
+            let all = Self.sharingChanges.contains(table)
+            let here = pageID.isEmpty || pageID == id
+            if all || (table == "comments" && here) { Task { await refreshThreads() } }
+            if all || (table == "page_members" && here) { Task { await refreshMembers() } }
         default:
             break
         }

@@ -121,10 +121,11 @@ struct BlockCard: View {
         case "map": BlockHeights.of(node.id, width: width) ?? MapBlockView.mapHeight + scaled(80)
         case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         case "recording", "file": BlockHeights.of(node.id, width: width) ?? scaled(64)
+        // An embed's frame fits its content, from 120 to 1200 points; its
+        // stored height sizes it only until the content says how tall it is.
         case "embed":
-            max(
-                CGFloat(min(max(node.data?["height"]?.int ?? 320, 120), 1200)),
-                min(BlockHeights.of(node.id, width: width) ?? 0, 1200))
+            BlockHeights.of(node.id, width: width).map { min(max($0, 120), 1200) }
+                ?? CGFloat(min(max(node.data?["height"]?.int ?? 320, 120), 1200))
         default: scaled(64)
         }
     }
@@ -134,6 +135,15 @@ struct BlockCard: View {
     /// pass on from the page.
     var body: some View {
         block.environment(\.palette, BlockLook.palette)
+            // A link in a block, as in a table's cell or a card's sources,
+            // opens as the page's own links do: another page's in the app.
+            .environment(
+                \.openURL,
+                OpenURLAction { [weak editor] url in
+                    guard let editor else { return .systemAction }
+                    editor.open(url)
+                    return .handled
+                })
     }
 
     @ViewBuilder private var block: some View {
@@ -170,9 +180,8 @@ struct BlockCard: View {
 
 struct LinkCardBlock: View {
     let node: DocNode
+    @Environment(\.displayScale) private var scale
     @State private var picture: UIImage?
-
-    @MainActor private static let pictures = NSCache<NSString, UIImage>()
 
     static func tall(_ node: DocNode) -> Bool {
         !(node.data?["description"]?.string ?? "").isEmpty
@@ -221,19 +230,7 @@ struct LinkCardBlock: View {
         .background(.quaternary.opacity(0.5))
         .clipShape(.rect(cornerRadius: 10))
         .task(id: image) {
-            guard !image.isEmpty else {
-                picture = nil
-                return
-            }
-            if let kept = Self.pictures.object(forKey: image as NSString) {
-                picture = kept
-                return
-            }
-            guard let data = try? await ImageBlock.client?.picture(image), !data.isEmpty,
-                let made = await Task.detached(operation: { Pictures.bitmap(data) }).value
-            else { return }
-            Self.pictures.setObject(made, forKey: image as NSString)
-            picture = made
+            await CardPictures.load(image, scale: scale) { picture = $0 }
         }
     }
 }
@@ -279,13 +276,23 @@ struct SubpageBlock: View {
 
 struct ImageBlock: View {
     let node: DocNode
+    @Environment(\.displayScale) private var scale
     @State private var picture: Picture?
+    @State private var width: CGFloat = 0
+    /// The picture's file and link that `picture` is of: one made again for
+    /// a wider block shows the narrower one until it is ready.
+    @State private var shownOf: [String] = []
 
     static var client: CoreClient?
 
     private enum Picture: Sendable {
         case bitmap(UIImage)
         case svg(SVG)
+    }
+
+    private struct Wanted: Hashable {
+        let source: [String]
+        let pixels: CGFloat
     }
 
     private var link: String { node.data?["url"]?.string ?? "" }
@@ -304,8 +311,20 @@ struct ImageBlock: View {
         }
         .clipShape(.rect(cornerRadius: 8))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: [fileID, link]) {
-            picture = nil
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: {
+            width = $0
+        }
+        .task(id: Wanted(source: [fileID, link], pixels: Pictures.pixels(width * scale))) {
+            let source = [fileID, link]
+            if shownOf != source {
+                picture = nil
+                shownOf = source
+            }
+            // As wide as the block is laid out, once it is.
+            let pixels = Pictures.pixels(width * scale)
+            guard pixels > 0 else { return }
             var data: Data?
             if !fileID.isEmpty, let client = Self.client,
                 let path = try? await client.localFile(fileID)
@@ -320,7 +339,9 @@ struct ImageBlock: View {
                 data = try? await Self.client?.picture(link)
             }
             guard let data, !data.isEmpty else { return }
-            picture = await Task.detached { Self.picture(data) }.value
+            let made = await Task.detached { Self.picture(data, pixels: pixels) }.value
+            guard !Task.isCancelled else { return }
+            picture = made
         }
     }
 
@@ -328,9 +349,9 @@ struct ImageBlock: View {
         RoundedRectangle(cornerRadius: 8).fill(.quaternary)
     }
 
-    private nonisolated static func picture(_ data: Data) -> Picture? {
+    private nonisolated static func picture(_ data: Data, pixels: CGFloat) -> Picture? {
         guard Pictures.fit(data) else { return nil }
-        if let image = UIImage(data: data) {
+        if let image = Pictures.bitmap(data, pixels: pixels) {
             return .bitmap(image)
         }
         return SVG(data: SVGPercents.resolved(data)).map { .svg($0) }
@@ -348,8 +369,64 @@ enum Pictures {
         return width * height <= Double(MobileMaxPixels)
     }
 
-    static func bitmap(_ data: Data) -> UIImage? {
-        fit(data) ? UIImage(data: data) : nil
+    /// The picture in data, decoded no bigger than `pixels` on its longer
+    /// side, as it shows: a photo is never held at its full size, which can
+    /// be tens of megabytes, to be drawn in a card. Nil for what is no
+    /// picture, or one too big to read.
+    static func bitmap(_ data: Data, pixels: CGFloat) -> UIImage? {
+        guard fit(data),
+            let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(pixels, 1),
+        ]
+        guard
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source, CGImageSourceGetPrimaryImageIndex(source), options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: image)
+    }
+
+    /// The pixels a picture `points` wide on screen is decoded at: rounded
+    /// up, so that a block a little wider or narrower does not decode it
+    /// again.
+    static func pixels(_ points: CGFloat) -> CGFloat {
+        guard points.isFinite, points > 0 else { return 0 }
+        return (points / 256).rounded(.up) * 256
+    }
+}
+
+/// The pictures of cards and link cards, by their links: fetched, decoded
+/// no bigger than a card shows them, and kept, so that a card made again,
+/// as an edit to the page does, shows its picture at once.
+@MainActor
+enum CardPictures {
+    /// The most points a card's picture is wide or tall on screen, with
+    /// room to spare.
+    static let points: CGFloat = 450
+
+    private static let kept = NSCache<NSString, UIImage>()
+
+    /// Shows the picture at link, or none: never another link's while it
+    /// loads or once it fails, nor one asked for before the link changed.
+    static func load(_ link: String, scale: CGFloat, show: (UIImage?) -> Void) async {
+        guard !link.isEmpty else { return show(nil) }
+        let pixels = Pictures.pixels(points * max(scale, 1))
+        let key = "\(Int(pixels)) \(link)" as NSString
+        if let picture = kept.object(forKey: key) { return show(picture) }
+        show(nil)
+        guard let data = try? await ImageBlock.client?.picture(link), !data.isEmpty,
+            let made = await Task.detached(operation: {
+                Pictures.bitmap(data, pixels: pixels)
+            }).value,
+            !Task.isCancelled
+        else { return }
+        kept.setObject(made, forKey: key)
+        show(made)
     }
 }
 
@@ -703,7 +780,7 @@ struct ChartBlock: View {
         }
         var points: [Point] = []
         for (s, series) in (d["series"]?.array ?? []).enumerated() {
-            let name = series["name"]?.string ?? ""
+            let name = Self.seriesName(series["name"]?.string ?? "", at: s)
             for (i, v) in (series["values"]?.array ?? []).enumerated() where i < labels.count {
                 points.append(
                     Point(id: s * 10_000 + i, label: labels[i], series: name, value: v.double ?? 0))
@@ -738,6 +815,13 @@ struct ChartBlock: View {
         }
         .padding(12)
         .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 10))
+    }
+
+    /// The name a chart's series shows by, as the core names it: its own,
+    /// or for one with none, its number in the app's language, as Series 2.
+    static func seriesName(_ name: String, at index: Int) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? L.chartSeriesNumbered(n: index + 1) : name
     }
 }
 
@@ -891,21 +975,16 @@ struct TableGrid: View {
     var onHeight: (@MainActor (CGSize) -> Void)?
     @State private var height: CGFloat = 0
 
-    static func rows(_ node: DocNode) -> [[String]] {
-        if let (table, rows) = read[node.id], table == node { return rows }
-        let rows = cells(node)
-        if read.count >= kept { read.removeAll(keepingCapacity: true) }
-        read[node.id] = (node, rows)
-        return rows
-    }
-    @MainActor private static var read: [String: (DocNode, [[String]])] = [:]
-    private static let kept = 256
+    /// A table's cells, row by row, each its text's delta with its marks.
+    typealias Cells = [[[JSONValue]]]
 
-    nonisolated static func cells(_ node: DocNode) -> [[String]] {
-        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
-        var error: NSError?
-        let json = MobileTableText(raw ?? "{}", &error)
-        return (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? []
+    static func rows(_ node: DocNode) -> Cells {
+        read.value(of: node) { cells($0) } ?? []
+    }
+    @MainActor private static var read = NodeCache<Cells>(most: 256)
+
+    nonisolated static func cells(_ node: DocNode) -> Cells {
+        (try? coreValue(node, as: Cells.self, MobileTableCells)) ?? []
     }
 
     var body: some View {
@@ -949,33 +1028,54 @@ struct TableGrid: View {
         ) {
             ForEach(0..<rows.count * columns, id: \.self) { i in
                 let (r, c) = (i / columns, i % columns)
-                Text(c < rows[r].count ? rows[r][c] : "")
+                Text(c < rows[r].count ? MarkdownPreview.text(rows[r][c], palette: palette) : "")
                     .font(Fonts.pageText(size: BlockLook.textSize * 0.88))
-                    .fontWeight(r == 0 ? .semibold : .regular)
                     .foregroundStyle(palette.text)
-                    .multilineTextAlignment(look.textAlignment(c))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, look.lines && c == 0 ? 0 : 10)
-                    .padding(.trailing, look.lines && c == columns - 1 ? 0 : 10)
-                    .padding(.vertical, 8)
-                    .frame(minHeight: rowHeight, alignment: look.alignment(c, vertical: .center))
-                    .frame(
-                        maxWidth: .infinity, maxHeight: .infinity,
-                        alignment: look.alignment(c, vertical: .top)
-                    )
-                    .background(r == 0 && !look.lines ? palette.panel : .clear)
-                    .border(look.lines ? .clear : palette.divider, width: 0.5)
-                    .overlay(alignment: .top) {
-                        if look.lines && r > 0 {
-                            Rectangle().fill(palette.divider).frame(height: 0.5)
-                        }
-                    }
+                    .tableCell(
+                        look, row: r, column: c, of: columns, palette: palette,
+                        minHeight: rowHeight)
             }
         }
-        .clipShape(.rect(cornerRadius: look.lines ? 0 : 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(look.lines ? .clear : palette.border, lineWidth: 1))
+        .tableOutline(look, palette: palette)
+    }
+}
+
+extension View {
+    /// A table cell's look, in a page or an answer alike: its column's
+    /// alignment, its padding, none at the table's ends when it is drawn
+    /// with lines, a bold header row, and the grid's header background and
+    /// borders or, with lines, a hairline over each row after the first.
+    func tableCell(
+        _ look: TableLook, row: Int, column: Int, of columns: Int, palette: Palette,
+        minHeight: CGFloat = 0
+    ) -> some View {
+        fontWeight(row == 0 ? .semibold : .regular)
+            .multilineTextAlignment(look.textAlignment(column))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, look.lines && column == 0 ? 0 : 10)
+            .padding(.trailing, look.lines && column == columns - 1 ? 0 : 10)
+            .padding(.vertical, 8)
+            .frame(minHeight: minHeight, alignment: look.alignment(column, vertical: .center))
+            // As tall as its row, so that its lines are the row's.
+            .frame(
+                maxWidth: .infinity, maxHeight: .infinity,
+                alignment: look.alignment(column, vertical: .top)
+            )
+            .background(row == 0 && !look.lines ? palette.panel : .clear)
+            .border(look.lines ? .clear : palette.divider, width: 0.5)
+            .overlay(alignment: .top) {
+                if look.lines && row > 0 {
+                    Rectangle().fill(palette.divider).frame(height: 0.5)
+                }
+            }
+    }
+
+    /// A table's outline: a grid's rounded border, or none with lines.
+    func tableOutline(_ look: TableLook, palette: Palette) -> some View {
+        clipShape(.rect(cornerRadius: look.lines ? 0 : 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(look.lines ? .clear : palette.border, lineWidth: 1))
     }
 }
 

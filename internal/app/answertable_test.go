@@ -39,3 +39,16 @@ func TestAnswerTablesHaveSimpleLines(t *testing.T) {
 		t.Errorf("the table's text starts at %v, the text above it at %v", cell.X, fees.X)
 	}
 }
+
+// East Asian text counts an em a character, but halfwidth forms half, as
+// Latin letters do.
+func TestWideCharacters(t *testing.T) {
+	for r, want := range map[rune]bool{
+		'中': true, 'あ': true, 'ア': true, '한': true, '。': true, 'Ａ': true, '！': true,
+		'a': false, '1': false, 'ｱ': false, '｡': false, 'ﾞ': false, 'ￂ': false,
+	} {
+		if got := wide(r); got != want {
+			t.Errorf("wide(%q) = %v, want %v", r, got, want)
+		}
+	}
+}

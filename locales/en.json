@@ -444,6 +444,15 @@
   "@hostChartSeries": {
     "description": "The name of a new chart's series."
   },
+  "chartSeriesNumbered": "Series {n}",
+  "@chartSeriesNumbered": {
+    "description": "A chart's series that has no name, as its legend and its table name it, counting the series from 1.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "hostErrorCreateSubpage": "Could not create the subpage: {error}",
   "@hostErrorCreateSubpage": {
     "description": "Toast when a subpage could not be created.",
@@ -871,6 +880,10 @@
   "@cardSpeed": {
     "description": "Name of the button of an audio player that shows its speed, as 1.5×, and changes it."
   },
+  "cardPlaybackPosition": "Playback position",
+  "@cardPlaybackPosition": {
+    "description": "Name, for VoiceOver, of the slider of an audio or video player that shows where in it it plays, and moves there."
+  },
   "exportRecording": "Recording",
   "@exportRecording": {
     "description": "The name of an exported recording's audio file, for a recording with no title."
@@ -1240,6 +1253,30 @@
   "@dialogHistoryAgentRun": {
     "description": "Page history: why a version was kept: before an agent edited the page."
   },
+  "dialogHistoryBeforeAgent": "Before {agent}",
+  "@dialogHistoryBeforeAgent": {
+    "description": "Page history: why a version was kept: before an AI app outside Leaflet, or the leaflet command, edited the page; agent is its name.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude Code"
+      }
+    }
+  },
+  "dialogHistoryBeforeAgentRun": "Before {agent}: {request}",
+  "@dialogHistoryBeforeAgentRun": {
+    "description": "Page history: why a version was kept: before an agent in the app edited the page as asked; agent is the agent's name, request the start of what it was asked, in the user's own words.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      },
+      "request": {
+        "type": "String",
+        "example": "Tidy up these notes"
+      }
+    }
+  },
   "dialogHistoryAutosave": "Autosave",
   "@dialogHistoryAutosave": {
     "description": "Page history: why a version was kept: saved automatically."
@@ -1378,13 +1415,21 @@
   "@dialogShareOwnerOnly": {
     "description": "The Share dialog of a page shared with the user: only its owner shares it through a public link."
   },
-  "dialogShareCopyLink": "Copy link",
-  "@dialogShareCopyLink": {
-    "description": "Share dialog: the button copying the page's link."
+  "dialogShareAppLink": "Link in Leaflet",
+  "@dialogShareAppLink": {
+    "description": "Share dialog: heading over the section of the page's in-app link (leaflet://page/…), which opens it in Leaflet, as against its public link on the web."
   },
-  "dialogShareLinkCopied": "Link copied",
+  "dialogShareAppLinkHint": "Opens this page in Leaflet, for people who can already see it.",
+  "@dialogShareAppLinkHint": {
+    "description": "Share dialog: under the in-app link's heading, what the link does and who it works for: those the page is shared with already, not anyone on the web."
+  },
+  "dialogShareCopyLink": "Copy Leaflet link",
+  "@dialogShareCopyLink": {
+    "description": "Share dialog: the button copying the page's in-app link (leaflet://page/…), which opens it in Leaflet, not its public link."
+  },
+  "dialogShareLinkCopied": "Leaflet link copied",
   "@dialogShareLinkCopied": {
-    "description": "A toast after the page's link is copied."
+    "description": "A toast after the page's in-app link (leaflet://page/…) is copied in the Share dialog."
   },
   "dialogChartNeedRows": "Add a header row and at least one row of values.",
   "@dialogChartNeedRows": {
@@ -1393,6 +1438,24 @@
   "dialogChartNeedSeries": "The header needs a label column and at least one series.",
   "@dialogChartNeedSeries": {
     "description": "Chart dialog: an error when the header has too few columns."
+  },
+  "dialogChartTooManyRows": "A chart holds at most {count} rows of data.",
+  "@dialogChartTooManyRows": {
+    "description": "Chart dialog: an error when more rows of data, one a label, are written than a chart holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogChartTooManySeries": "A chart holds at most {count} series.",
+  "@dialogChartTooManySeries": {
+    "description": "Chart dialog: an error when the header names more series, columns after the label column, than a chart holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "dialogChartNotNumber": "Row {row}: “{value}” is not a number.",
   "@dialogChartNotNumber": {
@@ -1421,6 +1484,10 @@
   "dialogFieldTitle": "Title",
   "@dialogFieldTitle": {
     "description": "Chart and embed dialogs: the title field's placeholder."
+  },
+  "dialogPageReadOnly": "This page can no longer be changed, so this was not saved.",
+  "@dialogPageReadOnly": {
+    "description": "Toast when Save is clicked in a dialog that edits a block (a chart, a fact card, a map, an embed, a formula or diagram, a link, notes) after the page became read-only while it was open, as when its owner took away the right to edit it; the dialog stays open."
   },
   "dialogChartBar": "Bar",
   "@dialogChartBar": {
@@ -1485,6 +1552,126 @@
   "dialogCardNoIcon": "No icon",
   "@dialogCardNoIcon": {
     "description": "The fact card dialog's icon menu: the choice of no icon before the title."
+  },
+  "cardIconBus": "Bus",
+  "@cardIconBus": {
+    "description": "The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the name of an icon a card's title can carry, a bus."
+  },
+  "cardIconTrainFront": "Train",
+  "@cardIconTrainFront": {
+    "description": "The fact card icon menu and picker: an icon of a train seen from the front."
+  },
+  "cardIconTramFront": "Tram",
+  "@cardIconTramFront": {
+    "description": "The fact card icon menu and picker: an icon of a tram seen from the front."
+  },
+  "cardIconCar": "Car",
+  "@cardIconCar": {
+    "description": "The fact card icon menu and picker: an icon of a car."
+  },
+  "cardIconBike": "Bicycle",
+  "@cardIconBike": {
+    "description": "The fact card icon menu and picker: an icon of a bicycle."
+  },
+  "cardIconFootprints": "Footprints",
+  "@cardIconFootprints": {
+    "description": "The fact card icon menu and picker: an icon of footprints, for walking."
+  },
+  "cardIconPlane": "Plane",
+  "@cardIconPlane": {
+    "description": "The fact card icon menu and picker: an icon of an airplane."
+  },
+  "cardIconShip": "Ship",
+  "@cardIconShip": {
+    "description": "The fact card icon menu and picker: an icon of a ship."
+  },
+  "cardIconMapPin": "Map pin",
+  "@cardIconMapPin": {
+    "description": "The fact card icon menu and picker: an icon of a pin that marks a place on a map."
+  },
+  "cardIconClock": "Clock",
+  "@cardIconClock": {
+    "description": "The fact card icon menu and picker: an icon of a clock."
+  },
+  "cardIconCalendar": "Calendar",
+  "@cardIconCalendar": {
+    "description": "The fact card icon menu and picker: an icon of a calendar."
+  },
+  "cardIconTicket": "Ticket",
+  "@cardIconTicket": {
+    "description": "The fact card icon menu and picker: an icon of a ticket."
+  },
+  "cardIconBanknote": "Banknote",
+  "@cardIconBanknote": {
+    "description": "The fact card icon menu and picker: an icon of a banknote, for money."
+  },
+  "cardIconWallet": "Wallet",
+  "@cardIconWallet": {
+    "description": "The fact card icon menu and picker: an icon of a wallet."
+  },
+  "cardIconPhone": "Phone",
+  "@cardIconPhone": {
+    "description": "The fact card icon menu and picker: an icon of a telephone handset."
+  },
+  "cardIconHospital": "Hospital",
+  "@cardIconHospital": {
+    "description": "The fact card icon menu and picker: an icon of a hospital."
+  },
+  "cardIconUtensils": "Fork and knife",
+  "@cardIconUtensils": {
+    "description": "The fact card icon menu and picker: an icon of a fork and a knife, for food and restaurants."
+  },
+  "cardIconBedDouble": "Bed",
+  "@cardIconBedDouble": {
+    "description": "The fact card icon menu and picker: an icon of a double bed, for hotels and lodging."
+  },
+  "cardIconBuilding2": "Building",
+  "@cardIconBuilding2": {
+    "description": "The fact card icon menu and picker: an icon of an office building."
+  },
+  "cardIconGraduationCap": "Graduation cap",
+  "@cardIconGraduationCap": {
+    "description": "The fact card icon menu and picker: an icon of a graduation cap, for schools and studies."
+  },
+  "cardIconShoppingBag": "Shopping bag",
+  "@cardIconShoppingBag": {
+    "description": "The fact card icon menu and picker: an icon of a shopping bag."
+  },
+  "cardIconInfo": "Information",
+  "@cardIconInfo": {
+    "description": "The fact card icon menu and picker: an icon of a letter i in a circle, for information."
+  },
+  "cardIconStar": "Star",
+  "@cardIconStar": {
+    "description": "The fact card icon menu and picker: an icon of a star."
+  },
+  "cardIconSun": "Sun",
+  "@cardIconSun": {
+    "description": "The fact card icon menu and picker: an icon of the sun, for sunny weather."
+  },
+  "cardIconCloudRain": "Rain cloud",
+  "@cardIconCloudRain": {
+    "description": "The fact card icon menu and picker: an icon of a cloud with rain, for rainy weather."
+  },
+  "cardIconThermometer": "Thermometer",
+  "@cardIconThermometer": {
+    "description": "The fact card icon menu and picker: an icon of a thermometer, for temperatures."
+  },
+  "cardIconGlobe": "Globe",
+  "@cardIconGlobe": {
+    "description": "The fact card icon menu and picker: an icon of a globe, for the world and the web."
+  },
+  "cardIconUser": "Person",
+  "@cardIconUser": {
+    "description": "The fact card icon menu and picker: an icon of a person."
+  },
+  "cardIconPackage": "Package",
+  "@cardIconPackage": {
+    "description": "The fact card icon menu and picker: an icon of a parcel box."
+  },
+  "cardIconTrendingUp": "Rising trend",
+  "@cardIconTrendingUp": {
+    "description": "The fact card icon menu and picker: an icon of a line going up, for growth and rising numbers."
   },
   "dialogCardPicture": "Picture link (optional, beside details)",
   "@dialogCardPicture": {
@@ -1596,6 +1783,28 @@
   "@mapLegTransit": {
     "description": "A map block's route: a leg of public transport of another kind, before its line's name."
   },
+  "mapRoutesBy": "Routes: {router}",
+  "@mapRoutesBy": {
+    "description": "A map block's credit line, after \"© OpenStreetMap contributors · \": the service its route was found with, as \"Routes: Transitous\". The router's name stays as it is.",
+    "placeholders": {
+      "router": {
+        "type": "String"
+      }
+    }
+  },
+  "mapZoomHelp": "Use {key} + scroll to zoom the map",
+  "@mapZoomHelp": {
+    "description": "Shown over a map in a page shared by a public link when a visitor scrolls on it, which scrolls the page instead: the key to hold to zoom the map, \"Ctrl\" or \"⌘\", which stays as it is.",
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "mapMoveHelp": "Use two fingers to move the map",
+  "@mapMoveHelp": {
+    "description": "Shown over a map in a page shared by a public link when a visitor drags it with one finger on a touch screen, which scrolls the page instead."
+  },
   "dialogCardEmpty": "Give the card a title or a fact.",
   "@dialogCardEmpty": {
     "description": "The fact card dialog's error when both the title and the facts are empty."
@@ -1603,6 +1812,15 @@
   "dialogCardBadPicture": "The picture link must be a web address, starting with http:// or https://.",
   "@dialogCardBadPicture": {
     "description": "The fact card dialog's error for a picture link that is not a web address."
+  },
+  "dialogCardLongPicture": "The picture link is too long: a card takes one of at most {count} characters.",
+  "@dialogCardLongPicture": {
+    "description": "The fact card dialog's error for a picture link longer than a card keeps.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "dialogCardBadSource": "Source {line} is not a web link.",
   "@dialogCardBadSource": {
@@ -1707,6 +1925,20 @@
   "cardSources": "Sources",
   "@cardSources": {
     "description": "A fact card: what its source chip's menu and tooltip are called, the web pages its facts come from."
+  },
+  "cardSourcesLabel": "Sources: {names}",
+  "@cardSourcesLabel": {
+    "description": "A fact card: what screen readers say for its source chip, the names of the web pages its facts come from.",
+    "placeholders": {
+      "names": {
+        "type": "String",
+        "example": "Wikipedia, BBC"
+      }
+    }
+  },
+  "cardSourcesSeparator": ", ",
+  "@cardSourcesSeparator": {
+    "description": "A fact card: what goes between two source names in what screen readers say for its source chip, as in \"Wikipedia, BBC\"."
   },
   "cardLayout": "Layout",
   "@cardLayout": {
@@ -1900,6 +2132,10 @@
   "@pubTitle": {
     "description": "Share dialog: heading over the temporary public link section."
   },
+  "pubLinkCopied": "Public link copied",
+  "@pubLinkCopied": {
+    "description": "A toast after the page's public link on the web is copied in the Share dialog."
+  },
   "pubChecking": "Looking for cloudflared…",
   "@pubChecking": {
     "description": "Share dialog: shown while the app looks for Cloudflare's cloudflared tool."
@@ -2065,7 +2301,7 @@
   },
   "pubNameTaken": "Someone on this page goes by that name. Choose another.",
   "@pubNameTaken": {
-    "description": "Public page (seen by visitors): the comment form, when the name typed is that of the page's owner, of an agent or of someone else who comments on the page, which a visitor can't take."
+    "description": "Public page (seen by visitors): the comment form, when the name typed is that of the page's owner, of an agent or of someone else whose comments the public page shows, which a visitor can't take."
   },
   "pubPageOwner": "Page owner",
   "@pubPageOwner": {
@@ -2344,6 +2580,24 @@
   "@agentChatgptSignInEnded": {
     "description": "An agent run or Settings › Agent providers: ChatGPT no longer accepts the sign-in kept on this device."
   },
+  "agentChatgptCodeRefused": "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one that is, or connect OpenAI with an API key. If this account is on Plus or Pro, sign in again.",
+  "@agentChatgptCodeRefused": {
+    "description": "Settings › Agent providers: after the browser step of signing in with ChatGPT went through, OpenAI refused to finish the sign-in (its invalid_grant) with no reason given. It does this for an account without ChatGPT Plus or Pro, even after the browser step offered the plan."
+  },
+  "agentChatgptSignInFailed": "ChatGPT sign-in failed: {error}",
+  "@agentChatgptSignInFailed": {
+    "description": "Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's sign-in refused, or its answer could not be read; error is why, often OpenAI's own words, in English.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "invalid_request"
+      }
+    }
+  },
+  "agentChatgptUnverified": "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again.",
+  "@agentChatgptUnverified": {
+    "description": "Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's answer did not pass Leaflet's checks: its identity token, or where its sign-in is."
+  },
   "agentKeyUnread": "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key again in Settings › Agent providers.",
   "@agentKeyUnread": {
     "description": "Why an agent can't run: the API key kept on this device for its provider could not be read, as the user turned the system's prompt down.",
@@ -2427,6 +2681,10 @@
   "provisionProjectFailed": "Supabase couldn't start the project. Try again, or check it in the Supabase dashboard.",
   "@provisionProjectFailed": {
     "description": "Setting up a Supabase project for Leaflet: Supabase reports the project failed to start or restore."
+  },
+  "provisionProjectSlow": "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard.",
+  "@provisionProjectSlow": {
+    "description": "Setting up a Supabase project for Leaflet: the project still had not started or been restored after Leaflet waited about 15 minutes."
   },
   "provisionMigrationFailed": "Leaflet couldn't set up the database ({migration}): {error}",
   "@provisionMigrationFailed": {
@@ -2802,6 +3060,18 @@
   "agentModelCutOff": "The model's answer was cut off.",
   "@agentModelCutOff": {
     "description": "Why an agent run failed: the model's streamed answer ended before it was complete."
+  },
+  "agentModelStoppedAnswering": "The model stopped answering. Try again.",
+  "@agentModelStoppedAnswering": {
+    "description": "Why an agent run or a connection test failed: the model's server sent nothing more for minutes, in the middle of its answer."
+  },
+  "agentAnswerTooLong": "The answer was too long to read.",
+  "@agentAnswerTooLong": {
+    "description": "Why an agent run, a web search or signing in with ChatGPT failed: the server's answer was larger than Leaflet reads."
+  },
+  "agentRedirected": "The server answered with a redirect to another address, which Leaflet doesn't follow.",
+  "@agentRedirected": {
+    "description": "Why an agent run, a connection test or signing in with ChatGPT failed: the server answered with an HTTP redirect, which Leaflet does not follow for agents."
   },
   "agentChatgptCouldNotAnswer": "ChatGPT could not answer",
   "@agentChatgptCouldNotAnswer": {
@@ -5180,7 +5450,11 @@
   },
   "settingsSwitchAccount": "Switch account",
   "@settingsSwitchAccount": {
-    "description": "The provider dialog for ChatGPT: signs in again."
+    "description": "The provider dialog for ChatGPT: signs in with another ChatGPT account, picked in the browser."
+  },
+  "settingsSignInAgain": "Sign in again",
+  "@settingsSignInAgain": {
+    "description": "The provider dialog for ChatGPT: signs the same ChatGPT account in again, as after its sign-in ended."
   },
   "settingsChatGPTSignIn": "Sign in with ChatGPT",
   "@settingsChatGPTSignIn": {
@@ -5884,6 +6158,10 @@
   "externalLiveEditsTitle": "Live edits",
   "@externalLiveEditsTitle": {
     "description": "The name of the small window in a corner of the screen that shows an AI app's edits as it makes them, for screen readers and the system's window lists."
+  },
+  "externalLiveEditsCommandLine": "Command line",
+  "@externalLiveEditsCommandLine": {
+    "description": "The name the leaflet command's own changes go by: the user, or a script, running leaflet commands in a terminal. It shows as the agent's name in the small corner window (externalLiveEditsEditing) and in page history (dialogHistoryBeforeAgent)."
   },
   "externalLiveEditsEditing": "{agent} is editing",
   "@externalLiveEditsEditing": {

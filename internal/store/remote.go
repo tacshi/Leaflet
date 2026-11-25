@@ -264,10 +264,8 @@ func FileFromRemote(r map[string]any) File {
 		Kept: r["kept"] == true, PurgedAt: TimeOrZero(r["purged_at"])}
 }
 
-var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true}
-
 func (s *Store) HasRowAt(table, id string, at time.Time) bool {
-	if !pulled[table] {
+	if !slices.Contains(pulledTables, table) {
 		return false
 	}
 	var n int
@@ -275,7 +273,12 @@ func (s *Store) HasRowAt(table, id string, at time.Time) bool {
 	return n > 0
 }
 
+// pulledTables are the tables whose rows come from the server, and keep pulled_at.
 var pulledTables = []string{"pages", "folders", "comments", "recordings", "files"}
+
+// seenTables are the tables whose rows keep server_at: the server's updated_at of the row as this device last had it,
+// pulled or as the server took its own write, which a deletion for good sends (SeenAt).
+var seenTables = []string{"pages", "files"}
 
 const PeerKey = "_peer"
 
@@ -298,11 +301,14 @@ func (s *Store) putRemote(entity, id string, r map[string]any, over *OutboxEntry
 			return err
 		}
 		var at any
-		if _, peer := r[PeerKey]; !peer {
+		_, peer := r[PeerKey]
+		if !peer {
 			at = Time(r["updated_at"]).UnixMilli()
 		}
-		_, err = tx.Exec(`UPDATE `+entity+` SET pulled_at = ? WHERE id = ?`, at, id) // #nosec G202
-		return err
+		if _, err = tx.Exec(`UPDATE `+entity+` SET pulled_at = ? WHERE id = ?`, at, id); err != nil || peer || S(r, "updated_at") == "" { // #nosec G202
+			return err
+		}
+		return noteSeen(tx, entity, id, Time(r["updated_at"]))
 	})
 	if err == nil && over != nil {
 		s.Notify("outbox", "")
@@ -340,6 +346,32 @@ func unpulled(q querier, entity, id string) error {
 	}
 	_, err := q.Exec(`UPDATE `+entity+` SET pulled_at = NULL WHERE id = ? AND pulled_at IS NOT NULL`, id) // #nosec G202
 	return err
+}
+
+func noteSeen(q querier, table, id string, at time.Time) error {
+	if !slices.Contains(seenTables, table) {
+		return nil
+	}
+	_, err := q.Exec(`UPDATE `+table+` SET server_at = MAX(COALESCE(server_at, 0), ?) WHERE id = ?`, at.UnixMilli(), id) // #nosec G202
+	return err
+}
+
+// NoteSeen keeps that the server has the row as of its updated_at at, as when it took this device's write of it.
+func (s *Store) NoteSeen(table, id string, at time.Time) error { return noteSeen(s.db, table, id, at) }
+
+// SeenAt is the server's updated_at of the row as this device last had it, pulled or as the server took its write, to
+// the millisecond: a deletion for good sends it, and the server refuses it if the row changed there since, as when
+// another device restored it or deleted it again. A row this device never had from the server has none. A change made
+// here since does not clear it, as it does pulled_at.
+func (s *Store) SeenAt(table, id string) (time.Time, bool) {
+	if !slices.Contains(seenTables, table) {
+		return time.Time{}, false
+	}
+	var at sql.NullInt64
+	if err := s.db.QueryRow(`SELECT server_at FROM `+table+` WHERE id = ?`, id).Scan(&at); err != nil || !at.Valid || at.Int64 == 0 { // #nosec G202
+		return time.Time{}, false
+	}
+	return time.UnixMilli(at.Int64), true
 }
 
 func (s *Store) RowPulledAt(table, id string) (time.Time, bool) {
@@ -419,6 +451,10 @@ func (s *Store) PutRemoteFile(r map[string]any) error { return s.putRemoteFile(r
 
 func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 	f := FileFromRemote(r)
+	if !f.PurgedAt.IsZero() {
+		// A file deleted for good keeps none of what it was, though a device that had it sends it so.
+		f = fileTombstone(f)
+	}
 	ignored := false
 	stored, err := s.putRemote("files", f.ID, r, over, func(tx *sql.Tx) error {
 		if over == nil {
@@ -440,9 +476,11 @@ func (s *Store) putRemoteFile(r map[string]any, over *OutboxEntry) error {
 				return err
 			}
 		}
-		if !f.DeletedAt.IsZero() {
+		if f.Gone() {
 			return nil
 		}
+		// The file keeps its contents, in use or in the bin, as when the server refused this device's deletion of it
+		// for good: they stay where they are stored.
 		_, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage_delete' AND entity_id = ?`, "files/"+f.ID)
 		return err
 	})

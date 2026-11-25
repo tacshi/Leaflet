@@ -480,7 +480,7 @@ final class EditingRules {
                 mentions.append([r.location - para.location, NSMaxRange(r) - para.location])
             }
         }
-        let runs = (try? JSONEncoder().encode(mentions)).map { String(decoding: $0, as: UTF8.self) }
+        let runs = try? jsonString(mentions)
         let raw = MobileInlineShortcut(
             (storage.string as NSString).substring(with: upTo), runs ?? "[]")
         guard let m = try? JSONDecoder().decode(InlineMatch.self, from: Data(raw.utf8)) else {

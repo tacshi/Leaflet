@@ -20,9 +20,7 @@ struct AgentState: Codable, Sendable {
 
     struct Run: Codable, Hashable, Identifiable, Sendable {
         var id: String
-        var surface: String
         var agentName: String
-        var instruction: String
         var status: String
         var undone: Bool
         var error: String?
@@ -36,8 +34,7 @@ struct AgentState: Codable, Sendable {
         var settled = false
 
         enum CodingKeys: String, CodingKey {
-            case id, surface, instruction, status, undone, error, edits, summary, stoppable, answer,
-                activity, settled
+            case id, status, undone, error, edits, summary, stoppable, answer, activity, settled
             case agentName = "agent_name"
             case blockIDs = "block_ids"
             case editPages = "edit_pages"
@@ -200,10 +197,6 @@ struct ProviderTest: Codable, Sendable {
 }
 
 extension CoreClient {
-    private func json<T: Encodable>(_ v: T) -> String {
-        String(decoding: (try? JSONEncoder().encode(v)) ?? Data("null".utf8), as: UTF8.self)
-    }
-
     nonisolated(nonsending) func agentState(_ pageID: String) async throws -> AgentState {
         try await call(AgentState.self) { core in
             try Self.answer { e in core.agentState(pageID, error: e) }
@@ -211,7 +204,7 @@ extension CoreClient {
     }
 
     nonisolated(nonsending) func chat(_ pageID: String, text: String, focus: [String]) async {
-        let f = json(focus)
+        guard let f = try? jsonString(focus) else { return }
         try? await call { $0.chat(pageID, text: text, focus: f) }
     }
 
@@ -223,7 +216,7 @@ extension CoreClient {
         _ pageID: String, surface: String, instruction: String, focus: [String], selection: String,
         agent: AgentState.Option?
     ) async throws -> String {
-        let f = json(focus)
+        let f = try jsonString(focus)
         return try await call { core in
             try Self.answer { e in
                 core.ask(
@@ -302,14 +295,14 @@ extension CoreClient {
     }
 
     nonisolated(nonsending) func saveProvider(_ provider: AgentProvider) async throws {
-        let raw = json(provider)
+        let raw = try jsonString(provider)
         try await call(waiting: true) { try $0.saveProvider(raw) }
     }
 
     nonisolated(nonsending) func testProvider(_ provider: AgentProvider) async throws
         -> ProviderTest
     {
-        let raw = json(provider)
+        let raw = try jsonString(provider)
         return try await call(ProviderTest.self, waiting: true) { core in
             try Self.answer { e in core.testProvider(raw, error: e) }
         }
@@ -319,11 +312,13 @@ extension CoreClient {
         try await call(waiting: true) { try $0.removeProvider(id) }
     }
 
-    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws
+    /// Starts a ChatGPT sign-in: with `again`, as the account the provider is
+    /// signed in as; without, as whichever account the person picks.
+    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String, again: Bool) async throws
         -> ChatGPTSignIn
     {
         try await call(ChatGPTSignIn.self, waiting: true) { core in
-            try Self.answer { e in core.beginChatGPTSign(in: providerID, error: e) }
+            try Self.answer { e in core.beginChatGPTSign(in: providerID, again: again, error: e) }
         }
     }
 

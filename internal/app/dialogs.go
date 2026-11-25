@@ -175,6 +175,17 @@ type dialogs struct {
 	hideRun      string
 }
 
+// canSaveIn reports whether a dialog that edits a block can still save in ed, the open page's editor: not once the page
+// can no longer be changed, as when sync takes away the right to edit it while the dialog is open, when the edit would
+// show but never be saved. It then says so, and the dialog stays open with what was written in it.
+func (a *App) canSaveIn(ed *editor.Editor) bool {
+	if ed != nil && !ed.ReadOnly {
+		return true
+	}
+	a.toast(locales.DialogPageReadOnly())
+	return false
+}
+
 func (d *dialogs) view(c *ui.Context, a *App) {
 	if d.searchOpen {
 		a.searchDialog(c)
@@ -624,7 +635,7 @@ func (a *App) historyDialog(c *ui.Context) {
 				if a.canEdit(d.historyPage) {
 					ui.Column(c).Padding(8, 8, 4).Children(func() {
 						if !d.naming {
-							if ghost(c, "name-version", "bookmark", locales.DialogHistoryNameVersion()).Justify(ui.Start).FillWidth().Clicked() {
+							if button(c, "name-version", "bookmark", locales.DialogHistoryNameVersion()).Justify(ui.Start).FillWidth().Clicked() {
 								d.naming = true
 							}
 							return
@@ -852,12 +863,25 @@ func (a *App) shareDialog(c *ui.Context) {
 			} else {
 				notice(c, "info", "info", locales.DialogShareOwnerOnly(), nil)
 			}
-			ui.Row(c).Gap(8).Children(func() {
-				if button(c, "copy", "link", locales.DialogShareCopyLink()).Clicked() {
-					c.WriteClipboard(doc.PageLink(d.sharePage))
-					c.Toast(locales.DialogShareLinkCopied())
-				}
-			})
+			a.appLink(c)
+		})
+	})
+}
+
+// appLink is the Share dialog's section of the page's link in the app,
+// leaflet://page/…, apart from its public link on the web: it opens the
+// page for those who can see it already.
+func (a *App) appLink(c *ui.Context) {
+	pal := theme.Of(c)
+	id := a.dialogs.sharePage
+	ui.Column(c).Gap(6).FillWidth().Children(func() {
+		label(c, locales.DialogShareAppLink())
+		ui.Row(c).Gap(16).AlignItems(ui.Center).FillWidth().Children(func() {
+			ui.Text(c, locales.DialogShareAppLinkHint()).FontSize(12).TextColor(pal.TextMuted).Grow(1).Shrink(1)
+			if button(c, "copy", "link", locales.DialogShareCopyLink()).Shrink(0).Clicked() {
+				c.WriteClipboard(doc.PageLink(id))
+				c.Toast(locales.DialogShareLinkCopied())
+			}
 		})
 	})
 }
@@ -928,7 +952,7 @@ func (a *App) publicLink(c *ui.Context) {
 						tools(c, func() {
 							if iconButton(c, "copy-link", "copy", locales.CommonCopy()).Clicked() {
 								c.WriteClipboard(p.url)
-								c.Toast(locales.DialogShareLinkCopied())
+								c.Toast(locales.PubLinkCopied())
 							}
 						})
 					})
@@ -1011,7 +1035,7 @@ func (a *App) installCloudflared(c *ui.Context) {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Spinner(c).Size(12, 12)
 			ui.Text(c, locales.PubWaiting()).FontSize(12).TextColor(pal.TextMuted).Grow(1)
-			if ghost(c, "guide", "", locales.PubInstallGuide()).Clicked() {
+			if button(c, "guide", "", locales.PubInstallGuide()).Clicked() {
 				_ = mygo.Shell.OpenExternal(cloudflaredDownloads)
 			}
 		})
@@ -1053,7 +1077,7 @@ func (a *App) chartDialog(c *ui.Context) {
 				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.chartOpen = false
 				}
-				if primary(c, "save", "", locales.DialogChartSave()).Clicked() {
+				if primary(c, "save", "", locales.DialogChartSave()).Clicked() && a.canSaveIn(d.chartEditor) {
 					data, err := menu.ChartData(chartKinds[d.chartKind], d.chartTitle, d.chartCap, d.chartCSV)
 					if err != nil {
 						d.chartError = err.Error()
@@ -1062,7 +1086,9 @@ func (a *App) chartDialog(c *ui.Context) {
 					id := d.chartID
 					d.chartEditor.Edit(func(content *doc.Content) {
 						if n := content.Find(id); n != nil {
-							data["author"] = n.Data["author"]
+							if author, ok := n.Data["author"]; ok {
+								data["author"] = author
+							}
 							n.Data = data
 						}
 					})
@@ -1080,7 +1106,7 @@ func (d *dialogs) openEmbed() {
 
 func (d *dialogs) editEmbed(n *doc.Node) {
 	d.embedOpen, d.embedID, d.embedError = true, n.ID, ""
-	d.embedTitle, d.embedHTML = n.Str("title"), n.Str("html")
+	d.embedTitle, d.embedHTML = embedTitle(n), n.Str("html")
 	d.embedHeight = strconv.Itoa(n.Int("height", 320))
 }
 
@@ -1107,7 +1133,7 @@ func (a *App) embedDialog(c *ui.Context) {
 					label = locales.CommonSave()
 				}
 				insert := primary(c, "insert", "", label).Disabled(strings.TrimSpace(d.embedHTML) == "")
-				if insert.Clicked() && a.page != nil {
+				if insert.Clicked() && a.page != nil && a.canSaveIn(a.page.editor) {
 					h, _ := strconv.Atoi(d.embedHeight)
 					n, err := menu.EmbedBlock(d.embedTitle, d.embedHTML, h, a.session.DisplayName)
 					if err != nil {
@@ -1117,7 +1143,11 @@ func (a *App) embedDialog(c *ui.Context) {
 					if id := d.embedID; id != "" {
 						a.page.editor.Edit(func(content *doc.Content) {
 							if old := content.Find(id); old != nil {
-								n.Data["author"] = old.Data["author"]
+								if author, ok := old.Data["author"]; ok {
+									n.Data["author"] = author
+								} else {
+									delete(n.Data, "author")
+								}
 								old.Data = n.Data
 							}
 						})
@@ -1221,6 +1251,8 @@ func (a *App) insertLink(link string) {
 	}
 	switch {
 	case a.page == nil:
+	case !a.canSaveIn(a.page.editor):
+		return
 	case d.linkID != "":
 		a.setMediaLink(d.linkID, n.Str("url"))
 	default:
@@ -1275,7 +1307,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 	ui.Overlay(c, func() {
 		anchor := ui.Box(c.Key("inline-anchor")).Absolute().Left(at.X).Top(at.Y).Size(at.W, at.H).PassThrough()
 		panel := ui.Column(c.Key("inline-prompt")).AttachTo(anchor, ui.AnchorBottomLeft, ui.AnchorTopLeft).Width(at.W).Margin(8, 0, 0).
-			Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).
+			Padding(inlinePad).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).
 			Bind(&ip.panel)
 		if panel.PressedOutside() && ip.shown && strings.TrimSpace(ip.text) == "" && !ip.working && ip.reply == "" {
 			a.dialogs.inline = nil
@@ -1283,6 +1315,24 @@ func (a *App) inlinePrompt(c *ui.Context) {
 		ip.shown = true
 		a.inlinePanel(c, panel, ip, pal)
 	})
+}
+
+// inlinePad is the inline prompt's padding, on each side.
+const inlinePad = 12
+
+// inlineWidth is how wide the inline prompt's answer shows: its panel's
+// width as last laid out, less its padding, or the page's while it has
+// none yet.
+func (a *App) inlineWidth(c *ui.Context) float32 {
+	if ip := a.dialogs.inline; ip != nil {
+		if w := ip.panel.Bounds(c).W - 2*inlinePad; w > 0 {
+			return w
+		}
+	}
+	if a.page != nil {
+		return a.page.view.Bounds(c).W
+	}
+	return 0
 }
 
 func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal *theme.Palette) {
@@ -1317,7 +1367,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 					label = runProgress(run, label)
 					if run.Answer != "" {
 						ui.Scroll(c).MaxHeight(320).Children(func() {
-							markdownView(c, run.Answer, &a.md).FontSize(13.5)
+							markdownView(c, run.Answer, &a.inlineMD).FontSize(13.5)
 						})
 					}
 				}
@@ -1333,7 +1383,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)
 				ui.Scroll(c).MaxHeight(320).Children(func() {
-					markdownView(c, ip.reply, &a.md).FontSize(13.5)
+					markdownView(c, ip.reply, &a.inlineMD).FontSize(13.5)
 				})
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {
 					ui.Row(c).Gap(8).Children(func() {
@@ -1350,7 +1400,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 			ui.Row(c).Wrap().Gap(6).Children(func() {
 				chips := []string{locales.DialogInlineExplain(), locales.DialogInlineShorter(), locales.DialogInlineGrammar()}
 				for i, s := range chips {
-					if ghost(c, "chip:"+strconv.Itoa(i), "", s).Border(1, pal.AccentSoftBorder).Clicked() {
+					if button(c, "chip:"+strconv.Itoa(i), "", s).Border(1, pal.AccentSoftBorder).Clicked() {
 						ip.text = s
 						a.sendInline(ip)
 					}

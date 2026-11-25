@@ -71,9 +71,13 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	if err != nil {
 		return err
 	}
+	purge, err := s.purgesHere(e)
+	if err != nil {
+		return err
+	}
 	cols := e.Changed
 	if cols == nil {
-		if !v.After(whole) {
+		if !v.After(whole) && !purge {
 			return nil
 		}
 		cols = slices.Sorted(maps.Keys(e.Row))
@@ -87,9 +91,12 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		if err != nil {
 			return err
 		}
-		if v.After(had) {
+		if v.After(had) || purge && c == "purged_at" {
 			newer = append(newer, c)
 		}
+	}
+	if purge && !slices.Contains(newer, "purged_at") {
+		newer = append(newer, "purged_at")
 	}
 	if len(newer) == 0 {
 		return nil
@@ -126,13 +133,34 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		return s.hold(e)
 	}
 	changed[e.Table] = true
-	if e.Table == "pages" {
+	switch {
+	case e.Table == "pages" && s.st.IsPurged(e.ID):
 		s.dropPurgedPageFile(e.ID)
+	case e.Table == "files" && s.fileIsPurged(e.ID):
+		s.heardOfPurge()
 	}
-	if e.Changed == nil {
+	if e.Changed == nil && v.After(whole) {
 		return s.st.SetRowVersion(e.Table, e.ID, v)
 	}
 	return s.setVersion(e.Table, e.ID, newer, v)
+}
+
+// purgesHere reports whether the entry deletes for good a page or a file that is not deleted for good here. Such a
+// deletion is final: it applies whatever the versions of the row's columns here, as a row sent again whole, after a
+// restore that crossed the deletion, carries a later time than the deletion and would otherwise keep it out, on that
+// device and on those that read it later, which would then disagree with the others on what is gone.
+func (s *Service) purgesHere(e icloud.Entry) (bool, error) {
+	if e.Table != "pages" && e.Table != "files" || e.Row["purged_at"] == nil {
+		return false, nil
+	}
+	local, here, err := s.localRow(e.Table, e.ID)
+	return here && local["purged_at"] == nil, err
+}
+
+// fileIsPurged reports whether the file was deleted for good here.
+func (s *Service) fileIsPurged(id string) bool {
+	f, err := s.st.File(id)
+	return err == nil && !f.PurgedAt.IsZero()
 }
 
 func heldKey(table, id string) string { return heldPrefix + table + "." + id }

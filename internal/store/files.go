@@ -40,13 +40,15 @@ type File struct {
 func (f File) Gone() bool { return !f.PurgedAt.IsZero() || !f.DeletedAt.IsZero() && !f.Kept }
 
 func (s *Store) Files() ([]File, error) {
-	return s.queryFiles(`deleted_at IS NULL ORDER BY created_at DESC`)
+	return s.queryFiles(`deleted_at IS NULL AND purged_at IS NULL ORDER BY created_at DESC`)
 }
 
 func (s *Store) AllFiles() ([]File, error) { return s.queryFiles(`1 = 1 ORDER BY created_at DESC`) }
 
-func (s *Store) File(id string) (File, error) {
-	files, err := s.queryFiles(`id = ?`, id)
+func (s *Store) File(id string) (File, error) { return fileIn(s.db, s.Dir, id) }
+
+func fileIn(q querier, dir, id string) (File, error) {
+	files, err := filesIn(q, dir, `id = ?`, id)
 	if err == nil && len(files) == 0 {
 		err = errNotFound
 	}
@@ -54,6 +56,44 @@ func (s *Store) File(id string) (File, error) {
 		return File{}, err
 	}
 	return files[0], nil
+}
+
+// changeFile changes a file in tx as fn has it, and queues what that changed of it, with the always columns among
+// them. fn sees the file's UpdatedAt as now, and reports whether it changed it. It is the file as it is then, and
+// whether fn changed it; a file not here is errNotFound.
+func changeFile(tx *sql.Tx, dir, id, label string, now time.Time, fn func(tx *sql.Tx, f *File) (bool, error), always ...string) (File, bool, error) {
+	f, err := fileIn(tx, dir, id)
+	if err != nil {
+		return File{}, false, err
+	}
+	old := FileToRemote(f)
+	was := f.UpdatedAt
+	f.UpdatedAt = now
+	if changed, err := fn(tx, &f); err != nil || !changed {
+		f.UpdatedAt = was
+		return f, false, err
+	}
+	if err := putFile(tx, dir, f); err != nil {
+		return f, false, err
+	}
+	return f, true, queueChange(tx, "files", f.ID, old, FileToRemote(f), label, f.PageID, always...)
+}
+
+// updateFile is changeFile now, in a transaction of its own, telling those who watch the outbox and the files once fn
+// changed the file.
+func (s *Store) updateFile(id, label string, fn func(tx *sql.Tx, f *File) (bool, error)) error {
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		var err error
+		_, changed, err = changeFile(tx, s.Dir, id, label, time.Now(), fn)
+		return err
+	})
+	if err != nil || !changed {
+		return err
+	}
+	s.Notify("outbox", "")
+	s.Notify("files", "")
+	return nil
 }
 
 func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
@@ -77,6 +117,11 @@ func filesIn(q querier, dir, where string, args ...any) ([]File, error) {
 func (s *Store) PutFile(f File) error { return putFile(s.db, s.Dir, f) }
 
 func putFile(q querier, dir string, f File) error {
+	// A file deleted for good was deleted no later: a restore that crossed the deletion on another device, whose row
+	// came with its purged_at and not its deletion, is no file to list.
+	if f.DeletedAt.IsZero() {
+		f.DeletedAt = f.PurgedAt
+	}
 	_, err := q.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at, kept, purged_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
 		folder_id = excluded.folder_id, page_id = excluded.page_id, name = excluded.name, storage_path = excluded.storage_path,
@@ -111,14 +156,10 @@ func (s *Store) RekeyFile(id string) (string, error) {
 	var key, pageID string
 	changed := false
 	err := s.inTx(func(tx *sql.Tx) error {
-		files, err := filesIn(tx, s.Dir, `id = ?`, id)
+		f, err := fileIn(tx, s.Dir, id)
 		if err != nil {
 			return err
 		}
-		if len(files) == 0 {
-			return errNotFound
-		}
-		f := files[0]
 		if key = f.StoragePath; ValidStorageKey(key) {
 			return nil
 		}
@@ -269,12 +310,13 @@ func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 	return local, nil
 }
 
-// DeleteFile deletes a file for good, its contents with it, as one just added that could not be placed.
+// DeleteFile deletes a file for good, its contents with it, at once, as one just added that could not be placed: in
+// the bin or not.
 func (s *Store) DeleteFile(f File) error {
 	var copies []string
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
-		copies, err = purgeFile(tx, s.Dir, f.ID, time.Now())
+		copies, err = purgeFile(tx, s.Dir, f.ID, time.Now(), WipeNow, func(File) bool { return true })
 		return err
 	})
 	if err != nil {
@@ -288,12 +330,17 @@ func (s *Store) DeleteFile(f File) error {
 	return nil
 }
 
-func (s *Store) removeCopy(id string) {
+// removeCopy removes the copy here of a file whose contents are gone (Gone), and reports whether it did: a file in the
+// bin keeps it, to come back with it.
+func (s *Store) removeCopy(id string) bool {
 	var local sql.NullString
-	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ? AND deleted_at IS NOT NULL`, id).Scan(&local); err != nil || local.String == "" {
-		return
+	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ? AND (purged_at IS NOT NULL OR deleted_at IS NOT NULL AND NOT kept)`,
+		id).Scan(&local); err != nil || local.String == "" {
+		return false
 	}
-	if s.removeLocalCopy(s.Path(local.String)) {
-		_, _ = s.db.Exec(`UPDATE files SET local_path = NULL WHERE id = ?`, id)
+	if !s.removeLocalCopy(s.Path(local.String)) {
+		return false
 	}
+	_, err := s.db.Exec(`UPDATE files SET local_path = NULL WHERE id = ?`, id)
+	return err == nil
 }

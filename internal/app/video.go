@@ -621,7 +621,8 @@ func (a *App) videoNotesDialog(c *ui.Context) {
 					d.notesOpen = false
 				}
 				notes := doc.NormalizeNotes(d.notesText)
-				if primary(c, "save", "", locales.CommonSave()).Disabled(utf8.RuneCountInString(notes) > doc.MaxNotes).Clicked() {
+				save := primary(c, "save", "", locales.CommonSave()).Disabled(utf8.RuneCountInString(notes) > doc.MaxNotes)
+				if save.Clicked() && a.page != nil && a.canSaveIn(a.page.editor) {
 					d.notesOpen = false
 					a.setVideoNotes(d.notesBlock, notes)
 				}

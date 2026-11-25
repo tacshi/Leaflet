@@ -507,24 +507,28 @@ final class EditorTextView: UITextView {
                 key(
                     UIKeyCommand.inputDownArrow, [.alternate, .shift], #selector(moveBlockDown),
                     LI.moveBlockDown),
-                key("0", [.command, .alternate], #selector(makeText), L.hostSlashText),
-                key("1", [.command, .alternate], #selector(makeHeading1), L.hostSlashHeading1),
-                key("2", [.command, .alternate], #selector(makeHeading2), L.hostSlashHeading2),
-                key("3", [.command, .alternate], #selector(makeHeading3), L.hostSlashHeading3),
-                key("l", [.command, .shift], #selector(makeTodo), L.hostSlashTodo),
                 key(
                     "c", [.command, .alternate, .shift], #selector(copyPlainText),
                     L.editorCopyPlainText),
             ]
+            // The iPad's Format menu has these shortcuts; an iPhone, with no
+            // menu bar, has them here.
+            for (i, t) in TurnInto.all.enumerated() {
+                guard let input = t.key else { continue }
+                commands.append(key(input, t.modifiers, #selector(turnInto(_:)), t.title, i))
+            }
         }
         commands.append(contentsOf: super.keyCommands ?? [])
         return commands
     }
 
     private func key(
-        _ input: String, _ flags: UIKeyModifierFlags, _ action: Selector, _ title: String
+        _ input: String, _ flags: UIKeyModifierFlags, _ action: Selector, _ title: String,
+        _ property: Int? = nil
     ) -> UIKeyCommand {
-        let c = UIKeyCommand(title: title, action: action, input: input, modifierFlags: flags)
+        let c = UIKeyCommand(
+            title: title, action: action, input: input, modifierFlags: flags,
+            propertyList: property)
         c.wantsPriorityOverSystemBehavior = true
         return c
     }
@@ -543,11 +547,13 @@ final class EditorTextView: UITextView {
     @objc func editLink() { controller?.editLink() }
     @objc func moveBlockUp() { controller?.moveBlock(by: -1) }
     @objc func moveBlockDown() { controller?.moveBlock(by: 1) }
-    @objc func makeText() { controller?.setType("paragraph") }
-    @objc func makeHeading1() { controller?.setType("heading", ["level": .int(1)]) }
-    @objc func makeHeading2() { controller?.setType("heading", ["level": .int(2)]) }
-    @objc func makeHeading3() { controller?.setType("heading", ["level": .int(3)]) }
-    @objc func makeTodo() { controller?.setType("todo_list", ["checked": .bool(false)]) }
+    /// Turns the text at the caret into the type of `TurnInto.all` the
+    /// command's place in it says.
+    @objc func turnInto(_ command: UIKeyCommand) {
+        let all = TurnInto.all
+        guard let i = command.propertyList as? Int, all.indices.contains(i) else { return }
+        controller?.setType(all[i].type, all[i].data)
+    }
     @objc func copyPlainText() { controller?.copyPlainText() }
 
     override func copy(_ sender: Any?) {

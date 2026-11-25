@@ -90,9 +90,10 @@ iPad app is SwiftUI and UIKit, on the same Go core.
   beside a picture, with a note and a chip for the pages they come from.
 - Maps of places and of a route between them, walking, cycling, driving or
   by public transport, each bus or train line in its own color: on
-  OpenFreeMap's map on the Mac and Windows, on Apple's on iPhone and iPad.
-  Places are found with Photon, and routes with FOSSGIS's OSRM or
-  Transitous, which get the places asked for.
+  OpenFreeMap's map on the Mac and Windows, in a page a public link
+  shares, whose visitors' browsers load its tiles, and in a PDF; on
+  Apple's on iPhone and iPad. Places are found with Photon, and routes
+  with FOSSGIS's OSRM or Transitous, which get the places asked for.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
   pages, a selection toolbar with text colors, formulas typeset in the line
   from `$x^2$`, folding headings, an outline, and links to pages and to
@@ -302,7 +303,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 
 | Tool | What it does |
 | --- | --- |
-| `list_pages`, `search_pages` | Find pages by title, tag and text, and recordings and comments |
+| `list_pages`, `search_pages` | Find pages by title, tag and text, and recordings and comments; many pages list in parts |
 | `current_page` | See the page open in the app, with the selected text and its text color |
 | `read_page` | Read a page's blocks, with their IDs and versions |
 | `create_page`, `rename_page` | Make and rename pages |
@@ -332,15 +333,22 @@ between, and sync like any other change. An edit given the version
 it since, and answers with what it holds now. One that replaces a change
 the agent never read, as a nested item someone added under a block it
 deletes, is kept as a conflict in the page's history, and its answer says
-so. `upload_files` copies files into the page as the app's Upload does,
-except into a page other people have or one with a public link. Only the
+so. So is one that replaces or deletes a block of a page the agent read so
+long ago that the server let go of what it read, until it reads the page
+again. `upload_files`
+copies files into the page as the app's Upload does, except into a page
+other people have or one with a public link, and, on Windows, only files on
+the computer's own drives, never on another computer's share. Only the
 app knows of a link another of your computers serves: it checks every two
 minutes while it runs, and without a check from the last five minutes, as
 with the app closed or offline for a while, `upload_files` adds nothing to
 pages that sync. The open app picks up
 what they write within a second and merges it with what is being typed.
 With the app closed, or no page open, `current_page` gives the page opened
-last on this device, with no selection.
+last on this device, with no selection, as it does after the app crashed.
+Started on a data folder the app never opened, as a mistyped
+`LEAFLET_DATA_DIR`, the server stops with an error rather than make an
+empty database the app would never show.
 
 While the Mac or PC app runs, in front or not, a small window in a corner
 of the screen shows the part of a page an agent is changing, as it changes

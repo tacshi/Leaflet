@@ -13,8 +13,10 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func TestCommandName(t *testing.T) {
@@ -85,6 +87,16 @@ func TestNoPages(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "open Leaflet once first") {
 		t.Errorf("ls without pages: exit %d, %q", code, errOut)
 	}
+	// The MCP server, too, starts on the app's pages alone: one on a new
+	// database would take edits the app never shows.
+	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.0"}}}` + "\n"
+	out, errOut, code := run(t, dir, initialize, "mcp")
+	if code != 1 || out != "" || !strings.Contains(errOut, "open Leaflet once first") {
+		t.Errorf("mcp without pages: exit %d, %q, %q", code, out, errOut)
+	}
+	if _, err := os.Stat(store.Path(dir)); !os.IsNotExist(err) {
+		t.Errorf("mcp made a database: %v", err)
+	}
 	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +154,7 @@ func TestPages(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	h, err := st.History(id)
-	if err != nil || len(h) != 1 || h[0].Label != "Before Command line" || strings.Contains(h[0].Content, "Dates") {
+	if err != nil || len(h) != 1 || core.HistoryLabel(h[0]) != locales.DialogHistoryBeforeAgent(locales.ExternalLiveEditsCommandLine()) || strings.Contains(h[0].Content, "Dates") {
 		t.Errorf("history %v, %v", h, err)
 	}
 }

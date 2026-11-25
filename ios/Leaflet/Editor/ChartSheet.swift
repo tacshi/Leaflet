@@ -32,7 +32,7 @@ struct ChartSheet: View {
                         .pickerStyle(.segmented)
                     }
                     Section {
-                        CodeTextEditor(text: $text)
+                        CodeTextEditor(text: $text, label: L.dialogChartTitle)
                             .frame(minHeight: 180)
                     } footer: {
                         if let failure {
@@ -68,7 +68,7 @@ struct ChartSheet: View {
         title = d["title"]?.string ?? ""
         kind = d["chart_type"]?.string ?? "bar"
         caption = d["caption"]?.string ?? ""
-        let raw = (try? JSONEncoder().encode(d)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+        let raw = (try? jsonString(d)) ?? "{}"
         text = MobileChartText(raw)
         original = fields
     }

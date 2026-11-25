@@ -118,8 +118,8 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					head = append(head, escapeCommonMark(l))
 				}
 				rows := [][]string{head}
-				for _, s := range chart.Series {
-					row := []string{escapeCommonMark(s.Name)}
+				for i, s := range chart.Series {
+					row := []string{escapeCommonMark(SeriesName(msgs, i, s))}
 					for _, v := range s.Values {
 						row = append(row, trimFloat(v))
 					}
@@ -130,7 +130,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					block(indent, "*"+escapeCommonMark(cap)+"*")
 				}
 			case "embed":
-				if title := n.Str("title"); title == "" || defaultEmbedTitle(title) {
+				if title := n.Str("title"); title == "" || IsDefaultEmbedTitle(title) {
 					block(indent, "*"+escapeCommonMark(msgs.ExportEmbed())+"*")
 				} else {
 					block(indent, "*"+escapeCommonMark(msgs.ExportEmbedTitled(title))+"*")
@@ -151,7 +151,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "link_preview":
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "card":
-				block(indent, cardMarkdown(CardOf(n), link))
+				block(indent, cardMarkdown(CardOf(n), link, href))
 			case "map":
 				block(indent, mapMarkdown(msgs, MapOf(n), link))
 			case "file":
@@ -269,7 +269,10 @@ func withLinks(c *Content, link func(string) string) *Content {
 	return c
 }
 
-func defaultEmbedTitle(title string) bool {
+// IsDefaultEmbedTitle reports whether title is the one an embed gets when it
+// is not given one, DefaultEmbedTitle or the embed dialog's in any language:
+// it then shows in the reader's language.
+func IsDefaultEmbedTitle(title string) bool {
 	if strings.EqualFold(title, DefaultEmbedTitle) {
 		return true
 	}

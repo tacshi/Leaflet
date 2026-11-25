@@ -102,7 +102,18 @@ enum VoiceNotes {
             return false
         }
         let timeout = Task {
+            // The time to start counts from when the microphone may be used:
+            // the first voice note asks for it, and the answer can take a
+            // while, though not for ever.
+            let asked = ContinuousClock.now
+            while AVAudioApplication.shared.recordPermission == .undetermined,
+                ContinuousClock.now - asked < .seconds(120)
+            {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
             try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
             watch.cancel()
         }
         defer { timeout.cancel() }

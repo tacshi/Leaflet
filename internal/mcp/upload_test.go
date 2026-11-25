@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 func writeFile(t *testing.T, dir, name string, data []byte) string {
@@ -117,7 +119,7 @@ func TestUploadFiles(t *testing.T) {
 	if f := byID[file.Str("file_id")]; file.Type != "file" || file.Str("name") != "rules.pdf" || f.MimeType != "application/pdf" {
 		t.Errorf("file %+v", file)
 	}
-	if history, _ := st.History(p.ID); len(history) != 1 || history[0].Label != "Before Claude Code" || strings.Contains(history[0].Content, "file_id") {
+	if history, _ := st.History(p.ID); len(history) != 1 || core.HistoryLabel(history[0]) != locales.DialogHistoryBeforeAgent("Claude Code") || strings.Contains(history[0].Content, "file_id") {
 		t.Errorf("history %+v", history)
 	}
 
@@ -408,5 +410,33 @@ func TestUploadAndMoveWithLinksElsewhere(t *testing.T) {
 	}
 	if out, failed := move(6); failed {
 		t.Errorf("moved once the link stopped: %v", out)
+	}
+}
+
+// On Windows, a path of another computer's share, as page text could name,
+// is opened over the network with the user's sign-in: only a drive's paths
+// are taken.
+func TestOnlyThisComputersDrives(t *testing.T) {
+	for path, want := range map[string]bool{
+		`C:\Users\me\shot.png`:        true,
+		`d:/Pictures/shot.png`:        true,
+		`\\host\share\shot.png`:       false,
+		`//host/share/shot.png`:       false,
+		`\\?\UNC\host\share\shot.png`: false,
+		`\\?\C:\Users\me\shot.png`:    false,
+		`\\.\pipe\x`:                  false,
+		`\??\UNC\host\share\shot.png`: false,
+		`C:shot.png`:                  false,
+		`\Users\me\shot.png`:          false,
+	} {
+		if got := onThisComputer(path, true); got != want {
+			t.Errorf("onThisComputer(%q) = %v", path, got)
+		}
+	}
+	if p, err := fileURLPath("file:////host/share/shot.png", true); err != nil || onThisComputer(p, true) {
+		t.Errorf("file:////host/share/shot.png is %q, %v", p, err)
+	}
+	if !onThisComputer("//host/share/shot.png", false) {
+		t.Error("a path elsewhere than Windows is refused")
 	}
 }

@@ -31,8 +31,8 @@ final class PlayerSettings {
 @MainActor
 enum PlaySpeed {
     static let defaultsKey = "player.speed"
-    static let all: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2]
-    static let skip: Double = 15
+    nonisolated static let all: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2]
+    nonisolated static let skip: Double = 15
 
     static var current: Float { Float(PlayerSettings.shared.speed) }
 
@@ -107,6 +107,9 @@ final class FilePlayback {
 
     func plays(_ id: String, in editor: String?) -> Bool { block == id && owner == editor }
 
+    /// Whether a file plays now, which keeps the audio session on.
+    var running: Bool { player.map { $0.timeControlStatus != .paused } ?? false }
+
     func loads(_ id: String, in editor: String?) -> Bool { loading == id && owner == editor }
 
     func play(
@@ -124,7 +127,9 @@ final class FilePlayback {
             return
         }
         guard let client, loading == nil else { return }
-        stop()
+        // The session stays on for the file to come, and goes once it does
+        // not.
+        stop(lettingGo: false)
         loading = id
         owner = editor
         fetch += 1
@@ -134,6 +139,7 @@ final class FilePlayback {
                 if fetch == this {
                     loading = nil
                     fetching = nil
+                    if player == nil { AudioSession.letGo() }
                 }
             }
             do {
@@ -163,7 +169,13 @@ final class FilePlayback {
                 guard current(this) else { return }
                 watching = made.observe(\.timeControlStatus) { [weak self] player, _ in
                     let on = player.timeControlStatus != .paused
-                    Task { @MainActor in self?.playing = on }
+                    let ended = !on && Self.atEnd(player)
+                    Task { @MainActor in
+                        self?.playing = on
+                        // Played to its end, the file lets the session go, as
+                        // a recording does.
+                        if ended { AudioSession.letGo() }
+                    }
                 }
                 player = made
                 cover = picture
@@ -199,12 +211,16 @@ final class FilePlayback {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio)
         try? session.setActive(true)
-        if rewinding, let length = player.currentItem?.duration.seconds, length.isFinite,
-            player.currentTime().seconds >= length - 0.05
-        {
-            player.seek(to: .zero)
-        }
+        if rewinding, Self.atEnd(player) { player.seek(to: .zero) }
         player.play()
+    }
+
+    /// Whether the player is at its file's end, having played it all.
+    private nonisolated static func atEnd(_ player: AVPlayer) -> Bool {
+        guard let length = player.currentItem?.duration.seconds, length.isFinite else {
+            return false
+        }
+        return player.currentTime().seconds >= length - 0.05
     }
 
     func toggle() {
@@ -231,7 +247,11 @@ final class FilePlayback {
         if playing { player?.rate = PlaySpeed.current }
     }
 
-    func stop() {
+    /// Stops the file playing, or on its way, and lets the audio session go
+    /// unless something else still has it (`AudioSession`), or the caller
+    /// plays another file (`lettingGo` false).
+    func stop(lettingGo: Bool = true) {
+        let had = player != nil || loading != nil
         fetching?.cancel()
         fetching = nil
         fetch += 1
@@ -243,6 +263,7 @@ final class FilePlayback {
         block = nil
         owner = nil
         playing = false
+        if had, lettingGo { AudioSession.letGo() }
     }
 
     func stop(_ blocks: Set<String>, in editor: String?) {
@@ -319,6 +340,8 @@ struct NowPlayingBar: View {
                         }
                     )
                     .tint(palette.accent)
+                    .accessibilityLabel(L.cardPlaybackPosition)
+                    .accessibilityValue(MobileClock(Int(at)))
                     if wide {
                         Text(verbatim: MobileClock(Int(length))).font(.caption.monospacedDigit())
                     }
@@ -477,6 +500,8 @@ struct FileBar: View {
                 }
             )
             .tint(palette.accent)
+            .accessibilityLabel(L.cardPlaybackPosition)
+            .accessibilityValue(MobileClock(Int(at)))
             Text(verbatim: MobileClock(Int(length))).monospacedDigit()
             SpeedMenu()
         }

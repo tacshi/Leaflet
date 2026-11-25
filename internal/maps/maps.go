@@ -59,11 +59,32 @@ var client = &http.Client{Transport: web.PublicTransport(), Timeout: 20 * time.S
 var ErrNoRoute = errors.New("no route was found between these places")
 
 // osrmEvery keeps requests to FOSSGIS's OSRM servers a second apart, as
-// they ask.
+// they ask: last is the time of the last turn given.
 var osrmEvery = struct {
 	sync.Mutex
 	last time.Time
 }{}
+
+// osrmTurn waits for a request's turn at the OSRM servers, a second after
+// the last turn given, or until ctx ends. The turn is given at once, so
+// that the requests waiting each wait on their own, and each can end.
+func osrmTurn(ctx context.Context) error {
+	osrmEvery.Lock()
+	turn := osrmEvery.last.Add(time.Second)
+	if now := time.Now(); turn.Before(now) {
+		turn = now
+	}
+	osrmEvery.last = turn
+	osrmEvery.Unlock()
+	wait := time.NewTimer(time.Until(turn))
+	defer wait.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wait.C:
+		return nil
+	}
+}
 
 func get(ctx context.Context, link string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
@@ -176,17 +197,9 @@ func FindRoutes(ctx context.Context, from, to doc.LatLng, mode string, depart ti
 	if !ok {
 		return nil, fmt.Errorf("a route goes by %s", strings.Join(doc.RouteModes, ", "))
 	}
-	osrmEvery.Lock()
-	if wait := time.Second - time.Since(osrmEvery.last); wait > 0 {
-		select {
-		case <-ctx.Done():
-			osrmEvery.Unlock()
-			return nil, ctx.Err()
-		case <-time.After(wait):
-		}
+	if err := osrmTurn(ctx); err != nil {
+		return nil, err
 	}
-	osrmEvery.last = time.Now()
-	osrmEvery.Unlock()
 	link := fmt.Sprintf("%s/%s/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=polyline6&steps=false&alternatives=false",
 		OSRMURL, profile, from.Lng, from.Lat, to.Lng, to.Lat)
 	var res struct {

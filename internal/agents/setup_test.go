@@ -380,34 +380,42 @@ func TestRemoveProvider(t *testing.T) {
 	}
 }
 
-func TestSignInWithChatGPTAsksForTheClient(t *testing.T) {
+// A sign-in for any account registers Leaflet anew, as OpenAI turns away
+// an account a registration wasn't made for; a sign-in again asks for the
+// account's own registration and names the account, so OpenAI skips its
+// account picker.
+func TestSignInWithChatGPTAsksForTheAccountsOwnClient(t *testing.T) {
 	fakeDiscovery(t, &chatgptDiscovery{AuthorizationEndpoint: "https://auth.example.com/authorize"})
 	h := setupHub(t, nil)
-	asked := func(had *ChatGPT) string {
+	asked := func(again *ChatGPT) url.Values {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())
-		var client string
-		_, err := h.SignInWithChatGPT(ctx, had, func(link string) {
+		var q url.Values
+		_, err := h.SignInWithChatGPT(ctx, again, func(link string) {
 			u, _ := url.Parse(link)
-			client = u.Query().Get("client_id")
+			q = u.Query()
 			cancel()
 		})
 		if err == nil {
 			t.Fatal("signed in with no answer")
 		}
-		return client
+		return q
 	}
-	if got := asked(nil); got != "dynamic_agent_client" {
-		t.Errorf("first sign-in asked for %q", got)
+	q := asked(nil)
+	if q.Get("client_id") != "dynamic_agent_client" || q.Get("agent_name_hint") != "Leaflet" || q.Has("login_hint") || q.Has("id_token_hint") {
+		t.Errorf("first sign-in asked %v", q)
 	}
-	if err := h.st.SetValue(chatgptClientKey, "client.1"); err != nil {
+	// A registration kept for the whole device, by an earlier Leaflet, is
+	// another account's as likely as not.
+	if err := h.st.SetValue(chatgptClientKey, "oaiapp_device"); err != nil {
 		t.Fatal(err)
 	}
-	if got := asked(nil); got != "client.1" {
-		t.Errorf("asked for %q, want this device's", got)
+	if q := asked(nil); q.Get("client_id") != "dynamic_agent_client" {
+		t.Errorf("another account's sign-in asked for %q", q.Get("client_id"))
 	}
-	if got := asked(NewChatGPT(ChatGPTAccount{ClientID: "client.2"})); got != "client.2" {
-		t.Errorf("asked for %q, want the provider's", got)
+	q = asked(NewChatGPT(ChatGPTAccount{ClientID: "oaiapp_mine", Email: "me@example.com", IDToken: "a.b.c"}))
+	if q.Get("client_id") != "oaiapp_mine" || q.Get("login_hint") != "me@example.com" || q.Get("id_token_hint") != "a.b.c" || q.Has("agent_name_hint") {
+		t.Errorf("a sign-in again asked %v", q)
 	}
 }
 

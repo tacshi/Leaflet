@@ -858,3 +858,32 @@ func TestTemplateFillsAPageClosedDuringTheCopy(t *testing.T) {
 		t.Errorf("subpages %v", under)
 	}
 }
+
+// A template's hint is kept once, made again as the template changes, and
+// let go of as it goes.
+func TestTemplateHintsKeptOnceATemplate(t *testing.T) {
+	a := templatesApp(t)
+	tpl, err := a.st.CreatePage(store.NewPageOptions{Title: "Kit", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("First")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if got := a.templateHint(*a.pageByID(tpl.ID)); got != "First" {
+		t.Fatalf("hint %q", got)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, _, err := a.st.SaveContent(tpl.ID, doc.FromBlocks([]*doc.Node{textNode("Second")})); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if got := a.templateHint(*a.pageByID(tpl.ID)); got != "Second" || len(a.templateHints) != 1 {
+		t.Errorf("hint %q, %d kept", got, len(a.templateHints))
+	}
+	if _, err := a.st.DeletePage(tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if len(a.templateHints) != 0 {
+		t.Errorf("hints of templates gone are kept: %v", a.templateHints)
+	}
+}

@@ -31,7 +31,7 @@ func (r *runner) listing() (*listing, error) {
 	if r.list != nil {
 		return r.list, nil
 	}
-	out, err := r.call("list_pages", map[string]any{})
+	out, err := r.srv.Listing()
 	if err != nil {
 		return nil, err
 	}

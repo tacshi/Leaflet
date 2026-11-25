@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
@@ -905,10 +907,19 @@ func TestPubVisitorsCantGoByTheNamesOfThePagesPeople(t *testing.T) {
 	a.session = a.st.Session()
 	a.providers = []store.Provider{{ID: "c", Name: "Claude"}}
 	now := time.Now()
-	if err := a.st.PutComment(store.Comment{ID: "m1", PageID: pg.ID, BlockID: "p1", AuthorKind: "user", AuthorID: "u2",
-		AuthorName: "Mei", Body: "Booked.", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
+	// Mei commented in a thread the public page shows; Sam in one it
+	// doesn't, and Lee in one resolved since.
+	for _, cm := range []store.Comment{
+		{ID: "m1", AuthorID: "u2", AuthorName: "Mei", Body: "Booked."},
+		{ID: "m2", AuthorID: "u3", AuthorName: "Sam", Body: "Between us: the price went up."},
+		{ID: "m3", AuthorID: "u4", AuthorName: "Lee", Body: "Paid.", Resolved: true},
+	} {
+		cm.PageID, cm.BlockID, cm.AuthorKind, cm.CreatedAt, cm.UpdatedAt = pg.ID, "p1", "user", now, now
+		if err := a.st.PutComment(cm); err != nil {
+			t.Fatal(err)
+		}
 	}
+	p.threads["m1"], p.threads["m3"] = true, true
 	p.render(a.pubJob(p))
 	post := func(name string) int {
 		body, _ := json.Marshal(map[string]string{"block": "p1", "name": name, "body": "Send the deposit to my new account."})
@@ -916,10 +927,22 @@ func TestPubVisitorsCantGoByTheNamesOfThePagesPeople(t *testing.T) {
 	}
 	for _, name := range []string{
 		"Rocky Shi", " rocky   SHI ", "ＲＯＣＫＹ　ＳＨＩ", "Rocky\u200b Shi", "\u202eRocky Shi\u202c",
-		"You", "you", "你", "あなた", locales.PubPageOwner(), "claude", "Mei",
+		"You", "you", "你", "あなた", locales.PubPageOwner(), "claude", "Mei", "mei",
 	} {
 		if got := post(name); got != http.StatusConflict {
 			t.Errorf("%q: %d", name, got)
+		}
+	}
+	// The names of those the public page doesn't show go in, so that none
+	// can be found out by trying, as a visitor's comment, which the app
+	// shows as one.
+	for _, name := range []string{"Sam", "Lee"} {
+		if got := post(name); got != http.StatusNoContent {
+			t.Fatalf("%q, of a thread the page doesn't show: %d", name, got)
+		}
+		threads, _ := a.st.Threads(pg.ID)
+		if got := threads[len(threads)-1].Root; got.AuthorKind != "guest" || got.AuthorName != name {
+			t.Errorf("stored %q as %s", got.AuthorName, got.AuthorKind)
 		}
 	}
 	// A name of the visitor's own goes in without marks that reorder its
@@ -1006,5 +1029,36 @@ func TestPublicLinkIsRecordedForAgentsOutsideTheApp(t *testing.T) {
 	a.stopPub()
 	if a.st.ServesLink(pg.ID) {
 		t.Error("a stopped link is still recorded")
+	}
+}
+
+// The Share dialog keeps the page's link in Leaflet apart from its public
+// link, in a section of its own whose button says which link it copies, as
+// its toast does.
+func TestShareDialogNamesTheLinkInLeaflet(t *testing.T) {
+	a := templatesApp(t)
+	pg, err := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.cloudflared.busy = true
+	a.dialogs.shareOpen, a.dialogs.sharePage = true, pg.ID
+	tt := ui.NewTester(func(c *ui.Context) { a.shareDialog(c) }, 700, 700)
+	tt.Frame()
+	for _, want := range []string{locales.PubTitle(), locales.DialogShareAppLink(), locales.DialogShareAppLinkHint(), "Copy Leaflet link"} {
+		if !tt.HasText(want) {
+			t.Fatalf("no %q in %v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("Copy Leaflet link"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if got := tt.Clipboard(); got != doc.PageLink(pg.ID) {
+		t.Errorf("copied %q", got)
+	}
+	if !tt.HasText("Leaflet link copied") {
+		t.Errorf("no toast in %v", tt.Texts())
 	}
 }

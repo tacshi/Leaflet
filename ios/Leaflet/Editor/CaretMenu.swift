@@ -119,6 +119,7 @@ struct CaretMenuView: View {
                                     .padding(.horizontal, 14)
                                     .padding(.top, 8)
                                     .padding(.bottom, 4)
+                                    .accessibilityAddTraits(.isHeader)
                             }
                             Button {
                                 pick(i)

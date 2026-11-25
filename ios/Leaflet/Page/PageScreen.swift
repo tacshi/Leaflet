@@ -139,7 +139,7 @@ struct PageScreen: View {
                         .environment(\.palette, palette)
                         .environment(app)
                 } footer: {
-                    if model.blank, let row, row.canEdit {
+                    if model.blank, !model.readOnly, let row, row.canEdit {
                         startWith(row)
                             .environment(\.palette, palette)
                             .environment(app)
@@ -433,6 +433,9 @@ struct PageScreen: View {
                     sharedWith: model?.members.filter { $0.userID != app.status?.userID }.count
                         ?? 0)
             }
+            if model?.unreadable == true {
+                UnreadableNotice()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -475,6 +478,22 @@ struct PageScreen: View {
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+}
+
+/// Says a page's content could not be read, so it opened read-only and is
+/// kept as it is, as the desktop's notice over such a page does.
+struct UnreadableNotice: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Label(L.pageUnreadable, systemImage: "exclamationmark.triangle")
+            .font(.footnote)
+            .foregroundStyle(palette.warnText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(palette.warnBg, in: .rect(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.warnBorder))
     }
 }
 
@@ -536,7 +555,7 @@ struct Inspector: View {
                     } else if let model {
                         AgentPanel(model: model, allPages: $scene.allPages, isSheet: isSheet)
                     }
-                case .comments: if let model { CommentsPanel(model: model) }
+                case .comments: if let model { CommentsPanel(model: model, isSheet: isSheet) }
                 }
             }
         }
@@ -600,10 +619,8 @@ struct OutlineRow: Identifiable, Decodable, Hashable, Sendable {
     }
 
     static func rows(_ headings: [DocNode]) -> [OutlineRow] {
-        guard !headings.isEmpty, let data = try? JSONEncoder().encode(headings) else { return [] }
-        var error: NSError?
-        let raw = MobileOutline(String(decoding: data, as: UTF8.self), &error)
-        return (try? JSONDecoder().decode([OutlineRow].self, from: Data(raw.utf8))) ?? []
+        guard !headings.isEmpty else { return [] }
+        return (try? coreValue(headings, as: [OutlineRow].self, MobileOutline)) ?? []
     }
 }
 

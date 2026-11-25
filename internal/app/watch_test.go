@@ -302,9 +302,47 @@ func TestResetWatchClearsState(t *testing.T) {
 	a.hushWatch()
 	a.resetWatch()
 	w := &a.watch
-	if w.shown || w.ed != nil || w.target != nil || len(w.pending) != 0 || w.hushed || w.seen == nil || len(w.seen) != 0 {
+	if w.shown || w.ed != nil || w.target != nil || len(w.pending) != 0 || w.hushed || w.seen == nil {
 		t.Errorf("resetWatch left state: shown=%v ed=%v target=%v pending=%v hushed=%v seen=%v",
 			w.shown, w.ed != nil, w.target != nil, w.pending, w.hushed, w.seen)
+	}
+	// What the agents did before counts as seen.
+	a.agentsEdited()
+	if w.shown {
+		t.Error("an edit from before the reset shows again")
+	}
+}
+
+// Signing in to an account in place of this one hides the corner window,
+// which showed a page of the account before, and what agents did before
+// doesn't show again; what they do after does.
+func TestAccountSwitchResetsTheWatch(t *testing.T) {
+	a, s, p := watchApp(t)
+	a.images = newImageCache(t.TempDir())
+	write := func(md string) {
+		t.Helper()
+		if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": md}); out["error"] != nil {
+			t.Fatal(out)
+		}
+	}
+	write("more")
+	a.agentsEdited()
+	w := &a.watch
+	if !w.shown {
+		t.Fatal("the corner window did not show")
+	}
+	a.usedAccount(&store.User{ID: "u2", Email: "sam@example.com"}, true, nil)
+	if w.shown || w.ed != nil || w.act.PageID != "" {
+		t.Fatalf("after the switch the window shows %v, page %q", w.shown, w.act.PageID)
+	}
+	a.agentsEdited()
+	if w.shown {
+		t.Error("an edit from before the switch shows again")
+	}
+	write("after")
+	a.agentsEdited()
+	if !w.shown {
+		t.Error("an edit after the switch does not show")
 	}
 }
 
@@ -348,5 +386,37 @@ func TestCornerWindowRevealsCollapsedBlocks(t *testing.T) {
 	a.watch.reveal(a.watch.follow)
 	if a.watch.ed.Content.Find("head").Bool("collapsed") {
 		t.Error("collapsed heading stayed collapsed")
+	}
+}
+
+// An agent outside the app changing blocks of the open page lights them up
+// for a moment, but a block an agent's run in the app tinted stays tinted,
+// as long as the run's bar shows.
+func TestAnOutsideEditKeepsARunsTint(t *testing.T) {
+	a, s, p := watchApp(t)
+	a.openPage(p.ID)
+	a.Tint(p.ID, []string{"p2"})
+	for _, id := range []string{"p1", "p2"} {
+		if out := s.Call("replace_block", map[string]any{"page_id": p.ID, "id": id, "block": map[string]any{"type": "paragraph", "text": "rewritten"}}); out["error"] != nil {
+			t.Fatal(out)
+		}
+	}
+	a.agentsEdited()
+	ps := a.page
+	if !ps.tinted["p1"] || !ps.tinted["p2"] {
+		t.Fatalf("tinted %v", ps.tinted)
+	}
+	now := time.Now()
+	dim(ps.tinted, ps.lit, now, blockLit)
+	if next := dim(ps.tinted, ps.lit, now.Add(blockLit), blockLit); next != 0 {
+		t.Errorf("a light still on, going out in %v", next)
+	}
+	if ps.tinted["p1"] || !ps.tinted["p2"] {
+		t.Errorf("after a moment tinted %v, want the run's p2 alone", ps.tinted)
+	}
+	a.goToBlock("p2", false)
+	dim(ps.tinted, ps.lit, now.Add(3*blockLit), blockLit)
+	if !ps.tinted["p2"] {
+		t.Error("going to a block the run tinted put out its tint")
 	}
 }

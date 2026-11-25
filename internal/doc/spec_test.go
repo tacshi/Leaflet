@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"leaflet/locales"
 )
 
 func TestChartValuesAreFinite(t *testing.T) {
@@ -129,5 +131,69 @@ func TestCallNodesNestAsDeepAsSpecs(t *testing.T) {
 	}
 	if err := CallNodes(nested(maxSpecDepth + 1)); err == nil {
 		t.Errorf("blocks %d deep taken", maxSpecDepth+1)
+	}
+}
+
+func TestChartsAreBounded(t *testing.T) {
+	chart := func(labels, series, label, name, title, caption int) map[string]any {
+		ls := make([]any, labels)
+		for i := range ls {
+			ls[i] = strings.Repeat("l", label)
+		}
+		ss := make([]any, series)
+		for i := range ss {
+			vs := make([]any, labels)
+			for k := range vs {
+				vs[k] = 1.0
+			}
+			ss[i] = map[string]any{"name": strings.Repeat("s", name), "values": vs}
+		}
+		return map[string]any{"title": strings.Repeat("t", title), "caption": strings.Repeat("c", caption), "labels": ls, "series": ss}
+	}
+	if _, err := ChartData(chart(MaxChartLabels, MaxChartSeries, MaxChartLabel, MaxChartName, MaxChartTitle, MaxChartCaption)); err != nil {
+		t.Errorf("a chart as large as one may be: %v", err)
+	}
+	for name, c := range map[string]map[string]any{
+		"labels":  chart(MaxChartLabels+1, 1, 1, 1, 0, 0),
+		"series":  chart(1, MaxChartSeries+1, 1, 1, 0, 0),
+		"label":   chart(1, 1, MaxChartLabel+1, 1, 0, 0),
+		"name":    chart(1, 1, 1, MaxChartName+1, 0, 0),
+		"title":   chart(1, 1, 1, 1, MaxChartTitle+1, 0),
+		"caption": chart(1, 1, 1, 1, 0, MaxChartCaption+1),
+	} {
+		raw, _ := json.Marshal(c)
+		if _, err := SpecToNode(map[string]any{"type": "chart", "chart": c}, "", ""); err == nil {
+			t.Errorf("too long a %s: no error", name)
+		}
+		if nodes := MarkdownBlocks("```chart\n" + string(raw) + "\n```"); nodes[0].Type != "code" || FenceError(nodes) == nil {
+			t.Errorf("too long a %s: the fence made a %s", name, nodes[0].Type)
+		}
+	}
+}
+
+func TestChartSeriesWithoutANameIsNamedWhereItShows(t *testing.T) {
+	n, err := SpecToNode(map[string]any{"type": "chart", "chart": map[string]any{"labels": []any{"a"},
+		"series": []any{map[string]any{"values": []any{1.0}}, map[string]any{"name": "Web", "values": []any{2.0}}}}}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := ChartOf(n)
+	if ch.Series[0].Name != "" {
+		t.Errorf("kept the name %q", ch.Series[0].Name)
+	}
+	if got := SeriesName(locales.In("ja"), 0, ch.Series[0]); got != "系列 1" {
+		t.Errorf("named %q in Japanese", got)
+	}
+	if got := SeriesName(locales.In("ja"), 1, ch.Series[1]); got != "Web" {
+		t.Errorf("a series' own name read as %q", got)
+	}
+	md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{Lang: "zh-Hans"})
+	page := PageHTML("", FromBlocks([]*Node{n}), HTMLOptions{Lang: "zh-Hans"})
+	if !strings.Contains(md, "| 系列 1 | 1 |") || !strings.Contains(page, "<th>系列 1</th>") {
+		t.Errorf("a series without a name not named in the reader's language:\n%s\n%s", md, page)
+	}
+	_, err = ChartData(map[string]any{"labels": []any{"a", "b"}, "series": []any{map[string]any{"values": []any{1.0}}}})
+	if err == nil || err.Error() != "Series 1 has 1 values but there are 2 labels." {
+		t.Errorf("a series without a name named in an error as %v", err)
 	}
 }

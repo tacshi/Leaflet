@@ -168,7 +168,7 @@ func (a *App) lightBlocks(ids []string) {
 		ps.lit = map[string]time.Time{}
 	}
 	for _, id := range ids {
-		ps.tinted[id], ps.lit[id] = true, time.Time{}
+		light(ps.tinted, ps.lit, id)
 	}
 	if a.win != nil {
 		a.win.Invalidate()
@@ -204,7 +204,7 @@ func (w *agentWatch) take(act mcp.Activity, c *doc.Content, now time.Time, host 
 		w.scroll, w.follow, w.jump = ui.ScrollState{}, "", true
 	}
 	for _, id := range act.Changed {
-		w.tinted[id], w.lit[id] = true, time.Time{}
+		light(w.tinted, w.lit, id)
 	}
 	if len(w.pending) == 0 || !same || w.next.Before(now) {
 		w.next = now
@@ -242,7 +242,7 @@ func (w *agentWatch) advance(now time.Time) time.Duration {
 	shown := 0
 	for shown < len(w.pending) && !now.Before(w.next) {
 		id := w.pending[shown]
-		w.tinted[id], w.lit[id] = true, now
+		light(w.tinted, w.lit, id)
 		w.followTo(id)
 		w.next = w.next.Add(w.step)
 		shown++
@@ -254,18 +254,7 @@ func (w *agentWatch) advance(now time.Time) time.Duration {
 	if len(w.pending) > 0 {
 		soon(max(w.next.Sub(now), time.Millisecond))
 	}
-	for id, at := range w.lit {
-		if at.IsZero() {
-			w.lit[id], at = now, now
-		}
-		left := watchLit - now.Sub(at)
-		if left <= 0 {
-			delete(w.lit, id)
-			delete(w.tinted, id)
-			continue
-		}
-		soon(left)
-	}
+	soon(dim(w.tinted, w.lit, now, watchLit))
 	return wake
 }
 
@@ -376,14 +365,15 @@ func (a *App) hideWatch() {
 }
 
 // resetWatch hides the corner window and drops what it held, as when leaving
-// or switching accounts.
+// or switching accounts, and takes in the agents' changes so far, which were
+// before and don't show.
 func (a *App) resetWatch() {
 	a.hideWatch()
 	w := &a.watch
 	w.act, w.at, w.target, w.ed = mcp.Activity{}, time.Time{}, nil, nil
 	w.tinted, w.lit, w.pending = nil, nil, nil
 	w.follow, w.jump, w.hushed = "", false, false
-	w.seen = map[string]int64{}
+	a.startWatch()
 }
 
 // hushWatch hides the window as the user closed it: it stays away until the
@@ -449,12 +439,12 @@ func (a *App) watchView(c *ui.Context) {
 	width, _ := c.Size()
 	root.Children(func() {
 		ui.Row(c.Key("head")).FillWidth().Padding(10, 8, 10, 14).Gap(10).AlignItems(ui.Center).DragWindow().Children(func() {
-			avatar(c, w.act.Agent, 26, true)
+			avatar(c, w.act.ShownAgent(), 26, true)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 				if busy {
-					shimmer(c, locales.ExternalLiveEditsEditing(w.act.Agent), 12)
+					shimmer(c, locales.ExternalLiveEditsEditing(w.act.ShownAgent()), 12)
 				} else {
-					ui.Text(c, locales.ExternalLiveEditsEdited(w.act.Agent)).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+					ui.Text(c, locales.ExternalLiveEditsEdited(w.act.ShownAgent())).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 				}
 				ui.Text(c, title).FontSize(14).FontWeight(600).TextColor(pal.Text).SingleLine()
 			})
@@ -610,7 +600,7 @@ func (h watchHost) Embed(c *ui.Context, n *doc.Node, _ float32) {
 	case "diagram":
 		blockCard(c, n, "workflow", locales.HostSlashDiagram(), source)
 	default:
-		blockCard(c, n, "code", cmp.Or(n.Str("title"), locales.HostSlashEmbed()), "")
+		blockCard(c, n, "code", cmp.Or(embedTitle(n), locales.HostSlashEmbed()), "")
 	}
 }
 

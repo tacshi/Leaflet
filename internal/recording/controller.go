@@ -8,9 +8,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
@@ -447,7 +449,13 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 	if err != nil {
 		return err
 	}
-	rec, err := r.st.CreateRecording(pageID, blockID, stt.Provider, model(stt), path, stt.Language)
+	// A recording of audio alone names no provider, so one the app's end
+	// cuts off comes back ready, as its Stop would leave it.
+	provider, mdl := "", ""
+	if transcribe {
+		provider, mdl = stt.Provider, model(stt)
+	}
+	rec, err := r.st.CreateRecording(pageID, blockID, provider, mdl, path, stt.Language)
 	if err != nil {
 		_ = wav.Close()
 		_ = os.Remove(path)
@@ -1011,11 +1019,22 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 	})
 	ctx := r.jobContext()
 	segs, err := r.transcribe(ctx, rec, path, stream, stt)
-	err = quitError(ctx, err)
 	var lost error
 	if stream != nil {
 		lost = stream.Lost()
 	}
+	// A live transcription that dropped partway, or failed, leaves the
+	// rest of the audio to be transcribed from the file. Should that fail
+	// too, the words heard live stay, with why the rest is missing.
+	if stream != nil && (err != nil || lost != nil) && ctx.Err() == nil {
+		r.update(func() { delete(r.Finishing, rec.ID) })
+		if all, rerr := r.transcribeRest(ctx, rec, path, segs, stt); rerr == nil {
+			segs, err, lost = all, nil, nil
+		} else {
+			log.Printf("recording: the rest of %s: %v", rec.ID, rerr)
+		}
+	}
+	err = quitError(ctx, err)
 	// The row and the marks change in one turn of the app, so a recording
 	// that reads as done can be transcribed again at once.
 	done := make(chan struct{})
@@ -1047,6 +1066,76 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 	if done, err := r.st.Recording(rec.ID); err == nil {
 		r.sweepAudio(done, time.Now())
 	}
+}
+
+// restOverlap is how much of the audio before the live words stopped is
+// transcribed again with the rest, so that a word the drop cut through is
+// heard whole.
+const restOverlap = 1000
+
+// transcribeRest transcribes the audio at path after the words heard live,
+// from a little before they stop, and returns them followed by the rest:
+// the part heard already is not paid for twice.
+func (r *Controller) transcribeRest(ctx context.Context, rec store.Recording, path string, heard []store.Segment, stt store.SttSettings) ([]store.Segment, error) {
+	from := 0
+	if len(heard) > 0 {
+		from = max(heard[len(heard)-1].EndMs-restOverlap, 0)
+	}
+	part, size, err := cutWav(path, from)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.Remove(part) }()
+	if len(heard) > 0 && size <= AudioSize(restOverlap) {
+		return heard, nil // the words heard live reach the end
+	}
+	rest, err := r.transcribe(ctx, rec, part, nil, stt)
+	if err != nil {
+		return nil, err
+	}
+	return joinRest(heard, rest, from), nil
+}
+
+// joinRest puts rest, the transcript of the audio from the from ms on,
+// after the words heard live. What rest has of the overlap, which the
+// words heard have already, is left out.
+func joinRest(heard, rest []store.Segment, from int) []store.Segment {
+	out := slices.Clone(heard)
+	end := 0
+	if len(heard) > 0 {
+		end = heard[len(heard)-1].EndMs
+	}
+	for _, s := range rest {
+		s.StartMs += from
+		s.EndMs += from
+		if s.EndMs <= end {
+			continue
+		}
+		if s.StartMs < end && len(out) > 0 {
+			if s.Text = afterRepeat(out[len(out)-1].Text, s.Text); s.Text == "" {
+				continue
+			}
+			s.StartMs = end
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// afterRepeat is next without the words it starts with that prev ends
+// with, told apart by neither case nor punctuation.
+func afterRepeat(prev, next string) string {
+	p, n := strings.Fields(prev), strings.Fields(next)
+	same := func(a, b string) bool {
+		bare := func(s string) string { return strings.ToLower(strings.TrimFunc(s, unicode.IsPunct)) }
+		return bare(a) == bare(b)
+	}
+	for k := min(len(p), len(n)); k > 0; k-- {
+		if slices.EqualFunc(p[len(p)-k:], n[:k], same) {
+			return strings.Join(n[k:], " ")
+		}
+	}
+	return next
 }
 
 const keepAudioFor = 30 * 24 * time.Hour
@@ -1304,15 +1393,6 @@ func tempAudio(audio io.Reader) (string, error) {
 		return "", err
 	}
 	return f.Name(), nil
-}
-
-func (r *Controller) Audio(ctx context.Context, rec store.Recording) ([]byte, error) {
-	audio, err := r.openAudioOf(ctx, rec)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = audio.Close() }()
-	return io.ReadAll(audio)
 }
 
 func (r *Controller) OpenAudio(ctx context.Context, rec store.Recording) (io.ReadCloser, error) {

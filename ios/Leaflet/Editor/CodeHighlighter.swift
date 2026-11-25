@@ -218,11 +218,18 @@ struct CodeLanguage: Decodable, Sendable {
     let id: String
     let name: String
 
-    static let all: [CodeLanguage] =
+    private static let read: [CodeLanguage] =
         (try? JSONDecoder().decode([CodeLanguage].self, from: Data(MobileCodeLanguages().utf8)))
         ?? []
 
+    /// The languages a code block can be in, by name in the app's language
+    /// as it is now: none, plain text, has its name from the app's own
+    /// strings, the others theirs.
+    static var all: [CodeLanguage] {
+        read.map { $0.id.isEmpty ? CodeLanguage(id: "", name: L.editorCodePlainText) : $0 }
+    }
+
     static func name(_ id: String) -> String {
-        all.first { $0.id == id }?.name ?? id
+        id.isEmpty ? L.editorCodePlainText : read.first { $0.id == id }?.name ?? id
     }
 }

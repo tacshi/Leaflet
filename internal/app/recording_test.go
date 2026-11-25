@@ -1,13 +1,19 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
@@ -116,6 +122,59 @@ func TestPlaybackFailureShows(t *testing.T) {
 	(<-posted)()
 	if len(a.toasts) != 1 || !strings.HasPrefix(a.toasts[0].text, strings.TrimSuffix(locales.RecCouldNotPlay(""), " ")) {
 		t.Errorf("toasts %+v", a.toasts)
+	}
+}
+
+// heldAudio is a recording's audio kept on the account, not on this device.
+type heldAudio struct{ wav []byte }
+
+func (heldAudio) Uploads() bool  { return true }
+func (heldAudio) CanFetch() bool { return true }
+func (h heldAudio) Fetch(context.Context, string, string) ([]byte, error) {
+	return h.wav, nil
+}
+
+func TestRecordingPlaysFromAFile(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	wav := recording.WavFromPCM(make([]byte, 2*recording.SampleRate))
+	path := filepath.Join(t.TempDir(), "r1.wav")
+	if err := os.WriteFile(path, wav, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	here, err := a.playable(context.Background(), store.Recording{ID: "r1", LocalPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := here.(*os.File); !ok || f.Name() != path {
+		t.Errorf("a recording here plays from %T", here)
+	}
+	p, err := audio.OpenStream(here)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := p.Duration(); d != time.Second {
+		t.Errorf("plays for %v", d)
+	}
+	p.Close()
+
+	a.rec.Blobs = heldAudio{wav}
+	there, err := a.playable(context.Background(), store.Recording{ID: "r2", AudioPath: "u/r2.wav"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, ok := there.(downloaded)
+	if !ok {
+		t.Fatalf("a recording elsewhere plays from %T", there)
+	}
+	if got, err := io.ReadAll(there); err != nil || !bytes.Equal(got, wav) {
+		t.Errorf("the copy holds %d bytes, %v", len(got), err)
+	}
+	if err := there.Close(); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(copied.Name()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stays once closed: %v", err)
 	}
 }
 

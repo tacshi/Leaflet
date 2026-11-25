@@ -213,11 +213,7 @@ func (a *App) dayTodoRow(c *ui.Context, t store.PageTodo, size float32, now time
 			a.finishTodo(t)
 		}
 		ui.Column(c).Grow(1).Shrink(1).Gap(2).Children(func() {
-			text := t.Text
-			if strings.TrimSpace(text) == "" {
-				text = locales.TodosUntitled()
-			}
-			ui.Text(c, text).FontSize(size).TextColor(pal.Text)
+			ui.Text(c, todoText(t)).FontSize(size).TextColor(pal.Text)
 			if t.Owner != "" {
 				ui.Text(c, t.Owner).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 			}
@@ -232,6 +228,14 @@ func (a *App) dayTodoRow(c *ui.Context, t store.PageTodo, size float32, now time
 	if row.Clicked() {
 		a.openBlock(t.PageID, t.BlockID)
 	}
+}
+
+// todoText is a to-do's text as the app shows it, an empty one's saying so.
+func todoText(t store.PageTodo) string {
+	if strings.TrimSpace(t.Text) == "" {
+		return locales.TodosUntitled()
+	}
+	return t.Text
 }
 
 func (a *App) finishTodo(t store.PageTodo) {
@@ -260,7 +264,7 @@ func (a *App) finishTodo(t store.PageTodo) {
 	}
 	set(true)
 	a.todosStale = true
-	a.toastAction(locales.TodosFinished(t.Text), locales.CommonUndo(), func() {
+	a.toastAction(locales.TodosFinished(todoText(t)), locales.CommonUndo(), func() {
 		set(false)
 		a.todosStale = true
 	})
@@ -290,7 +294,7 @@ func (a *App) remind() {
 	now := time.Now()
 	for _, t := range a.reminders(now) {
 		n := mygo.NewNotification(mygo.NotificationOptions{ID: core.ReminderID(t.PageID, t.BlockID),
-			Title: core.ReminderTitle(locales.In(i18n.Locale()), t, now), Subtitle: t.PageTitle, Body: t.Text, Group: "todos"})
+			Title: core.ReminderTitle(locales.In(i18n.Locale()), t, now), Subtitle: t.PageTitle, Body: todoText(t), Group: "todos"})
 		if err := n.Show(); err == nil {
 			_ = a.st.SetValue(core.ReminderKey(t.PageID, t.BlockID), core.ReminderValue(t))
 		}

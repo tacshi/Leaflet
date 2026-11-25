@@ -63,8 +63,8 @@ func (a *App) factCard(c *ui.Context, card doc.Card, width float32) {
 		}
 		side := min(max(width*0.26, 96), 190)
 		ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Start).Children(func() {
-			if _, failed := a.images.get(c, card.Image, cardSide); card.Image != "" && !failed {
-				netimage.Image(c, card.Image, netimage.Options{MaxSide: cardSide, Placeholder: pal.Ground}).
+			if _, failed := a.images.get(c, card.Image, factSide); card.Image != "" && !failed {
+				netimage.Image(c, card.Image, netimage.Options{MaxSide: factSide, Placeholder: pal.Ground}).
 					Size(side, side*5/4).Radius(12).Shrink(0)
 			}
 			ui.Column(c).Grow(1).Shrink(1).Gap(6).Children(func() {
@@ -108,7 +108,7 @@ func sourceChip(c *ui.Context, sources []doc.CardSource) {
 	}
 	chip := ui.ButtonBase(c.Key("sources")).Height(20).Padding(0, 8).Gap(4).Radius(999).Background(pal.Ground).
 		TextColor(pal.TextMuted).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-		Label(locales.CardSources() + ": " + strings.Join(names, ", ")).Tooltip(strings.Join(names, "\n"))
+		Label(locales.CardSourcesLabel(strings.Join(names, locales.CardSourcesSeparator()))).Tooltip(strings.Join(names, "\n"))
 	if chip.Hovered() {
 		chip.Background(pal.Hover.Over(pal.Ground)).TextColor(pal.Text)
 	}
@@ -134,19 +134,31 @@ func sourceChip(c *ui.Context, sources []doc.CardSource) {
 }
 
 // chatCard draws a ```card fence of an agent's answer or a comment as the
-// card it holds, once its fence closes; one that holds none shows as the
-// code it is.
-func (a *App) chatCard(c *ui.Context, b *markdown.CodeBlockView) {
-	if b.Open {
-		shimmer(c, locales.HostSlashCard(), 13)
-		return
+// card it holds, once its fence closes, width(c) wide; one that holds none
+// shows as the code it is. Without picture the card leaves its picture out,
+// as a comment's does: anyone the page's public link reaches can write one,
+// and its picture would be fetched from where they say as the thread shows.
+// A card without its picture takes no width, so width may then be nil.
+func (a *App) chatCard(width func(*ui.Context) float32, picture bool) func(*ui.Context, *markdown.CodeBlockView) {
+	return func(c *ui.Context, b *markdown.CodeBlockView) {
+		if b.Open {
+			shimmer(c, locales.HostSlashCard(), 13)
+			return
+		}
+		n, ok := doc.CardNodeFromJSON(b.Code())
+		if !ok {
+			markdown.DefaultCodeBlock(c, b)
+			return
+		}
+		card := doc.CardOf(n)
+		var w float32
+		if !picture {
+			card.Image = ""
+		} else if width != nil {
+			w = width(c)
+		}
+		a.factCard(c, card, w)
 	}
-	n, ok := doc.CardNodeFromJSON(b.Code())
-	if !ok {
-		markdown.DefaultCodeBlock(c, b)
-		return
-	}
-	a.factCard(c, doc.CardOf(n), a.panelW)
 }
 
 // cardIcons are the card icons as menu items show them, each made once.
@@ -161,6 +173,74 @@ func cardMenuIcon(name string) ui.MenuIcon {
 		cardIcons[name] = icon
 	}
 	return icon
+}
+
+// cardIconLabel names a card icon, one of doc.CardIcons, in the app's
+// language; an icon it does not know keeps its Lucide name.
+func cardIconLabel(name string) string {
+	switch name {
+	case "bus":
+		return locales.CardIconBus()
+	case "train-front":
+		return locales.CardIconTrainFront()
+	case "tram-front":
+		return locales.CardIconTramFront()
+	case "car":
+		return locales.CardIconCar()
+	case "bike":
+		return locales.CardIconBike()
+	case "footprints":
+		return locales.CardIconFootprints()
+	case "plane":
+		return locales.CardIconPlane()
+	case "ship":
+		return locales.CardIconShip()
+	case "map-pin":
+		return locales.CardIconMapPin()
+	case "clock":
+		return locales.CardIconClock()
+	case "calendar":
+		return locales.CardIconCalendar()
+	case "ticket":
+		return locales.CardIconTicket()
+	case "banknote":
+		return locales.CardIconBanknote()
+	case "wallet":
+		return locales.CardIconWallet()
+	case "phone":
+		return locales.CardIconPhone()
+	case "hospital":
+		return locales.CardIconHospital()
+	case "utensils":
+		return locales.CardIconUtensils()
+	case "bed-double":
+		return locales.CardIconBedDouble()
+	case "building-2":
+		return locales.CardIconBuilding2()
+	case "graduation-cap":
+		return locales.CardIconGraduationCap()
+	case "shopping-bag":
+		return locales.CardIconShoppingBag()
+	case "info":
+		return locales.CardIconInfo()
+	case "star":
+		return locales.CardIconStar()
+	case "sun":
+		return locales.CardIconSun()
+	case "cloud-rain":
+		return locales.CardIconCloudRain()
+	case "thermometer":
+		return locales.CardIconThermometer()
+	case "globe":
+		return locales.CardIconGlobe()
+	case "user":
+		return locales.CardIconUser()
+	case "package":
+		return locales.CardIconPackage()
+	case "trending-up":
+		return locales.CardIconTrendingUp()
+	}
+	return name
 }
 
 func (d *dialogs) openCard(id string, ed *editor.Editor) {
@@ -198,7 +278,7 @@ func (a *App) cardDialog(c *ui.Context) {
 						}
 						m.Separator()
 						for _, name := range doc.CardIcons {
-							if m.Item(name).Icon(cardMenuIcon(name)).Radio(d.cardIcon == name).Chosen() {
+							if m.Item(cardIconLabel(name)).Icon(cardMenuIcon(name)).Radio(d.cardIcon == name).Chosen() {
 								d.cardIcon = name
 							}
 						}
@@ -218,7 +298,7 @@ func (a *App) cardDialog(c *ui.Context) {
 				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.cardOpen = false
 				}
-				if primary(c, "save", "", locales.DialogCardSave()).Clicked() {
+				if primary(c, "save", "", locales.DialogCardSave()).Clicked() && a.canSaveIn(d.cardEditor) {
 					layout := doc.CardDetails
 					if d.cardLayout == 0 {
 						layout = doc.CardFigures
@@ -235,7 +315,9 @@ func (a *App) cardDialog(c *ui.Context) {
 					id := d.cardID
 					d.cardEditor.Edit(func(content *doc.Content) {
 						if n := content.Find(id); n != nil {
-							data["author"] = n.Data["author"]
+							if author, ok := n.Data["author"]; ok {
+								data["author"] = author
+							}
 							n.Data = data
 						}
 					})

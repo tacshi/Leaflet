@@ -1,7 +1,6 @@
 package doc
 
 import (
-	"encoding/json"
 	"html"
 	"slices"
 	"strings"
@@ -18,13 +17,17 @@ const (
 	CardDetails = "details"
 )
 
+// What a card holds at most: characters of its title (and of a source's),
+// a fact's label and value, its note and its picture's address, and how
+// many facts and sources.
 const (
-	maxCardTitle   = 200
-	maxCardLabel   = 100
-	maxCardValue   = 400
-	maxCardNote    = 1000
-	maxCardFacts   = 12
-	maxCardSources = 8
+	MaxCardTitle   = 200
+	MaxCardLabel   = 100
+	MaxCardValue   = 400
+	MaxCardNote    = 1000
+	MaxCardImage   = 2048
+	MaxCardFacts   = 12
+	MaxCardSources = 8
 )
 
 // CardIcons are the icons a card's title can carry, by Lucide's names, which
@@ -170,24 +173,24 @@ func CardData(spec map[string]any) (map[string]any, error) {
 	if c.Icon != "" && !slices.Contains(CardIcons, c.Icon) {
 		return nil, toolErr("card.icon must be one of: %s.", strings.Join(CardIcons, ", "))
 	}
-	if c.Title, err = text("title", maxCardTitle); err != nil {
+	if c.Title, err = text("title", MaxCardTitle); err != nil {
 		return nil, err
 	}
-	if c.Image, err = text("image", 2048); err != nil {
+	if c.Image, err = text("image", MaxCardImage); err != nil {
 		return nil, err
 	}
-	if c.Image != "" && !agentURL(c.Image) {
+	if c.Image != "" && !WebURL(c.Image) {
 		return nil, toolErr("card.image must be a picture's web link, http or https.")
 	}
-	if c.Note, err = text("note", maxCardNote); err != nil {
+	if c.Note, err = text("note", MaxCardNote); err != nil {
 		return nil, err
 	}
 	raw, ok := spec["facts"].([]any)
 	if v := spec["facts"]; v != nil && !ok {
 		return nil, toolErr("card.facts must be a list of {label, value}.")
 	}
-	if len(raw) > maxCardFacts {
-		return nil, toolErr("A card holds at most %d facts.", maxCardFacts)
+	if len(raw) > MaxCardFacts {
+		return nil, toolErr("A card holds at most %d facts.", MaxCardFacts)
 	}
 	for _, f := range raw {
 		m, ok := f.(map[string]any)
@@ -195,8 +198,8 @@ func CardData(spec map[string]any) (map[string]any, error) {
 			return nil, toolErr("card.facts must be a list of {label, value}.")
 		}
 		label, value := strings.TrimSpace(JSONText(m["label"])), strings.TrimSpace(JSONText(m["value"]))
-		if utf8.RuneCountInString(label) > maxCardLabel || utf8.RuneCountInString(value) > maxCardValue {
-			return nil, toolErr("A card's fact takes a label of at most %d characters and a value of at most %d.", maxCardLabel, maxCardValue)
+		if utf8.RuneCountInString(label) > MaxCardLabel || utf8.RuneCountInString(value) > MaxCardValue {
+			return nil, toolErr("A card's fact takes a label of at most %d characters and a value of at most %d.", MaxCardLabel, MaxCardValue)
 		}
 		if label != "" || value != "" {
 			c.Facts = append(c.Facts, CardFact{Label: label, Value: value})
@@ -209,8 +212,8 @@ func CardData(spec map[string]any) (map[string]any, error) {
 	if v := spec["sources"]; v != nil && !ok {
 		return nil, toolErr("card.sources must be a list of {url, title}.")
 	}
-	if len(sources) > maxCardSources {
-		return nil, toolErr("A card names at most %d sources.", maxCardSources)
+	if len(sources) > MaxCardSources {
+		return nil, toolErr("A card names at most %d sources.", MaxCardSources)
 	}
 	for _, s := range sources {
 		m, ok := s.(map[string]any)
@@ -219,29 +222,15 @@ func CardData(spec map[string]any) (map[string]any, error) {
 		}
 		link, _ := m["url"].(string)
 		title, _ := m["title"].(string)
-		if link = strings.TrimSpace(link); !agentURL(link) {
+		if link = strings.TrimSpace(link); !WebURL(link) {
 			return nil, toolErr("A card's source needs url, the web address of the page its facts come from.")
 		}
 		// A page named twice is one source: the first names it.
 		if !slices.ContainsFunc(c.Sources, func(s CardSource) bool { return s.URL == link }) {
-			c.Sources = append(c.Sources, CardSource{URL: link, Title: clipText(strings.TrimSpace(title), maxCardTitle)})
+			c.Sources = append(c.Sources, CardSource{URL: link, Title: ClipText(title, MaxCardTitle)})
 		}
 	}
 	return c.Data(), nil
-}
-
-// CardNodeFromJSON is the card block a ```card fence holds, its JSON a
-// spec's card, or false when it holds none.
-func CardNodeFromJSON(src string) (*Node, bool) {
-	var spec map[string]any
-	if err := json.Unmarshal([]byte(src), &spec); err != nil {
-		return nil, false
-	}
-	data, err := CardData(spec)
-	if err != nil {
-		return nil, false
-	}
-	return &Node{ID: NewBlockID(), Type: "card", Data: data}, true
 }
 
 // CardText is the card's words, as search and a plain copy read it.
@@ -265,8 +254,10 @@ func SourceName(s CardSource) string {
 	return SiteName(s.URL)
 }
 
-func clipText(s string, most int) string {
-	if utf8.RuneCountInString(s) <= most {
+// ClipText is s without the spaces at its ends, cut to its first most
+// characters, as a card keeps what is longer than it holds.
+func ClipText(s string, most int) string {
+	if s = strings.TrimSpace(s); utf8.RuneCountInString(s) <= most {
 		return s
 	}
 	return string([]rune(s)[:most])
@@ -283,8 +274,20 @@ func FactSeparator(label string) string {
 }
 
 // cardMarkdown is a card as Markdown reads: its title in bold, its
-// picture, its facts as a list, then its note and its sources' links.
-func cardMarkdown(c Card, link func(text, to string) string) string {
+// picture, its facts as a list, then its note and its sources' links. A
+// fact's value and the note, inline Markdown, read as a paragraph's text
+// does, in a line, their links led where href leads them, and none of
+// them starts a block of its own.
+func cardMarkdown(c Card, link func(text, to string) string, href func(string) string) string {
+	inline := func(md string) string {
+		d := OneLine(FromMarkdown(md))
+		for i := range d {
+			if d[i].Attrs.Href != "" {
+				d[i].Attrs.Href = href(d[i].Attrs.Href)
+			}
+		}
+		return d.ReadableMarkdown()
+	}
 	var parts []string
 	if c.Title != "" {
 		parts = append(parts, "**"+escapeCommonMark(c.Title)+"**")
@@ -294,19 +297,21 @@ func cardMarkdown(c Card, link func(text, to string) string) string {
 	}
 	var facts []string
 	for _, f := range c.Facts {
-		value := strings.Join(strings.Fields(f.Value), " ")
-		if f.Label == "" {
-			facts = append(facts, "- "+value)
-			continue
+		text := inline(f.Value)
+		if f.Label != "" {
+			text = strings.TrimRight(escapeCommonMark(f.Label)+FactSeparator(f.Label)+text, " ")
 		}
-		facts = append(facts, "- "+escapeCommonMark(f.Label)+FactSeparator(f.Label)+value)
+		if text = EscapeBlockStart(text); IsRule("- " + text) {
+			text = `\` + text
+		}
+		facts = append(facts, "- "+text)
 	}
 	if len(facts) > 0 {
 		parts = append(parts, strings.Join(facts, "\n"))
 	}
 	var tail []string
 	if c.Note != "" {
-		tail = append(tail, EscapeBlockStart(strings.Join(strings.Fields(c.Note), " ")))
+		tail = append(tail, EscapeBlockStart(inline(c.Note)))
 	}
 	var links []string
 	for _, s := range c.Sources {
@@ -334,8 +339,8 @@ func (w htmlWriter) factCard(n *Node) {
 		w.write("<strong>", html.EscapeString(c.Title), "</strong></div>")
 	}
 	w.write(`<div class="fc-body">`)
-	if c.Image != "" && c.Layout == CardDetails {
-		w.write(`<img class="fc-pic" src="`, html.EscapeString(c.Image), `" alt="`, html.EscapeString(c.Title), `"`, w.lazy(), `>`)
+	if src := w.picture(n); src != "" {
+		w.write(`<img class="fc-pic" src="`, html.EscapeString(src), `" alt="`, html.EscapeString(c.Title), `"`, w.lazy(), `>`)
 	}
 	w.write(`<div class="fc-main"><div class="fc-facts">`)
 	for _, f := range c.Facts {

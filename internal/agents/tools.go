@@ -94,7 +94,7 @@ var blockSchema = map[string]any{
 		"map": map[string]any{"type": "object", "description": "A map of places, and of a route between them that find_route found. With a route and no places, it marks the route's ends.",
 			"properties": map[string]any{
 				"title": map[string]any{"type": "string"},
-				"places": map[string]any{"type": "array", "description": "Places as find_place gave them.", "items": map[string]any{"type": "object", "properties": map[string]any{
+				"places": map[string]any{"type": "array", "description": "Places as find_place gave them, in order: the map numbers them 1, 2, 3 on their pins, so a name is the place's alone, without a number, and the text may refer to them by theirs.", "items": map[string]any{"type": "object", "properties": map[string]any{
 					"name": map[string]any{"type": "string"}, "lat": map[string]any{"type": "number"}, "lng": map[string]any{"type": "number"},
 				}, "required": []string{"lat", "lng"}}},
 				"route": map[string]any{"type": "string", "description": "The id find_route gave the route, as \"r1\". In replace_block, none takes the map's route off; a title, places or route not given stay as they were."},
@@ -522,11 +522,31 @@ func (x *Executor) Guarded() bool { return x.armed || x.found != nil }
 
 const maxRunBlocks = 5000
 
-func (x *Executor) room(nodes []*doc.Node) error {
-	if x.written+countNodes(nodes) > maxRunBlocks {
+func (x *Executor) room(nodes []*doc.Node) error { return x.roomFor(countNodes(nodes)) }
+
+// roomFor refuses a call that would write n blocks more than a run writes.
+func (x *Executor) roomFor(n int) error {
+	if x.written+n > maxRunBlocks {
 		return terr("This run has written %d blocks, and one run writes at most %d. Stop here, and say in your reply what is left to do.", x.written, maxRunBlocks)
 	}
 	return nil
+}
+
+// rewritten is how many blocks a rewrite of prev as n writes: n itself, and
+// those in it prev did not hold; the nested blocks it keeps, as a list item's
+// nested items, it does not write again.
+func rewritten(prev, n *doc.Node) int {
+	had := map[string]bool{}
+	for _, k := range prev.Children {
+		walk(k, func(k *doc.Node) { had[k.ID] = true })
+	}
+	count := 0
+	walk(n, func(k *doc.Node) {
+		if k == n || !had[k.ID] {
+			count++
+		}
+	})
+	return count
 }
 
 func countNodes(nodes []*doc.Node) int {
@@ -1207,10 +1227,15 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	made := rewritten(prev, n)
+	if err := x.roomFor(made); err != nil {
+		return nil, err
+	}
 	op := doc.Op{Op: "replace", ID: id, Node: n, PrevNode: prev.Clone()}
 	if err := x.emit(op, summaryFor(locales.AgentEditRewrote, []*doc.Node{n}), []string{id}); err != nil {
 		return nil, err
 	}
+	x.written += made
 	return map[string]any{"id": id}, nil
 }
 

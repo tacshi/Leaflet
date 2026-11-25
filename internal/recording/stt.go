@@ -2,6 +2,7 @@ package recording
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,36 +40,16 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 }
 
 func transcribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, name string, wait time.Duration, apiKey, language string) ([]store.Segment, error) {
-	var form bytes.Buffer
-	w := multipart.NewWriter(&form)
-	if err := w.WriteField("model", model); err != nil {
-		return nil, err
-	}
-	if err := w.WriteField("response_format", "verbose_json"); err != nil {
-		return nil, err
-	}
+	fields := [][2]string{{"model", model}, {"response_format", "verbose_json"}}
 	if language != "auto" && language != "" && !strings.Contains(language, "-") {
-		if err := w.WriteField("language", language); err != nil {
-			return nil, err
-		}
+		fields = append(fields, [2]string{"language", language})
 	}
-	if _, err := w.CreateFormFile("file", name); err != nil {
-		return nil, err
-	}
-	head := form.Len()
-	if err := w.Close(); err != nil {
-		return nil, err
-	}
-	tail := form.Bytes()[head:]
-	body := io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(wav, size), bytes.NewReader(tail))
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", body)
+	req, err := streamForm(ctx, endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", fields, name, wav, size)
 	if err != nil {
 		return nil, err
 	}
-	req.ContentLength = int64(head) + size + int64(len(tail))
-	req.Header.Set("Content-Type", w.FormDataContentType())
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -138,23 +119,51 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 	if !strings.HasPrefix(model, "stt-async") {
 		model = sonioxAsyncModel
 	}
-	call := func(ctx context.Context, method, path string, body []byte, out any) error {
-		req, err := http.NewRequestWithContext(ctx, method, sonioxAPI+path, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		return sonioxDo(req, key, out)
+	j := fileJob{
+		provider: "soniox", api: sonioxAPI, key: key, do: sonioxDo, left: left, poll: sonioxPoll,
+		failed: errors.New(locales.RecErrSonioxFailed("")),
+		start:  "/transcriptions",
+		job: func(file string) map[string]any {
+			return map[string]any{"model": model, "file_id": file, "language_hints": hints, "enable_speaker_diarization": speakers}
+		},
+		jobPath: "/transcriptions/",
+		check: func(ctx context.Context, call apiCall, id string) ([]store.Segment, bool, time.Duration, error) {
+			var info struct {
+				Status       string `json:"status"`
+				ErrorMessage string `json:"error_message"`
+			}
+			if err := call(ctx, "GET", "/transcriptions/"+id, nil, &info); err != nil {
+				return nil, false, 0, err
+			}
+			switch info.Status {
+			case "completed":
+				var transcript struct {
+					Tokens []Token `json:"tokens"`
+				}
+				if err := call(ctx, "GET", "/transcriptions/"+id+"/transcript", nil, &transcript); err != nil {
+					return nil, false, 0, err
+				}
+				return TokensToSegments(transcript.Tokens), true, 0, nil
+			case "error":
+				return nil, false, 0, errors.New(locales.RecErrSonioxFailed(info.ErrorMessage))
+			}
+			return nil, false, sonioxPoll, nil
+		},
 	}
-	// What the transcription leaves with Soniox is noted as soon as Soniox
-	// names it, and deleted when the transcription ends, however it ends.
-	kept := func(path string) { left.keep("soniox", path) }
-	remove := func(path string) { left.remove("soniox", key, path) }
+	return j.transcribe(ctx, audio, size, name)
+}
 
+// streamForm is a POST to link of a multipart form, fields and then the
+// audio as a file called name, which streams the audio rather than holding
+// it in memory.
+func streamForm(ctx context.Context, link string, fields [][2]string, name string, audio io.Reader, size int64) (*http.Request, error) {
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
+	for _, f := range fields {
+		if err := w.WriteField(f[0], f[1]); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := w.CreateFormFile("file", name); err != nil {
 		return nil, err
 	}
@@ -163,70 +172,120 @@ func TranscribeSoniox(ctx context.Context, key, model string, audio io.Reader, s
 		return nil, err
 	}
 	tail := form.Bytes()[head:]
-	up, cancel := context.WithTimeout(ctx, transferWait(size))
-	req, err := http.NewRequestWithContext(up, "POST", sonioxAPI+"/files",
+	req, err := http.NewRequestWithContext(ctx, "POST", link,
 		io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(audio, size), bytes.NewReader(tail)))
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 	req.ContentLength = int64(head) + size + int64(len(tail))
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req, nil
+}
+
+// An apiCall asks a provider's API at path, sending body as JSON, and
+// reads its answer into out.
+type apiCall func(ctx context.Context, method, path string, body []byte, out any) error
+
+// A fileJob is a provider's API that transcribes audio uploaded to it as a
+// job, which is asked after until it ends: Soniox's and MOSS's.
+type fileJob struct {
+	// provider is the name what it leaves there is noted under.
+	provider, api, key string
+	do                 func(req *http.Request, key string, out any) error
+	left               Leftovers
+	// poll is the pause before asking again after a request that failed
+	// in passing.
+	poll time.Duration
+	// failed is the error for an answer that names no file or job.
+	failed error
+	// fields go with the audio's upload.
+	fields [][2]string
+	// start is the path a job is started at, with job's settings for the
+	// file uploaded.
+	start string
+	job   func(file string) map[string]any
+	// jobPath, followed by its ID, is the path a job is deleted at, "" for
+	// a provider whose jobs are not deleted.
+	jobPath string
+	// check asks after the job: done, with its segments, once it has ended,
+	// else how long to wait before asking again.
+	check func(ctx context.Context, call apiCall, id string) (segs []store.Segment, done bool, pause time.Duration, err error)
+}
+
+func (j fileJob) call(ctx context.Context, method, path string, body []byte, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, j.api+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return j.do(req, j.key, out)
+}
+
+// transcribe uploads the audio, starts a job of it and asks after the job
+// until it ends. What the transcription leaves with the provider is noted
+// as soon as the provider names it, and deleted when the transcription
+// ends, however it ends.
+func (j fileJob) transcribe(ctx context.Context, audio io.Reader, size int64, name string) ([]store.Segment, error) {
+	up, cancel := context.WithTimeout(ctx, transferWait(size))
+	req, err := streamForm(up, j.api+"/files", j.fields, name, audio, size)
 	var file struct {
 		ID string `json:"id"`
 	}
-	err = sonioxDo(req, key, &file)
+	if err == nil {
+		err = j.do(req, j.key, &file)
+	}
 	cancel()
 	if err != nil {
 		return nil, err
 	}
-	kept("/files/" + file.ID)
-	defer remove("/files/" + file.ID)
+	if file.ID == "" {
+		return nil, j.failed
+	}
+	j.left.keep(j.provider, "/files/"+file.ID)
+	defer j.left.remove(j.provider, j.key, "/files/"+file.ID)
 
-	create, _ := json.Marshal(map[string]any{
-		"model": model, "file_id": file.ID, "language_hints": hints, "enable_speaker_diarization": speakers,
-	})
-	var job struct {
-		ID string `json:"id"`
+	create, _ := json.Marshal(j.job(file.ID))
+	// MOSS names its job task_id, Soniox id.
+	var started struct {
+		ID     string `json:"id"`
+		TaskID string `json:"task_id"`
 	}
 	start, cancel := context.WithTimeout(ctx, jobWait)
-	err = call(start, "POST", "/transcriptions", create, &job)
+	err = j.call(start, "POST", j.start, create, &started)
 	cancel()
 	if err != nil {
 		return nil, err
 	}
-	kept("/transcriptions/" + job.ID)
-	defer remove("/transcriptions/" + job.ID)
+	id := cmp.Or(started.TaskID, started.ID)
+	if id == "" {
+		return nil, j.failed
+	}
+	if j.jobPath != "" {
+		j.left.keep(j.provider, j.jobPath+id)
+		defer j.left.remove(j.provider, j.key, j.jobPath+id)
+	}
 
 	wait, cancel := context.WithTimeout(ctx, fileWait(size))
 	defer cancel()
 	for {
-		var info struct {
-			Status       string `json:"status"`
-			ErrorMessage string `json:"error_message"`
-		}
-		if err := polled(wait, sonioxPoll, func() error { return call(wait, "GET", "/transcriptions/"+job.ID, nil, &info) }); err != nil {
-			return nil, err
-		}
-		if info.Status == "completed" {
-			break
-		}
-		if info.Status == "error" {
-			return nil, errors.New(locales.RecErrSonioxFailed(info.ErrorMessage))
+		var segs []store.Segment
+		var done bool
+		var pause time.Duration
+		err := polled(wait, j.poll, func() (err error) {
+			segs, done, pause, err = j.check(wait, j.call, id)
+			return err
+		})
+		if err != nil || done {
+			return segs, err
 		}
 		select {
 		case <-wait.Done():
 			return nil, wait.Err()
-		case <-time.After(sonioxPoll):
+		case <-time.After(pause):
 		}
 	}
-	var transcript struct {
-		Tokens []Token `json:"tokens"`
-	}
-	if err := call(wait, "GET", "/transcriptions/"+job.ID+"/transcript", nil, &transcript); err != nil {
-		return nil, err
-	}
-	return TokensToSegments(transcript.Tokens), nil
 }
 
 // A transientError is one a poll asks again after: the network dropped, or
@@ -340,20 +399,14 @@ func EndpointKey(baseURL string) string { return LoadEndpointKey().For(baseURL) 
 
 func SetEndpointKey(baseURL, key string) error {
 	if key == "" {
-		if err := keychain.Delete("stt.endpoint.key"); !errors.Is(err, keychain.ErrNotFound) {
-			return err
-		}
-		return nil
+		return keychain.Delete("stt.endpoint.key")
 	}
 	return keychain.Set("stt.endpoint.key", []byte(endpoint.NormalizeBaseURL(baseURL)+"\n"+key))
 }
 
 func SetLocalSonioxKey(key string) error {
 	if key == "" {
-		if err := keychain.Delete("stt.soniox.key"); !errors.Is(err, keychain.ErrNotFound) {
-			return err
-		}
-		return nil
+		return keychain.Delete("stt.soniox.key")
 	}
 	return keychain.Set("stt.soniox.key", []byte(key))
 }
@@ -565,7 +618,9 @@ func (s *Soniox) textLocked() string {
 func (s *Soniox) Send(pcm []byte) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
-	if s.qclosed || s.ending.Load() {
+	// A stream that lost audio takes no more, so what it heard is the start
+	// of the recording, and the rest is transcribed from the file after it.
+	if s.qclosed || s.ending.Load() || s.Lost() != nil {
 		return
 	}
 	select {

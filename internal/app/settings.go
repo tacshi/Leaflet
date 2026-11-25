@@ -499,7 +499,7 @@ func (a *App) deleteAccount() {
 			return
 		}
 		s.deleteOpen = false
-		a.leave(a.st.Wipe, false)
+		a.leave(a.st.ForgetAll, false)
 		a.toast(locales.SettingsAccountDeleted())
 	})
 }
@@ -996,8 +996,11 @@ func (a *App) chatgptRow(c *ui.Context) {
 				who = locales.SettingsSignedInAs(a.form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
-				a.chatgptSignIn()
+			if button(c, "again", "", locales.SettingsSignInAgain()).Disabled(a.form.signingIn).Clicked() {
+				a.chatgptSignIn(a.form.chatgpt)
+			}
+			if button(c, "switch", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
+				a.chatgptSignIn(nil)
 			}
 		})
 		return
@@ -1008,16 +1011,18 @@ func (a *App) chatgptRow(c *ui.Context) {
 	}
 	ui.Column(c).Gap(8).Children(func() {
 		if primary(c, "signin", "user", label).Height(36).Disabled(a.form.signingIn).Clicked() {
-			a.chatgptSignIn()
+			a.chatgptSignIn(nil)
 		}
 		ui.Text(c, locales.SettingsChatGPTNote()).
 			FontSize(12).TextColor(pal.TextMuted)
 	})
 }
 
-func (a *App) chatgptSignIn() {
+// chatgptSignIn signs in with ChatGPT in the browser: as again's account,
+// when again is given, or as whichever account the person picks there.
+func (a *App) chatgptSignIn(again *agents.ChatGPT) {
 	a.form.signingIn, a.form.result = true, ""
-	hub, had, gen := a.hub, a.form.chatgpt, a.form.gen
+	hub, had, gen := a.hub, again, a.form.gen
 	ctx, cancel := context.WithCancel(context.Background())
 	a.form.cancelSignIn()
 	a.form.stopSignIn = cancel
@@ -1053,7 +1058,7 @@ func (a *App) modelPicker(c *ui.Context) {
 			return
 		}
 		options := append([]string{}, a.form.models...)
-		if a.form.model != "" && !contains(options, a.form.model) {
+		if a.form.model != "" && !slices.Contains(options, a.form.model) {
 			options = append([]string{a.form.model}, options...)
 		}
 		options = append(options, other)
@@ -1076,7 +1081,7 @@ func (a *App) modelPicker(c *ui.Context) {
 	if !a.form.custom && len(a.form.models) == 0 && !a.form.fetching {
 		return
 	}
-	if a.form.custom && len(a.form.models) > 0 && ghost(c, "list", "", locales.SettingsFromList()).Clicked() {
+	if a.form.custom && len(a.form.models) > 0 && button(c, "list", "", locales.SettingsFromList()).Clicked() {
 		a.form.custom = false
 		if len(a.form.models) > 0 {
 			a.form.model = a.form.models[0]
@@ -1141,7 +1146,7 @@ func (a *App) fetchModels() {
 			// keeps its model, which the picker shows above the list: a server
 			// can serve a model it does not list, as an Azure deployment, a
 			// model's variant or one since unloaded is.
-			if a.form.model == "" || a.form.id == "" && !a.form.custom && !contains(models, a.form.model) {
+			if a.form.model == "" || a.form.id == "" && !a.form.custom && !slices.Contains(models, a.form.model) {
 				a.form.model = models[0]
 			}
 			if a.form.result != "" && !a.form.resultOK {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
 
@@ -70,6 +71,24 @@ func TestRecoverInterrupted(t *testing.T) {
 	}
 	if r, _ := st.Recording(empty.ID); r.Status != "failed" || r.Error == "" {
 		t.Errorf("no text: %s, %q", r.Status, r.Error)
+	}
+}
+
+func TestRecoverInterruptedKeepsAudioAlone(t *testing.T) {
+	r, st, _ := newTestController(t)
+	var block *doc.Node
+	// Soniox has no key here, so the recording keeps its audio alone.
+	if err := r.Start("p", store.SttSettings{Provider: "soniox", Language: "auto"}, false, func(n *doc.Node) { block = n }); err != nil {
+		t.Fatal(err)
+	}
+	if r.withText {
+		t.Fatal("transcribes without a key")
+	}
+	id, _ := block.Data["recording_id"].(string)
+	// The app ends while it records, and the next start finds the row.
+	NewController(st, nil).RecoverInterrupted()
+	if rec, err := st.Recording(id); err != nil || rec.Status != "ready" || rec.Error != "" || rec.SttProvider != "" || rec.SttModel != "" {
+		t.Errorf("audio alone came back %s, %q, by %q %q (%v)", rec.Status, rec.Error, rec.SttProvider, rec.SttModel, err)
 	}
 }
 

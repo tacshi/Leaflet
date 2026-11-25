@@ -57,9 +57,13 @@ const (
 	maxPictureBytes = 20 << 20
 	maxPixels       = doc.MaxPixels
 	maxGIFPixels    = 200_000_000
-	// cardSide bounds a link card's 150×96 picture, at 3 pixels a DIP;
-	// previewSide a file's preview, which fills the window.
+	// cardSide bounds a link card's 150×96 picture, at 3 pixels a DIP.
+	// factSide bounds a fact card's picture, up to 190×237.5 DIP: cut to
+	// fill it, a 16:9 photo's longest side shows up to 422 DIP, about 1270
+	// pixels at 3 a DIP. previewSide bounds a file's preview, which fills
+	// the window.
 	cardSide    = 450
+	factSide    = 1280
 	previewSide = 4096
 )
 

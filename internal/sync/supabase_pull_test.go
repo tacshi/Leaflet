@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -145,7 +146,7 @@ func TestPullReadsPastAFullOverlap(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	rows, _, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, 2)
+	rows, _, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, true, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,5 +439,49 @@ func TestASharedTreeComesWhole(t *testing.T) {
 	}
 	if waiting := waitingOn(t, svc); len(waiting) != depth {
 		t.Errorf("%d pages wait for their content", len(waiting))
+	}
+}
+
+// TestOnlyAPullsFirstPageGoesBackOverTheOverlap pulls more changed rows than a page holds: the first page reads from a
+// little before the cursor, for a write that came in late, and each page after goes on from where the last stopped.
+func TestOnlyAPullsFirstPageGoesBackOverTheOverlap(t *testing.T) {
+	was := pullRows
+	pullRows = 2
+	t.Cleanup(func() { pullRows = was })
+	st := openStore(t)
+	space := st.Session().SpaceID
+	start := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
+	row := func(i int) map[string]any {
+		at := start.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano)
+		return map[string]any{"id": fmt.Sprintf("00000000-0000-4000-8000-%012d", i), "space_id": space, "title": "P",
+			"sort_key": "V", "created_at": at, "updated_at": at}
+	}
+	var asked []url.Values
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/v1/pages" {
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+			return
+		}
+		asked = append(asked, r.URL.Query())
+		rows := []map[string]any{}
+		if n := len(asked); n <= 2 {
+			rows = []map[string]any{row(2*n - 1), row(2 * n)}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc.setCursor("pages", cursor{at: start.Format(time.RFC3339Nano)})
+	if _, err := svc.pullAll(context.Background(), "pages", "*", st.PutRemotePage); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) < 2 {
+		t.Fatalf("asked %v", asked)
+	}
+	if got, want := asked[0].Get("updated_at"), "gt."+start.Add(-overlap).Format(time.RFC3339Nano); got != want {
+		t.Errorf("the first page read from %q, want %q", got, want)
+	}
+	if got := asked[1].Get("or"); !strings.Contains(got, start.Add(2*time.Second).Format(time.RFC3339Nano)) || asked[1].Has("updated_at") {
+		t.Errorf("the second page read %v, not on from the first", asked[1])
 	}
 }

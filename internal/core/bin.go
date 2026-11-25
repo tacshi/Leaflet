@@ -160,7 +160,11 @@ func (c *Core) DropNewPage(id string) error {
 	if _, err := c.Store.DeletePage(id); err != nil {
 		return err
 	}
-	return c.PurgeBin(store.BinRef{Kind: store.BinPage, ID: id})
+	p, err := c.Store.Page(id)
+	if err != nil {
+		return err
+	}
+	return c.PurgeBin(store.BinRef{Kind: store.BinPage, ID: id, DeletedAt: p.DeletedAt})
 }
 
 // BinWhen says when an item of the bin was deleted and how long it has left there, as

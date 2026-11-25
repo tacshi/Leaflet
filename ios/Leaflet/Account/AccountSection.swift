@@ -49,7 +49,7 @@ struct AccountSection: View {
                         }
                     }
                 }
-            } else {
+            } else if account != nil || app.status?.signedIn != true {
                 NavigationLink {
                     SignInView().themedForm(palette)
                 } label: {
@@ -63,7 +63,7 @@ struct AccountSection: View {
         } header: {
             Text(L.settingsSectionAccount)
                 .task(id: app.status?.signedIn) {
-                    account = try? await app.client?.account()
+                    await readAccount()
                     if !naming { name = app.status?.displayName ?? "" }
                 }
         } footer: {
@@ -104,7 +104,7 @@ struct AccountSection: View {
         } catch {
             failure = error.localizedDescription
         }
-        account = try? await client.account()
+        await readAccount()
     }
 
     private func signOut(anyway: Bool) async {
@@ -127,7 +127,18 @@ struct AccountSection: View {
             failure = error.localizedDescription
         }
         await app.reload()
-        account = try? await client.account()
+        await readAccount()
+    }
+
+    /// Reads the account again: one that cannot be read keeps what shows,
+    /// and says why under it.
+    private func readAccount() async {
+        guard let client = app.client else { return }
+        do {
+            account = try await client.account()
+        } catch {
+            failure = error.localizedDescription
+        }
     }
 }
 

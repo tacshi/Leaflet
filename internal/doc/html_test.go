@@ -257,6 +257,10 @@ func TestPageHTMLPrint(t *testing.T) {
 	}
 	screen := PageHTML("Trip", c, opts)
 	opts.Print = true
+	if bare := PageHTML("Trip", c, opts); strings.Contains(bare, "<img") {
+		t.Errorf("a printed page links pictures on the web:\n%s", bare)
+	}
+	opts.Picture = func(link string) string { return "inlined:" + link }
 	paper := PageHTML("Trip", c, opts)
 	for _, want := range []string{"prefers-color-scheme:dark", `<details class="fold">`, `<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ`, `loading="lazy"`, "<details><summary>"} {
 		if !strings.Contains(screen, want) {
@@ -272,8 +276,8 @@ func TestPageHTMLPrint(t *testing.T) {
 		"<div class=\"keep\"><h2 id=\"b-hc\" data-block=\"hc\">Code</h2>\n<pre id=\"b-c\" data-block=\"c\"><code>x</code></pre>\n</div>",
 		`<details id="b-tg" data-block="tg" open>`,
 		`<a id="b-v" data-block="v" class="card link" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"`,
-		`<img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="">`,
-		`<img src="https://x.dev/c.png" alt="">`,
+		`<img src="inlined:https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="">`,
+		`<img src="inlined:https://x.dev/c.png" alt="">`,
 		"line 11",
 		`class="math" title="x^2"><svg `,
 		"</main><script type=\"module\">/*diagram*/</script>\n</body>",

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"log"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -57,9 +58,12 @@ func (c cursor) passed(r map[string]any, key string) bool {
 	return at.Before(cur) || at.Equal(cur) && store.S(r, key) <= c.key
 }
 
-func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) (rows []map[string]any, full bool, err error) {
+// changed is the table's rows changed after the cursor, from overlap before it when back, as the first page of a pull
+// reads them: a write the server took just before the cursor's, which came in after it, is not passed by. A later page
+// goes on from where the one before stopped.
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, back bool, limit int, filters ...string) (rows []map[string]any, full bool, err error) {
 	from := cur
-	if at, err := time.Parse(time.RFC3339Nano, cur.at); err == nil && at.Unix() > 0 {
+	if at, err := time.Parse(time.RFC3339Nano, cur.at); back && err == nil && at.Unix() > 0 {
 		from = cursor{at: at.Add(-overlap).UTC().Format(time.RFC3339Nano)}
 	}
 	var out []map[string]any
@@ -150,6 +154,9 @@ func (s *Service) pull(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.pullTreesWaiting(ctx); err != nil {
+		return err
+	}
 	if err := s.pullShared(ctx); err != nil {
 		return err
 	}
@@ -185,8 +192,8 @@ func (s *Service) pullAll(ctx context.Context, table, columns string, apply func
 	have := func(r map[string]any) bool {
 		return s.st.HasRowAt(table, store.S(r, "id"), store.Time(r["updated_at"]))
 	}
-	err = s.paged(table, func(bool) (bool, error) {
-		rows, full, err := s.changed(ctx, table, "id", columns, s.cursor(table), pullRows)
+	err = s.paged(table, func(first bool) (bool, error) {
+		rows, full, err := s.changed(ctx, table, "id", columns, s.cursor(table), first, pullRows)
 		if err != nil {
 			return false, err
 		}
@@ -198,11 +205,11 @@ func (s *Service) pullAll(ctx context.Context, table, columns string, apply func
 }
 
 func (s *Service) pullShared(ctx context.Context) error {
-	return s.paged("page_permissions", func(bool) (bool, error) { return s.pullSharedPage(ctx) })
+	return s.paged("page_permissions", func(first bool) (bool, error) { return s.pullSharedPage(ctx, first) })
 }
 
-func (s *Service) pullSharedPage(ctx context.Context) (bool, error) {
-	rows, full, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), 100,
+func (s *Service) pullSharedPage(ctx context.Context, first bool) (bool, error) {
+	rows, full, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), first, 100,
 		remote.Eq("user_id", s.be.UserID()), remote.NotNull("accepted_at"))
 	if err != nil {
 		return false, err
@@ -299,6 +306,40 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	return s.setWaiting(waiting)
 }
 
+// treesKey keeps the pages whose trees are to be pulled again whole, until they are: those a deletion for good the
+// server refused brought back, as what came for them while it waited here was passed by.
+const treesKey = "sync.trees_waiting"
+
+// pullTreeAgain pulls the page's tree again whole, now, or with the next pull if it cannot.
+func (s *Service) pullTreeAgain(ctx context.Context, pageID string) error {
+	trees, err := s.ids(treesKey)
+	if err != nil {
+		return err
+	}
+	trees[pageID] = true
+	if err := s.setIDs(treesKey, trees); err != nil {
+		return err
+	}
+	return s.pullTreesWaiting(ctx)
+}
+
+func (s *Service) pullTreesWaiting(ctx context.Context) error {
+	trees, err := s.ids(treesKey)
+	if err != nil || len(trees) == 0 {
+		return err
+	}
+	for _, id := range slices.Sorted(maps.Keys(trees)) {
+		if err := s.pullTree(ctx, id); err != nil {
+			return err
+		}
+		delete(trees, id)
+		if err := s.setIDs(treesKey, trees); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 var treeIDs, treeRows = 100, 500
 
 func (s *Service) selectIn(ctx context.Context, table, col string, ids []string) ([]map[string]any, error) {
@@ -328,8 +369,8 @@ func (s *Service) pullComments(ctx context.Context) error {
 	have := func(r map[string]any) bool {
 		return s.st.HasRowAt("comments", store.S(r, "id"), store.Time(r["updated_at"]))
 	}
-	return s.paged("comments", func(bool) (bool, error) {
-		rows, full, err := s.changed(ctx, "comments", "id", "*", s.cursor("comments"), pullRows)
+	return s.paged("comments", func(first bool) (bool, error) {
+		rows, full, err := s.changed(ctx, "comments", "id", "*", s.cursor("comments"), first, pullRows)
 		if err != nil || len(rows) == 0 {
 			return false, err
 		}

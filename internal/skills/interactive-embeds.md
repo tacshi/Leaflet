@@ -18,7 +18,7 @@ An embed is a small web page inside a Leaflet page: something the reader plays w
 ## Fit the page
 
 - The page is as narrow as a phone or as wide as a desktop window: lay it out to its width, with flex or grid and percentages, and size a canvas to its box, times `devicePixelRatio`, again on `resize`.
-- Give `height` what the content needs, without a scrollbar inside.
+- Give `height` about what the content needs: the frame has that height while the embed loads, then fits the content, from 120 to 1200, as it grows or shrinks. Let the body take its content's height (no `height: 100%` or `100vh` on it) and keep a scrollbar out of it.
 - Leaflet sets `data-theme="light"` or `"dark"` on `<html>`, with the matching `color-scheme`. Keep the background transparent, so it sits on the page, and take colors from CSS variables that the dark theme changes, as in the template. Leaflet loads the embed again when the look changes, so read the theme once, as it starts. The page's palette: red `#ef4444`, orange `#f97316`, yellow `#eab308`, green `#22c55e`, teal `#14b8a6`, blue `#3b82f6`, indigo `#6366f1`, purple `#a855f7`, pink `#ec4899`, brown `#92400e`, gray `#71717a`.
 - Use the system font, `system-ui`, at about 15px, as the page does.
 
@@ -95,4 +95,4 @@ An embed is a small web page inside a Leaflet page: something the reader plays w
 
 ## Changing one
 
-read_page leaves out an embed's html longer than 30,000 characters and gives its `html_length`: to change such an embed, write its html whole, with replace_block. Keep its title, and its height unless the content changes size.
+read_page leaves out an embed's html longer than 30,000 characters and gives its `html_length`: to change such an embed, write its html whole, with replace_block where you have it. Keep its title, and its height unless the content changes size.

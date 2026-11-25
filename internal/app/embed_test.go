@@ -224,3 +224,39 @@ func TestEmbedViewsTakeWebRTCFromEveryFrame(t *testing.T) {
 		t.Errorf("options %+v", o)
 	}
 }
+
+// An embed made without a title, as by an agent or by the dialog in
+// another language, shows its title in the app's language, in the page and
+// in the corner window.
+func TestDefaultEmbedTitleShowsInTheAppsLanguage(t *testing.T) {
+	embed := func(title string) *doc.Node {
+		return &doc.Node{ID: "e", Type: "embed", Data: map[string]any{"title": title, "html": "<p>hi</p>"}}
+	}
+	for _, title := range []string{doc.DefaultEmbedTitle, locales.In("zh-Hans").DialogEmbedTitle(), locales.In("ja").DialogEmbedTitle()} {
+		if got := embedTitle(embed(title)); got != locales.DialogEmbedTitle() {
+			t.Errorf("%q shows as %q", title, got)
+		}
+	}
+	if got := embedTitle(embed("Fares")); got != "Fares" {
+		t.Errorf("a title of its own shows as %q", got)
+	}
+	n := embed(locales.In("ja").DialogEmbedTitle())
+	tt := ui.NewTester(func(c *ui.Context) { watchHost{&App{}}.Embed(c, n, 300) }, 400, 200)
+	tt.Frame()
+	if !tt.HasText(locales.DialogEmbedTitle()) || tt.HasText(n.Str("title")) {
+		t.Errorf("the corner window shows %v", tt.Texts())
+	}
+}
+
+// An embed's frame fits its content, shorter than its stored height too,
+// so no space is left under what it holds, between 120 and 1200 tall.
+func TestEmbedFrameFitsItsContent(t *testing.T) {
+	for content, want := range map[float32]float32{700: 700, 40: 120, 5000: 1200} {
+		if got := embedFrame(content); got != want {
+			t.Errorf("content %v: frame %v, want %v", content, got, want)
+		}
+	}
+	if strings.Contains(embedScript, "dataset.height") {
+		t.Error("a public page's embed keeps its stored height as the least it shows")
+	}
+}

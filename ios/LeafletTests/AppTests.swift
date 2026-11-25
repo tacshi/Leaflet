@@ -154,7 +154,7 @@ struct AppTests {
         #expect(!state.atWork)
         state.runs = [
             AgentState.Run(
-                id: "r", surface: "chat", agentName: "A", instruction: "Tidy", status: "done",
+                id: "r", agentName: "A", status: "done",
                 undone: false, edits: [], summary: "", stoppable: false)
         ]
         #expect(!state.atWork)

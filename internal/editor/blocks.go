@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/chart"
 
@@ -433,8 +434,14 @@ func removeTableColumn(n *doc.Node, at int) {
 
 type ChartSeries = doc.ChartSeries
 
+// ChartOf is the chart block n as a chart draws it: each series named, one
+// without a name by its number in the app's language.
 func ChartOf(n *doc.Node) (kind, title, caption string, labels []string, series []ChartSeries) {
 	ch := doc.ChartOf(n)
+	msgs := locales.In(i18n.Locale())
+	for i := range ch.Series {
+		ch.Series[i].Name = doc.SeriesName(msgs, i, ch.Series[i])
+	}
 	return ch.Kind, ch.Title, ch.Caption, ch.Labels, ch.Series
 }
 

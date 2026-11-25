@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
+	"github.com/egoist/mygo/i18n"
+
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
@@ -161,5 +165,64 @@ func TestActivityCountsATableAsOneBlock(t *testing.T) {
 	added, changed, removed := blockChanges(doc.FromBlocks([]*doc.Node{before}), doc.FromBlocks([]*doc.Node{after, table}), nil)
 	if !slices.Equal(added, []string{"t2"}) || !slices.Equal(changed, []string{"t1"}) || removed != 0 {
 		t.Errorf("added %v, changed %v, removed %d", added, changed, removed)
+	}
+}
+
+// Two servers of agents of one name, as two sessions of Claude Code, keep
+// each other's changes.
+func TestActivityOfTwoServersOfOneAgent(t *testing.T) {
+	dir := t.TempDir()
+	open := func() *store.Store {
+		st, err := store.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		if _, err := st.LoadSession(nil); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	a, b := open(), open()
+	p, err := a.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for _, st := range []*store.Store{a, b} {
+		s := NewServer(st, "test")
+		s.SetAgent("Claude Code")
+		wg.Go(func() {
+			for range keptActivity / 2 {
+				s.noteActivity("write_markdown", p.ID, doc.Empty(), doc.Empty(), nil)
+			}
+		})
+	}
+	wg.Wait()
+	if list := ParseActivities(Activities(a)["claude code"]); len(list) != keptActivity {
+		t.Errorf("kept %d changes of %d", len(list), keptActivity)
+	}
+}
+
+// An agent's name shows in the app's own words for the leaflet command and an
+// agent with none of its own, as the corner window shows them.
+func TestActivityShowsTheAgentsName(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "ja" })
+	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
+	for agent, want := range map[string]string{agents.CommandLine: "コマンドライン", "": "エージェント", "Claude Code": "Claude Code"} {
+		if got := (Activity{Agent: agent}).ShownAgent(); got != want {
+			t.Errorf("%q shows as %q", agent, got)
+		}
+	}
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := NewServer(st, "test").Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "A line."}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if list := ParseActivities(Activities(st)[""]); len(list) != 1 || list[0].ShownAgent() != "エージェント" {
+		t.Errorf("an agent of no name: %+v", list)
 	}
 }

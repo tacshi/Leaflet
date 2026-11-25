@@ -200,24 +200,17 @@ func changeable(p WorkspacePage) error {
 	return nil
 }
 
+// place is where a call puts a page: inside a page of the user's that is not
+// shared, or in a folder, which the workspace checks as it files the page.
 func (x *Executor) place(args map[string]any) (parent WorkspacePage, folder string, err error) {
-	parentID, err := optionalString(args, "parent_id")
-	if err != nil {
-		return parent, "", err
-	}
-	if folder, err = optionalString(args, "folder_id"); err != nil {
-		return parent, "", err
-	}
-	if parentID == "" {
-		return parent, folder, nil
-	}
-	if folder != "" {
-		return parent, "", terr("Give parent_id or folder_id, not both: a page inside another is in no folder.")
-	}
-	if parent, err = x.workspacePage(args, "parent_id"); err == nil {
-		err = changeable(parent)
-	}
-	return parent, "", err
+	parent, _, folder, err = Place(args, func(id string) (WorkspacePage, error) {
+		p, err := x.workspacePage(map[string]any{"page_id": id}, "page_id")
+		if err == nil {
+			err = changeable(p)
+		}
+		return p, err
+	}, nil)
+	return parent, folder, err
 }
 
 func (x *Executor) workspaceCreate(args map[string]any) (map[string]any, error) {
@@ -285,11 +278,10 @@ func (x *Executor) workspaceRename(args map[string]any) (map[string]any, error) 
 	if err := changeable(p); err != nil {
 		return nil, err
 	}
-	title, err := str(args, "title")
+	title, err := TitleArg(args)
 	if err != nil {
 		return nil, err
 	}
-	title = store.ClampTitle(strings.TrimSpace(title))
 	if err := x.checkURLs(nil, title); err != nil {
 		return nil, err
 	}
@@ -310,17 +302,9 @@ func (x *Executor) workspaceTags(args map[string]any) (map[string]any, error) {
 	if err := changeable(p); err != nil {
 		return nil, err
 	}
-	raw, ok := args["tags"].([]any)
-	if !ok {
-		return nil, terr("tags must be a list of words.")
-	}
-	tags := make([]string, 0, len(raw))
-	for _, t := range raw {
-		s, ok := t.(string)
-		if !ok {
-			return nil, terr("tags must be a list of words.")
-		}
-		tags = append(tags, s)
+	tags, err := TagsArg(args)
+	if err != nil {
+		return nil, err
 	}
 	if err := x.checkURLs(nil, tags); err != nil {
 		return nil, err
@@ -348,19 +332,18 @@ func sameTags(a, b []string) bool {
 }
 
 func (x *Executor) workspaceFolder(args map[string]any) (map[string]any, error) {
-	name, err := str(args, "name")
+	name, err := FolderNameArg(args)
 	if err != nil {
 		return nil, err
 	}
-	name = strings.TrimSpace(name)
 	if err := x.checkURLs(nil, name); err != nil {
 		return nil, err
 	}
-	parent, err := optionalString(args, "parent_folder_id")
+	parent, err := ParentFolderArg(args)
 	if err != nil {
 		return nil, err
 	}
-	f, err := x.Ctx.Workspace.CreateFolder(name, strings.TrimSpace(parent))
+	f, err := x.Ctx.Workspace.CreateFolder(name, parent)
 	if err != nil {
 		return nil, err
 	}
@@ -374,11 +357,11 @@ func (x *Executor) workspaceMoveFolder(args map[string]any) (map[string]any, err
 		return nil, err
 	}
 	id = strings.TrimSpace(id)
-	parent, err := optionalString(args, "parent_folder_id")
+	parent, err := ParentFolderArg(args)
 	if err != nil {
 		return nil, err
 	}
-	name, from, to, err := x.Ctx.Workspace.MoveFolder(id, strings.TrimSpace(parent))
+	name, from, to, err := x.Ctx.Workspace.MoveFolder(id, parent)
 	if errors.Is(err, store.ErrFolderIntoSelf) {
 		return nil, terr("A folder cannot move into itself or a folder inside it.")
 	}

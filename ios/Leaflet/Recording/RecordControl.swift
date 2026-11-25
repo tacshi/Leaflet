@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 
 struct RecordControl: View {
@@ -47,11 +48,14 @@ struct RecordControl: View {
                         .opacity(
                             state.paused || Int(t.date.timeIntervalSince1970 * 2) % 2 == 0 ? 1 : 0.4
                         )
-                    Text(state.starting ? L.recStarting : Self.time(recorder.elapsed(at: t.date)))
-                        .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(palette.dangerText)
-                        .lineLimit(1)
-                        .fixedSize()
+                    Text(
+                        state.starting
+                            ? L.recStarting : MobileClock(Int(recorder.elapsed(at: t.date)))
+                    )
+                    .font(.footnote.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(palette.dangerText)
+                    .lineLimit(1)
+                    .fixedSize()
                 }
             }
             Button {
@@ -79,12 +83,5 @@ struct RecordControl: View {
         .foregroundStyle(palette.danger)
         .padding(.leading, 10).padding(.trailing, 4)
         .fixedSize()
-    }
-
-    static func time(_ seconds: TimeInterval) -> String {
-        let s = max(Int(seconds), 0)
-        return s >= 3600
-            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
-            : String(format: "%d:%02d", s / 60, s % 60)
     }
 }

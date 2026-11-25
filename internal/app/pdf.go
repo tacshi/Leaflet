@@ -15,6 +15,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
 	"leaflet/internal/guard"
+	"leaflet/internal/rendered"
 	"leaflet/internal/theme"
 	"leaflet/internal/webpage"
 	"leaflet/locales"
@@ -77,7 +78,7 @@ func printPDF(page string) ([]byte, error) {
 	defer win.Destroy()
 	pg := win.Page()
 	pg.OnWillNavigate(func(e *mygo.NavigateEvent) {
-		if !strings.HasPrefix(e.URL, "about:") && !strings.HasPrefix(e.URL, "data:") {
+		if !strings.HasPrefix(e.URL, webpage.PrintOrigin) && !strings.HasPrefix(e.URL, "about:") && !strings.HasPrefix(e.URL, "data:") {
 			e.PreventDefault()
 		}
 	})
@@ -91,7 +92,7 @@ func printPDF(page string) ([]byte, error) {
 	}
 	pg.OnDidFinishLoad(done)
 	pg.OnDidFailLoad(func(*mygo.LoadError) { done() })
-	pg.LoadHTML(page, "")
+	pg.LoadHTML(page, webpage.PrintOrigin)
 	select {
 	case <-loaded:
 	case <-time.After(pdfLoadWait):
@@ -99,6 +100,11 @@ func printPDF(page string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_, _ = pg.EvalContext(ctx, "await document.fonts.ready")
+	cancel()
+	// Its maps are drawn on their tiles meanwhile, each in place of its
+	// plain drawing, which those not drawn in time keep.
+	ctx, cancel = context.WithTimeout(context.Background(), rendered.PrintMapWait+time.Second)
+	_, _ = pg.EvalContext(ctx, webpage.MapsDrawn)
 	cancel()
 	w, h := webpage.Paper(webpage.RegionOf(mygo.App.Region().Locale))
 	return pg.PrintToPDF(mygo.PDFOptions{PageSize: mygo.PageSize{Width: w, Height: h},

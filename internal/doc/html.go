@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -32,6 +33,18 @@ type HTMLOptions struct {
 	Region       string
 	Video        func(v Video) Video
 	ScriptSource func(name string) string
+	// Picture gives the src of a picture at a web link, "" to leave it out.
+	// Without it a page shows the link itself, and a printed page, which
+	// loads nothing from the web, leaves the picture out.
+	Picture func(link string) string
+	// Map gives the src of a page that shows a map block on its tiles, in
+	// a frame over the map's plain drawing, "" for none. A printed page
+	// shows none.
+	Map func(n *Node) string
+	// MapData gives what the script a printed page has as "map" draws a
+	// map block on its tiles from, in place of its plain drawing, "" for
+	// the drawing alone.
+	MapData func(n *Node) string
 }
 
 type RecordingView struct {
@@ -50,13 +63,14 @@ const pageTextSize = 16
 
 func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	var body strings.Builder
-	diagram, embed, recording := false, false, false
+	diagram, embed, recording, mapped := false, false, false, false
 	videos := map[string]Video{}
 	media := map[string]bool{}
 	files := map[string]servedFile{}
 	c.Walk(func(n, _ *Node) {
 		diagram = diagram || n.Type == "diagram"
 		embed = embed || n.Type == "embed" && opts.Embed != nil
+		mapped = mapped || n.Type == "map" && opts.Print && opts.MapData != nil
 		if n.Type == "recording" {
 			recording, media[n.ID] = true, true
 		}
@@ -92,7 +106,8 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	if !diagram || !served("diagram") {
 		diagram = false
 	}
-	w := htmlWriter{b: &body, opts: opts, diagram: diagram, videos: videos, media: media, files: files}
+	mapped = mapped && served("map")
+	w := htmlWriter{b: &body, opts: opts, diagram: diagram, mapped: mapped, videos: videos, media: media, files: files}
 	w.blocks(c.Children)
 
 	var b strings.Builder
@@ -107,12 +122,12 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	}
 	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + css + `</style>` + opts.Head)
 	var inline strings.Builder
-	for _, name := range []string{"diagram", "embed", "recording", "video", "comments"} {
-		if name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
+	for _, name := range []string{"diagram", "map", "embed", "recording", "video", "comments"} {
+		if name == "diagram" && !diagram || name == "map" && !mapped || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
 			continue
 		}
 		kind := " defer"
-		if name == "diagram" {
+		if name == "diagram" || name == "map" {
 			kind = ` type="module"`
 		}
 		if src := source(name); src != "" {
@@ -134,6 +149,9 @@ type htmlWriter struct {
 	videos  map[string]Video
 	media   map[string]bool
 	files   map[string]servedFile
+	// mapped is whether a printed page's script draws its maps on their
+	// tiles (HTMLOptions.MapData).
+	mapped bool
 }
 
 type servedFile struct{ href, name, detail string }
@@ -294,12 +312,11 @@ func (w htmlWriter) block(n *Node) {
 	case "divider":
 		w.write("<hr", w.attrs(n, ""), ">\n")
 	case "image":
-		src := n.Str("url")
-		if !WebURL(src) {
-			src = ""
-			if w.opts.Image != nil {
-				src = w.opts.Image(n)
-			}
+		src := ""
+		if WebURL(n.Str("url")) {
+			src = w.picture(n)
+		} else if w.opts.Image != nil {
+			src = w.opts.Image(n)
 		}
 		if src == "" {
 			return
@@ -374,8 +391,8 @@ func (w htmlWriter) block(n *Node) {
 			w.write("<th>", html.EscapeString(l), "</th>")
 		}
 		w.write("</tr>")
-		for _, s := range chart.Series {
-			w.write("<tr><th>", html.EscapeString(s.Name), "</th>")
+		for i, s := range chart.Series {
+			w.write("<tr><th>", html.EscapeString(SeriesName(locales.In(w.opts.Lang), i, s)), "</th>")
 			for _, v := range s.Values {
 				w.write("<td>", trimFloat(v), "</td>")
 			}
@@ -480,7 +497,7 @@ func (w htmlWriter) card(n *Node) {
 		w.write(`<span class="desc">`, html.EscapeString(d), "</span>")
 	}
 	w.write(`<span class="site">`, w.icon("globe"), html.EscapeString(site), "</span></span>")
-	if img := n.Str("image"); WebURL(img) {
+	if img := w.picture(n); img != "" {
 		w.write(`<img src="`, html.EscapeString(img), `" alt=""`, w.lazy(), `>`)
 	}
 	w.write("</a>\n")
@@ -494,14 +511,64 @@ func (w htmlWriter) videoCard(n *Node, v Video) {
 	}
 	w.write("<a", w.attrs(n, "card link"), ` href="`, html.EscapeString(link), `" rel="noopener noreferrer"><span class="text"><strong>`, html.EscapeString(cardTitle(n)), "</strong>")
 	w.write(`<span class="site">`, w.icon("play"), html.EscapeString(site), "</span></span>")
-	img := n.Str("image")
-	if !WebURL(img) {
-		img = v.Thumbnail()
-	}
-	if img != "" {
+	if img := w.picture(n); img != "" {
 		w.write(`<img src="`, html.EscapeString(img), `" alt="">`)
 	}
 	w.write("</a>\n")
+}
+
+// picture is the src of the picture from the web that n shows, "" for none,
+// as opts.Picture gives it.
+func (w htmlWriter) picture(n *Node) string {
+	link := shownPicture(n)
+	switch {
+	case !WebURL(link):
+		return ""
+	case w.opts.Picture != nil:
+		return w.opts.Picture(link)
+	case w.opts.Print:
+		return ""
+	}
+	return link
+}
+
+// shownPicture is the link of the picture from the web a block shows in a
+// printed page: an image block's own, a link card's, a video card's, its
+// thumbnail without one, and a fact card's beside its details.
+func shownPicture(n *Node) string {
+	switch n.Type {
+	case "image":
+		return n.Str("url")
+	case "link_preview":
+		if WebURL(n.Str("url")) {
+			return n.Str("image")
+		}
+	case "video":
+		v, ok := ParseVideoURL(n.Str("url"))
+		switch img := n.Str("image"); {
+		case ok && !WebURL(img):
+			return v.Thumbnail()
+		case ok || WebURL(n.Str("url")):
+			return img
+		}
+	case "card":
+		if c := CardOf(n); c.Layout == CardDetails {
+			return c.Image
+		}
+	}
+	return ""
+}
+
+// WebPictures lists, each once, the links of the pictures from the web a
+// printed page of c shows, so they can all be fetched before it's written.
+func WebPictures(c *Content) []string {
+	var links []string
+	c.Walk(func(n, _ *Node) {
+		if link := shownPicture(n); WebURL(link) && !slices.Contains(links, link) {
+			links = append(links, link)
+		}
+	})
+	return links
 }
 
 func (w htmlWriter) videoMoment(v Video) func(class, text string, at int) string {

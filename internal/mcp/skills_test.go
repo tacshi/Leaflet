@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/skills"
 )
 
@@ -49,5 +50,37 @@ func TestSkills(t *testing.T) {
 	}
 	if out, failed := result(t, got[5]); !failed || !strings.Contains(out["error"].(string), "No skill") || !strings.Contains(out["error"].(string), "saving-to-leaflet") {
 		t.Errorf("read_skill nope: %v", out)
+	}
+}
+
+// A skill the app's agents read names a tool only they lack, or the leaflet
+// command, as for agents outside the app: they would call a tool they do not
+// have.
+func TestAppSkillsNameTheirTools(t *testing.T) {
+	inApp := map[string]bool{}
+	for _, defs := range [][]map[string]any{agents.ToolDefinitions(true, false), agents.WorkspaceToolDefinitions(true), agents.WebToolDefinitions(true), agents.MapToolDefinitions()} {
+		for _, d := range defs {
+			inApp[d["function"].(map[string]any)["name"].(string)] = true
+		}
+	}
+	var outside []string
+	for name := range toolNames() {
+		if !inApp[name] {
+			outside = append(outside, name)
+		}
+	}
+	for _, sk := range skills.All() {
+		if sk.External {
+			continue
+		}
+		for line := range strings.Lines(sk.Body) {
+			named := strings.Contains(line, "leaflet command")
+			for _, name := range outside {
+				named = named || strings.Contains(line, name)
+			}
+			if named && !strings.Contains(line, "outside the app") {
+				t.Errorf("%s names what only agents outside the app have, without saying so: %s", sk.Name, line)
+			}
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -137,5 +138,51 @@ func TestMapDialogLetsGoOfItsSearch(t *testing.T) {
 	tt.Frame()
 	if stopped != 3 || d.mapOpen || d.mapRun == run {
 		t.Errorf("cancelled: stopped %d, open %v", stopped, d.mapOpen)
+	}
+}
+
+func TestMapPageIsBuiltOnceWhileItsMapStays(t *testing.T) {
+	a := &App{}
+	var o markdown.Options
+	o.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"map": a.chatMap}
+	m := testMap()
+	fence := func() string {
+		raw, _ := json.Marshal(m)
+		return fmt.Sprintf("```map\n%s\n```\n", raw)
+	}
+	md := fence()
+	tt := ui.NewTester(func(c *ui.Context) {
+		defer a.dropMaps()
+		ui.Column(c).Fill().Padding(20).Children(func() { markdownView(c, md, &o).FontSize(13.5) })
+	}, 600, 900)
+	tt.Frame()
+	tt.Frame()
+	only := func() (*mapPage, *chatMap) {
+		if len(a.mapViews.pages) != 1 || len(a.mapViews.chats) != 1 {
+			t.Fatalf("pages %v, fences %v", a.mapViews.pages, a.mapViews.chats)
+		}
+		for _, p := range a.mapViews.pages {
+			for _, ch := range a.mapViews.chats {
+				return p, ch
+			}
+		}
+		return nil, nil
+	}
+	page, read := only()
+	if !strings.Contains(page.html, "Heung Yuen Wai") {
+		t.Fatalf("the page does not show the map: %.200s", page.html)
+	}
+	for range 3 {
+		tt.Frame()
+	}
+	if p, ch := only(); p != page || ch != read {
+		t.Error("the map's page was made again, or its fence read again, though the map stayed")
+	}
+	m.Places[1].Name = "Lo Wu"
+	md = fence()
+	tt.Frame()
+	tt.Frame()
+	if p, _ := only(); p == page || !strings.Contains(p.html, `"name":"Lo Wu"`) {
+		t.Error("the page was not made again for another map")
 	}
 }

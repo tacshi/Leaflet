@@ -62,9 +62,7 @@ func (a *App) Tint(pageID string, ids []string) {
 	if a.page == nil || a.page.id != pageID {
 		return
 	}
-	for k := range a.page.tinted {
-		delete(a.page.tinted, k)
-	}
+	clear(a.page.tinted)
 	clear(a.page.lit)
 	for _, id := range ids {
 		a.page.tinted[id] = true
@@ -125,7 +123,7 @@ func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock
 func (h *host) VideoMenu(m *ui.Menu, n *doc.Node)               { h.a.videoMenu(m, n) }
 func (h *host) Card(c *ui.Context, n *doc.Node)                 { h.a.linkPreviewBlock(c, n) }
 func (h *host) FactCard(c *ui.Context, n *doc.Node, w float32)  { h.a.factCardBlock(c, n, w) }
-func (h *host) Map(c *ui.Context, n *doc.Node, w float32)       { h.a.mapBlock(c, n, w) }
+func (h *host) Map(c *ui.Context, n *doc.Node, _ float32)       { h.a.mapBlock(c, n) }
 func (h *host) File(c *ui.Context, n *doc.Node, width float32)  { h.a.fileBlock(c, n, width) }
 func (h *host) FileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) { h.a.fileMenu(c, m, n) }
 func (h *host) Recording(c *ui.Context, n *doc.Node)            { h.a.recordingBlock(c, n) }
@@ -771,6 +769,15 @@ func (a *App) scrollByEmbeds(ps *pageState) {
 	}
 }
 
+// embedTitle is an embed's title as it shows: the one an embed gets without
+// one, as an agent's, in the app's language.
+func embedTitle(n *doc.Node) string {
+	if title := n.Str("title"); !doc.IsDefaultEmbedTitle(title) {
+		return title
+	}
+	return locales.DialogEmbedTitle()
+}
+
 func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	switch n.Type {
 	case "math_equation", "diagram":
@@ -784,7 +791,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	hovered := box.Hovered()
 	box.Children(func() {
 		ui.Row(c).Height(24).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, n.Str("title")).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
+			ui.Text(c, embedTitle(n)).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
 			if a.page != nil && !a.page.editor.ReadOnly {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
 					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).IgnoreInput(!hovered).AlignItems(ui.Center).Label(locales.HostEditEmbed())
@@ -805,11 +812,15 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 			})
 		})
 		html := n.Str("html")
-		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
-			return max(height, min(content, 1200))
-		}, height)
+		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, embedFrame, height)
 	})
 }
+
+// embedFrame is the height of an embed's frame for its content's: the
+// content's own, from 120 to 1200, so that the frame neither scrolls nor
+// leaves space under what it holds. The block's stored height sizes the
+// frame only until its content says how tall it is.
+func embedFrame(content float32) float32 { return min(max(content, 120), 1200) }
 
 type embedInput struct {
 	src, kind string

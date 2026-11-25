@@ -112,6 +112,31 @@ func TestBatchesListsPlaceholdersAndSpotsCopies(t *testing.T) {
 	if _, copies, _ := f.Batches(dev); !copies {
 		t.Error("a copy iCloud made went unseen")
 	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.BatchCopies(dev)
+	log := "devices/" + dev + "/log/"
+	if want := []BatchCopy{{log + "0000000000000002 2.json", 2}, {log + "notes.txt", 0}}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("copies %v, want %v, %v", got, want, err)
+	}
+}
+
+func TestPagesListsTheVersionsOfADevice(t *testing.T) {
+	f := folder(t)
+	rel, _ := PagePath(dev, page)
+	if err := f.WriteJSON(rel, PageFile{Format: Format, PageID: page}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(f.Root, "devices", dev, "pages")
+	for _, n := range []string{".0b1c2d3e-0000-4000-8000-0000000000ab.json.icloud", "notes.json"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := f.Pages(dev); err != nil || !reflect.DeepEqual(got, []string{page, "0b1c2d3e-0000-4000-8000-0000000000ab"}) {
+		t.Errorf("pages %v, %v", got, err)
+	}
 }
 
 func TestReadSpacePicksTheLowest(t *testing.T) {

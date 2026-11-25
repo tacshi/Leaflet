@@ -77,8 +77,10 @@ func (s *Service) removal(payload map[string]any) (waits, stays bool) {
 	if id == "" {
 		return false, false
 	}
+	// A file that keeps its contents, in use or in the bin, as one whose deletion for good the server refused, keeps
+	// them where they are stored too.
 	f, err := s.st.File(id)
-	return false, err == nil && f.DeletedAt.IsZero()
+	return false, err == nil && !f.Gone()
 }
 
 func (s *Service) copyWaits(bucket, path string) bool {

@@ -30,8 +30,10 @@ enum PagePDF {
         if await !loading.wait(upTo: loadWait) {
             view.stopLoading()
         }
+        // Its maps are drawn on their tiles meanwhile, each in place of its
+        // plain drawing, which those the page doesn't draw in time keep.
         _ = try? await view.callAsyncJavaScript(
-            "await document.fonts.ready", contentWorld: .page)
+            "await document.fonts.ready; await window.leafletMapsDrawn", contentWorld: .page)
 
         let renderer = UIPrintPageRenderer()
         renderer.addPrintFormatter(view.viewPrintFormatter(), startingAtPageAt: 0)

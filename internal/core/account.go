@@ -191,7 +191,7 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 	switch err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); {
 	case err == nil:
 		c.projectUpdated(p.Ref)
-	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits):
+	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits), errors.Is(err, provision.ErrUploadLimitLow):
 		log.Printf("set up project %s: %v", p.Ref, err)
 	default:
 		return nil, err
@@ -292,7 +292,7 @@ func (c *Core) RenewProject(ctx context.Context, api *supabaseapi.Client) error 
 	switch err := provision.Setup(ctx, api, ref, nil); {
 	case err == nil:
 		c.projectUpdated(ref)
-	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits):
+	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits), errors.Is(err, provision.ErrUploadLimitLow):
 		log.Printf("update project %s: %v", ref, err)
 	default:
 		return err

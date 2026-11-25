@@ -17,6 +17,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 type fakeHost struct {
@@ -460,6 +461,25 @@ func TestCharts(t *testing.T) {
 			if !tt.HasText(s) {
 				t.Errorf("%s chart has no %q: %v", kind, s, tt.Texts())
 			}
+		}
+	}
+}
+
+func TestChartNamesSeriesWithoutNames(t *testing.T) {
+	e, tt, _ := setup(t)
+	n, err := doc.SpecToNode(map[string]any{"type": "chart", "chart": map[string]any{
+		"labels": []any{"Q1", "Q2"},
+		"series": []any{map[string]any{"values": []any{1.0, 2.0}}, map[string]any{"values": []any{3.0, 4.0}}},
+	}}, "", "Agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.InsertBlocks(n)
+	tt.Frame()
+	tt.Frame()
+	for _, s := range []string{locales.ChartSeriesNumbered(1), locales.ChartSeriesNumbered(2)} {
+		if !tt.HasText(s) {
+			t.Errorf("the legend has no %q: %v", s, tt.Texts())
 		}
 	}
 }

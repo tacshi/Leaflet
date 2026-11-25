@@ -1405,6 +1405,22 @@ func (msgs Messages) HostChartSeries() string {
 	return Catalog.Format(msgs.locale, "hostChartSeries", nil)
 }
 
+// ChartSeriesNumbered says "Series {n}"
+// in the language the app shows.
+//
+// A chart's series that has no name, as its legend and its table name it,
+// counting the series from 1.
+func ChartSeriesNumbered(n int) string { return In(i18n.Locale()).ChartSeriesNumbered(n) }
+
+// ChartSeriesNumbered says "Series {n}"
+// in the language of msgs.
+//
+// A chart's series that has no name, as its legend and its table name it,
+// counting the series from 1.
+func (msgs Messages) ChartSeriesNumbered(n int) string {
+	return Catalog.Format(msgs.locale, "chartSeriesNumbered", map[string]any{"n": n})
+}
+
 // HostErrorCreateSubpage says "Could not create the subpage: {error}"
 // in the language the app shows.
 //
@@ -2463,6 +2479,22 @@ func CardSpeed() string { return In(i18n.Locale()).CardSpeed() }
 // changes it.
 func (msgs Messages) CardSpeed() string {
 	return Catalog.Format(msgs.locale, "cardSpeed", nil)
+}
+
+// CardPlaybackPosition says "Playback position"
+// in the language the app shows.
+//
+// Name, for VoiceOver, of the slider of an audio or video player that shows
+// where in it it plays, and moves there.
+func CardPlaybackPosition() string { return In(i18n.Locale()).CardPlaybackPosition() }
+
+// CardPlaybackPosition says "Playback position"
+// in the language of msgs.
+//
+// Name, for VoiceOver, of the slider of an audio or video player that shows
+// where in it it plays, and moves there.
+func (msgs Messages) CardPlaybackPosition() string {
+	return Catalog.Format(msgs.locale, "cardPlaybackPosition", nil)
 }
 
 // ExportRecording says "Recording"
@@ -3547,6 +3579,44 @@ func (msgs Messages) DialogHistoryAgentRun() string {
 	return Catalog.Format(msgs.locale, "dialogHistoryAgentRun", nil)
 }
 
+// DialogHistoryBeforeAgent says "Before {agent}"
+// in the language the app shows.
+//
+// Page history: why a version was kept: before an AI app outside Leaflet,
+// or the leaflet command, edited the page; agent is its name.
+func DialogHistoryBeforeAgent(agent string) string {
+	return In(i18n.Locale()).DialogHistoryBeforeAgent(agent)
+}
+
+// DialogHistoryBeforeAgent says "Before {agent}"
+// in the language of msgs.
+//
+// Page history: why a version was kept: before an AI app outside Leaflet,
+// or the leaflet command, edited the page; agent is its name.
+func (msgs Messages) DialogHistoryBeforeAgent(agent string) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryBeforeAgent", map[string]any{"agent": agent})
+}
+
+// DialogHistoryBeforeAgentRun says "Before {agent}: {request}"
+// in the language the app shows.
+//
+// Page history: why a version was kept: before an agent in the app edited
+// the page as asked; agent is the agent's name, request the start of what
+// it was asked, in the user's own words.
+func DialogHistoryBeforeAgentRun(agent string, request string) string {
+	return In(i18n.Locale()).DialogHistoryBeforeAgentRun(agent, request)
+}
+
+// DialogHistoryBeforeAgentRun says "Before {agent}: {request}"
+// in the language of msgs.
+//
+// Page history: why a version was kept: before an agent in the app edited
+// the page as asked; agent is the agent's name, request the start of what
+// it was asked, in the user's own words.
+func (msgs Messages) DialogHistoryBeforeAgentRun(agent string, request string) string {
+	return Catalog.Format(msgs.locale, "dialogHistoryBeforeAgentRun", map[string]any{"agent": agent, "request": request})
+}
+
 // DialogHistoryAutosave says "Autosave"
 // in the language the app shows.
 //
@@ -3919,30 +3989,70 @@ func (msgs Messages) DialogShareOwnerOnly() string {
 	return Catalog.Format(msgs.locale, "dialogShareOwnerOnly", nil)
 }
 
-// DialogShareCopyLink says "Copy link"
+// DialogShareAppLink says "Link in Leaflet"
 // in the language the app shows.
 //
-// Share dialog: the button copying the page's link.
-func DialogShareCopyLink() string { return In(i18n.Locale()).DialogShareCopyLink() }
+// Share dialog: heading over the section of the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, as against its public
+// link on the web.
+func DialogShareAppLink() string { return In(i18n.Locale()).DialogShareAppLink() }
 
-// DialogShareCopyLink says "Copy link"
+// DialogShareAppLink says "Link in Leaflet"
 // in the language of msgs.
 //
-// Share dialog: the button copying the page's link.
+// Share dialog: heading over the section of the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, as against its public
+// link on the web.
+func (msgs Messages) DialogShareAppLink() string {
+	return Catalog.Format(msgs.locale, "dialogShareAppLink", nil)
+}
+
+// DialogShareAppLinkHint says "Opens this page in Leaflet, for people who can already see it."
+// in the language the app shows.
+//
+// Share dialog: under the in-app link's heading, what the link does and who
+// it works for: those the page is shared with already, not anyone on the
+// web.
+func DialogShareAppLinkHint() string { return In(i18n.Locale()).DialogShareAppLinkHint() }
+
+// DialogShareAppLinkHint says "Opens this page in Leaflet, for people who can already see it."
+// in the language of msgs.
+//
+// Share dialog: under the in-app link's heading, what the link does and who
+// it works for: those the page is shared with already, not anyone on the
+// web.
+func (msgs Messages) DialogShareAppLinkHint() string {
+	return Catalog.Format(msgs.locale, "dialogShareAppLinkHint", nil)
+}
+
+// DialogShareCopyLink says "Copy Leaflet link"
+// in the language the app shows.
+//
+// Share dialog: the button copying the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, not its public link.
+func DialogShareCopyLink() string { return In(i18n.Locale()).DialogShareCopyLink() }
+
+// DialogShareCopyLink says "Copy Leaflet link"
+// in the language of msgs.
+//
+// Share dialog: the button copying the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, not its public link.
 func (msgs Messages) DialogShareCopyLink() string {
 	return Catalog.Format(msgs.locale, "dialogShareCopyLink", nil)
 }
 
-// DialogShareLinkCopied says "Link copied"
+// DialogShareLinkCopied says "Leaflet link copied"
 // in the language the app shows.
 //
-// A toast after the page's link is copied.
+// A toast after the page's in-app link (leaflet://page/…) is copied in
+// the Share dialog.
 func DialogShareLinkCopied() string { return In(i18n.Locale()).DialogShareLinkCopied() }
 
-// DialogShareLinkCopied says "Link copied"
+// DialogShareLinkCopied says "Leaflet link copied"
 // in the language of msgs.
 //
-// A toast after the page's link is copied.
+// A toast after the page's in-app link (leaflet://page/…) is copied in
+// the Share dialog.
 func (msgs Messages) DialogShareLinkCopied() string {
 	return Catalog.Format(msgs.locale, "dialogShareLinkCopied", nil)
 }
@@ -3973,6 +4083,40 @@ func DialogChartNeedSeries() string { return In(i18n.Locale()).DialogChartNeedSe
 // Chart dialog: an error when the header has too few columns.
 func (msgs Messages) DialogChartNeedSeries() string {
 	return Catalog.Format(msgs.locale, "dialogChartNeedSeries", nil)
+}
+
+// DialogChartTooManyRows says "A chart holds at most {count} rows of data."
+// in the language the app shows.
+//
+// Chart dialog: an error when more rows of data, one a label, are written
+// than a chart holds.
+func DialogChartTooManyRows(count int) string { return In(i18n.Locale()).DialogChartTooManyRows(count) }
+
+// DialogChartTooManyRows says "A chart holds at most {count} rows of data."
+// in the language of msgs.
+//
+// Chart dialog: an error when more rows of data, one a label, are written
+// than a chart holds.
+func (msgs Messages) DialogChartTooManyRows(count int) string {
+	return Catalog.Format(msgs.locale, "dialogChartTooManyRows", map[string]any{"count": count})
+}
+
+// DialogChartTooManySeries says "A chart holds at most {count} series."
+// in the language the app shows.
+//
+// Chart dialog: an error when the header names more series, columns after
+// the label column, than a chart holds.
+func DialogChartTooManySeries(count int) string {
+	return In(i18n.Locale()).DialogChartTooManySeries(count)
+}
+
+// DialogChartTooManySeries says "A chart holds at most {count} series."
+// in the language of msgs.
+//
+// Chart dialog: an error when the header names more series, columns after
+// the label column, than a chart holds.
+func (msgs Messages) DialogChartTooManySeries(count int) string {
+	return Catalog.Format(msgs.locale, "dialogChartTooManySeries", map[string]any{"count": count})
 }
 
 // DialogChartNotNumber says "Row {row}: “{value}” is not a number."
@@ -4047,6 +4191,26 @@ func DialogFieldTitle() string { return In(i18n.Locale()).DialogFieldTitle() }
 // Chart and embed dialogs: the title field's placeholder.
 func (msgs Messages) DialogFieldTitle() string {
 	return Catalog.Format(msgs.locale, "dialogFieldTitle", nil)
+}
+
+// DialogPageReadOnly says "This page can no longer be changed, so this was not saved."
+// in the language the app shows.
+//
+// Toast when Save is clicked in a dialog that edits a block (a chart, a
+// fact card, a map, an embed, a formula or diagram, a link, notes) after
+// the page became read-only while it was open, as when its owner took away
+// the right to edit it; the dialog stays open.
+func DialogPageReadOnly() string { return In(i18n.Locale()).DialogPageReadOnly() }
+
+// DialogPageReadOnly says "This page can no longer be changed, so this was not saved."
+// in the language of msgs.
+//
+// Toast when Save is clicked in a dialog that edits a block (a chart, a
+// fact card, a map, an embed, a formula or diagram, a link, notes) after
+// the page became read-only while it was open, as when its owner took away
+// the right to edit it; the dialog stays open.
+func (msgs Messages) DialogPageReadOnly() string {
+	return Catalog.Format(msgs.locale, "dialogPageReadOnly", nil)
 }
 
 // DialogChartBar says "Bar"
@@ -4283,6 +4447,452 @@ func DialogCardNoIcon() string { return In(i18n.Locale()).DialogCardNoIcon() }
 // The fact card dialog's icon menu: the choice of no icon before the title.
 func (msgs Messages) DialogCardNoIcon() string {
 	return Catalog.Format(msgs.locale, "dialogCardNoIcon", nil)
+}
+
+// CardIconBus says "Bus"
+// in the language the app shows.
+//
+// The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the
+// name of an icon a card's title can carry, a bus.
+func CardIconBus() string { return In(i18n.Locale()).CardIconBus() }
+
+// CardIconBus says "Bus"
+// in the language of msgs.
+//
+// The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the
+// name of an icon a card's title can carry, a bus.
+func (msgs Messages) CardIconBus() string {
+	return Catalog.Format(msgs.locale, "cardIconBus", nil)
+}
+
+// CardIconTrainFront says "Train"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a train seen from the
+// front.
+func CardIconTrainFront() string { return In(i18n.Locale()).CardIconTrainFront() }
+
+// CardIconTrainFront says "Train"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a train seen from the
+// front.
+func (msgs Messages) CardIconTrainFront() string {
+	return Catalog.Format(msgs.locale, "cardIconTrainFront", nil)
+}
+
+// CardIconTramFront says "Tram"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a tram seen from the
+// front.
+func CardIconTramFront() string { return In(i18n.Locale()).CardIconTramFront() }
+
+// CardIconTramFront says "Tram"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a tram seen from the
+// front.
+func (msgs Messages) CardIconTramFront() string {
+	return Catalog.Format(msgs.locale, "cardIconTramFront", nil)
+}
+
+// CardIconCar says "Car"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a car.
+func CardIconCar() string { return In(i18n.Locale()).CardIconCar() }
+
+// CardIconCar says "Car"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a car.
+func (msgs Messages) CardIconCar() string {
+	return Catalog.Format(msgs.locale, "cardIconCar", nil)
+}
+
+// CardIconBike says "Bicycle"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a bicycle.
+func CardIconBike() string { return In(i18n.Locale()).CardIconBike() }
+
+// CardIconBike says "Bicycle"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a bicycle.
+func (msgs Messages) CardIconBike() string {
+	return Catalog.Format(msgs.locale, "cardIconBike", nil)
+}
+
+// CardIconFootprints says "Footprints"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of footprints, for walking.
+func CardIconFootprints() string { return In(i18n.Locale()).CardIconFootprints() }
+
+// CardIconFootprints says "Footprints"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of footprints, for walking.
+func (msgs Messages) CardIconFootprints() string {
+	return Catalog.Format(msgs.locale, "cardIconFootprints", nil)
+}
+
+// CardIconPlane says "Plane"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of an airplane.
+func CardIconPlane() string { return In(i18n.Locale()).CardIconPlane() }
+
+// CardIconPlane says "Plane"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of an airplane.
+func (msgs Messages) CardIconPlane() string {
+	return Catalog.Format(msgs.locale, "cardIconPlane", nil)
+}
+
+// CardIconShip says "Ship"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a ship.
+func CardIconShip() string { return In(i18n.Locale()).CardIconShip() }
+
+// CardIconShip says "Ship"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a ship.
+func (msgs Messages) CardIconShip() string {
+	return Catalog.Format(msgs.locale, "cardIconShip", nil)
+}
+
+// CardIconMapPin says "Map pin"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a pin that marks a place
+// on a map.
+func CardIconMapPin() string { return In(i18n.Locale()).CardIconMapPin() }
+
+// CardIconMapPin says "Map pin"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a pin that marks a place
+// on a map.
+func (msgs Messages) CardIconMapPin() string {
+	return Catalog.Format(msgs.locale, "cardIconMapPin", nil)
+}
+
+// CardIconClock says "Clock"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a clock.
+func CardIconClock() string { return In(i18n.Locale()).CardIconClock() }
+
+// CardIconClock says "Clock"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a clock.
+func (msgs Messages) CardIconClock() string {
+	return Catalog.Format(msgs.locale, "cardIconClock", nil)
+}
+
+// CardIconCalendar says "Calendar"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a calendar.
+func CardIconCalendar() string { return In(i18n.Locale()).CardIconCalendar() }
+
+// CardIconCalendar says "Calendar"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a calendar.
+func (msgs Messages) CardIconCalendar() string {
+	return Catalog.Format(msgs.locale, "cardIconCalendar", nil)
+}
+
+// CardIconTicket says "Ticket"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a ticket.
+func CardIconTicket() string { return In(i18n.Locale()).CardIconTicket() }
+
+// CardIconTicket says "Ticket"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a ticket.
+func (msgs Messages) CardIconTicket() string {
+	return Catalog.Format(msgs.locale, "cardIconTicket", nil)
+}
+
+// CardIconBanknote says "Banknote"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a banknote, for money.
+func CardIconBanknote() string { return In(i18n.Locale()).CardIconBanknote() }
+
+// CardIconBanknote says "Banknote"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a banknote, for money.
+func (msgs Messages) CardIconBanknote() string {
+	return Catalog.Format(msgs.locale, "cardIconBanknote", nil)
+}
+
+// CardIconWallet says "Wallet"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a wallet.
+func CardIconWallet() string { return In(i18n.Locale()).CardIconWallet() }
+
+// CardIconWallet says "Wallet"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a wallet.
+func (msgs Messages) CardIconWallet() string {
+	return Catalog.Format(msgs.locale, "cardIconWallet", nil)
+}
+
+// CardIconPhone says "Phone"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a telephone handset.
+func CardIconPhone() string { return In(i18n.Locale()).CardIconPhone() }
+
+// CardIconPhone says "Phone"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a telephone handset.
+func (msgs Messages) CardIconPhone() string {
+	return Catalog.Format(msgs.locale, "cardIconPhone", nil)
+}
+
+// CardIconHospital says "Hospital"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a hospital.
+func CardIconHospital() string { return In(i18n.Locale()).CardIconHospital() }
+
+// CardIconHospital says "Hospital"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a hospital.
+func (msgs Messages) CardIconHospital() string {
+	return Catalog.Format(msgs.locale, "cardIconHospital", nil)
+}
+
+// CardIconUtensils says "Fork and knife"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a fork and a knife, for
+// food and restaurants.
+func CardIconUtensils() string { return In(i18n.Locale()).CardIconUtensils() }
+
+// CardIconUtensils says "Fork and knife"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a fork and a knife, for
+// food and restaurants.
+func (msgs Messages) CardIconUtensils() string {
+	return Catalog.Format(msgs.locale, "cardIconUtensils", nil)
+}
+
+// CardIconBedDouble says "Bed"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a double bed, for hotels
+// and lodging.
+func CardIconBedDouble() string { return In(i18n.Locale()).CardIconBedDouble() }
+
+// CardIconBedDouble says "Bed"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a double bed, for hotels
+// and lodging.
+func (msgs Messages) CardIconBedDouble() string {
+	return Catalog.Format(msgs.locale, "cardIconBedDouble", nil)
+}
+
+// CardIconBuilding2 says "Building"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of an office building.
+func CardIconBuilding2() string { return In(i18n.Locale()).CardIconBuilding2() }
+
+// CardIconBuilding2 says "Building"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of an office building.
+func (msgs Messages) CardIconBuilding2() string {
+	return Catalog.Format(msgs.locale, "cardIconBuilding2", nil)
+}
+
+// CardIconGraduationCap says "Graduation cap"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a graduation cap, for
+// schools and studies.
+func CardIconGraduationCap() string { return In(i18n.Locale()).CardIconGraduationCap() }
+
+// CardIconGraduationCap says "Graduation cap"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a graduation cap, for
+// schools and studies.
+func (msgs Messages) CardIconGraduationCap() string {
+	return Catalog.Format(msgs.locale, "cardIconGraduationCap", nil)
+}
+
+// CardIconShoppingBag says "Shopping bag"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a shopping bag.
+func CardIconShoppingBag() string { return In(i18n.Locale()).CardIconShoppingBag() }
+
+// CardIconShoppingBag says "Shopping bag"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a shopping bag.
+func (msgs Messages) CardIconShoppingBag() string {
+	return Catalog.Format(msgs.locale, "cardIconShoppingBag", nil)
+}
+
+// CardIconInfo says "Information"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a letter i in a circle,
+// for information.
+func CardIconInfo() string { return In(i18n.Locale()).CardIconInfo() }
+
+// CardIconInfo says "Information"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a letter i in a circle,
+// for information.
+func (msgs Messages) CardIconInfo() string {
+	return Catalog.Format(msgs.locale, "cardIconInfo", nil)
+}
+
+// CardIconStar says "Star"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a star.
+func CardIconStar() string { return In(i18n.Locale()).CardIconStar() }
+
+// CardIconStar says "Star"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a star.
+func (msgs Messages) CardIconStar() string {
+	return Catalog.Format(msgs.locale, "cardIconStar", nil)
+}
+
+// CardIconSun says "Sun"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of the sun, for sunny
+// weather.
+func CardIconSun() string { return In(i18n.Locale()).CardIconSun() }
+
+// CardIconSun says "Sun"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of the sun, for sunny
+// weather.
+func (msgs Messages) CardIconSun() string {
+	return Catalog.Format(msgs.locale, "cardIconSun", nil)
+}
+
+// CardIconCloudRain says "Rain cloud"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a cloud with rain, for
+// rainy weather.
+func CardIconCloudRain() string { return In(i18n.Locale()).CardIconCloudRain() }
+
+// CardIconCloudRain says "Rain cloud"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a cloud with rain, for
+// rainy weather.
+func (msgs Messages) CardIconCloudRain() string {
+	return Catalog.Format(msgs.locale, "cardIconCloudRain", nil)
+}
+
+// CardIconThermometer says "Thermometer"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a thermometer, for
+// temperatures.
+func CardIconThermometer() string { return In(i18n.Locale()).CardIconThermometer() }
+
+// CardIconThermometer says "Thermometer"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a thermometer, for
+// temperatures.
+func (msgs Messages) CardIconThermometer() string {
+	return Catalog.Format(msgs.locale, "cardIconThermometer", nil)
+}
+
+// CardIconGlobe says "Globe"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a globe, for the world and
+// the web.
+func CardIconGlobe() string { return In(i18n.Locale()).CardIconGlobe() }
+
+// CardIconGlobe says "Globe"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a globe, for the world and
+// the web.
+func (msgs Messages) CardIconGlobe() string {
+	return Catalog.Format(msgs.locale, "cardIconGlobe", nil)
+}
+
+// CardIconUser says "Person"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a person.
+func CardIconUser() string { return In(i18n.Locale()).CardIconUser() }
+
+// CardIconUser says "Person"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a person.
+func (msgs Messages) CardIconUser() string {
+	return Catalog.Format(msgs.locale, "cardIconUser", nil)
+}
+
+// CardIconPackage says "Package"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a parcel box.
+func CardIconPackage() string { return In(i18n.Locale()).CardIconPackage() }
+
+// CardIconPackage says "Package"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a parcel box.
+func (msgs Messages) CardIconPackage() string {
+	return Catalog.Format(msgs.locale, "cardIconPackage", nil)
+}
+
+// CardIconTrendingUp says "Rising trend"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a line going up, for
+// growth and rising numbers.
+func CardIconTrendingUp() string { return In(i18n.Locale()).CardIconTrendingUp() }
+
+// CardIconTrendingUp says "Rising trend"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a line going up, for
+// growth and rising numbers.
+func (msgs Messages) CardIconTrendingUp() string {
+	return Catalog.Format(msgs.locale, "cardIconTrendingUp", nil)
 }
 
 // DialogCardPicture says "Picture link (optional, beside details)"
@@ -4627,6 +5237,58 @@ func (msgs Messages) MapLegTransit() string {
 	return Catalog.Format(msgs.locale, "mapLegTransit", nil)
 }
 
+// MapRoutesBy says "Routes: {router}"
+// in the language the app shows.
+//
+// A map block's credit line, after "© OpenStreetMap contributors · ": the
+// service its route was found with, as "Routes: Transitous". The router's
+// name stays as it is.
+func MapRoutesBy(router string) string { return In(i18n.Locale()).MapRoutesBy(router) }
+
+// MapRoutesBy says "Routes: {router}"
+// in the language of msgs.
+//
+// A map block's credit line, after "© OpenStreetMap contributors · ": the
+// service its route was found with, as "Routes: Transitous". The router's
+// name stays as it is.
+func (msgs Messages) MapRoutesBy(router string) string {
+	return Catalog.Format(msgs.locale, "mapRoutesBy", map[string]any{"router": router})
+}
+
+// MapZoomHelp says "Use {key} + scroll to zoom the map"
+// in the language the app shows.
+//
+// Shown over a map in a page shared by a public link when a visitor scrolls
+// on it, which scrolls the page instead: the key to hold to zoom the map,
+// "Ctrl" or "⌘", which stays as it is.
+func MapZoomHelp(key string) string { return In(i18n.Locale()).MapZoomHelp(key) }
+
+// MapZoomHelp says "Use {key} + scroll to zoom the map"
+// in the language of msgs.
+//
+// Shown over a map in a page shared by a public link when a visitor scrolls
+// on it, which scrolls the page instead: the key to hold to zoom the map,
+// "Ctrl" or "⌘", which stays as it is.
+func (msgs Messages) MapZoomHelp(key string) string {
+	return Catalog.Format(msgs.locale, "mapZoomHelp", map[string]any{"key": key})
+}
+
+// MapMoveHelp says "Use two fingers to move the map"
+// in the language the app shows.
+//
+// Shown over a map in a page shared by a public link when a visitor drags
+// it with one finger on a touch screen, which scrolls the page instead.
+func MapMoveHelp() string { return In(i18n.Locale()).MapMoveHelp() }
+
+// MapMoveHelp says "Use two fingers to move the map"
+// in the language of msgs.
+//
+// Shown over a map in a page shared by a public link when a visitor drags
+// it with one finger on a touch screen, which scrolls the page instead.
+func (msgs Messages) MapMoveHelp() string {
+	return Catalog.Format(msgs.locale, "mapMoveHelp", nil)
+}
+
 // DialogCardEmpty says "Give the card a title or a fact."
 // in the language the app shows.
 //
@@ -4655,6 +5317,20 @@ func DialogCardBadPicture() string { return In(i18n.Locale()).DialogCardBadPictu
 // address.
 func (msgs Messages) DialogCardBadPicture() string {
 	return Catalog.Format(msgs.locale, "dialogCardBadPicture", nil)
+}
+
+// DialogCardLongPicture says "The picture link is too long: a card takes one of at most {count} characters."
+// in the language the app shows.
+//
+// The fact card dialog's error for a picture link longer than a card keeps.
+func DialogCardLongPicture(count int) string { return In(i18n.Locale()).DialogCardLongPicture(count) }
+
+// DialogCardLongPicture says "The picture link is too long: a card takes one of at most {count} characters."
+// in the language of msgs.
+//
+// The fact card dialog's error for a picture link longer than a card keeps.
+func (msgs Messages) DialogCardLongPicture(count int) string {
+	return Catalog.Format(msgs.locale, "dialogCardLongPicture", map[string]any{"count": count})
 }
 
 // DialogCardBadSource says "Source {line} is not a web link."
@@ -4977,6 +5653,38 @@ func CardSources() string { return In(i18n.Locale()).CardSources() }
 // pages its facts come from.
 func (msgs Messages) CardSources() string {
 	return Catalog.Format(msgs.locale, "cardSources", nil)
+}
+
+// CardSourcesLabel says "Sources: {names}"
+// in the language the app shows.
+//
+// A fact card: what screen readers say for its source chip, the names of
+// the web pages its facts come from.
+func CardSourcesLabel(names string) string { return In(i18n.Locale()).CardSourcesLabel(names) }
+
+// CardSourcesLabel says "Sources: {names}"
+// in the language of msgs.
+//
+// A fact card: what screen readers say for its source chip, the names of
+// the web pages its facts come from.
+func (msgs Messages) CardSourcesLabel(names string) string {
+	return Catalog.Format(msgs.locale, "cardSourcesLabel", map[string]any{"names": names})
+}
+
+// CardSourcesSeparator says ", "
+// in the language the app shows.
+//
+// A fact card: what goes between two source names in what screen readers
+// say for its source chip, as in "Wikipedia, BBC".
+func CardSourcesSeparator() string { return In(i18n.Locale()).CardSourcesSeparator() }
+
+// CardSourcesSeparator says ", "
+// in the language of msgs.
+//
+// A fact card: what goes between two source names in what screen readers
+// say for its source chip, as in "Wikipedia, BBC".
+func (msgs Messages) CardSourcesSeparator() string {
+	return Catalog.Format(msgs.locale, "cardSourcesSeparator", nil)
 }
 
 // CardLayout says "Layout"
@@ -5589,6 +6297,22 @@ func (msgs Messages) PubTitle() string {
 	return Catalog.Format(msgs.locale, "pubTitle", nil)
 }
 
+// PubLinkCopied says "Public link copied"
+// in the language the app shows.
+//
+// A toast after the page's public link on the web is copied in the Share
+// dialog.
+func PubLinkCopied() string { return In(i18n.Locale()).PubLinkCopied() }
+
+// PubLinkCopied says "Public link copied"
+// in the language of msgs.
+//
+// A toast after the page's public link on the web is copied in the Share
+// dialog.
+func (msgs Messages) PubLinkCopied() string {
+	return Catalog.Format(msgs.locale, "pubLinkCopied", nil)
+}
+
 // PubChecking says "Looking for cloudflared…"
 // in the language the app shows.
 //
@@ -6085,16 +6809,16 @@ func (msgs Messages) PubBusy() string {
 // in the language the app shows.
 //
 // Public page (seen by visitors): the comment form, when the name typed is
-// that of the page's owner, of an agent or of someone else who comments on
-// the page, which a visitor can't take.
+// that of the page's owner, of an agent or of someone else whose comments
+// the public page shows, which a visitor can't take.
 func PubNameTaken() string { return In(i18n.Locale()).PubNameTaken() }
 
 // PubNameTaken says "Someone on this page goes by that name. Choose another."
 // in the language of msgs.
 //
 // Public page (seen by visitors): the comment form, when the name typed is
-// that of the page's owner, of an agent or of someone else who comments on
-// the page, which a visitor can't take.
+// that of the page's owner, of an agent or of someone else whose comments
+// the public page shows, which a visitor can't take.
 func (msgs Messages) PubNameTaken() string {
 	return Catalog.Format(msgs.locale, "pubNameTaken", nil)
 }
@@ -6779,6 +7503,64 @@ func (msgs Messages) AgentChatgptSignInEnded() string {
 	return Catalog.Format(msgs.locale, "agentChatgptSignInEnded", nil)
 }
 
+// AgentChatgptCodeRefused says "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one t…"
+// in the language the app shows.
+//
+// Settings › Agent providers: after the browser step of signing in with
+// ChatGPT went through, OpenAI refused to finish the sign-in (its
+// invalid_grant) with no reason given. It does this for an account without
+// ChatGPT Plus or Pro, even after the browser step offered the plan.
+func AgentChatgptCodeRefused() string { return In(i18n.Locale()).AgentChatgptCodeRefused() }
+
+// AgentChatgptCodeRefused says "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one t…"
+// in the language of msgs.
+//
+// Settings › Agent providers: after the browser step of signing in with
+// ChatGPT went through, OpenAI refused to finish the sign-in (its
+// invalid_grant) with no reason given. It does this for an account without
+// ChatGPT Plus or Pro, even after the browser step offered the plan.
+func (msgs Messages) AgentChatgptCodeRefused() string {
+	return Catalog.Format(msgs.locale, "agentChatgptCodeRefused", nil)
+}
+
+// AgentChatgptSignInFailed says "ChatGPT sign-in failed: {error}"
+// in the language the app shows.
+//
+// Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's
+// sign-in refused, or its answer could not be read; error is why, often
+// OpenAI's own words, in English.
+func AgentChatgptSignInFailed(error string) string {
+	return In(i18n.Locale()).AgentChatgptSignInFailed(error)
+}
+
+// AgentChatgptSignInFailed says "ChatGPT sign-in failed: {error}"
+// in the language of msgs.
+//
+// Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's
+// sign-in refused, or its answer could not be read; error is why, often
+// OpenAI's own words, in English.
+func (msgs Messages) AgentChatgptSignInFailed(error string) string {
+	return Catalog.Format(msgs.locale, "agentChatgptSignInFailed", map[string]any{"error": error})
+}
+
+// AgentChatgptUnverified says "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's
+// answer did not pass Leaflet's checks: its identity token, or where its
+// sign-in is.
+func AgentChatgptUnverified() string { return In(i18n.Locale()).AgentChatgptUnverified() }
+
+// AgentChatgptUnverified says "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's
+// answer did not pass Leaflet's checks: its identity token, or where its
+// sign-in is.
+func (msgs Messages) AgentChatgptUnverified() string {
+	return Catalog.Format(msgs.locale, "agentChatgptUnverified", nil)
+}
+
 // AgentKeyUnread says "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key ag…"
 // in the language the app shows.
 //
@@ -7001,6 +7783,22 @@ func ProvisionProjectFailed() string { return In(i18n.Locale()).ProvisionProject
 // failed to start or restore.
 func (msgs Messages) ProvisionProjectFailed() string {
 	return Catalog.Format(msgs.locale, "provisionProjectFailed", nil)
+}
+
+// ProvisionProjectSlow says "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard."
+// in the language the app shows.
+//
+// Setting up a Supabase project for Leaflet: the project still had not
+// started or been restored after Leaflet waited about 15 minutes.
+func ProvisionProjectSlow() string { return In(i18n.Locale()).ProvisionProjectSlow() }
+
+// ProvisionProjectSlow says "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard."
+// in the language of msgs.
+//
+// Setting up a Supabase project for Leaflet: the project still had not
+// started or been restored after Leaflet waited about 15 minutes.
+func (msgs Messages) ProvisionProjectSlow() string {
+	return Catalog.Format(msgs.locale, "provisionProjectSlow", nil)
 }
 
 // ProvisionMigrationFailed says "Leaflet couldn't set up the database ({migration}): {error}"
@@ -7967,6 +8765,56 @@ func AgentModelCutOff() string { return In(i18n.Locale()).AgentModelCutOff() }
 // complete.
 func (msgs Messages) AgentModelCutOff() string {
 	return Catalog.Format(msgs.locale, "agentModelCutOff", nil)
+}
+
+// AgentModelStoppedAnswering says "The model stopped answering. Try again."
+// in the language the app shows.
+//
+// Why an agent run or a connection test failed: the model's server sent
+// nothing more for minutes, in the middle of its answer.
+func AgentModelStoppedAnswering() string { return In(i18n.Locale()).AgentModelStoppedAnswering() }
+
+// AgentModelStoppedAnswering says "The model stopped answering. Try again."
+// in the language of msgs.
+//
+// Why an agent run or a connection test failed: the model's server sent
+// nothing more for minutes, in the middle of its answer.
+func (msgs Messages) AgentModelStoppedAnswering() string {
+	return Catalog.Format(msgs.locale, "agentModelStoppedAnswering", nil)
+}
+
+// AgentAnswerTooLong says "The answer was too long to read."
+// in the language the app shows.
+//
+// Why an agent run, a web search or signing in with ChatGPT failed: the
+// server's answer was larger than Leaflet reads.
+func AgentAnswerTooLong() string { return In(i18n.Locale()).AgentAnswerTooLong() }
+
+// AgentAnswerTooLong says "The answer was too long to read."
+// in the language of msgs.
+//
+// Why an agent run, a web search or signing in with ChatGPT failed: the
+// server's answer was larger than Leaflet reads.
+func (msgs Messages) AgentAnswerTooLong() string {
+	return Catalog.Format(msgs.locale, "agentAnswerTooLong", nil)
+}
+
+// AgentRedirected says "The server answered with a redirect to another address, which Leaflet doesn't follow."
+// in the language the app shows.
+//
+// Why an agent run, a connection test or signing in with ChatGPT failed:
+// the server answered with an HTTP redirect, which Leaflet does not follow
+// for agents.
+func AgentRedirected() string { return In(i18n.Locale()).AgentRedirected() }
+
+// AgentRedirected says "The server answered with a redirect to another address, which Leaflet doesn't follow."
+// in the language of msgs.
+//
+// Why an agent run, a connection test or signing in with ChatGPT failed:
+// the server answered with an HTTP redirect, which Leaflet does not follow
+// for agents.
+func (msgs Messages) AgentRedirected() string {
+	return Catalog.Format(msgs.locale, "agentRedirected", nil)
 }
 
 // AgentChatgptCouldNotAnswer says "ChatGPT could not answer"
@@ -14724,15 +15572,33 @@ func (msgs Messages) SettingsSignedInAccount() string {
 // SettingsSwitchAccount says "Switch account"
 // in the language the app shows.
 //
-// The provider dialog for ChatGPT: signs in again.
+// The provider dialog for ChatGPT: signs in with another ChatGPT account,
+// picked in the browser.
 func SettingsSwitchAccount() string { return In(i18n.Locale()).SettingsSwitchAccount() }
 
 // SettingsSwitchAccount says "Switch account"
 // in the language of msgs.
 //
-// The provider dialog for ChatGPT: signs in again.
+// The provider dialog for ChatGPT: signs in with another ChatGPT account,
+// picked in the browser.
 func (msgs Messages) SettingsSwitchAccount() string {
 	return Catalog.Format(msgs.locale, "settingsSwitchAccount", nil)
+}
+
+// SettingsSignInAgain says "Sign in again"
+// in the language the app shows.
+//
+// The provider dialog for ChatGPT: signs the same ChatGPT account in again,
+// as after its sign-in ended.
+func SettingsSignInAgain() string { return In(i18n.Locale()).SettingsSignInAgain() }
+
+// SettingsSignInAgain says "Sign in again"
+// in the language of msgs.
+//
+// The provider dialog for ChatGPT: signs the same ChatGPT account in again,
+// as after its sign-in ended.
+func (msgs Messages) SettingsSignInAgain() string {
+	return Catalog.Format(msgs.locale, "settingsSignInAgain", nil)
 }
 
 // SettingsChatGPTSignIn says "Sign in with ChatGPT"
@@ -16715,6 +17581,26 @@ func ExternalLiveEditsTitle() string { return In(i18n.Locale()).ExternalLiveEdit
 // lists.
 func (msgs Messages) ExternalLiveEditsTitle() string {
 	return Catalog.Format(msgs.locale, "externalLiveEditsTitle", nil)
+}
+
+// ExternalLiveEditsCommandLine says "Command line"
+// in the language the app shows.
+//
+// The name the leaflet command's own changes go by: the user, or a script,
+// running leaflet commands in a terminal. It shows as the agent's name in
+// the small corner window (externalLiveEditsEditing) and in page history
+// (dialogHistoryBeforeAgent).
+func ExternalLiveEditsCommandLine() string { return In(i18n.Locale()).ExternalLiveEditsCommandLine() }
+
+// ExternalLiveEditsCommandLine says "Command line"
+// in the language of msgs.
+//
+// The name the leaflet command's own changes go by: the user, or a script,
+// running leaflet commands in a terminal. It shows as the agent's name in
+// the small corner window (externalLiveEditsEditing) and in page history
+// (dialogHistoryBeforeAgent).
+func (msgs Messages) ExternalLiveEditsCommandLine() string {
+	return Catalog.Format(msgs.locale, "externalLiveEditsCommandLine", nil)
 }
 
 // ExternalLiveEditsEditing says "{agent} is editing"

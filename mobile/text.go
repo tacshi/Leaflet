@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/i18n"
 
+	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
 
@@ -39,6 +40,13 @@ func When(locale string, at, now int64) string {
 		return ""
 	}
 	return locales.In(locale).When(time.UnixMilli(at), time.UnixMilli(now))
+}
+
+// FileSize is how large a file of size bytes is, as its card says it in
+// the language with tag locale: 2.4 MB, as the desktop's says it.
+func FileSize(locale string, size int64) string {
+	defer catch(nil)
+	return webpage.FileSizeIn(locales.In(locale), size)
 }
 
 func Language(preferred string) string {

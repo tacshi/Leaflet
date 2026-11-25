@@ -86,8 +86,8 @@ metadata:
 | `divider` | — | |
 | `image` | `url`, `align`, `alt`, `width`, `height`, `file_id?` | a picture kept with the page has `file_id`, and `url` is `file://<file_id>/<name>`, as a `file`'s is |
 | `table` | `colsLen`, `rowsLen`, `style?`, `aligns?`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph`; `style` `lines` draws it with simple lines (a bold header and a hairline under it and between rows, with no borders) rather than as a grid; `aligns` is how each column aligns, in order, `left`, `center`, `right` or `""` as text does, as Markdown's delimiter row (`:---`, `:---:`, `---:`) says, a list that stops at its last column aligned so |
-| `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
-| `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
+| `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client; a series written without a name keeps `""`, and its legend and table name it by its number, as "Series 2", in the reader's language |
+| `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens; `height` is its frame's until the content has loaded, which the frame then fits, from 120 to 1200 |
 | `map` | `title?`, `places?` [{`name`, `lat`, `lng`}], `route?` {`mode`, `source`, `duration_s`, `distance_m`, `legs` [{`mode`, `line?`, `agency?`, `color?`, `from?`, `to?`, `duration_s`, `distance_m?`, `path`}]}, `author` | places on a map, and a route between them: `route.mode` is `walk`, `cycle`, `drive` or `transit`, `source` the router it came from (`transitous` or `osrm`), which the map credits, and each leg's `path` its points as an encoded polyline (Google's format) of 6 decimal places; a leg goes by `walk`, `cycle`, `drive`, `bus`, `coach`, `tram`, `subway`, `rail`, `ferry`, `cable`, `air` or `transit`, its `line` a line's name, as `B8`, and `color` its line's, `#rrggbb`. A map with a route and no places marks the route's ends. The Mac and Windows draw it on OpenFreeMap's tiles with MapLibre GL JS, iPhone and iPad on Apple's map; web pages and PDFs draw its route and places without tiles |
 | `card` | `layout` (`figures`\|`details`), `icon?`, `title?`, `image?`, `facts?` [{`label`, `value`}], `note?`, `sources?` [{`url`, `title?`}], `author` | facts at a glance under a title: `figures` shows the values large, side by side, `details` a line each, `label：value`, beside the picture `image`, a web link the app loads by itself; `icon` is one of Lucide's names the card takes (`doc.CardIcons`); a value and the note are inline Markdown; the sources show as a chip after the note, the first by its title or its site's name, with how many more |
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
@@ -146,7 +146,25 @@ in `conflict`. So does one that takes out, with the block it deletes or
 rewrites with nested blocks of its own, a nested block the client never saw,
 as someone added it since, or one changed since it saw it, whatever the
 block's version; a rewrite that keeps the nested blocks, as one of a list
-item's text does, replaces nothing of them.
+item's text does, replaces nothing of them. A session keeps what the client
+saw of 256 pages and 200,000 of their blocks, the pages seen longest ago let
+go past that: until the client reads a page let go again, an edit that
+replaces or deletes a block of it keeps the page before it as a `conflict`,
+and its `conflict` says Leaflet cannot tell whether the block changed.
+Its `list_pages` takes `offset?` and gives `{ pages, folders?, total_pages,
+next_offset? }`: at most 250 pages a part, fewer where they would take more
+than 40,000 bytes of JSON, the folders with the first part, and
+`next_offset`, while there are more, the `offset` to list on from (the
+`leaflet` command reads them all at once). A request's `id` is a string or
+an integer: one of `null`, a fraction, an object or a list is answered
+`-32600` (Invalid Request), and a notification, with none, not at all.
+`leaflet mcp`, as every command of `leaflet`, opens the data folder's
+database only where the app made it, and exits with an error otherwise, so
+a mistyped `LEAFLET_DATA_DIR` makes no database the app never shows. Its
+changes go by the client's name (`clientInfo.title` or `name`), the
+`leaflet` command's by `leaflet-command-line`, which the app shows as
+"Command line" in its language, and a client's of no name by none, shown as
+"Agent".
 It also has `upload_files`: `page_id`, `files: [{path, alt?, position?}]`,
 at most 100, returning `{ inserted_ids }`. It copies each file on this
 computer into the page as the app's Upload does (`store.AddFile`, its
@@ -154,7 +172,10 @@ computer into the page as the app's Upload does (`store.AddFile`, its
 one before it, the first at the end of the page, or where its `position`
 says; the edit then goes as `insert_blocks`' does, with its snapshot. The
 files are copied once the page takes every position and taken off again
-when the page is not saved. Agents add pictures, audio, video and PDFs only,
+when the page is not saved. On Windows a path is one on this computer's own
+drives, as `C:\`, or under `~\`: not another computer's share
+(`\\host\share`, `//host/share`, `file:////host/share`, `\\?\UNC\…`), which
+Windows would open with the user's sign-in. Agents add pictures, audio, video and PDFs only,
 and none to a page other people have or with a public link, as this
 device's record or the app's last read of the other devices' leases says,
 nor move a page into one. With pages syncing and no read of the leases from
@@ -194,7 +215,7 @@ picker's.
 
 ```json
 {
-  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram",
+  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram|card|map",
   "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…), <span style=\"color:#ef4444\">color</span>; for code, the code verbatim",
   "language": "go",
   "tone": "tip",
@@ -246,7 +267,23 @@ stays code where people paste or import Markdown; an agent's write, as
 ```` ```chart ````, ```` ```card ```` or ```` ```map ```` fence that is
 not its block is refused, its error saying why, and writes nothing
 (`doc.FenceError`), so a broken chart never lands on a page as JSON. A Markdown export writes a chart as its title, a table of its
-values and its caption, for people to read.
+values and its caption, for people to read, and a card's values and note
+as a paragraph's text is written: without colors, a mention as `@Name`,
+links as a paragraph's go (a page's to its file in a zip), and none
+starting a block of its own.
+
+What a spec writes is bounded, and one past a bound is an error (a page
+already kept is read as it is): a chart takes at most 2,000 labels and
+50 series, a label and a series' name of 200 characters, a title of 200
+and a caption of 1,000 (`doc.MaxChartLabels` and the rest); a card a
+title of 200 characters, 12 facts, a label of 100 and a value of 400, a
+note of 1,000, a picture's link of 2,048 and 8 sources (`doc.MaxCardTitle`
+and the rest); a map 25 places, each with its `lat` and `lng` (a place
+without them is an error, not a pin at 0, 0), names and a title of 200
+characters, and a route of 60 legs and 40,000 points. A link, an image's,
+a card's picture and sources, is `http` or `https`, to a host, with no
+space of any kind in it (`doc.WebURL`). The app's card and chart dialogs
+cut what is longer than a block keeps rather than refuse it.
 
 A table's `table_style` is `grid`, the default, or `lines`, and `align`
 lists how its columns align, in order: `left`, `center`, `right` or `""`.
@@ -370,7 +407,13 @@ keys, counts and `leaflet mcp`'s versions among them, one block at least,
 and in the first part (`offset` 0 or none) the subpages and the
 comments take at most a quarter of that each, before the blocks. `offset`
 and `limit` are whole numbers, 0 and 1 at least; an `offset` past the last
-block gives none.
+block gives none. The results of a run's calls take at most 120,000
+characters of what the model is sent: past that, the oldest result of more
+than 2,000 is replaced with `{"dropped": …}`, which asks the model to call
+the tool again if it needs it, the newest kept whole, and once they take
+three quarters of that, the newest says so, for the model to keep what it
+needs of each as it goes. `replace_block` counts the blocks it writes, a
+nested block it keeps not among them, towards the 5,000 a run writes.
 
 A public link can start on the page while a run that may read the user's
 other pages works on it, on its device or another. The run reads again
@@ -419,6 +462,10 @@ makes it no better. Reading one tells its site the same, so a run reads at
 most 10 links it picked from pages it read, one that failed among them; the
 pages the instruction, this page or a search gave it are not counted. Once a
 run reads another page, the web is closed to it.
+The run's answer keeps to the same: a ```` ```card ```` fence in it, which
+the chat draws with its picture, loses a picture the run may not load, its
+`image` made `""`, as it streams in and as it is kept (the fences found as
+the Mac and PC app's Markdown view and the phone's blocks find them).
 
 `find_place` and `find_route` are offered with the web's tools, as they
 ask services on the web what a run gives them: Photon (komoot) for places,
@@ -561,8 +608,13 @@ run reads (§2, §7).
    stream in: all of a run's ops are one undo step. A page that is not open
    gets them in its stored content as the run ends.
 4. Before its first op reaches the page, the run keeps the page as it was
-   in `page_history` (`reason: "agent_run"`). A snapshot that can't be kept
-   stops the edits: none is stored that the page can't go back from. A run
+   in `page_history` (`reason: "agent_run"`), its `label` the JSON
+   `{"agent", "request"}`, the agent's name and the start of what it was
+   asked, which the app words in its language as it shows the snapshot
+   (`leaflet mcp`'s is `{"agent"}`; a label earlier versions kept in
+   English, `Before <agent>: <request>`, shows so too). A snapshot that
+   can't be kept stops the edits: none is stored that the page can't go
+   back from. A run
    that fails, runs out of time or is stopped keeps what it changed, for
    Undo.
 5. The run's job stays on the device, in its own `ai_jobs` table, which
@@ -643,7 +695,9 @@ transcription run on the device (§4).
   row that cannot be stored stops that table's pull, and the next pull starts
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
-  can carry an earlier time; rows already stored here are skipped.
+  can carry an earlier time; rows already stored here are skipped. Only a
+  pull's first page goes back so: each page after it goes on from where
+  the one before stopped.
 - Between the pulls, the pages open on a device while someone sees them,
   on screen or through a public link, take another device's edits as they
   are saved. Each save of a page's content is told on the page's private
@@ -701,38 +755,59 @@ transcription run on the device (§4).
   pull has brought every other device's changes in, so that it never
   deletes for good, from what it knew before, a page another device has
   restored since. A device with iCloud sync on syncs before it has found
-  the folder too. Deleting for good sets `purged_at`, which stays, and
+  the folder too. Each item goes as the bin listed it, by its deletion: one
+  restored since, here or by another device whose change came in, or
+  deleted again, which gave it its days in the bin anew, is left as it is.
+  Deleting for good sets `purged_at`, which stays, and
   `deleted_at` with it, the deletion the device saw, and sends them up as
   a change of those columns with a page's `title` (empty), `icon`, `tags`
-  and `default_template_id` (none): the row stays, so the deletion reaches
-  every device, with nothing of what it was. Only a page of the space is
-  deleted for good: a page of someone else's space is its owner's to.
-  The server refuses the deletion for good of a page or file restored, or
-  deleted again, since the deletion the device saw (§7), as one sent late,
-  by a device that was asleep or offline, would be; the device then takes
-  the row as the server has it. So a device that syncs through the server
-  keeps what was on the page until the server takes the deletion, and the
-  page comes back whole if it is refused. Then, or at once on a device
-  that does not sync or syncs through iCloud Drive, which has no server to
-  order a deletion with a restore (one made on another device that its
-  log has not brought yet loses to it), the device takes everything on
-  the page off itself (content, history, comments, recordings, files,
-  conflicts, what of them waits to go up, and the copies in its data
-  folder) and queues the removal of the stored copies of its files and
-  recordings, as for a file deleted for good: those it knew of, and,
-  through the server, every one the server lists for the page as it is
-  deleted for good (`purged_objects`, by `page_id`), those another device
-  of the owner's or people it was shared with put there that it had not
-  heard of too, a recording whose `audio_path` has not come to it found
-  there by its id. Until it has read that list, the deletion stays queued
-  and goes up again. Through iCloud Drive it removes every device's
+  and `default_template_id` (none), or a file's `name` (empty),
+  `mime_type`, `size_bytes` and `storage_path` (none), which the device
+  keeps none of either: the row stays, so the deletion reaches
+  every device, with nothing of what it was. With them goes
+  `seen_updated_at`, the row's `updated_at` as the device last had it from
+  the server, pulled or as the server took its last write of the row,
+  which a change made on the device since does not clear; a row the
+  device never had from the server goes without it. Only a page of the
+  space is deleted for good: a page of someone else's space is its owner's
+  to. The server refuses the deletion for good of a page or file that
+  changed there since `seen_updated_at`, as one restored, or deleted again,
+  since, by its own clock, whatever the devices' clocks say (§7); from an
+  app that sends none, of one restored or deleted again since the deletion
+  the device saw. A deletion sent late, by a device that was asleep or
+  offline, would be one; the device then takes the row as the server has
+  it. So a device that syncs through the server keeps what was on the page
+  until the server takes the deletion, and the page comes back whole if it
+  is refused, with what came for it meanwhile, which its pulls passed by
+  as of a page deleted for good: it pulls the page's tree again whole,
+  rows and content, at once, or on its next pull until it has. Then, or at
+  once on a device that does not sync or syncs through iCloud Drive, which
+  has no server to order a deletion with a restore (one made on another
+  device that its log has not brought yet loses to it), the device takes
+  everything on the page off itself (content, history, comments,
+  recordings, files, conflicts, what of them waits to go up, and the
+  copies in its data folder), puts a page of the space that is under it
+  and not deleted at the top level, as the server does (§7) and as the
+  sidebar shows it, sending nothing, and queues the removal of the stored
+  copies of its files and recordings, as for a file deleted for good:
+  those it knew of whose rows name their own object (a file's
+  `{space}/{file}/{name}`, a recording's `{recorder}/{recording}.{ext}`,
+  or `{recording}.{ext}` in iCloud Drive), and, through the server, every
+  one the server lists for the page as it is deleted for good
+  (`purged_objects`, by `page_id`, read a page of the list at a time in
+  the order of its key), those another device of the owner's or people it
+  was shared with put there that it had not heard of too, a recording
+  whose `audio_path` has not come to it found there by its id, but for one
+  of a file or recording the device has on another page. Until it has
+  read that list, the deletion stays queued and goes up again, and a
+  removal whose recording it cannot look up there waits. Through iCloud Drive it removes every device's
   version of the page (§8) once a batch has the deletion, sent or read,
   and compacts its log on its next pass, leaving out what was on the page
-  and keeping its row only as it is now; it does the same to the batches
-  of the devices not active for 30 days, which compact theirs no more,
-  keeping each batch as it was written but for those entries, on its next
-  pass and then daily for 30 days, as a device active when it heard may
-  go quiet later. Each keeps, across launches, that these are still to
+  and keeping its row only as it is now; one device of those active (§8)
+  does the same to the batches of the devices not active for 30 days,
+  which compact theirs no more, keeping each batch as it was written but
+  for those entries, on its next pass and then daily for 30 days, as a
+  device active when it heard may go quiet later. Each keeps, across launches, that these are still to
   do. A device that pulls a page deleted for good does the same, and
   queues the removal of the stored copies it knows of, as the device that
   deleted it may not have heard of them all: on a page of another space
@@ -743,14 +818,23 @@ transcription run on the device (§4).
   saved, or a snapshot taken, of such a page here is refused.
 - A file deleted for good goes with its bytes. The deleting device removes
   its own copy (only one the app made in its data folder, never the file
-  the user added) and queues the removal of the stored copy, which runs
-  once the row with `purged_at` has gone up: the object in the `files`
-  bucket through Storage's `DELETE /storage/v1/object/files` (an object
-  already gone counts as removed), or the blob in iCloud Drive once a
-  batch has the deletion. An upload still waiting is dropped. A device
-  that pulls a file deleted for good, or deleted without `kept`, removes
-  its copy in its data folder; one in the bin keeps it, to come back with
-  it.
+  the user added), at once, or, through the server, once the server has
+  taken the deletion, and queues the removal of the stored copy, which
+  runs once the row with `purged_at` has gone up: the object in the
+  `files` bucket through Storage's `DELETE /storage/v1/object/files` (an
+  object already gone counts as removed), or the blob in iCloud Drive once
+  a batch has the deletion. The removal goes by itself: the page the file
+  was on deleted for good before it ran leaves it queued, though the
+  file's row no longer says where it is stored. An upload still waiting
+  is dropped. A deletion the server refuses (`file_restored`) brings the
+  file back as the server has it, in the bin or in use, with its copy,
+  and its stored copy stays: a removal of a file that keeps its contents
+  is dropped. A device that pulls a file deleted for good, or deleted
+  without `kept`, removes its copy in its data folder, and keeps none of
+  what it was; one in the bin keeps it, to come back with it. A file
+  deleted for good is listed nowhere, though its row came with
+  `purged_at` and not `deleted_at`, as from a device that restored it as
+  it was deleted for good elsewhere.
 - A file's row goes up after its contents, to the server as to iCloud
   Drive: a device that has the row can fetch them, and never takes a file
   still uploading for one that is gone. A recording's row goes first, as
@@ -885,16 +969,29 @@ recordings, files and pending invitations go as it is set
 its deletion; the objects of every file and recording on it are listed,
 by page, for the space's owner to remove (`purged_objects`, which they
 alone read, and `purged_objects_remove`, which lets them remove too those
-others put on it under their own space or account), the list forgetting
-each once it is gone from storage, as the next page is deleted for good;
-no one reads or writes anything on it after (`can_read_page`), nor clears
-its `purged_at` or `deleted_at` (`page_purged`, or `forbidden_restore`),
-and any other change of its row leaves it as it was. Only the space's
-owner sets it (`forbidden_purge`), and only on a page still in the bin as
-the writer saw it: one whose `deleted_at` is later than the one sent, or
-which is not deleted and changed after it, as when it was restored, is
-refused (`page_restored`; `purges_its_deletion`, to the millisecond).
-A file is the same (`files_purge`, `file_restored`): set by the space's owner, kept, and
+others put on it under their own space or account): only a file's path
+that names its own object and a recording's `audio_path` that names its
+own audio, each listed for whoever it was listed for first, the list
+forgetting what of that owner's is gone from storage as the next page of
+theirs is deleted for good. A live page under it goes to the top level,
+out of the reach of the shares above it (`pages_purged`), as does a page
+made or restored under one deleted for good (`pages_purge`); a deleted
+one stays under it, in the bin. No one reads or writes anything on it
+after (`can_read_page`), nor moves a page under it (`forbidden_move`),
+nor clears its `purged_at` or `deleted_at` (`page_purged`, or
+`forbidden_restore`), and any other change of its row leaves it as it
+was. Only the space's owner sets it (`forbidden_purge`), and only on a
+page still in the bin as the writer saw it. A writer sends
+`seen_updated_at` with it, the row's `updated_at` as it last had the row
+from the server: a row that has changed on the server since, by its
+`updated_at` to the millisecond, as when it was restored or deleted again
+elsewhere, is refused (`page_restored`), whatever the devices' clocks.
+One sent without it, as by an app from before, goes by the deletion: one
+whose `deleted_at` is later than the one sent, or which is not deleted
+and changed after it, is refused (`purges_its_deletion`, to the
+millisecond). No row keeps `seen_updated_at`: it is null on every row,
+whatever a write sends.
+A file is the same (`files_purge`, `file_restored`, `seen_updated_at`): set by the space's owner, kept, and
 with it the row keeps none of what the file was (`scrub_deleted_file`),
 as it keeps none when deleted without `kept`; a file in the bin, deleted
 with `kept`, keeps its name, path and object, to be restored, and
@@ -945,7 +1042,10 @@ its page. A
 `files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
-then remove its object), but not remove its row. Its `folder_id` is a folder of its space
+then remove its object), but not remove its row. Its `storage_path`
+names its own object, `{space_id}/{id}/{name}`, or nothing: any other is
+refused (`files_storage_path_own`, `23514`), so no file names someone
+else's object for a deletion for good to list. Its `folder_id` is a folder of its space
 (`folder_in_other_space` otherwise), and its `page_id`, as it is set, a
 page of its space or one its writer can edit, as an editor's upload to a
 page shared with them is (`forbidden_file_page` otherwise). A comment with
@@ -1040,8 +1140,8 @@ com~apple~CloudDocs/Leaflet` on macOS, `%USERPROFILE%\iCloudDrive\Leaflet`
 with iCloud for Windows). Every file but space.json and a blob has one
 writer, so iCloud never keeps two versions of one, but for what a page
 deleted for good takes away: any device removes every device's version of
-that page, and takes what was on it out of the batches of devices gone
-quiet (Compaction). Versions are in the files, never in their times; and
+that page, and one device takes what was on it out of the batches of
+devices gone quiet (Compaction). Versions are in the files, never in their times; and
 nothing depends on being told of changes, which a reader finds by
 listing.
 
@@ -1119,26 +1219,49 @@ Leaflet/
   rewrites it empty and sends everything again if it does not parse. A
   reader skips a batch that stays damaged only when later batches exist,
   after 20 passes and a day; a device compacting its log skips one of its
-  own the same way.
+  own the same way. A reader held up by a damaged batch, or by batches
+  missing, goes on from the snapshot the device's device.json names
+  (`log_from`), which holds all before it, once it is here, reading none
+  of the batches between; it reads them one by one for a snapshot only
+  while device.json cannot be read.
 - **Compaction.** Past 500 batches, or on the next pass once it has heard
-  of a page deleted for good, a device writes the latest entry of each
+  of a page or a file deleted for good, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true` (for a row, with
   each earlier entry that changed a column the later ones did not), leaving
   out what was on pages deleted for good and their rows but as they are
-  now, sets `log_from` to its seq, and removes the batches before it. A
-  reader that finds batches missing goes on from the first snapshot after
+  now, the rows of files deleted for good too (no name, type, size or
+  path), sets `log_from` to its seq, and removes the batches before it. A
+  reader that finds batches missing goes on from the snapshot after
   the gap, as a compaction cut short leaves batches before its snapshot.
-  A device that has heard of a page deleted for good also rewrites the
+  A device that has heard of a page or a file deleted for good also rewrites the
   batches of each device not active for 30 days, which compacts its own no
   more, leaving out the same entries and keeping each batch otherwise as it
-  was written: on its next pass, and then daily until 30 days after it
+  was written, and removes that device's versions of pages deleted for
+  good: on its next pass, and then daily until 30 days after it
   heard, by when every device that had not heard either has gone quiet or
-  has come back and compacted its own. It keeps on the device whether its
+  has come back and compacted its own. Only one device rewrites them, the
+  one with the lowest ID among those active within the last day, as its
+  device.json says, so that no two write a batch at once, which iCloud
+  would keep twice; the others look again daily, as that one may go
+  quiet too. A copy iCloud made of a quiet device's batch all the same
+  goes, as no one reads it, or is rewritten the same way when it is of
+  another batch than the one it is beside. A batch that does not parse
+  holds nothing to leave out. It keeps on the device whether its
   log is still to compact, when it last heard of such a page and when it
   last read every quiet device's batches, so that a pass cut short, or an
   app quit, leaves none of it undone.
+- **A deletion for good is final.** An entry with `purged_at` applies it
+  to a row that has none, whatever the versions of its columns: a row sent
+  again whole after a restore that crossed the deletion is later than the
+  deletion, and would otherwise keep it out on some devices but not on
+  others. A reader that has a page deleted for good removes a device's
+  version of it that a batch names, written by a device that had not
+  heard, and waits for none.
 - **A device that finds** in its own folder a batch after the last it wrote
-  (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
+  (other than the one it notes it is writing), or a copy iCloud made that
+  is not a version of the batch beside it (the same `seq` and
+  `written_at`, as two devices rewriting its log while it was quiet leave,
+  which it removes), shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
 - **Blobs** are written by any device that has the file or audio, the same

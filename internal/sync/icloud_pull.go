@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -185,7 +186,26 @@ func (s *Service) readBatch(peer string, seq int64) (icloud.Batch, error) {
 	return b, s.folder().ReadJSON(rel, &b)
 }
 
+// snapshotAfter is the index in seqs, from i on, of a snapshot of the peer's: the one its device.json names as where
+// its log starts (log_from), its latest, which holds all before it, or none while that is not here yet. Only while
+// device.json cannot be read are the batches read one by one for the first snapshot among them.
 func (s *Service) snapshotAfter(peer string, seqs []int64, i int) int {
+	var d deviceFile
+	rel, err := icloud.DevicePath(peer)
+	if err == nil {
+		err = s.folder().ReadJSON(rel, &d)
+	}
+	if err == nil {
+		j, found := slices.BinarySearch(seqs, d.LogFrom)
+		if !found || j < i {
+			return -1
+		}
+		if b, err := s.readBatch(peer, d.LogFrom); err == nil && b.Snapshot {
+			return j
+		} else if errors.Is(err, icloud.ErrNotReady) && !errors.Is(err, icloud.ErrDamaged) {
+			return -1
+		}
+	}
 	for ; i < len(seqs); i++ {
 		if b, err := s.readBatch(peer, seqs[i]); err == nil && b.Snapshot {
 			return i
@@ -198,6 +218,12 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 	switch e.Kind {
 	case "content":
 		if !icloud.ValidID(e.PageID) {
+			return nil
+		}
+		// The version of a page deleted for good, written by a device that had not heard, is not merged, nor
+		// waited for: it goes from the folder, as nothing of what was on the page stays there.
+		if s.st.IsPurged(e.PageID) {
+			s.dropPageFile(peer, e.PageID)
 			return nil
 		}
 		waiting[e.PageID] = true

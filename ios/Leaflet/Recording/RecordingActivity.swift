@@ -17,8 +17,11 @@ final class RecordingActivity {
 
     private nonisolated static let fresh: TimeInterval = 120
 
-    private nonisolated static func staleAfter(_ state: State) -> Date? {
-        state.paused ? nil : Date().addingTimeInterval(fresh)
+    /// When the activity goes stale unless the app says it is still on,
+    /// paused or not: an app that was quit leaves it showing as stopped,
+    /// not as a recording with buttons that would do nothing.
+    nonisolated static func staleDate(from now: Date = Date()) -> Date {
+        now.addingTimeInterval(fresh)
     }
 
     private init() {}
@@ -32,7 +35,7 @@ final class RecordingActivity {
         do {
             let activity = try Activity.request(
                 attributes: RecordingAttributes(),
-                content: .init(state: state, staleDate: Self.staleAfter(state)))
+                content: .init(state: state, staleDate: Self.staleDate()))
             id = activity.id
             shown = state
             watch(activity)
@@ -70,7 +73,7 @@ final class RecordingActivity {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.fresh / 2))
                 guard !Task.isCancelled, let self else { return }
-                if let id = self.id, let shown = self.shown, !shown.paused {
+                if let id = self.id, let shown = self.shown {
                     await Self.update(id, to: shown)
                 }
             }
@@ -132,7 +135,7 @@ final class RecordingActivity {
     private nonisolated static func update(_ id: String, to state: State) async {
         guard let activity = Activity<RecordingAttributes>.activities.first(where: { $0.id == id })
         else { return }
-        await activity.update(.init(state: state, staleDate: staleAfter(state)))
+        await activity.update(.init(state: state, staleDate: staleDate()))
     }
 
     private nonisolated static func end(_ ids: [String]) async {

@@ -81,22 +81,10 @@ struct FormatCommands: View {
                 .keyboardShortcut("k")
             Divider()
             Menu(LI.turnInto) {
-                Button(L.hostSlashText) { editor?.setType("paragraph") }
-                    .keyboardShortcut("0", modifiers: [.command, .option])
-                Button(L.hostSlashHeading1) { editor?.setType("heading", ["level": .int(1)]) }
-                    .keyboardShortcut("1", modifiers: [.command, .option])
-                Button(L.hostSlashHeading2) { editor?.setType("heading", ["level": .int(2)]) }
-                    .keyboardShortcut("2", modifiers: [.command, .option])
-                Button(L.hostSlashHeading3) { editor?.setType("heading", ["level": .int(3)]) }
-                    .keyboardShortcut("3", modifiers: [.command, .option])
-                Button(L.hostSlashBulleted) { editor?.setType("bulleted_list") }
-                    .keyboardShortcut("8", modifiers: [.command, .shift])
-                Button(L.hostSlashNumbered) { editor?.setType("numbered_list") }
-                    .keyboardShortcut("7", modifiers: [.command, .shift])
-                Button(L.hostSlashTodo) { editor?.setType("todo_list", ["checked": .bool(false)]) }
-                    .keyboardShortcut("l", modifiers: [.command, .shift])
-                Button(L.hostSlashQuote) { editor?.setType("quote") }
-                Button(L.hostSlashCode) { editor?.setType("code") }
+                ForEach(Array(TurnInto.all.enumerated()), id: \.offset) { _, t in
+                    Button(t.title) { editor?.setType(t.type, t.data) }
+                        .keyboardShortcut(t.shortcut)
+                }
             }
             Button(LI.moveBlockUp) { editor?.moveBlock(by: -1) }
                 .keyboardShortcut(.upArrow, modifiers: [.option, .shift])
@@ -104,5 +92,17 @@ struct FormatCommands: View {
                 .keyboardShortcut(.downArrow, modifiers: [.option, .shift])
         }
         .disabled(editor?.textView.isEditable != true)
+    }
+}
+
+extension TurnInto {
+    /// The shortcut as a menu of the app's takes it.
+    var shortcut: KeyboardShortcut? {
+        guard let key = key?.first else { return nil }
+        var flags: EventModifiers = []
+        if modifiers.contains(.command) { flags.insert(.command) }
+        if modifiers.contains(.alternate) { flags.insert(.option) }
+        if modifiers.contains(.shift) { flags.insert(.shift) }
+        return KeyboardShortcut(KeyEquivalent(key), modifiers: flags)
     }
 }

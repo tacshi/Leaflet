@@ -14,6 +14,18 @@ struct RecordingTests {
         #expect(RecordingState(finishing: ["recording"]).transcribes)
     }
 
+    @Test func theAudioSessionGoesOnlyOnceNothingHasIt() {
+        #expect(AudioSession.idle(recording: false, file: false, microphone: false))
+        #expect(!AudioSession.idle(recording: false, file: true, microphone: false))
+        #expect(!AudioSession.idle(recording: true, file: false, microphone: false))
+        #expect(!AudioSession.idle(recording: false, file: false, microphone: true))
+    }
+
+    @Test func aPausedRecordingsActivityStillGoesStale() {
+        let now = Date()
+        #expect(RecordingActivity.staleDate(from: now) == now.addingTimeInterval(120))
+    }
+
     @Test func timeTheAppWasAwayIsNoStall() async throws {
         // Every wait of a second reads here as one the app spent suspended: a transcription
         // that goes on through them is not given up, though it never beats.

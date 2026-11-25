@@ -112,3 +112,12 @@ func TestSkillColors(t *testing.T) {
 		}
 	}
 }
+
+// A map numbers its places on their pins, so the guide has their names
+// written without numbers of their own, which would show twice.
+func TestExpressiveMapsNumberTheirPlaces(t *testing.T) {
+	s, _ := Get(Expressive)
+	if !strings.Contains(s.Body, "A map numbers its places 1, 2, 3 on their pins") || !strings.Contains(s.Body, `not "① 南京博物院"`) {
+		t.Error("the guide does not say a map numbers its places")
+	}
+}

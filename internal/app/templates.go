@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"log"
+	"maps"
 	"strings"
 
 	"github.com/egoist/mygo/i18n"
@@ -333,17 +334,33 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 	}
 }
 
+// templateHint is a template's hint as made for its stamp: when the template
+// was last changed, and the language.
+type templateHint struct{ stamp, hint string }
+
 func (a *App) templateHint(t store.Page) string {
-	key := t.ID + "@" + t.UpdatedAt.String() + "@" + i18n.Locale()
-	if h, ok := a.templateHints[key]; ok {
-		return h
+	stamp := t.UpdatedAt.String() + "@" + i18n.Locale()
+	if h, ok := a.templateHints[t.ID]; ok && h.stamp == stamp {
+		return h.hint
 	}
 	hint := templates.Hint(a.st, t, templates.Subpages(a.templates))
 	if a.templateHints == nil {
-		a.templateHints = map[string]string{}
+		a.templateHints = map[string]templateHint{}
 	}
-	a.templateHints[key] = hint
+	a.templateHints[t.ID] = templateHint{stamp, hint}
 	return hint
+}
+
+// dropTemplateHints lets go of the hints of templates gone.
+func (a *App) dropTemplateHints() {
+	if len(a.templateHints) == 0 {
+		return
+	}
+	kept := make(map[string]bool, len(a.templates))
+	for _, t := range a.templates {
+		kept[t.ID] = true
+	}
+	maps.DeleteFunc(a.templateHints, func(id string, _ templateHint) bool { return !kept[id] })
 }
 
 func (a *App) searchHits(query string) []store.SearchHit {

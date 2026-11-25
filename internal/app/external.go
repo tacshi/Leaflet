@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -18,12 +19,18 @@ import (
 	"leaflet/locales"
 )
 
+// externalClients are the agents Settings › External shows how to set up by hand, by their names, the last any other,
+// which goes by the app's language's word.
 var externalClients = []struct{ id, label string }{
-	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
+	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", ""},
 }
 
+// externalState is Settings › External: the agents found, and where the app runs from and whether macOS moved it there
+// to run it (App Translocation), all read again as they are checked.
 type externalState struct {
 	agents        []agentStatus
+	exe           string
+	moved         bool
 	checked       time.Time
 	checking      bool
 	busy, waiting string
@@ -40,8 +47,7 @@ func (a *App) externalSettings(c *ui.Context) {
 	if !a.external.checking && time.Since(a.external.checked) > 3*time.Second {
 		a.checkAgents()
 	}
-	exe, dir := executable(), a.st.Dir
-	moved := translocated(exe)
+	exe, dir, moved := a.external.exe, a.st.Dir, a.external.moved
 	if moved {
 		notice(c, "warn", "triangle-alert", locales.ExternalMoveFirst(), nil)
 	}
@@ -145,10 +151,7 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 		ui.Row(c).Padding(12, 16).FillWidth().Children(func() {
 			labels := make([]string, len(externalClients))
 			for i, cl := range externalClients {
-				labels[i] = cl.label
-				if cl.id == "other" {
-					labels[i] = locales.ExternalClientOther()
-				}
+				labels[i] = cmp.Or(cl.label, locales.ExternalClientOther())
 			}
 			ui.Segmented(c.Key("client"), &a.external.client, labels...)
 		})
@@ -169,6 +172,8 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 
 func (a *App) checkAgents() {
 	a.external.checking = true
+	a.external.exe = executable()
+	a.external.moved = translocated(a.external.exe)
 	go func() {
 		found := a.findAgents()
 		a.update(func() { a.foundAgents(found) })

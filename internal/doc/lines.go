@@ -342,44 +342,16 @@ func (p *lineParser) closeCode() {
 		kids[last] = MathNode(text)
 	case p.code.Str("language") == "mermaid":
 		kids[last] = DiagramNode(text)
-	case p.code.Str("language") == "card" && cardFence(text, &kids[last]):
-	case p.code.Str("language") == "map" && mapFence(text, &kids[last]):
-	case p.code.Str("language") == "chart" && chartFence(text, &kids[last]):
 	default:
-		p.code.SetDelta(Delta{{Text: text}}.Compact())
+		// A ```chart, ```card or ```map fence is the block its JSON is; one
+		// that is none stays code.
+		if n, _ := fenceNode(p.code.Str("language"), text); n != nil {
+			kids[last] = n
+		} else {
+			p.code.SetDelta(Delta{{Text: text}}.Compact())
+		}
 	}
 	p.code, p.codeIn = nil, nil
-}
-
-// cardFence makes *at the card a ```card fence's JSON is, as an agent's
-// answer shows one, reporting whether it is one; a fence that is not stays
-// code.
-func cardFence(text string, at **Node) bool {
-	n, ok := CardNodeFromJSON(text)
-	if ok {
-		*at = n
-	}
-	return ok
-}
-
-// chartFence makes *at the chart a ```chart fence's JSON is, reporting
-// whether it is one; a fence that is not stays code.
-func chartFence(text string, at **Node) bool {
-	n, ok := ChartNodeFromJSON(text)
-	if ok {
-		*at = n
-	}
-	return ok
-}
-
-// mapFence makes *at the map a ```map fence's JSON is, its route resolved
-// already, reporting whether it is one; a fence that is not stays code.
-func mapFence(text string, at **Node) bool {
-	n, ok := MapNodeFromJSON(text)
-	if ok {
-		*at = n
-	}
-	return ok
 }
 
 func (t *textBlock) addLine(s string) {
@@ -614,7 +586,7 @@ func imageLine(line string) *Node {
 	if len(in) == 0 || in[0].Kind != parser.Image || in[0].Next != len(in) {
 		return nil
 	}
-	if strings.IndexFunc(in[0].Dest, unicode.IsSpace) >= 0 || !agentURL(in[0].Dest) {
+	if !WebURL(in[0].Dest) {
 		return nil
 	}
 	n, err := ImageNode(in[0].Dest)

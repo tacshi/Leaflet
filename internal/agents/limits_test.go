@@ -136,6 +136,82 @@ func TestRunStopsAtTheBlockLimit(t *testing.T) {
 	}
 }
 
+// A rewrite writes the blocks it makes, its nested ones too, and those count
+// towards what a run writes; the nested blocks it keeps it does not write.
+func TestRewritesCountTowardsTheBlockLimit(t *testing.T) {
+	x := executor(page())
+	x.written = maxRunBlocks
+	kids := []any{}
+	for range 1500 {
+		kids = append(kids, map[string]any{"type": "bulleted_list", "text": "x"})
+	}
+	if out := x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "bulleted_list", "text": "list", "children": kids}}); out["error"] == nil || len(x.Ops) != 0 {
+		t.Errorf("past the limit: %v", out)
+	}
+	x.written = maxRunBlocks - 3
+	if out := x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "bulleted_list", "text": "list", "children": kids[:2]}}); out["error"] != nil || x.written != maxRunBlocks {
+		t.Fatalf("up to the limit: %v, %d written", out, x.written)
+	}
+	x.written = maxRunBlocks - 1
+	if out := x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "bulleted_list", "text": "the list"}}); out["error"] != nil || x.written != maxRunBlocks {
+		t.Errorf("a rewrite keeping its two nested items: %v, %d written", out, x.written)
+	}
+	if n := x.Ctx.Content.Find("l1"); len(n.Children) != 2 {
+		t.Errorf("l1 holds %d nested items", len(n.Children))
+	}
+}
+
+// readingModel reads the page again each round, as a model summing up a long
+// page part by part does, and keeps how much of what it was sent the results
+// of its calls took.
+type readingModel struct {
+	rounds  int
+	results []int
+	dropped bool
+	told    bool
+}
+
+func (m *readingModel) Chat(_ context.Context, _ string, messages, _ []map[string]any, _ int) (ChatResult, error) {
+	total := 0
+	for _, msg := range messages {
+		if msg["role"] == "tool" {
+			s := msg["content"].(string)
+			total += utf16Len(s)
+			m.dropped = m.dropped || s == resultDropped
+			m.told = m.told || strings.HasSuffix(s, resultsNearlyFull)
+		}
+	}
+	m.results = append(m.results, total)
+	if m.rounds++; m.rounds < MaxRounds {
+		return ChatResult{ToolCalls: []ToolCall{{ID: fmt.Sprint("c", m.rounds), Name: "read_page", Arguments: "{}"}}}, nil
+	}
+	return ChatResult{Content: "The gist."}, nil
+}
+
+// The results of a run's calls take no more of the conversation than a
+// model reads with the rest: the oldest large ones make room for new ones.
+func TestOldResultsMakeRoom(t *testing.T) {
+	var blocks []*doc.Node
+	for i := range 3000 {
+		n := &doc.Node{ID: fmt.Sprintf("b%d", i), Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: strings.Repeat("words of a long page ", 10)}})
+		blocks = append(blocks, n)
+	}
+	m := &readingModel{}
+	res, err := RunLocal(context.Background(), m, Request{Model: "m", SupportsTools: true, Instruction: "Sum it up"}, executor(doc.FromBlocks(blocks)).Ctx, Events{})
+	if err != nil || res.Reply != "The gist." {
+		t.Fatalf("reply %q, %v", res.Reply, err)
+	}
+	for round, n := range m.results {
+		if n > resultsBudget+utf16Len(resultsNearlyFull) {
+			t.Errorf("round %d was sent %d units of results", round, n)
+		}
+	}
+	if !m.dropped || !m.told {
+		t.Errorf("results dropped %v, the model told %v", m.dropped, m.told)
+	}
+}
+
 func TestTooManyCallsInOneAnswer(t *testing.T) {
 	var calls []any
 	for i := range maxRoundCalls + 1 {
@@ -210,6 +286,21 @@ func TestRunSaidInTheAppsLanguage(t *testing.T) {
 	}
 	if got := Describe(&Run{Stopped: true}); got != "変更を加える前に停止しました。" {
 		t.Errorf("reply %q", got)
+	}
+	for err, want := range map[error]string{
+		errIdle:                                  "モデルの応答が止まりました。もう一度お試しください。",
+		errTooLong:                               "応答が長すぎて読み取れません。",
+		errRedirect:                              "サーバーが別のアドレスへのリダイレクトを返しましたが、Leaflet はリダイレクトをたどりません。",
+		signInError{errors.New("invalid_grant")}: "ChatGPT のサインインに失敗しました：invalid_grant",
+		signInError{errTooLong}:                  "ChatGPT のサインインに失敗しました：応答が長すぎて読み取れません。",
+		unverified("ChatGPT's identity token has expired"): "Leaflet は ChatGPT のサインインを確認できなかったため、使用しませんでした。もう一度お試しください。",
+	} {
+		if got := err.Error(); got != want {
+			t.Errorf("error %q, want %q", got, want)
+		}
+	}
+	if !errors.Is(signInError{errTooLong}, errTooLong) {
+		t.Error("a sign-in's error is not its cause")
 	}
 }
 

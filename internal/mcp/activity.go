@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
@@ -42,6 +43,10 @@ type Activity struct {
 	Near string `json:"near,omitempty"`
 }
 
+// ShownAgent is the agent's name as the app shows it, in the app's own words
+// for the leaflet command and for an agent with no name of its own.
+func (a Activity) ShownAgent() string { return agents.ShownName(a.Agent) }
+
 // ParseActivities reads an agent's last changes as Activities keeps them,
 // the oldest first.
 func ParseActivities(raw string) []Activity {
@@ -65,20 +70,20 @@ func (s *Server) noteActivity(tool, pageID string, before, after *doc.Content, o
 	if len(a.Added)+len(a.Changed) == 0 && a.Removed > 0 {
 		a.Near = nearRemoved(before, after)
 	}
-	key := ActivityPrefix + strings.ToLower(s.agent)
-	kept, _ := s.st.Value(key)
-	list := slices.DeleteFunc(ParseActivities(kept), func(k Activity) bool { return k.At < now-age || k.At > now+age })
-	// Each comes after the one before, in the same millisecond too, as the
-	// app takes in those after the last it took.
-	if n := len(list); n > 0 {
-		a.At = max(a.At, list[n-1].At+1)
-	}
-	list = append(list, a)
-	list = list[max(len(list)-keptActivity, 0):]
-	raw, err := json.Marshal(list)
-	if err == nil {
-		err = s.st.SetValue(key, string(raw))
-	}
+	// The changes are read and kept again in one transaction, as two servers
+	// of agents of one name, as two sessions of Claude Code, each add theirs.
+	err := s.st.UpdateValue(ActivityPrefix+strings.ToLower(s.agent), func(kept string, _ bool) (string, error) {
+		list := slices.DeleteFunc(ParseActivities(kept), func(k Activity) bool { return k.At < now-age || k.At > now+age })
+		// Each comes after the one before, in the same millisecond too, as the
+		// app takes in those after the last it took.
+		at := a
+		if n := len(list); n > 0 {
+			at.At = max(at.At, list[n-1].At+1)
+		}
+		list = append(list, at)
+		raw, err := json.Marshal(list[max(len(list)-keptActivity, 0):])
+		return string(raw), err
+	})
 	if err != nil {
 		log.Printf("mcp: %v", err)
 	}
@@ -88,7 +93,7 @@ func (s *Server) noteActivity(tool, pageID string, before, after *doc.Content, o
 // holds changed or moved, and how many of before's it lost, not counting
 // those in a block it lost too.
 func blockChanges(before, after *doc.Content, ops []doc.Op) (added, changed []string, removed int) {
-	was, in := map[string]string{}, map[string]string{}
+	was, in := map[string]uint64{}, map[string]string{}
 	units(before, func(n, parent *doc.Node) {
 		was[n.ID] = own(n)
 		if parent != nil {

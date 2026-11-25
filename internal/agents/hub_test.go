@@ -212,7 +212,7 @@ func TestOpenPageOpNotAppliedWithoutItsConflict(t *testing.T) {
 	h := NewHub(st, nil, openHost{ed: ed})
 	run := &Run{ID: "r1", Ops: ops}
 	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
-	d := h.newDelivery(p.ID, run, local)
+	d := h.newDelivery(p.ID, run)
 	h.finish(h.Session(p.ID), run, Request{Instruction: "Rewrite"}, local, read, d, Result{Reply: "Rewrote it."}, nil, RunOptions{})
 	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
 		t.Errorf("run %q, error %q", run.Status, run.Error)
@@ -333,7 +333,7 @@ func TestOpWhileComposingKeepsItsText(t *testing.T) {
 	rewrite := read.Clone()
 	rewrite.SetDelta(doc.Delta{{Text: "Ship the editor first.and more"}})
 	h := NewHub(st, nil, stubHost{})
-	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama"}})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"})
 	if err := d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read}, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,6 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	open, _ := live.Open(st, p.ID, live.Options{})
 	open.Attach(liveEditor{ed})
 	h := NewHub(st, nil, stubHost{})
-	local := Option{Provider: store.Provider{ID: "ollama"}}
 	rewrite := func(text string) doc.Op {
 		was := ed.Content.Find("p1").Clone()
 		n := was.Clone()
@@ -365,7 +364,7 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 	ed.PlaceCaret("p1", -1)
 	ed.SetMarkedText(nil, "an", ui.TextInputRange{Start: 2, End: 2})
 	_ = open.Doc()
-	d := h.newDelivery(p.ID, &Run{ID: "r1"}, local)
+	d := h.newDelivery(p.ID, &Run{ID: "r1"})
 	d.read = before
 	if err := d.apply(open, op, 0); err != nil {
 		t.Fatal(err)
@@ -381,7 +380,7 @@ func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
 		t.Fatal("no composition")
 	}
 	op = rewrite("Ship the editor first.and morean, then the rest.")
-	d = h.newDelivery(p.ID, &Run{ID: "r2"}, local)
+	d = h.newDelivery(p.ID, &Run{ID: "r2"})
 	d.read = composing
 	if err := d.apply(open, op, 0); err != nil {
 		t.Fatal(err)
@@ -403,7 +402,7 @@ func TestRunOnAnOpenPageKeepsItsUndoAsItGoes(t *testing.T) {
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add a line"}, reply)
 	o := RunOptions{Surface: "sidebar", Instruction: "Add a line", Reply: reply}
 	before := ed.Content.Copy()
-	d := h.newDelivery(p.ID, run, local)
+	d := h.newDelivery(p.ID, run)
 	h.arrived(s, run, local, before, d, o, insertAfter("p1", "x1", "one"), "Added a line")
 
 	if ed.Content.Find("x1") == nil {
@@ -432,7 +431,7 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
 	run := &Run{ID: "r1"}
-	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
+	d := h.newDelivery(p.ID, run)
 	work := ed.Content.Copy()
 	var ops []doc.Op
 	agent := func(op doc.Op) {
@@ -492,7 +491,7 @@ func TestTakingOutAFilledInLinkCardKeepsNothing(t *testing.T) {
 	st := openStore(t)
 	p, ed := openPage(t, st)
 	h := NewHub(st, nil, openHost{ed: ed})
-	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"})
 	work := ed.Content.Copy()
 	var ops []doc.Op
 	agent := func(op doc.Op) {
@@ -530,7 +529,7 @@ func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	h := NewHub(st, nil, openHost{ed: ed})
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1"}
-	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}})
+	d := h.newDelivery(p.ID, run)
 	work := ed.Content.Copy()
 	block := func(text string) *doc.Node {
 		n := &doc.Node{Type: "paragraph"}
@@ -572,7 +571,7 @@ func TestStreamWithoutItsConflictFailsTheRun(t *testing.T) {
 	s := h.Session(p.ID)
 	run := &Run{ID: "r1"}
 	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
-	d := h.newDelivery(p.ID, run, local)
+	d := h.newDelivery(p.ID, run)
 	work := ed.Content.Copy()
 	before := work.Copy()
 	block := func(text string) *doc.Node {
@@ -781,7 +780,7 @@ func TestRunEndingAfterSignOutStoresNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	option := Option{Provider: store.Provider{Name: "Local"}}
-	h.finish(s, run, Request{PageID: p.ID}, option, before, h.newDelivery(p.ID, run, option),
+	h.finish(s, run, Request{PageID: p.ID}, option, before, h.newDelivery(p.ID, run),
 		Result{Reply: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}, Edits: []Edit{{Summary: "x"}}}, nil,
 		RunOptions{Reply: reply, Done: func(*Run) { done = true }})
 	hist, _ := st.History(p.ID)
@@ -1162,7 +1161,7 @@ func TestStopAfterTheRunFinishedKeepsItsReply(t *testing.T) {
 	s.Runs, s.Running = []*Run{run}, true
 	reply := &Message{Pending: true}
 	option := Option{Provider: store.Provider{Name: "Local"}}
-	h.finish(s, run, Request{PageID: "p1"}, option, doc.Empty(), h.newDelivery("p1", run, option),
+	h.finish(s, run, Request{PageID: "p1"}, option, doc.Empty(), h.newDelivery("p1", run),
 		Result{Reply: "It is a plan."}, nil, RunOptions{Reply: reply})
 	if run.Status != "done" || run.Stopped || run.Reply != "It is a plan." || reply.Text != "It is a plan." {
 		t.Errorf("run %+v, reply %+v", run, reply)
@@ -1412,7 +1411,7 @@ func TestChatKeepsTheRunningRunAlone(t *testing.T) {
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add lines"}, reply)
 	o := RunOptions{Surface: "sidebar", Instruction: "Add lines", Reply: reply}
 	before := ed.Content.Copy()
-	d := h.newDelivery(p.ID, run, local)
+	d := h.newDelivery(p.ID, run)
 	h.arrived(s, run, local, before, d, o, insertAfter("p1", "x1", "one"), "Added a line")
 	chat, _ := st.Value(chatKey(p.ID))
 	for i, id := range []string{"x2", "x3"} {
@@ -1438,7 +1437,7 @@ func TestChatKeepsTheRunningRunAlone(t *testing.T) {
 	s.Runs = append(s.Runs, run2)
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add more"}, reply2)
 	o2 := RunOptions{Surface: "sidebar", Instruction: "Add more", Reply: reply2}
-	d2 := h.newDelivery(p.ID, run2, local)
+	d2 := h.newDelivery(p.ID, run2)
 	h.arrived(s, run2, local, ed.Content.Copy(), d2, o2, insertAfter("x3", "y1", "one"), "Added a line")
 	d2.chatSaved = d2.chatSaved.Add(-chatSaveEvery)
 	h.arrived(s, run2, local, ed.Content.Copy(), d2, o2, insertAfter("y1", "y2", "two"), "Added a line")
@@ -1894,7 +1893,7 @@ func TestUndoLeavesOutAnOpThatDidNotApply(t *testing.T) {
 		run := &Run{ID: "r1", Ops: ops}
 		s.Runs = append(s.Runs, run)
 		local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
-		h.finish(s, run, Request{Instruction: "Rewrite"}, local, read, h.newDelivery(p.ID, run, local), Result{Reply: "Done."}, nil, RunOptions{})
+		h.finish(s, run, Request{Instruction: "Rewrite"}, local, read, h.newDelivery(p.ID, run), Result{Reply: "Done."}, nil, RunOptions{})
 		content := func() *doc.Content {
 			if open {
 				return ed.Content
@@ -1931,7 +1930,7 @@ func TestOpenPageRunNotAppliedWithoutItsSnapshot(t *testing.T) {
 	run := &Run{ID: "r1"}
 	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama"}}
 	before := ed.Content.Copy()
-	d := h.newDelivery(p.ID, run, local)
+	d := h.newDelivery(p.ID, run)
 	h.arrived(s, run, local, before, d, RunOptions{}, insertAfter("p1", "x1", "one"), "Added a line")
 	if ed.Content.Find("x1") != nil {
 		t.Error("an op went in without the page's snapshot")

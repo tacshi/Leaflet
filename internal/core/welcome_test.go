@@ -89,17 +89,25 @@ func TestWelcomePage(t *testing.T) {
 			t.Errorf("the guide does not say %q", says)
 		}
 	}
-	var formula, root, colored, highlit, notes bool
+	var formula, colored, highlit, notes bool
+	var inline int
+	var section, mathIn string
 	var tables []*doc.Node
 	for _, n := range c.All() {
 		for _, r := range n.Delta() {
 			formula = formula || r.Attrs.Math && r.Text == "E = mc^2"
-			root = root || r.Attrs.Math && r.Text == `\sqrt{a^2 + b^2}`
+			if r.Attrs.Math {
+				inline++
+			}
 			colored = colored || r.Attrs.Color != ""
 			highlit = highlit || r.Attrs.Background != ""
 		}
 		notes = notes || n.Type == "video" && strings.HasPrefix(n.Str("notes"), "0:00 ")
 		switch n.Type {
+		case "heading":
+			section = n.Delta().Plain()
+		case "math_equation":
+			mathIn = section
 		case "table":
 			tables = append(tables, n)
 		case "card":
@@ -113,8 +121,11 @@ func TestWelcomePage(t *testing.T) {
 			}
 		}
 	}
-	if !formula || !root || !colored || !highlit || !notes {
-		t.Errorf("the guide shows a formula %v and one in its Math paragraph %v, a color %v, a highlight %v, a video's notes %v", formula, root, colored, highlit, notes)
+	if !formula || !colored || !highlit || !notes {
+		t.Errorf("the guide shows a formula %v, a color %v, a highlight %v, a video's notes %v", formula, colored, highlit, notes)
+	}
+	if inline != 1 || mathIn != "Writing" {
+		t.Errorf("%d formulas in lines, want 1; the Math block is under %q, want Writing", inline, mathIn)
 	}
 	if len(tables) != 2 || doc.TableStyle(tables[0]) != doc.TableLines || !slices.Equal(doc.TableAligns(tables[0], 4), []string{"", "", "", "right"}) || doc.TableStyle(tables[1]) != "" {
 		t.Errorf("the guide's tables do not show both looks and a column aligned right")

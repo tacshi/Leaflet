@@ -18439,6 +18439,24 @@ func (msgs Messages) WelcomeWritingLines() string {
 	return Catalog.Format(msgs.locale, "welcomeWritingLines", nil)
 }
 
+// WelcomeMath says "A formula on a line of its own is a **Math** block, and **Edit** opens its TeX."
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the paragraph before an
+// example Math block of the / menu, a TeX formula on a line of its own
+// (Markdown).
+func WelcomeMath() string { return In(i18n.Locale()).WelcomeMath() }
+
+// WelcomeMath says "A formula on a line of its own is a **Math** block, and **Edit** opens its TeX."
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the paragraph before an
+// example Math block of the / menu, a TeX formula on a line of its own
+// (Markdown).
+func (msgs Messages) WelcomeMath() string {
+	return Catalog.Format(msgs.locale, "welcomeMath", nil)
+}
+
 // WelcomeBlocksHeading says "Blocks"
 // in the language the app shows.
 //
@@ -18949,20 +18967,20 @@ func (msgs Messages) WelcomeToggleInside() string {
 	return Catalog.Format(msgs.locale, "welcomeToggleInside", nil)
 }
 
-// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
+// WelcomeDiagram says "A **Diagram** draws Mermaid, and **Edit** opens its source."
 // in the language the app shows.
 //
-// The welcome guide page, made once on first run: a paragraph naming blocks
-// of the / menu (Markdown).
-func WelcomeMathDiagram() string { return In(i18n.Locale()).WelcomeMathDiagram() }
+// The welcome guide page, made once on first run: the paragraph before an
+// example Diagram block of the / menu, a Mermaid chart (Markdown).
+func WelcomeDiagram() string { return In(i18n.Locale()).WelcomeDiagram() }
 
-// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
+// WelcomeDiagram says "A **Diagram** draws Mermaid, and **Edit** opens its source."
 // in the language of msgs.
 //
-// The welcome guide page, made once on first run: a paragraph naming blocks
-// of the / menu (Markdown).
-func (msgs Messages) WelcomeMathDiagram() string {
-	return Catalog.Format(msgs.locale, "welcomeMathDiagram", nil)
+// The welcome guide page, made once on first run: the paragraph before an
+// example Diagram block of the / menu, a Mermaid chart (Markdown).
+func (msgs Messages) WelcomeDiagram() string {
+	return Catalog.Format(msgs.locale, "welcomeDiagram", nil)
 }
 
 // WelcomeDiagramIdea says "Idea"

@@ -177,7 +177,7 @@ private struct BinPageSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     if let markdown {
-                        MarkdownPreview(markdown: markdown, size: app.textSize)
+                        MarkdownPreview(markdown: markdown, size: app.textSize, simpleTables: false)
                             .foregroundStyle(palette.text)
                     } else {
                         ProgressView()

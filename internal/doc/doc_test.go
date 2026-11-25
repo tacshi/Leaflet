@@ -1454,6 +1454,9 @@ func TestMergeTableRowsAddedOnBothSides(t *testing.T) {
 			if rows := TableRows(again.Find("T")); !reflect.DeepEqual(rows, tc.want) || len(conflicts) != 0 {
 				t.Errorf("%s: merged again, rows %q, conflicts %+v", tc.name, rows, conflicts)
 			}
+			if again.Encode() != first.Encode() {
+				t.Errorf("%s: merged again, the merge changes:\n%s\nwas\n%s", tc.name, again.Encode(), first.Encode())
+			}
 		}
 	}
 }

@@ -314,8 +314,14 @@ func (w htmlWriter) block(n *Node) {
 		}
 		w.write("<figure", w.attrs(n, class), `><img src="`, html.EscapeString(src), `" alt="`, html.EscapeString(n.Str("alt")), `"`, style, w.lazy(), `></figure>`+"\n")
 	case "table":
-		w.write("<div", w.attrs(n, "table"), "><table>\n")
+		class := "table"
+		if TableStyle(n) == TableLines {
+			class += " lines"
+		}
+		w.write("<div", w.attrs(n, class), "><table>\n")
 		grid := tableCells(n)
+		_, cols := TableSize(n)
+		aligns := TableAligns(n, cols)
 		short := map[int]bool{}
 		if len(grid) > 0 {
 			for c := range grid[0] {
@@ -335,11 +341,14 @@ func (w htmlWriter) block(n *Node) {
 			}
 			w.write("<tr>")
 			for c, d := range row {
-				open := "<" + cell + ">"
+				attrs := ""
 				if short[c] {
-					open = "<" + cell + ` class="nowrap">`
+					attrs = ` class="nowrap"`
 				}
-				w.write(open, w.text(d), "</", cell, ">")
+				if c < len(aligns) && aligns[c] != "" {
+					attrs += ` style="text-align:` + aligns[c] + `"`
+				}
+				w.write("<", cell, attrs, ">", w.text(d), "</", cell, ">")
 			}
 			w.write("</tr>\n")
 		}
@@ -832,6 +841,10 @@ table a,table code{overflow-wrap:anywhere}
 .nowrap{white-space:nowrap}
 th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 th{background:var(--th);font-weight:600}
+.lines table{width:100%}
+.lines th,.lines td{border:0;border-bottom:1px solid var(--line);background:none;padding:8px 12px 8px 0}
+.lines th:last-child,.lines td:last-child{padding-right:0}
+.lines tr:last-child td{border-bottom:0}
 .muted{color:var(--muted)}
 .card{border:1px solid var(--line);border-radius:8px;padding:10px 14px}
 a.card,div.card{display:flex;align-items:center;gap:12px;margin:.5em 0;color:inherit;text-decoration:none;overflow:hidden}

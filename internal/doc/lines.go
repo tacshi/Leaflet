@@ -48,6 +48,8 @@ type lineParser struct {
 	table   [][]string
 	tableIn *[]*Node
 	ruled   bool
+	// aligns is how the table's columns align, as its delimiter row says.
+	aligns []string
 
 	numbers map[*Node]int
 
@@ -137,7 +139,7 @@ func (p *lineParser) part(line string) (next string, more bool) {
 			p.tableIn = p.container(indent)
 		}
 		if row, rule := tableRow(trimmed); rule && len(p.table) == 1 && !p.ruled {
-			p.ruled = true
+			p.ruled, p.aligns = true, tableRuleAligns(row)
 		} else {
 			p.table = append(p.table, row)
 		}
@@ -316,6 +318,8 @@ func (p *lineParser) summaryLine(s string) (next string, more bool) {
 func (p *lineParser) flushTable() {
 	if len(p.table) > 0 {
 		if t, err := TableNode(p.table, ""); err == nil {
+			_, cols := TableSize(t)
+			SetTableAligns(t, p.aligns[:min(len(p.aligns), cols)])
 			*p.tableIn = append(*p.tableIn, t)
 		} else {
 			// Too large for a table: its rows stay, as lines of text.
@@ -324,7 +328,7 @@ func (p *lineParser) flushTable() {
 			}
 		}
 	}
-	p.table, p.tableIn, p.ruled = nil, nil, false
+	p.table, p.tableIn, p.ruled, p.aligns = nil, nil, false, nil
 }
 
 func (p *lineParser) closeCode() {

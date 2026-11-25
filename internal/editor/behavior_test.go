@@ -564,6 +564,48 @@ func TestTableButtonsActOnTheEditedCell(t *testing.T) {
 	}
 }
 
+func TestTableLookButtons(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"Time", "Price", "Note"}, {"8am", "$400", "x"}}, "")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table, newText("paragraph", nil)} })
+	tt.Frame()
+	if err := tt.Click("$400"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	click := func(label string) {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("%v in %v", err, tt.Texts())
+		}
+		tt.Frame()
+	}
+	click("Align column right")
+	if got := doc.TableAligns(table, 3); !slices.Equal(got, []string{"", "right", ""}) {
+		t.Errorf("after aligning right, aligns %q", got)
+	}
+	click("Simple lines")
+	if doc.TableStyle(table) != doc.TableLines {
+		t.Errorf("style %q after Simple lines", doc.TableStyle(table))
+	}
+	click("Add a column to the right")
+	if got := doc.TableAligns(table, 4); !slices.Equal(got, []string{"", "right", "", ""}) {
+		t.Errorf("after adding a column, aligns %q", got)
+	}
+	click("Align column left")
+	if _, ok := table.Data["aligns"]; ok {
+		t.Errorf("aligning left keeps aligns %v", table.Data["aligns"])
+	}
+	e.Undo()
+	if got := doc.TableAligns(e.node(table.ID), 4); !slices.Equal(got, []string{"", "right", "", ""}) {
+		t.Errorf("after undo, aligns %q", got)
+	}
+	e.ToggleTableLines(table.ID)
+	if doc.TableStyle(e.node(table.ID)) != "" {
+		t.Errorf("style %q after toggling it off", doc.TableStyle(e.node(table.ID)))
+	}
+}
+
 func TestEnterLeavesATableThatEndsThePage(t *testing.T) {
 	e, tt, _ := setup(t)
 	table, _ := doc.TableNode([][]string{{"A"}, {"a1"}}, "")

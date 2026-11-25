@@ -11033,6 +11033,104 @@ func (msgs Messages) EditorTableRemoveThisColumn() string {
 	return Catalog.Format(msgs.locale, "editorTableRemoveThisColumn", nil)
 }
 
+// EditorTableSimpleLines says "Simple lines"
+// in the language the app shows.
+//
+// Table block: the right-click menu item, and the button under a table
+// while one of its cells is being edited, that switch the table between a
+// grid and simple lines (a bold header with a rule under it and a hairline
+// between rows, with no borders), checked or lit while on. On iPhone and
+// iPad, the switch of the table editor.
+func EditorTableSimpleLines() string { return In(i18n.Locale()).EditorTableSimpleLines() }
+
+// EditorTableSimpleLines says "Simple lines"
+// in the language of msgs.
+//
+// Table block: the right-click menu item, and the button under a table
+// while one of its cells is being edited, that switch the table between a
+// grid and simple lines (a bold header with a rule under it and a hairline
+// between rows, with no borders), checked or lit while on. On iPhone and
+// iPad, the switch of the table editor.
+func (msgs Messages) EditorTableSimpleLines() string {
+	return Catalog.Format(msgs.locale, "editorTableSimpleLines", nil)
+}
+
+// EditorTableAlignLeft says "Align column left"
+// in the language the app shows.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that aligns that cell's
+// column to the left. On iPhone and iPad, the item of the table editor's
+// alignment menu that does the same.
+func EditorTableAlignLeft() string { return In(i18n.Locale()).EditorTableAlignLeft() }
+
+// EditorTableAlignLeft says "Align column left"
+// in the language of msgs.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that aligns that cell's
+// column to the left. On iPhone and iPad, the item of the table editor's
+// alignment menu that does the same.
+func (msgs Messages) EditorTableAlignLeft() string {
+	return Catalog.Format(msgs.locale, "editorTableAlignLeft", nil)
+}
+
+// EditorTableAlignCenter says "Center column"
+// in the language the app shows.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that centers that cell's
+// column. On iPhone and iPad, the item of the table editor's alignment menu
+// that does the same.
+func EditorTableAlignCenter() string { return In(i18n.Locale()).EditorTableAlignCenter() }
+
+// EditorTableAlignCenter says "Center column"
+// in the language of msgs.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that centers that cell's
+// column. On iPhone and iPad, the item of the table editor's alignment menu
+// that does the same.
+func (msgs Messages) EditorTableAlignCenter() string {
+	return Catalog.Format(msgs.locale, "editorTableAlignCenter", nil)
+}
+
+// EditorTableAlignRight says "Align column right"
+// in the language the app shows.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that aligns that cell's
+// column to the right, as for numbers and prices. On iPhone and iPad, the
+// item of the table editor's alignment menu that does the same.
+func EditorTableAlignRight() string { return In(i18n.Locale()).EditorTableAlignRight() }
+
+// EditorTableAlignRight says "Align column right"
+// in the language of msgs.
+//
+// Table block: the button (an icon) under a table while one of its cells is
+// being edited, as its tooltip and VoiceOver say, that aligns that cell's
+// column to the right, as for numbers and prices. On iPhone and iPad, the
+// item of the table editor's alignment menu that does the same.
+func (msgs Messages) EditorTableAlignRight() string {
+	return Catalog.Format(msgs.locale, "editorTableAlignRight", nil)
+}
+
+// EditorTableAlignment says "Column alignment"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): the menu under the cells that aligns the
+// column of the cell being edited: left, center or right.
+func EditorTableAlignment() string { return In(i18n.Locale()).EditorTableAlignment() }
+
+// EditorTableAlignment says "Column alignment"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): the menu under the cells that aligns the
+// column of the cell being edited: left, center or right.
+func (msgs Messages) EditorTableAlignment() string {
+	return Catalog.Format(msgs.locale, "editorTableAlignment", nil)
+}
+
 // EditorTableAddRow says "Add row"
 // in the language the app shows.
 //
@@ -16481,13 +16579,13 @@ func (msgs Messages) WelcomeBlocksHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeBlocksHeading", nil)
 }
 
-// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end."
+// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end. This table has **Simple l…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeBlocksTable() string { return In(i18n.Locale()).WelcomeBlocksTable() }
 
-// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end."
+// WelcomeBlocksTable says "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end. This table has **Simple l…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -16541,6 +16639,22 @@ func WelcomeTableDue() string { return In(i18n.Locale()).WelcomeTableDue() }
 // example tables.
 func (msgs Messages) WelcomeTableDue() string {
 	return Catalog.Format(msgs.locale, "welcomeTableDue", nil)
+}
+
+// WelcomeTableHours says "Hours"
+// in the language the app shows.
+//
+// The welcome guide: the header of the milestones table's column of hours
+// each milestone takes, aligned right.
+func WelcomeTableHours() string { return In(i18n.Locale()).WelcomeTableHours() }
+
+// WelcomeTableHours says "Hours"
+// in the language of msgs.
+//
+// The welcome guide: the header of the milestones table's column of hours
+// each milestone takes, aligned right.
+func (msgs Messages) WelcomeTableHours() string {
+	return Catalog.Format(msgs.locale, "welcomeTableHours", nil)
 }
 
 // WelcomeTableTask says "Task"
@@ -16761,14 +16875,14 @@ func (msgs Messages) WelcomeToggleInside() string {
 	return Catalog.Format(msgs.locale, "welcomeToggleInside", nil)
 }
 
-// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source."
+// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph naming blocks
 // of the / menu (Markdown).
 func WelcomeMathDiagram() string { return In(i18n.Locale()).WelcomeMathDiagram() }
 
-// WelcomeMathDiagram says "**Math** is TeX and **Diagram** is Mermaid: **Edit** opens their source."
+// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph naming blocks

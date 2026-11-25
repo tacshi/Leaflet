@@ -53,6 +53,10 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 				e.Host.EditBlock(e.menuBlock)
 			}
 			switch n := e.node(e.menuBlock); n.Type {
+			case "table":
+				if !e.ReadOnly && m.Item(locales.EditorTableSimpleLines()).Checked(doc.TableStyle(n) == doc.TableLines).Chosen() {
+					e.ToggleTableLines(n.ID)
+				}
 			case "video":
 				e.Host.VideoMenu(m, n)
 			case "file":

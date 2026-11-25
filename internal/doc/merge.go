@@ -130,6 +130,20 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 		b := baseFlat[id]
 		primaryEdited, otherEdited := b == nil || p.own != b.own, b == nil || o.own != b.own
+		if primaryEdited && otherEdited && p.own != o.own && b != nil && n.Type == "table" && o.node.Type == "table" && b.node.Type == "table" {
+			if data, clash := mergedTableData(b.node, p.node, o.node, otherWins(id, true, true, o.own > p.own)); !clash {
+				result.Find(id).Data = data
+				switch canonical([]any{n.Type, data}) {
+				case p.own:
+					times[id] = pt
+				case o.own:
+					times[id] = max(pt, ot)
+				default:
+					times[id] = max(localLatest, remoteLatest) + 1
+				}
+				continue
+			}
+		}
 		if primaryEdited && otherEdited && p.own != o.own && !onlyPlaced(p.node, o.node) {
 			conflicts = append(conflicts, Conflict{
 				BlockID:        id,
@@ -387,6 +401,17 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	}
 
 	result.Children = liftStranded(result.Children)
+
+	// A block that ends up as a side has it, its place included, is that side's version: it is at least as new.
+	// A table's cells sorted after one side's new row are, though the merge took them from the other side.
+	for id, f := range flatten(result) {
+		if s := otherFlat[id]; s != nil && s.signature == f.signature {
+			times[id] = max(times[id], timeOf(other, id))
+		}
+		if s := primaryFlat[id]; s != nil && s.signature == f.signature {
+			times[id] = max(times[id], timeOf(primary, id))
+		}
+	}
 
 	live := map[string]bool{}
 	result.Walk(func(n, _ *Node) { live[n.ID] = true })

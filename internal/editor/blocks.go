@@ -25,23 +25,27 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	}
 	colW := max((e.width-float32(e.depth(n.ID))*indentStep-2)/float32(cols), 80)
 	cells := doc.TableCells(n)
+	look := tableLook{lines: doc.TableStyle(n) == doc.TableLines, aligns: doc.TableAligns(n, cols), cols: cols}
 	wrap := ui.Column(c.Key("table:" + n.ID)).Gap(6)
 	editing := wrap.FocusWithin()
 	wrap.Children(func() {
 		ui.ScrollHorizontal(c).FillWidth().Children(func() {
-			grid := ui.Column(c).Radius(8).Border(1, pal.Border).Clip()
+			grid := ui.Column(c)
+			if !look.lines {
+				grid.Radius(8).Border(1, pal.Border).Clip()
+			}
 			grid.Children(func() {
 				for r := 0; r < rows; r++ {
 					row := ui.Row(c.Key(r)).AlignItems(ui.Stretch)
 					if r > 0 {
-						row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Border)
+						row.BorderWidth(1, 0, 0, 0).BorderColor(look.rule(pal))
 					}
-					if r == 0 {
+					if r == 0 && !look.lines {
 						row.Background(pal.Ground)
 					}
 					row.Children(func() {
 						for col := 0; col < cols; col++ {
-							e.tableCell(c, n, cells[r][col], r, col, colW, pal)
+							e.tableCell(c, n, cells[r][col], r, col, colW, look, pal)
 						}
 					})
 				}
@@ -49,7 +53,7 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		})
 		r, col, ok := e.editedCell(n)
 		if !e.ReadOnly && editing && ok {
-			ui.Row(c).Gap(6).Children(func() {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				if small(c, "add-row", "plus", locales.EditorTableRow(), locales.EditorTableRowBelow(), pal) {
 					e.Edit(func(*doc.Content) { insertTableRow(n, r+1) })
 				}
@@ -64,8 +68,95 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 					e.Edit(func(*doc.Content) { removeTableColumn(n, col) })
 					e.cellEdit = cellKey(n.ID, r, min(col, cols-2))
 				}
+				ui.Box(c).Width(1).Height(16).Background(pal.Divider)
+				for _, a := range tableAlignTools {
+					if toggle(c, "align-"+a.align, a.icon, "", a.hint(), look.align(col) == a.align, pal) {
+						// Left is where a column's text starts anyway: the column goes back to aligning as Markdown's "---" does.
+						to := a.align
+						if to == doc.AlignLeft {
+							to = ""
+						}
+						e.Edit(func(*doc.Content) { doc.SetTableAlign(n, col, to) })
+					}
+				}
+				if toggle(c, "lines", "rows-3", locales.EditorTableSimpleLines(), locales.EditorTableSimpleLines(), look.lines, pal) {
+					e.ToggleTableLines(n.ID)
+				}
 			})
 		}
+	})
+}
+
+// tableLook is how a table draws: as a grid or with simple lines, and how
+// each of its columns aligns.
+type tableLook struct {
+	lines  bool
+	aligns []string
+	cols   int
+}
+
+// rule colors the lines between a table's rows.
+func (l tableLook) rule(pal *theme.Palette) ui.Color {
+	if l.lines {
+		return pal.Divider
+	}
+	return pal.Border
+}
+
+// align is how column col aligns: left unless the table says otherwise.
+func (l tableLook) align(col int) string {
+	if col >= 0 && col < len(l.aligns) && l.aligns[col] != "" {
+		return l.aligns[col]
+	}
+	return doc.AlignLeft
+}
+
+// textAlign is the alignment of column col's text.
+func (l tableLook) textAlign(col int) ui.Align {
+	switch l.align(col) {
+	case doc.AlignCenter:
+		return ui.Center
+	case doc.AlignRight:
+		return ui.End
+	}
+	return ui.Start
+}
+
+// padding is the room in a cell of column col: with simple lines, the
+// outer columns' text lines up with the page's.
+func (l tableLook) padding(col int) (start, end float32) {
+	start, end = 10, 10
+	if l.lines && col == 0 {
+		start = 0
+	}
+	if l.lines && col == l.cols-1 {
+		end = 0
+	}
+	return start, end
+}
+
+var tableAlignTools = []struct {
+	align, icon string
+	hint        func() string
+}{
+	{doc.AlignLeft, "text-align-start", locales.EditorTableAlignLeft},
+	{doc.AlignCenter, "text-align-center", locales.EditorTableAlignCenter},
+	{doc.AlignRight, "text-align-end", locales.EditorTableAlignRight},
+}
+
+// ToggleTableLines switches the table between a grid and simple lines, as
+// one step to undo.
+func (e *Editor) ToggleTableLines(id string) {
+	n := e.node(id)
+	if n == nil || n.Type != "table" || e.ReadOnly {
+		return
+	}
+	e.Edit(func(*doc.Content) {
+		style := doc.TableLines
+		if doc.TableStyle(n) == doc.TableLines {
+			style = ""
+		}
+		doc.SetTableStyle(n, style)
 	})
 }
 
@@ -78,6 +169,29 @@ func small(c *ui.Context, key, icon, label, hint string, pal *theme.Palette) boo
 	b.Children(func() {
 		ui.Icon(c, theme.Icon(icon)).FontSize(12)
 		ui.Text(c, label).FontSize(12)
+	})
+	return b.Clicked()
+}
+
+// toggle is a small button like small's, lit while on; with no label, it
+// shows its icon alone and says its hint.
+func toggle(c *ui.Context, key, icon, label, hint string, on bool, pal *theme.Palette) bool {
+	b := ui.ButtonBase(c.Key(key)).Height(24).Padding(0, 8).Gap(4).Radius(6).Border(1, pal.Divider).
+		Background(pal.Surface).TextColor(pal.TextMuted).AlignItems(ui.Center).Label(hint).Tooltip(hint).KeepFocus().Selected(on)
+	if label == "" {
+		b.Padding(0, 6)
+	}
+	switch {
+	case on:
+		b.Background(pal.AccentSoft).BorderColor(pal.AccentSoft).TextColor(pal.Text)
+	case b.Hovered():
+		b.TextColor(pal.Text)
+	}
+	b.Children(func() {
+		ui.Icon(c, theme.Icon(icon)).FontSize(12)
+		if label != "" {
+			ui.Text(c, label).FontSize(12)
+		}
 	})
 	return b.Clicked()
 }
@@ -139,12 +253,14 @@ func (e *Editor) moveCell(n *doc.Node) {
 	e.cellEdit, e.cellFocused = cellKey(n.ID, r, col), false
 }
 
-func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w float32, pal *theme.Palette) {
+func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w float32, look tableLook, pal *theme.Palette) {
 	key := fmt.Sprintf("cell:%d:%d", r, col)
-	box := ui.Box(c.Key(key)).Width(w).Padding(8, 10)
-	if col > 0 {
+	start, end := look.padding(col)
+	box := ui.Box(c.Key(key)).Width(w).Padding(8, end, 8, start)
+	if col > 0 && !look.lines {
 		box.BorderWidth(0, 0, 0, 1).BorderColor(pal.Border)
 	}
+	align := look.textAlign(col)
 	var para *doc.Node
 	if cell != nil && len(cell.Children) > 0 {
 		para = cell.Children[0]
@@ -163,7 +279,8 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 			view.Children(func() {
 				if para != nil && para.Delta().Len() > 0 {
 					spans, maths := e.spans(para, pal, font)
-					text := ui.RichText(c, spans...).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).TextColor(pal.Text)
+					text := ui.RichText(c, spans...).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).TextColor(pal.Text).
+						FillWidth().TextAlign(align)
 					if len(maths) > 0 {
 						at := make(map[int]typeset, len(maths))
 						for _, m := range maths {
@@ -191,7 +308,7 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 		}
 		before := e.cellText
 		in := ui.TextAreaBase(c.Key("in"), &e.cellText).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).
-			TextColor(pal.Text).FillWidth().AutoFocus().
+			TextColor(pal.Text).FillWidth().TextAlign(align).AutoFocus().
 			OnTextKey(func(k ui.TextKey) bool {
 				switch {
 				case k.Key == ui.KeyTab && k.Mods == 0:
@@ -296,6 +413,7 @@ func insertTableColumn(n *doc.Node, at int) {
 	for r := 0; r < rows; r++ {
 		n.Children = append(n.Children, doc.TableCellNode(r, at, nil))
 	}
+	doc.ShiftTableAligns(n, at, 1)
 	n.Set("colsLen", cols+1)
 	doc.SortTableCells(n)
 }
@@ -309,6 +427,7 @@ func removeTableRow(n *doc.Node, at int) {
 func removeTableColumn(n *doc.Node, at int) {
 	_, cols := doc.TableSize(n)
 	shiftCells(n, "colPosition", at, -1)
+	doc.ShiftTableAligns(n, at, -1)
 	n.Set("colsLen", cols-1)
 }
 

@@ -125,11 +125,11 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	heading(m.WelcomeBlocksHeading())
 	text("paragraph", m.WelcomeBlocksTable())
 	you, agent := m.WelcomeTableYou(), m.WelcomeTableAgent()
-	add(map[string]any{"type": "table", "rows": []any{
-		[]any{m.WelcomeTableMilestone(), m.WelcomeTableOwner(), m.WelcomeTableDue()},
-		[]any{m.WelcomeTableOutline(), you, m.WelcomeMonday()},
-		[]any{m.WelcomeTableDraft(), agent, m.WelcomeWednesday()},
-		[]any{m.WelcomeTableReview(), you, m.WelcomeFriday()},
+	add(map[string]any{"type": "table", "table_style": "lines", "align": []any{"", "", "", "right"}, "rows": []any{
+		[]any{m.WelcomeTableMilestone(), m.WelcomeTableOwner(), m.WelcomeTableDue(), m.WelcomeTableHours()},
+		[]any{m.WelcomeTableOutline(), you, m.WelcomeMonday(), "2"},
+		[]any{m.WelcomeTableDraft(), agent, m.WelcomeWednesday(), "6"},
+		[]any{m.WelcomeTableReview(), you, m.WelcomeFriday(), "1.5"},
 	}})
 	add(map[string]any{"type": "code", "language": "javascript", "text": welcomeCode(m)})
 	add(map[string]any{"type": "callout", "tone": "tip", "text": m.WelcomeCallout()})

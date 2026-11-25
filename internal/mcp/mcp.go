@@ -66,6 +66,20 @@ type Server struct {
 
 const SeenPrefix = "mcp_seen:"
 
+// ConnectedPrefix keys when each client last started the server: an app that
+// has, such as Claude Desktop, which starts it as it opens, has taken Leaflet
+// in, before it is asked to work on a page.
+const ConnectedPrefix = "mcp_connected:"
+
+func (s *Server) markConnected() {
+	if s.client == "" {
+		return
+	}
+	if err := s.st.SetValue(ConnectedPrefix+strings.ToLower(s.client), strconv.FormatInt(time.Now().Unix(), 10)); err != nil {
+		log.Printf("mcp: %v", err)
+	}
+}
+
 func (s *Server) markSeen() {
 	if s.client == "" || time.Since(s.seen) < time.Minute {
 		return
@@ -207,6 +221,7 @@ func (s *Server) handle(req request) (any, *rpcError) {
 			s.agent = name
 		}
 		s.client = strings.TrimSpace(p.ClientInfo.Name)
+		s.markConnected()
 		version := versions[0]
 		if slices.Contains(versions, p.ProtocolVersion) {
 			version = p.ProtocolVersion

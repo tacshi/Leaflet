@@ -5931,6 +5931,10 @@
   "@externalDisconnect": {
     "description": "Settings › External agents: the button that removes Leaflet from an AI app's settings."
   },
+  "externalConnected": "Connected",
+  "@externalConnected": {
+    "description": "Settings › External agents: an AI app that has started Leaflet but not used it on a page yet."
+  },
   "externalLastUsed": "Connected · last used {when}",
   "@externalLastUsed": {
     "description": "Settings › External agents: an AI app that has used Leaflet; when is a relative time such as “5 minutes ago”.",

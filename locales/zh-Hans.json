@@ -471,6 +471,7 @@
   "supabaseSignInFailed": "Supabase 登录失败：{error}",
   "supabaseNoSignIn": "Supabase 未能让你登录。",
   "provisionProjectFailed": "Supabase 无法启动该项目。请重试，或在 Supabase 控制台中查看。",
+  "provisionProjectSlow": "Supabase 启动该项目的时间过长。请过几分钟再试，或在 Supabase 控制台中查看。",
   "provisionMigrationFailed": "Leaflet 无法设置数据库（{migration}）：{error}",
   "provisionDeployFailed": "Leaflet 无法部署其 {function} 函数：{error}",
   "provisionWhichMember": "Leaflet 无法确定你是该组织中的哪位成员。请使用你自己组织中的项目。",

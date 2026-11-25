@@ -2428,6 +2428,10 @@
   "@provisionProjectFailed": {
     "description": "Setting up a Supabase project for Leaflet: Supabase reports the project failed to start or restore."
   },
+  "provisionProjectSlow": "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard.",
+  "@provisionProjectSlow": {
+    "description": "Setting up a Supabase project for Leaflet: the project still had not started or been restored after Leaflet waited about 15 minutes."
+  },
   "provisionMigrationFailed": "Leaflet couldn't set up the database ({migration}): {error}",
   "@provisionMigrationFailed": {
     "description": "Setting up or updating a Supabase project for Leaflet: a step of the database's setup failed; migration names the step, error says what went wrong.",

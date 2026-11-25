@@ -471,6 +471,7 @@
   "supabaseSignInFailed": "Supabase でのサインインに失敗しました：{error}",
   "supabaseNoSignIn": "Supabase でサインインできませんでした。",
   "provisionProjectFailed": "Supabase がプロジェクトを起動できませんでした。もう一度試すか、Supabase のダッシュボードで確認してください。",
+  "provisionProjectSlow": "Supabase でのプロジェクトの起動に時間がかかりすぎています。数分後にもう一度試すか、Supabase のダッシュボードで確認してください。",
   "provisionMigrationFailed": "Leaflet でデータベースを設定できませんでした（{migration}）：{error}",
   "provisionDeployFailed": "Leaflet の {function} 関数をデプロイできませんでした：{error}",
   "provisionWhichMember": "組織のどのメンバーがあなたなのか Leaflet で判断できませんでした。自分だけの組織にあるプロジェクトを使ってください。",

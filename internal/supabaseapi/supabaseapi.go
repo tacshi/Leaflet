@@ -23,7 +23,10 @@ var ClientID = "a587f79b-48d7-41c1-b5ce-cbf87d11a491"
 
 var Auth = "https://leaflet-auth.capyvibe.app"
 
-const Port = 51741
+// Port is where a sign-in waits on this device for the browser to come
+// back, the address Supabase and the sign-in Worker send it to. Tests take
+// a free one instead.
+var Port = 51741
 
 var Base = "https://api.supabase.com"
 
@@ -51,6 +54,10 @@ type failed struct {
 	msg string
 	err error
 }
+
+// Failed is an error that reads as msg, said in the app's language, and
+// unwraps to err, what went wrong underneath.
+func Failed(msg string, err error) error { return &failed{msg, err} }
 
 func (f *failed) Error() string { return f.msg }
 
@@ -290,22 +297,26 @@ type Member struct {
 
 func (c *Client) Members(ctx context.Context, org string) ([]Member, error) {
 	var out []Member
-	return out, c.call(ctx, "GET", "/v1/organizations/"+url.PathEscape(org)+"/members", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/organizations/"+url.PathEscape(org)+"/members", nil, "", &out)
+	return out, err
 }
 
 func (c *Client) Organizations(ctx context.Context) ([]Organization, error) {
 	var out []Organization
-	return out, c.call(ctx, "GET", "/v1/organizations", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/organizations", nil, "", &out)
+	return out, err
 }
 
 func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 	var out []Project
-	return out, c.call(ctx, "GET", "/v1/projects", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/projects", nil, "", &out)
+	return out, err
 }
 
 func (c *Client) Project(ctx context.Context, ref string) (Project, error) {
 	var p Project
-	return p, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref), nil, "", &p)
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref), nil, "", &p)
+	return p, err
 }
 
 func (c *Client) CreateProject(ctx context.Context, name, org, regionGroup string) (Project, error) {
@@ -329,7 +340,8 @@ type APIKey struct {
 
 func (c *Client) APIKeys(ctx context.Context, ref string) ([]APIKey, error) {
 	var out []APIKey
-	return out, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/api-keys?reveal=true", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/api-keys?reveal=true", nil, "", &out)
+	return out, err
 }
 
 type Migration struct {
@@ -339,7 +351,8 @@ type Migration struct {
 
 func (c *Client) Migrations(ctx context.Context, ref string) ([]Migration, error) {
 	var out []Migration
-	return out, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/database/migrations", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/database/migrations", nil, "", &out)
+	return out, err
 }
 
 func (c *Client) Query(ctx context.Context, ref, sql string) error {
@@ -353,7 +366,8 @@ type Secret struct {
 
 func (c *Client) Secrets(ctx context.Context, ref string) ([]Secret, error) {
 	var out []Secret
-	return out, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/secrets", nil, "", &out)
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/secrets", nil, "", &out)
+	return out, err
 }
 
 func (c *Client) SetSecrets(ctx context.Context, ref string, secrets []Secret) error {
@@ -398,6 +412,16 @@ func (c *Client) DeployFunction(ctx context.Context, ref, slug, entrypoint strin
 	return c.call(ctx, "POST", "/v1/projects/"+url.PathEscape(ref)+"/functions/deploy?slug="+url.QueryEscape(slug), &body, w.FormDataContentType(), nil)
 }
 
+// UploadLimit is the size in bytes of the largest file the project's
+// Storage takes.
+func (c *Client) UploadLimit(ctx context.Context, ref string) (int64, error) {
+	var s struct {
+		FileSizeLimit int64 `json:"fileSizeLimit"`
+	}
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/config/storage", nil, "", &s)
+	return s.FileSizeLimit, err
+}
+
 func (c *Client) SetUploadLimit(ctx context.Context, ref string, limit int64) error {
 	return c.call(ctx, "PATCH", "/v1/projects/"+url.PathEscape(ref)+"/config/storage", map[string]any{"fileSizeLimit": limit}, "", nil)
 }
@@ -409,7 +433,8 @@ type SignUps struct {
 
 func (c *Client) SignUps(ctx context.Context, ref string) (SignUps, error) {
 	var s SignUps
-	return s, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/config/auth", nil, "", &s)
+	err := c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/config/auth", nil, "", &s)
+	return s, err
 }
 
 func (c *Client) SetSignUps(ctx context.Context, ref string, s SignUps) error {

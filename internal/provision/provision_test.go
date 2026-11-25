@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/supabaseapi"
+	"leaflet/locales"
 	"leaflet/supabase"
 )
 
@@ -46,6 +48,11 @@ type fakeProject struct {
 	// A marker another device's build sets on its deploy, as this one
 	// reads the Auth settings, after it read the secrets.
 	markedMeanwhile string
+	restoreFails    int
+	uploadLimit     int64
+	limitPatches    int
+	storageDown     bool
+	storageRefused  bool
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -78,6 +85,9 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			f.created = body.Name
 			_, _ = io.WriteString(w, `{"ref":"made","name":"Leaflet","status":"COMING_UP"}`)
+		case strings.HasSuffix(path, "/restore") && f.restoreFails > 0:
+			f.restoreFails--
+			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
 		case strings.HasSuffix(path, "/restore"):
 			f.restored = append(f.restored, strings.Split(path, "/")[3])
 		case path == "/v1/projects/paused":
@@ -86,6 +96,18 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			st := "COMING_UP"
 			if len(f.status) > 0 {
 				st, f.status = f.status[0], f.status[1:]
+			}
+			// A number fails the poll with that HTTP status, and "drop"
+			// with the connection cut before an answer.
+			if code, err := strconv.Atoi(st); err == nil {
+				http.Error(w, `{"message":"try again"}`, code)
+				return
+			}
+			if st == "drop" {
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					_ = conn.Close()
+				}
+				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"ref": "made", "name": "Leaflet", "status": st})
 		case strings.HasSuffix(path, "/database/migrations"):
@@ -166,7 +188,19 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				return
 			}
 			f.functions = slices.DeleteFunc(f.functions, func(s string) bool { return s == slug })
+		case strings.HasSuffix(path, "/config/storage") && f.storageDown:
+			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
+		case strings.HasSuffix(path, "/config/storage") && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(map[string]int64{"fileSizeLimit": f.uploadLimit})
+		case strings.HasSuffix(path, "/config/storage") && f.storageRefused:
+			http.Error(w, `{"message":"The file size limit is past what the plan allows"}`, http.StatusBadRequest)
 		case strings.HasSuffix(path, "/config/storage"):
+			var set struct {
+				FileSizeLimit int64 `json:"fileSizeLimit"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&set)
+			f.uploadLimit = set.FileSizeLimit
+			f.limitPatches++
 		case strings.HasSuffix(path, "/api-keys"):
 			_, _ = io.WriteString(w, `[{"name":"anon","type":"legacy","api_key":"eyJanon"},{"name":"service_role","type":"legacy","api_key":"eyJservice"}]`)
 		default:
@@ -378,8 +412,13 @@ func TestSetupLooksAgainBeforeItDeploys(t *testing.T) {
 		for _, m := range all {
 			f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
 		}
-		if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil {
+		var steps [][2]int
+		if err := Setup(context.Background(), f.serve(t), "p", func(done, total int) { steps = append(steps, [2]int{done, total}) }); err != nil {
 			t.Fatal(err)
+		}
+		// Deployed here or by the other device, the functions are done.
+		if n := len(Functions); len(steps) == 0 || steps[len(steps)-1] != [2]int{n, n} {
+			t.Errorf("with %s deployed meanwhile: progress %v", meanwhile, steps)
 		}
 		var names []string
 		for _, s := range f.secrets {
@@ -481,6 +520,79 @@ func TestReadyRestoresOncePaused(t *testing.T) {
 	p, err := Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "PAUSING"})
 	if err != nil || !p.Healthy() || strings.Join(f.restored, ",") != "made" {
 		t.Errorf("ready %+v, %v, restored %v", p, err, f.restored)
+	}
+}
+
+func pollFast(t *testing.T) {
+	t.Helper()
+	old := pollEvery
+	pollEvery = time.Millisecond
+	t.Cleanup(func() { pollEvery = old })
+}
+
+// A restore takes minutes, polled all the while: a poll the gateway, the
+// network or the rate limit fails is made again, and only a run of them
+// ends the wait.
+func TestReadyOutlastsFailedPolls(t *testing.T) {
+	pollFast(t)
+	f := &fakeProject{status: []string{"RESTORING", "502", "429", "drop", "drop", "RESTORING", "503", "504", "500", "502", "ACTIVE_HEALTHY"}}
+	api := f.serve(t)
+	p, err := Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "RESTORING"})
+	if err != nil || !p.Healthy() || len(f.status) != 0 {
+		t.Errorf("ready %+v, %v, polls left %v", p, err, f.status)
+	}
+
+	f.status = slices.Repeat([]string{"502"}, pollTries+1)
+	p, err = Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "RESTORING"})
+	if e, ok := errors.AsType[*supabaseapi.Error](err); !ok || e.Status != http.StatusBadGateway || p.Ref != "made" || p.Status != "RESTORING" || len(f.status) != 1 {
+		t.Errorf("after %d failed polls: %+v, %v, polls left %v", pollTries, p, err, f.status)
+	}
+
+	f.status = []string{"COMING_UP", "404", "ACTIVE_HEALTHY"}
+	if _, err = Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "COMING_UP"}); err == nil || len(f.status) != 1 {
+		t.Errorf("a refused poll: %v, polls left %v", err, f.status)
+	}
+}
+
+func TestReadyAsksARestoreAgain(t *testing.T) {
+	pollFast(t)
+	f := &fakeProject{status: []string{"INACTIVE", "RESTORING", "ACTIVE_HEALTHY"}, restoreFails: 1}
+	api := f.serve(t)
+	p, err := Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "INACTIVE"})
+	if err != nil || !p.Healthy() || strings.Join(f.restored, ",") != "made" {
+		t.Errorf("ready %+v, %v, restored %v", p, err, f.restored)
+	}
+}
+
+func TestReadyStopsAtAFailedProject(t *testing.T) {
+	pollFast(t)
+	for _, status := range failedStatuses {
+		f := &fakeProject{status: []string{status, "ACTIVE_HEALTHY"}}
+		api := f.serve(t)
+		if _, err := Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "COMING_UP"}); err == nil || err.Error() != locales.ProvisionProjectFailed() || len(f.status) != 1 {
+			t.Errorf("%s: %v, polls left %v", status, err, f.status)
+		}
+	}
+}
+
+func TestReadyGivesUpOnAStuckProject(t *testing.T) {
+	pollFast(t)
+	old := readyWithin
+	readyWithin = 50 * time.Millisecond
+	t.Cleanup(func() { readyWithin = old })
+	api := (&fakeProject{}).serve(t)
+	// The caller's own deadline is far later: Ready's ends the wait first.
+	later, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	p, err := Ready(later, api, supabaseapi.Project{Ref: "made", Status: "COMING_UP"})
+	if err == nil || err.Error() != locales.ProvisionProjectSlow() || p.Ref != "made" {
+		t.Errorf("stuck: %+v, %v", p, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Ready(ctx, api, supabaseapi.Project{Ref: "made", Status: "COMING_UP"}); !errors.Is(err, context.Canceled) {
+		t.Errorf("called off: %v", err)
 	}
 }
 
@@ -623,6 +735,64 @@ func TestSetupClosesSignUps(t *testing.T) {
 	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authRefused: true}
 	if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil || len(f.deployed) != len(Functions) {
 		t.Errorf("with Auth refused: %v, deployed %v", err, f.deployed)
+	}
+}
+
+// The upload limit is raised on every setup, not only one that deploys:
+// one refused for the moment is raised on the next, and one a plan refuses
+// leaves the rest set up.
+func TestSetupRaisesTheUploadLimit(t *testing.T) {
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := FunctionsHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeProject{
+		applied:     map[string][]supabaseapi.Migration{"p": nil},
+		secrets:     []supabaseapi.Secret{{Name: hashName(FunctionsVersion, hash), Value: "digest"}},
+		uploadLimit: 50 << 20,
+		storageDown: true,
+	}
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	api := f.serve(t)
+	setup := func() error {
+		t.Helper()
+		err := Setup(context.Background(), api, "p", nil)
+		if len(f.deployed) != 0 {
+			t.Fatalf("deployed %v", f.deployed)
+		}
+		return err
+	}
+	if err := setup(); !errors.Is(err, ErrUploadLimitLow) || f.uploadLimit != 50<<20 {
+		t.Errorf("with Storage down: %v, limit %d", err, f.uploadLimit)
+	}
+	f.mu.Lock()
+	f.storageDown = false
+	f.mu.Unlock()
+	if err := setup(); err != nil || f.uploadLimit != uploadLimit || f.limitPatches != 1 {
+		t.Errorf("once it is up: %v, limit %d after %d changes", err, f.uploadLimit, f.limitPatches)
+	}
+	if err := setup(); err != nil || f.limitPatches != 1 {
+		t.Errorf("set up again: %v, %d changes", err, f.limitPatches)
+	}
+
+	f.mu.Lock()
+	f.uploadLimit = 5 << 30
+	f.mu.Unlock()
+	if err := setup(); err != nil || f.uploadLimit != 5<<30 || f.limitPatches != 1 {
+		t.Errorf("an owner's higher limit: %v, limit %d after %d changes", err, f.uploadLimit, f.limitPatches)
+	}
+
+	f.mu.Lock()
+	f.uploadLimit, f.storageRefused = 50<<20, true
+	f.mu.Unlock()
+	if err := setup(); err != nil || f.uploadLimit != 50<<20 {
+		t.Errorf("with the plan refusing: %v, limit %d", err, f.uploadLimit)
 	}
 }
 

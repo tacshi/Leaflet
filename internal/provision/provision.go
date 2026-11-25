@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"regexp"
 	"slices"
@@ -281,31 +284,86 @@ func Create(ctx context.Context, api *supabaseapi.Client, org string) (supabasea
 	return Ready(ctx, api, p)
 }
 
+// readyWithin is how long Ready waits for a project to come up: a restore
+// takes minutes, and a project that takes much longer is stuck.
+var readyWithin = 15 * time.Minute
+
+// pollTries is how many times in a row a call Ready makes may fail in a way
+// that passes, as the network's or a gateway's failures, before the wait
+// ends with it. Each try waits twice as long as the one before.
+const pollTries = 5
+
+// failedStatuses are those of a project that will not come up on its own:
+// it failed to start, to pause or to restore, or it is deleted or being
+// deleted.
+var failedStatuses = []string{"INIT_FAILED", "PAUSE_FAILED", "RESTORE_FAILED", "GOING_DOWN", "REMOVED"}
+
+// tries counts the failures in a row of one of Ready's calls.
+type tries int
+
+// again counts a call's failure with err, and reports whether the call is
+// to be made again: err may pass, and the call has not failed pollTries
+// times in a row.
+func (t *tries) again(err error) bool {
+	*t++
+	return *t < pollTries && passing(err)
+}
+
 func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) (supabaseapi.Project, error) {
-	var err error
+	ctx, cancel := context.WithTimeoutCause(ctx, readyWithin, errors.New(locales.ProvisionProjectSlow()))
+	defer cancel()
 	restored := false
+	var polls, restores tries
 	for !p.Healthy() {
-		switch p.Status {
-		case "INIT_FAILED", "REMOVED", "RESTORE_FAILED":
+		if slices.Contains(failedStatuses, p.Status) {
 			return p, errors.New(locales.ProvisionProjectFailed())
-		case "INACTIVE":
-			if !restored {
-				if err := api.Restore(ctx, p.Ref); err != nil {
-					return p, err
-				}
-				restored = true
+		}
+		if p.Status == "INACTIVE" && !restored {
+			// A restore that failed for a moment is asked again only if the
+			// project is still paused when next polled: one Supabase took,
+			// though its answer was lost, has it restoring.
+			switch err := api.Restore(ctx, p.Ref); {
+			case err == nil:
+				restored, restores = true, 0
+			case ctx.Err() != nil:
+				return p, context.Cause(ctx)
+			case !restores.again(err):
+				return p, err
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return p, ctx.Err()
-		case <-time.After(pollEvery):
+			return p, context.Cause(ctx)
+		case <-time.After(pollEvery << max(polls, restores)):
 		}
-		if p, err = api.Project(ctx, p.Ref); err != nil {
+		switch next, err := api.Project(ctx, p.Ref); {
+		case err == nil:
+			p, polls = next, 0
+		case ctx.Err() != nil:
+			return p, context.Cause(ctx)
+		case !polls.again(err):
 			return p, err
 		}
 	}
 	return p, nil
+}
+
+// passing reports whether err may pass on its own: the network failed, or
+// the API was down or too busy for the moment.
+func passing(err error) bool {
+	if e, ok := errors.AsType[*supabaseapi.Error](err); ok {
+		return e.Status >= 500 || e.Status == http.StatusTooManyRequests || e.Status == http.StatusRequestTimeout
+	}
+	// A url.Error is a net.Error whatever went wrong, as a redirect refused:
+	// what it wraps tells whether the network failed.
+	if e, ok := errors.AsType[*url.Error](err); ok {
+		err = e.Err
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	_, ok := errors.AsType[net.Error](err)
+	return ok
 }
 
 func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress func(done, total int)) error {
@@ -345,11 +403,11 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 	}
 	for _, m := range missing {
 		if err := api.Query(ctx, ref, migrationSQL(m)); err != nil && !appliedMeanwhile(err) {
-			return &failed{locales.ProvisionMigrationFailed(m.Name, err.Error()), err}
+			return supabaseapi.Failed(locales.ProvisionMigrationFailed(m.Name, err.Error()), err)
 		}
 		step()
 	}
-	open := errors.Join(closeSignUps(ctx, api, ref), hearSaves(ctx, api, ref))
+	open := errors.Join(closeSignUps(ctx, api, ref), hearSaves(ctx, api, ref), raiseUploadLimit(ctx, api, ref))
 	if !deploy {
 		return open
 	}
@@ -362,6 +420,10 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		return err
 	}
 	if !needsDeploy(secrets, name) {
+		// The other device deployed the functions: their steps are done.
+		if progress != nil {
+			progress(total, total)
+		}
 		return open
 	}
 	for _, slug := range Functions {
@@ -370,7 +432,7 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 			return err
 		}
 		if err := api.DeployFunction(ctx, ref, slug, "supabase/functions/"+slug+"/index.ts", true, files); err != nil {
-			return &failed{locales.ProvisionDeployFailed(slug, err.Error()), err}
+			return supabaseapi.Failed(locales.ProvisionDeployFailed(slug, err.Error()), err)
 		}
 		step()
 	}
@@ -391,7 +453,6 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 	if len(old) > 0 {
 		_ = api.DeleteSecrets(ctx, ref, old)
 	}
-	_ = api.SetUploadLimit(ctx, ref, uploadLimit)
 	return open
 }
 
@@ -407,6 +468,24 @@ func closeSignUps(ctx context.Context, api *supabaseapi.Client, ref string) erro
 		return nil
 	}
 	return fmt.Errorf("%w: %w", ErrSignUpsOpen, err)
+}
+
+var ErrUploadLimitLow = errors.New("provision: the project's upload limit could not be raised yet")
+
+// raiseUploadLimit has the project's Storage take files of up to
+// uploadLimit, as the recordings bucket does: the project's limit caps every
+// bucket's, and starts at 50 MB. One an owner set higher stays. A plan that
+// keeps it lower refuses for good, and files past it are refused as they go
+// up.
+func raiseUploadLimit(ctx context.Context, api *supabaseapi.Client, ref string) error {
+	limit, err := api.UploadLimit(ctx, ref)
+	if err == nil && limit < uploadLimit {
+		err = api.SetUploadLimit(ctx, ref, uploadLimit)
+	}
+	if err == nil || refusedForGood(err) {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrUploadLimitLow, err)
 }
 
 var ErrRealtimeWaits = errors.New("provision: Realtime has not made its messages yet")
@@ -448,18 +527,9 @@ func migrationSQL(m Migration) string {
 }
 
 func appliedMeanwhile(err error) bool {
-	var e *supabaseapi.Error
-	return errors.As(err, &e) && strings.Contains(e.Message, appliedMark)
+	e, ok := errors.AsType[*supabaseapi.Error](err)
+	return ok && strings.Contains(e.Message, appliedMark)
 }
-
-type failed struct {
-	msg string
-	err error
-}
-
-func (f *failed) Error() string { return f.msg }
-
-func (f *failed) Unwrap() error { return f.err }
 
 func Owner(ctx context.Context, api *supabaseapi.Client, org string) (email, name string, err error) {
 	members, err := api.Members(ctx, org)

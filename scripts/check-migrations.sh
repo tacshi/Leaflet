@@ -12,12 +12,15 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="leaflet-migrations-$$"
 
+# pulled sets IMAGE to the first of the images there is, or that pulls.
+IMAGE=""
 pulled() {
-	local wait
+	local wait candidate
 	for wait in 0 10 20 40; do
 		sleep "$wait"
-		for image in "${images[@]}"; do
-			if docker image inspect "$image" >/dev/null 2>&1 || docker pull --quiet "$image" >/dev/null; then
+		for candidate in "${images[@]}"; do
+			if docker image inspect "$candidate" >/dev/null 2>&1 || docker pull --quiet "$candidate" >/dev/null; then
+				IMAGE="$candidate"
 				return 0
 			fi
 		done
@@ -29,7 +32,7 @@ if ! pulled; then
 	exit 1
 fi
 
-docker run --detach --rm --name "$name" --env POSTGRES_PASSWORD=postgres "$image" >/dev/null
+docker run --detach --rm --name "$name" --env POSTGRES_PASSWORD=postgres "$IMAGE" >/dev/null
 trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
 
 sql() {

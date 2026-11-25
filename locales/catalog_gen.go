@@ -7003,6 +7003,22 @@ func (msgs Messages) ProvisionProjectFailed() string {
 	return Catalog.Format(msgs.locale, "provisionProjectFailed", nil)
 }
 
+// ProvisionProjectSlow says "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard."
+// in the language the app shows.
+//
+// Setting up a Supabase project for Leaflet: the project still had not
+// started or been restored after Leaflet waited about 15 minutes.
+func ProvisionProjectSlow() string { return In(i18n.Locale()).ProvisionProjectSlow() }
+
+// ProvisionProjectSlow says "Supabase is taking too long to start the project. Try again in a few minutes, or check it in the Supabase dashboard."
+// in the language of msgs.
+//
+// Setting up a Supabase project for Leaflet: the project still had not
+// started or been restored after Leaflet waited about 15 minutes.
+func (msgs Messages) ProvisionProjectSlow() string {
+	return Catalog.Format(msgs.locale, "provisionProjectSlow", nil)
+}
+
 // ProvisionMigrationFailed says "Leaflet couldn't set up the database ({migration}): {error}"
 // in the language the app shows.
 //

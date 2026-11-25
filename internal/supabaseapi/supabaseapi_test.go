@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,10 +56,23 @@ func fakeAPI(t *testing.T, routes http.HandlerFunc) *httptest.Server {
 			routes(w, r)
 		}
 	}))
-	old, auth, id := Base, Auth, ClientID
-	Base, Auth, ClientID = srv.URL, "", "leaflet-app"
-	t.Cleanup(func() { Base, Auth, ClientID = old, auth, id; srv.Close() })
+	old, auth, id, port := Base, Auth, ClientID, Port
+	Base, Auth, ClientID, Port = srv.URL, "", "leaflet-app", freePort(t)
+	t.Cleanup(func() { Base, Auth, ClientID, Port = old, auth, id, port; srv.Close() })
 	return srv
+}
+
+// freePort is a port nothing on this computer listens on now, so that a
+// sign-in waits there whatever else runs, another app on Leaflet's own
+// port included.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func browser(t *testing.T, ctx context.Context) func(string) {
@@ -267,6 +281,45 @@ func TestDeleteFunction(t *testing.T) {
 	}
 	if strings.Join(asked, ",") != "DELETE /v1/projects/abc/functions/agent,DELETE /v1/projects/abc/functions/stt" {
 		t.Errorf("asked %v", asked)
+	}
+}
+
+// Each read returns what the API answered, read into the value it returns
+// before it returns it.
+func TestReadsReturnTheAnswer(t *testing.T) {
+	answers := map[string]string{ // #nosec G101 -- the fake API's answers, no real keys
+		"/v1/organizations/me/members":         `[{"user_name":"me","email":"me@example.com","role_name":"Owner"}]`,
+		"/v1/organizations":                    `[{"id":"1","slug":"me","name":"Me"}]`,
+		"/v1/projects":                         `[{"ref":"abc","name":"Leaflet","status":"ACTIVE_HEALTHY"}]`,
+		"/v1/projects/abc":                     `{"ref":"abc","name":"Leaflet","status":"COMING_UP"}`,
+		"/v1/projects/abc/api-keys":            `[{"name":"anon","type":"legacy","api_key":"eyJanon"}]`,
+		"/v1/projects/abc/database/migrations": `[{"version":"20261025000000","name":"init"}]`,
+		"/v1/projects/abc/secrets":             `[{"name":"OTHER","value":"digest"}]`,
+		"/v1/projects/abc/config/auth":         `{"disable_signup":true,"mailer_autoconfirm":false}`,
+		"/v1/projects/abc/config/storage":      `{"fileSizeLimit":52428800,"features":{"imageTransformation":{"enabled":true}}}`,
+	}
+	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, answers[r.URL.Path]) })
+	ctx, c := context.Background(), Resume("refresh-0")
+	read := func(v any, err error) string {
+		if err != nil {
+			return err.Error()
+		}
+		return fmt.Sprintf("%+v", v)
+	}
+	for _, tc := range []struct{ got, want string }{
+		{read(c.Members(ctx, "me")), "[{Name:me Email:me@example.com Role:Owner}]"},
+		{read(c.Organizations(ctx)), "[{ID:1 Slug:me Name:Me}]"},
+		{read(c.Projects(ctx)), "[{Ref:abc Name:Leaflet OrganizationSlug: Region: Status:ACTIVE_HEALTHY CreatedAt:}]"},
+		{read(c.Project(ctx, "abc")), "{Ref:abc Name:Leaflet OrganizationSlug: Region: Status:COMING_UP CreatedAt:}"},
+		{read(c.APIKeys(ctx, "abc")), "[{Name:anon Type:legacy APIKey:eyJanon}]"},
+		{read(c.Migrations(ctx, "abc")), "[{Version:20261025000000 Name:init}]"},
+		{read(c.Secrets(ctx, "abc")), "[{Name:OTHER Value:digest}]"},
+		{read(c.SignUps(ctx, "abc")), "{Disabled:true AutoConfirm:false}"},
+		{read(c.UploadLimit(ctx, "abc")), "52428800"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("read %s, want %s", tc.got, tc.want)
+		}
 	}
 }
 

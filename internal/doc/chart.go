@@ -8,6 +8,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"leaflet/locales"
 )
 
 var (
@@ -54,6 +56,15 @@ func ChartOf(n *Node) Chart {
 		ch.Series = append(ch.Series, cs)
 	}
 	return ch
+}
+
+// SeriesName is the name the chart shows its series i, s, by: its own, or
+// for one without, a name by its number in msgs' language, as "Series 2".
+func SeriesName(msgs locales.Messages, i int, s ChartSeries) string {
+	if strings.TrimSpace(s.Name) != "" {
+		return s.Name
+	}
+	return msgs.ChartSeriesNumbered(i + 1)
 }
 
 func ChartCSV(n *Node, labelColumn string) string {

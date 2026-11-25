@@ -1405,6 +1405,22 @@ func (msgs Messages) HostChartSeries() string {
 	return Catalog.Format(msgs.locale, "hostChartSeries", nil)
 }
 
+// ChartSeriesNumbered says "Series {n}"
+// in the language the app shows.
+//
+// A chart's series that has no name, as its legend and its table name it,
+// counting the series from 1.
+func ChartSeriesNumbered(n int) string { return In(i18n.Locale()).ChartSeriesNumbered(n) }
+
+// ChartSeriesNumbered says "Series {n}"
+// in the language of msgs.
+//
+// A chart's series that has no name, as its legend and its table name it,
+// counting the series from 1.
+func (msgs Messages) ChartSeriesNumbered(n int) string {
+	return Catalog.Format(msgs.locale, "chartSeriesNumbered", map[string]any{"n": n})
+}
+
 // HostErrorCreateSubpage says "Could not create the subpage: {error}"
 // in the language the app shows.
 //
@@ -3975,6 +3991,40 @@ func (msgs Messages) DialogChartNeedSeries() string {
 	return Catalog.Format(msgs.locale, "dialogChartNeedSeries", nil)
 }
 
+// DialogChartTooManyRows says "A chart holds at most {count} rows of data."
+// in the language the app shows.
+//
+// Chart dialog: an error when more rows of data, one a label, are written
+// than a chart holds.
+func DialogChartTooManyRows(count int) string { return In(i18n.Locale()).DialogChartTooManyRows(count) }
+
+// DialogChartTooManyRows says "A chart holds at most {count} rows of data."
+// in the language of msgs.
+//
+// Chart dialog: an error when more rows of data, one a label, are written
+// than a chart holds.
+func (msgs Messages) DialogChartTooManyRows(count int) string {
+	return Catalog.Format(msgs.locale, "dialogChartTooManyRows", map[string]any{"count": count})
+}
+
+// DialogChartTooManySeries says "A chart holds at most {count} series."
+// in the language the app shows.
+//
+// Chart dialog: an error when the header names more series, columns after
+// the label column, than a chart holds.
+func DialogChartTooManySeries(count int) string {
+	return In(i18n.Locale()).DialogChartTooManySeries(count)
+}
+
+// DialogChartTooManySeries says "A chart holds at most {count} series."
+// in the language of msgs.
+//
+// Chart dialog: an error when the header names more series, columns after
+// the label column, than a chart holds.
+func (msgs Messages) DialogChartTooManySeries(count int) string {
+	return Catalog.Format(msgs.locale, "dialogChartTooManySeries", map[string]any{"count": count})
+}
+
 // DialogChartNotNumber says "Row {row}: “{value}” is not a number."
 // in the language the app shows.
 //
@@ -4655,6 +4705,20 @@ func DialogCardBadPicture() string { return In(i18n.Locale()).DialogCardBadPictu
 // address.
 func (msgs Messages) DialogCardBadPicture() string {
 	return Catalog.Format(msgs.locale, "dialogCardBadPicture", nil)
+}
+
+// DialogCardLongPicture says "The picture link is too long: a card takes one of at most {count} characters."
+// in the language the app shows.
+//
+// The fact card dialog's error for a picture link longer than a card keeps.
+func DialogCardLongPicture(count int) string { return In(i18n.Locale()).DialogCardLongPicture(count) }
+
+// DialogCardLongPicture says "The picture link is too long: a card takes one of at most {count} characters."
+// in the language of msgs.
+//
+// The fact card dialog's error for a picture link longer than a card keeps.
+func (msgs Messages) DialogCardLongPicture(count int) string {
+	return Catalog.Format(msgs.locale, "dialogCardLongPicture", map[string]any{"count": count})
 }
 
 // DialogCardBadSource says "Source {line} is not a web link."

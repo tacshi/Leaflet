@@ -189,3 +189,98 @@ func TestMergeTableStyleBothChangedKeepsAConflict(t *testing.T) {
 		t.Errorf("the later change lost: %q", a)
 	}
 }
+
+// putColumn puts a column of texts into the table at at, as the editor
+// does, its cells new and the alignments after it moved on.
+func putColumn(tt *Node, at int, texts ...string) {
+	rows, cols := TableSize(tt)
+	for _, c := range tt.Children {
+		if p := c.Int("colPosition", 0); p >= at {
+			c.Set("colPosition", p+1)
+		}
+	}
+	for r := range rows {
+		tt.Children = append(tt.Children, TableCellNode(r, at, Delta{{Text: texts[r]}}))
+	}
+	ShiftTableAligns(tt, at, 1)
+	tt.Set("colsLen", cols+1)
+	SortTableCells(tt)
+}
+
+// takeColumn takes the table's column at out, as the editor does.
+func takeColumn(tt *Node, at int) {
+	_, cols := TableSize(tt)
+	kept := tt.Children[:0]
+	for _, c := range tt.Children {
+		switch p := c.Int("colPosition", 0); {
+		case p == at:
+			continue
+		case p > at:
+			c.Set("colPosition", p-1)
+		}
+		kept = append(kept, c)
+	}
+	tt.Children = kept
+	ShiftTableAligns(tt, at, -1)
+	tt.Set("colsLen", cols-1)
+}
+
+func TestMergeTableAlignsGoWithTheirColumns(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		rows         [][]string
+		base         func(*Node)
+		mine, theirs func(*Node)
+		want         []string
+	}{
+		{
+			name:   "aligned on one side, a column put before it on the other",
+			rows:   [][]string{{"a", "b"}, {"c", "d"}},
+			mine:   func(tt *Node) { SetTableAlign(tt, 1, AlignRight) },
+			theirs: func(tt *Node) { putColumn(tt, 0, "N", "n") },
+			want:   []string{"", "", "right"},
+		},
+		{
+			name:   "an aligned column, a column put before it on both sides",
+			rows:   [][]string{{"a", "b"}, {"c", "d"}},
+			base:   func(tt *Node) { SetTableAlign(tt, 1, AlignRight) },
+			mine:   func(tt *Node) { putColumn(tt, 0, "M", "m") },
+			theirs: func(tt *Node) { putColumn(tt, 0, "N", "n") },
+			want:   []string{"", "", "", "right"},
+		},
+		{
+			name:   "aligned on one side, a column before it taken out on the other",
+			rows:   [][]string{{"Item", "Note", "Price"}, {"tea", "hot", "$3"}},
+			mine:   func(tt *Node) { SetTableAlign(tt, 2, AlignRight) },
+			theirs: func(tt *Node) { takeColumn(tt, 1) },
+			want:   []string{"", "right"},
+		},
+	} {
+		table, _ := TableNode(tc.rows, "T")
+		base := FromBlocks([]*Node{table})
+		for id := range base.Blocks {
+			base.Blocks[id] = 1000
+		}
+		if tc.base != nil {
+			was := base
+			base = base.Copy()
+			tc.base(base.Find("T"))
+			base = base.Stamped(was, 1100)
+		}
+		mine, theirs := base.Copy(), base.Copy()
+		tc.mine(mine.Find("T"))
+		tc.theirs(theirs.Find("T"))
+		mine, theirs = mine.Stamped(base, 2000), theirs.Stamped(base, 1500)
+		for _, sides := range [][2]*Content{{mine, theirs}, {theirs, mine}} {
+			got, conflicts := Merge(base, sides[0], sides[1])
+			tt := got.Find("T")
+			_, cols := TableSize(tt)
+			if aligns := TableAligns(tt, cols); !reflect.DeepEqual(aligns, tc.want) || len(conflicts) != 0 {
+				t.Errorf("%s: aligns %q, want %q; conflicts %d", tc.name, aligns, tc.want, len(conflicts))
+			}
+			if raw, _ := tt.Data["aligns"].([]any); len(raw) > cols {
+				t.Errorf("%s: %d alignments for %d columns", tc.name, len(raw), cols)
+			}
+		}
+	}
+}

@@ -3,6 +3,8 @@ package rendered
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -177,5 +179,31 @@ func TestNoRTCNestedLeadsFramesTheEmbedMakes(t *testing.T) {
 	}
 	if !strings.Contains(NestedCSP, "require-trusted-types-for 'script'") || !strings.Contains(NestedCSP, "trusted-types default") || strings.Contains(NestedCSP, "allow-duplicates") {
 		t.Errorf("NestedCSP lets HTML past the default policy: %s", NestedCSP)
+	}
+}
+
+func TestScriptDataEndsNoScript(t *testing.T) {
+	evil := "</script><script>alert(1)</script> <!--"
+	s := ScriptString(evil)
+	data := dataScript("d", map[string]any{"name": evil})
+	body := strings.TrimSuffix(strings.TrimPrefix(data, `<script type="application/json" id="d">`), "</script>")
+	for _, out := range []string{s, body} {
+		if strings.Contains(out, "</") || strings.Contains(out, "<!--") || strings.Contains(out, " ") {
+			t.Errorf("%q could end its script", out)
+		}
+	}
+	var back string
+	if err := json.Unmarshal([]byte(s), &back); err != nil || back != evil {
+		t.Errorf("read back as %q, %v", back, err)
+	}
+}
+
+func TestModuleExports(t *testing.T) {
+	code, exports := moduleExports("const a=1,b=2;export{a as render,b};\n")
+	if code != "const a=1,b=2;" || !reflect.DeepEqual(exports, []export{{name: "render", local: "a"}, {name: "b", local: "b"}}) {
+		t.Errorf("%q, %+v", code, exports)
+	}
+	if code, exports := moduleExports("const a=1;"); code != "const a=1;" || exports != nil {
+		t.Errorf("a script that exports nothing: %q, %+v", code, exports)
 	}
 }

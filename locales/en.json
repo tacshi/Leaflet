@@ -444,6 +444,15 @@
   "@hostChartSeries": {
     "description": "The name of a new chart's series."
   },
+  "chartSeriesNumbered": "Series {n}",
+  "@chartSeriesNumbered": {
+    "description": "A chart's series that has no name, as its legend and its table name it, counting the series from 1.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "hostErrorCreateSubpage": "Could not create the subpage: {error}",
   "@hostErrorCreateSubpage": {
     "description": "Toast when a subpage could not be created.",
@@ -1394,6 +1403,24 @@
   "@dialogChartNeedSeries": {
     "description": "Chart dialog: an error when the header has too few columns."
   },
+  "dialogChartTooManyRows": "A chart holds at most {count} rows of data.",
+  "@dialogChartTooManyRows": {
+    "description": "Chart dialog: an error when more rows of data, one a label, are written than a chart holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogChartTooManySeries": "A chart holds at most {count} series.",
+  "@dialogChartTooManySeries": {
+    "description": "Chart dialog: an error when the header names more series, columns after the label column, than a chart holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "dialogChartNotNumber": "Row {row}: “{value}” is not a number.",
   "@dialogChartNotNumber": {
     "description": "Chart dialog: an error when a value is not a number.",
@@ -1603,6 +1630,15 @@
   "dialogCardBadPicture": "The picture link must be a web address, starting with http:// or https://.",
   "@dialogCardBadPicture": {
     "description": "The fact card dialog's error for a picture link that is not a web address."
+  },
+  "dialogCardLongPicture": "The picture link is too long: a card takes one of at most {count} characters.",
+  "@dialogCardLongPicture": {
+    "description": "The fact card dialog's error for a picture link longer than a card keeps.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "dialogCardBadSource": "Source {line} is not a web link.",
   "@dialogCardBadSource": {

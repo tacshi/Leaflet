@@ -3,11 +3,17 @@ package doc
 import (
 	"net/url"
 	"strings"
+	"unicode"
 )
 
+// WebURL reports whether s is a web address: http or https, to a host,
+// with no space of any kind in it, as a link a page loads or opens takes.
 func WebURL(s string) bool {
-	u, err := url.Parse(strings.TrimSpace(s))
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && !strings.ContainsAny(s, " \t\n")
+	if strings.ContainsFunc(s, unicode.IsSpace) {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }
 
 func LinkNode(link string) (*Node, error) {

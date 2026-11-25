@@ -3,13 +3,11 @@ package doc
 import (
 	"fmt"
 	"math"
-	"net/url"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -28,6 +26,18 @@ var AgentTypes = []string{
 }
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
+
+// What a chart holds at most: labels, a value of each series for each, and
+// series, and characters of a label, a series' name, its title and its
+// caption. A chart is read as it was kept, whatever its size.
+const (
+	MaxChartLabels  = 2000
+	MaxChartSeries  = 50
+	MaxChartLabel   = 200
+	MaxChartName    = 200
+	MaxChartTitle   = 200
+	MaxChartCaption = 1000
+)
 
 const maxEmbedHTML = 200_000
 
@@ -137,7 +147,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			img = spec
 		}
 		url, _ := img["url"].(string)
-		if url = strings.TrimSpace(url); !agentURL(url) {
+		if url = strings.TrimSpace(url); !WebURL(url) {
 			return nil, toolErr(NeedsImageURL)
 		}
 		alt, _ := img["alt"].(string)
@@ -220,7 +230,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			l = spec
 		}
 		link, _ := l["url"].(string)
-		if !agentURL(strings.TrimSpace(link)) {
+		if !WebURL(strings.TrimSpace(link)) {
 			link = ""
 		}
 		ln, err := LinkNode(link)
@@ -280,41 +290,54 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	if !chartTypes[kind] {
 		return nil, toolErr("chart.chart_type must be bar, line, or pie.")
 	}
-	var labels []any
-	if raw, ok := chart["labels"].([]any); ok {
-		for _, l := range raw {
-			labels = append(labels, JSONText(l))
-		}
-	}
-	var series []any
-	if raw, ok := chart["series"].([]any); ok {
-		for i, r := range raw {
-			s := asMap(r)
-			var values []any
-			if vs, ok := s["values"].([]any); ok {
-				for _, v := range vs {
-					values = append(values, chartValue(v))
-				}
-			}
-			name := fmt.Sprintf("Series %d", i+1)
-			if v, ok := s["name"]; ok && v != nil {
-				name = JSONText(v)
-			}
-			series = append(series, map[string]any{"name": name, "values": values})
-		}
-	}
-	if len(labels) == 0 || len(series) == 0 {
+	rawLabels, _ := chart["labels"].([]any)
+	rawSeries, _ := chart["series"].([]any)
+	if len(rawLabels) == 0 || len(rawSeries) == 0 {
 		return nil, toolErr("A chart needs chart.labels and at least one series.")
 	}
-	for _, s := range series {
-		m := s.(map[string]any)
-		vs := m["values"].([]any)
-		if len(vs) != len(labels) {
-			return nil, toolErr("Series %q has %d values but there are %d labels.", m["name"], len(vs), len(labels))
+	if len(rawLabels) > MaxChartLabels {
+		return nil, toolErr("A chart takes at most %d labels.", MaxChartLabels)
+	}
+	if len(rawSeries) > MaxChartSeries {
+		return nil, toolErr("A chart takes at most %d series.", MaxChartSeries)
+	}
+	labels := make([]any, len(rawLabels))
+	for i, l := range rawLabels {
+		if labels[i] = JSONText(l); utf8.RuneCountInString(labels[i].(string)) > MaxChartLabel {
+			return nil, toolErr("A chart's label takes at most %d characters.", MaxChartLabel)
 		}
+	}
+	series := make([]any, len(rawSeries))
+	for i, r := range rawSeries {
+		s := asMap(r)
+		// A series without a name keeps none: the chart names it by its
+		// number where it shows, in the reader's language (SeriesName).
+		name := JSONText(s["name"])
+		if utf8.RuneCountInString(name) > MaxChartName {
+			return nil, toolErr("A series' name takes at most %d characters.", MaxChartName)
+		}
+		vs, _ := s["values"].([]any)
+		if len(vs) != len(labels) {
+			what := strconv.Quote(name)
+			if name == "" {
+				what = strconv.Itoa(i + 1)
+			}
+			return nil, toolErr("Series %s has %d values but there are %d labels.", what, len(vs), len(labels))
+		}
+		values := make([]any, len(vs))
+		for k, v := range vs {
+			values[k] = chartValue(v)
+		}
+		series[i] = map[string]any{"name": name, "values": values}
 	}
 	title, _ := chart["title"].(string)
 	caption, _ := chart["caption"].(string)
+	if utf8.RuneCountInString(title) > MaxChartTitle {
+		return nil, toolErr("chart.title takes at most %d characters.", MaxChartTitle)
+	}
+	if utf8.RuneCountInString(caption) > MaxChartCaption {
+		return nil, toolErr("chart.caption takes at most %d characters.", MaxChartCaption)
+	}
 	return map[string]any{
 		"chart_type": kind,
 		"title":      title,
@@ -417,14 +440,6 @@ func chartValue(v any) float64 {
 	}
 	f, _ := AsFloat(v)
 	return f
-}
-
-func agentURL(s string) bool {
-	if !WebURL(s) || strings.ContainsFunc(s, unicode.IsSpace) {
-		return false
-	}
-	u, err := url.Parse(s)
-	return err == nil && u.Hostname() != ""
 }
 
 func CallNodes(nodes []*Node) error {

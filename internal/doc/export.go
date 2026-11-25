@@ -118,8 +118,8 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					head = append(head, escapeCommonMark(l))
 				}
 				rows := [][]string{head}
-				for _, s := range chart.Series {
-					row := []string{escapeCommonMark(s.Name)}
+				for i, s := range chart.Series {
+					row := []string{escapeCommonMark(SeriesName(msgs, i, s))}
 					for _, v := range s.Values {
 						row = append(row, trimFloat(v))
 					}
@@ -151,7 +151,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 			case "link_preview":
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "card":
-				block(indent, cardMarkdown(CardOf(n), link))
+				block(indent, cardMarkdown(CardOf(n), link, href))
 			case "map":
 				block(indent, mapMarkdown(msgs, MapOf(n), link))
 			case "file":

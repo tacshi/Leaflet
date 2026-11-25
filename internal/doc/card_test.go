@@ -133,3 +133,47 @@ func TestLoadedURL(t *testing.T) {
 		t.Error("a card shows a picture that is not on the web, or an icon it does not know")
 	}
 }
+
+func TestCardMarkdownReadsAsAParagraphDoes(t *testing.T) {
+	link := func(h string) string {
+		if strings.HasPrefix(h, "leaflet://") {
+			return "Plan.md"
+		}
+		return h
+	}
+	data, err := CardData(map[string]any{"title": "T", "note": "See [Plan](leaflet://page/abc) and <span style=\"color:#ef4444\">late</span>",
+		"facts": []any{
+			map[string]any{"label": "Fare", "value": "<span style=\"color:#ef4444\">**HK$18**</span>"},
+			map[string]any{"label": "Who", "value": "[@Ann](mention:user:u1)"},
+			map[string]any{"label": "Time", "value": "`a  b`"},
+			map[string]any{"label": "Open", "value": ""},
+			map[string]any{"value": "--"},
+			map[string]any{"value": "# Big"},
+			map[string]any{"value": "1. first"},
+			map[string]any{"value": "[ ] box"},
+			map[string]any{"value": "> quoted"},
+			map[string]any{"value": "a\nb"},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := &Node{ID: "c", Type: "card", Data: data}
+	md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{Link: link})
+	for _, want := range []string{
+		"- Fare: **HK$18**\n", "- Who: @Ann\n", "- Time: `a  b`\n", "- Open:\n", "See [Plan](Plan.md) and late",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "span") || strings.Contains(md, "mention:") || strings.Contains(md, "leaflet://") {
+		t.Errorf("markdown keeps what a paragraph's leaves out:\n%s", md)
+	}
+	blocks, _ := commonMarkText(md)
+	want := []string{"paragraph: T", "paragraph: Fare: HK$18", "paragraph: Who: @Ann", "paragraph: Time: a  b", "paragraph: Open:",
+		"paragraph: --", "paragraph: # Big", "paragraph: 1. first", "paragraph: [ ] box", "paragraph: > quoted", "paragraph: a b",
+		"paragraph: See Plan and late"}
+	if !reflect.DeepEqual(blocks, want) {
+		t.Errorf("reads as %q,\nwant %q", blocks, want)
+	}
+}

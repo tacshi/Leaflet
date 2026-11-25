@@ -19,21 +19,46 @@ import (
 var peleJS string
 
 var PeleModule = func() string {
-	m := regexp.MustCompile(`export\{([^}]*)\};?\s*$`).FindStringSubmatchIndex(peleJS)
-	if m == nil {
-		return "var peleRender = null;"
-	}
-	for _, part := range strings.Split(peleJS[m[2]:m[3]], ",") {
-		if local, name, ok := strings.Cut(strings.TrimSpace(part), " as "); ok && name == "render" {
-			return peleJS[:m[0]] + "\nconst peleRender = " + local + ";\n"
+	code, exports := moduleExports(peleJS)
+	for _, e := range exports {
+		if e.name == "render" {
+			return code + "\nconst peleRender = " + e.local + ";\n"
 		}
 	}
 	return "var peleRender = null;"
 }()
 
+// moduleExport is the export{…} an ES module's bundle ends with.
+var moduleExport = regexp.MustCompile(`export\{([^}]*)\};?\s*$`)
+
+// export is a name a module exports, and the local it is.
+type export struct{ name, local string }
+
+// moduleExports cuts an ES module's bundle at the export{…} it ends with,
+// for a page to run it as a plain script: its code before it, and what it
+// exports, in order; the bundle as it is, exporting nothing, when it ends
+// in none.
+func moduleExports(js string) (code string, exports []export) {
+	m := moduleExport.FindStringSubmatchIndex(js)
+	if m == nil {
+		return js, nil
+	}
+	for _, part := range strings.Split(js[m[2]:m[3]], ",") {
+		local, name, ok := strings.Cut(strings.TrimSpace(part), " as ")
+		if !ok {
+			local, name = strings.TrimSpace(part), strings.TrimSpace(part)
+		}
+		exports = append(exports, export{name: name, local: local})
+	}
+	return js[:m[0]], exports
+}
+
+// ScriptString is s as a JavaScript string, to write in a page's script:
+// json.Marshal escapes <, > and & as <, > and &, so that
+// no "</script>" in s ends the script, and U+2028 and U+2029 too.
 func ScriptString(s string) string {
 	b, _ := json.Marshal(s)
-	return strings.ReplaceAll(string(b), "</", `<\/`)
+	return string(b)
 }
 
 const renderedStyle = `html,body{margin:0;background:transparent;color:#16181d}
@@ -53,9 +78,11 @@ func ScriptsCSP(scripts ...string) string {
 	return policy + "; style-src 'unsafe-inline'"
 }
 
+// dataScript is v as a page's data, JSON in a script element of id: safe
+// there, as json.Marshal escapes the < of any "</script>" in v.
 func dataScript(id string, v any) string {
 	b, _ := json.Marshal(v)
-	return `<script type="application/json" id="` + id + `">` + strings.ReplaceAll(string(b), "</", `<\/`) + `</script>`
+	return `<script type="application/json" id="` + id + `">` + string(b) + `</script>`
 }
 
 const ZoomScript = `function leafletZoom(view, box, on, full, zoomed) {

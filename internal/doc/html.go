@@ -374,8 +374,8 @@ func (w htmlWriter) block(n *Node) {
 			w.write("<th>", html.EscapeString(l), "</th>")
 		}
 		w.write("</tr>")
-		for _, s := range chart.Series {
-			w.write("<tr><th>", html.EscapeString(s.Name), "</th>")
+		for i, s := range chart.Series {
+			w.write("<tr><th>", html.EscapeString(SeriesName(locales.In(w.opts.Lang), i, s)), "</th>")
 			for _, v := range s.Values {
 				w.write("<td>", trimFloat(v), "</td>")
 			}

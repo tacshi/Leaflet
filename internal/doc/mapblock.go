@@ -298,20 +298,6 @@ func LineColor(l MapLeg) string {
 	return ""
 }
 
-// MapNodeFromJSON is the map block a ```map fence holds, as an agent's
-// answer shows one, or false when it holds none.
-func MapNodeFromJSON(src string) (*Node, bool) {
-	var spec map[string]any
-	if err := json.Unmarshal([]byte(src), &spec); err != nil {
-		return nil, false
-	}
-	data, err := MapData(spec)
-	if err != nil {
-		return nil, false
-	}
-	return &Node{ID: NewBlockID(), Type: "map", Data: data}, true
-}
-
 // RouteSummary is a route in a line: how it goes, its time and its
 // length, as "Public transport · 43 min · 27 km".
 func RouteSummary(msgs locales.Messages, r *MapRoute) string {
@@ -367,24 +353,6 @@ func Duration(msgs locales.Messages, seconds int) string {
 		return msgs.MapMinutes(m)
 	}
 	return msgs.MapHoursMinutes(m/60, m%60)
-}
-
-// MapText is the map's words, as search and a plain copy read them.
-func MapText(msgs locales.Messages, m Map) string {
-	lines := []string{m.Title}
-	for _, p := range m.Places {
-		lines = append(lines, p.Name)
-	}
-	if m.Route != nil {
-		lines = append(lines, RouteSummary(msgs, m.Route), RouteSteps(msgs, m.Route))
-	}
-	var out []string
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			out = append(out, l)
-		}
-	}
-	return strings.Join(out, "\n")
 }
 
 // PlaceLink is a link to a place on OpenStreetMap's map.

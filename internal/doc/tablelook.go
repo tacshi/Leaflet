@@ -157,8 +157,9 @@ func tableRuleCell(align string) string {
 // base, merged key by key: a key only one side changed takes that side's
 // value, and one both changed takes the winner's, the other side's when
 // otherWins. clash reports a key both changed, not alike, other than the
-// table's size, which its cells settle (placeCells): a look one side gave
-// the table and a row the other added are both kept.
+// table's size, which its cells settle (placeCells), and its columns'
+// alignments, which go with their columns (mergedAligns): a look one side
+// gave the table and a row the other added are both kept.
 func mergedTableData(base, primary, other *Node, otherWins bool) (data map[string]any, clash bool) {
 	keys := map[string]bool{}
 	for _, n := range []*Node{base, primary, other} {
@@ -180,7 +181,7 @@ func mergedTableData(base, primary, other *Node, otherWins bool) (data map[strin
 		case same(p, pok, b, bok):
 			v, ok = o, ook
 		default:
-			clash = clash || k != "rowsLen" && k != "colsLen"
+			clash = clash || k != "rowsLen" && k != "colsLen" && k != "aligns"
 			v, ok = p, pok
 			if otherWins {
 				v, ok = o, ook

@@ -86,7 +86,7 @@ metadata:
 | `divider` | — | |
 | `image` | `url`, `align`, `alt`, `width`, `height`, `file_id?` | a picture kept with the page has `file_id`, and `url` is `file://<file_id>/<name>`, as a `file`'s is |
 | `table` | `colsLen`, `rowsLen`, `style?`, `aligns?`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph`; `style` `lines` draws it with simple lines (a bold header and a hairline under it and between rows, with no borders) rather than as a grid; `aligns` is how each column aligns, in order, `left`, `center`, `right` or `""` as text does, as Markdown's delimiter row (`:---`, `:---:`, `---:`) says, a list that stops at its last column aligned so |
-| `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
+| `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client; a series written without a name keeps `""`, and its legend and table name it by its number, as "Series 2", in the reader's language |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
 | `map` | `title?`, `places?` [{`name`, `lat`, `lng`}], `route?` {`mode`, `source`, `duration_s`, `distance_m`, `legs` [{`mode`, `line?`, `agency?`, `color?`, `from?`, `to?`, `duration_s`, `distance_m?`, `path`}]}, `author` | places on a map, and a route between them: `route.mode` is `walk`, `cycle`, `drive` or `transit`, `source` the router it came from (`transitous` or `osrm`), which the map credits, and each leg's `path` its points as an encoded polyline (Google's format) of 6 decimal places; a leg goes by `walk`, `cycle`, `drive`, `bus`, `coach`, `tram`, `subway`, `rail`, `ferry`, `cable`, `air` or `transit`, its `line` a line's name, as `B8`, and `color` its line's, `#rrggbb`. A map with a route and no places marks the route's ends. The Mac and Windows draw it on OpenFreeMap's tiles with MapLibre GL JS, iPhone and iPad on Apple's map; web pages and PDFs draw its route and places without tiles |
 | `card` | `layout` (`figures`\|`details`), `icon?`, `title?`, `image?`, `facts?` [{`label`, `value`}], `note?`, `sources?` [{`url`, `title?`}], `author` | facts at a glance under a title: `figures` shows the values large, side by side, `details` a line each, `label：value`, beside the picture `image`, a web link the app loads by itself; `icon` is one of Lucide's names the card takes (`doc.CardIcons`); a value and the note are inline Markdown; the sources show as a chip after the note, the first by its title or its site's name, with how many more |
@@ -194,7 +194,7 @@ picker's.
 
 ```json
 {
-  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram",
+  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram|card|map",
   "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…), <span style=\"color:#ef4444\">color</span>; for code, the code verbatim",
   "language": "go",
   "tone": "tip",
@@ -246,7 +246,23 @@ stays code where people paste or import Markdown; an agent's write, as
 ```` ```chart ````, ```` ```card ```` or ```` ```map ```` fence that is
 not its block is refused, its error saying why, and writes nothing
 (`doc.FenceError`), so a broken chart never lands on a page as JSON. A Markdown export writes a chart as its title, a table of its
-values and its caption, for people to read.
+values and its caption, for people to read, and a card's values and note
+as a paragraph's text is written: without colors, a mention as `@Name`,
+links as a paragraph's go (a page's to its file in a zip), and none
+starting a block of its own.
+
+What a spec writes is bounded, and one past a bound is an error (a page
+already kept is read as it is): a chart takes at most 2,000 labels and
+50 series, a label and a series' name of 200 characters, a title of 200
+and a caption of 1,000 (`doc.MaxChartLabels` and the rest); a card a
+title of 200 characters, 12 facts, a label of 100 and a value of 400, a
+note of 1,000, a picture's link of 2,048 and 8 sources (`doc.MaxCardTitle`
+and the rest); a map 25 places, each with its `lat` and `lng` (a place
+without them is an error, not a pin at 0, 0), names and a title of 200
+characters, and a route of 60 legs and 40,000 points. A link, an image's,
+a card's picture and sources, is `http` or `https`, to a host, with no
+space of any kind in it (`doc.WebURL`). The app's card and chart dialogs
+cut what is longer than a block keeps rather than refuse it.
 
 A table's `table_style` is `grid`, the default, or `lines`, and `align`
 lists how its columns align, in order: `left`, `center`, `right` or `""`.

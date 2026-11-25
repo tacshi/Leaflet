@@ -10,14 +10,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log"
+	"maps"
 	"math"
 	"math/big"
 	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,11 +36,17 @@ const (
 	chatgptPort     = 1455
 )
 
+// ChatGPTAccount is one ChatGPT account signed in on this device: its own
+// registration of Leaflet (ClientID), which OpenAI binds to that account
+// and its workspace, and what signs it in again. IDToken is the identity
+// token of its last sign-in, which a sign-in again sends so that OpenAI
+// skips its account picker.
 type ChatGPTAccount struct {
 	ClientID     string `json:"client_id"`
 	Email        string `json:"email"`
 	Subject      string `json:"sub"`
 	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token,omitempty"`
 }
 
 type chatgptDiscovery struct {
@@ -65,11 +73,11 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 		return nil, err
 	}
 	if d.Issuer != chatgptIssuer {
-		return nil, errors.New("OpenAI's sign-in answered for another issuer")
+		return nil, unverified("OpenAI's sign-in answered for another issuer")
 	}
 	for _, e := range []string{d.AuthorizationEndpoint, d.TokenEndpoint, d.JWKSURI} {
 		if !strings.HasPrefix(e, chatgptIssuer+"/") {
-			return nil, errors.New("OpenAI's sign-in endpoints are not on its own site")
+			return nil, unverified("OpenAI's sign-in endpoints are not on its own site")
 		}
 	}
 	if d.RevocationEndpoint != "" && !strings.HasPrefix(d.RevocationEndpoint, chatgptIssuer+"/") {
@@ -81,6 +89,21 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 
 func errSignInUnreachable(status string) error {
 	return errors.New(locales.AgentChatgptUnreachable(status))
+}
+
+// signInError is a sign-in OpenAI refused, or whose answer could not be
+// read, worded in the app's language as it shows.
+type signInError struct{ err error }
+
+func (e signInError) Error() string { return locales.AgentChatgptSignInFailed(e.err.Error()) }
+
+func (e signInError) Unwrap() error { return e.err }
+
+// unverified is a sign-in whose answer failed Leaflet's checks: the user
+// is told it could not be checked, and the log keeps why.
+func unverified(why string) error {
+	log.Printf("chatgpt sign-in: %s", why)
+	return errors.New(locales.AgentChatgptUnverified())
 }
 
 func isJSON(res *http.Response) bool {
@@ -109,7 +132,7 @@ func getSignInJSON(ctx context.Context, u string, v any) error {
 		err = json.Unmarshal(data, v)
 	}
 	if err != nil {
-		return fmt.Errorf("ChatGPT sign-in failed: %w", err)
+		return signInError{err}
 	}
 	return nil
 }
@@ -141,15 +164,18 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	var t chatgptTokens
 	data, err := readAll(res.Body, maxReplyBytes)
 	if errors.Is(err, errTooLong) {
-		return nil, fmt.Errorf("ChatGPT sign-in failed: %w", err)
+		return nil, signInError{err}
 	}
 	if err := json.Unmarshal(data, &t); err != nil && res.StatusCode < 400 {
 		if !isJSON(res) {
 			return nil, errSignInUnreachable(res.Status)
 		}
-		return nil, fmt.Errorf("ChatGPT sign-in failed: %w", err)
+		return nil, signInError{err}
 	}
 	if res.StatusCode >= 400 || t.Error != "" {
+		// An answer that refuses carries no tokens: kept whole in the log,
+		// it says what OpenAI said, beyond the fields read here.
+		log.Printf("chatgpt sign-in: %s answered %s: %.2000s", endpoint, res.Status, data)
 		msg := t.Description
 		if msg == "" {
 			msg = t.Error
@@ -157,12 +183,22 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 		if msg == "" {
 			msg = res.Status
 		}
-		return &t, fmt.Errorf("ChatGPT sign-in failed: %s", msg)
+		return &t, signInError{errors.New(msg)}
 	}
 	return &t, nil
 }
 
-func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url string)) (*ChatGPT, error) {
+// SignInChatGPT signs in with ChatGPT in the browser open opens. With
+// again, it signs that account in again under its own registration, with
+// its email and last identity token as hints, so that OpenAI goes straight
+// to that account. Without, it registers Leaflet anew, for whichever
+// account the person picks: OpenAI binds a registration to one account and
+// its workspace, and turns any other account away on its own page.
+func SignInChatGPT(ctx context.Context, hostID string, again *ChatGPTAccount, open func(url string)) (*ChatGPT, error) {
+	clientID := ""
+	if again != nil {
+		clientID = again.ClientID
+	}
 	d, err := discover(ctx)
 	if err != nil {
 		return nil, err
@@ -186,6 +222,12 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	}
 	if clientID != "" {
 		q.Set("client_id", clientID)
+		if again.Email != "" {
+			q.Set("login_hint", again.Email)
+		}
+		if again.IDToken != "" {
+			q.Set("id_token_hint", again.IDToken)
+		}
 	} else {
 		q.Set("client_id", "dynamic_agent_client")
 		q.Set("agent_name_hint", "Leaflet")
@@ -194,6 +236,14 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	back, err := lb.Wait(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// What the browser brought back, by name, and the scope when there is
+	// one: never the code.
+	log.Printf("chatgpt sign-in: the browser came back with %v, scope %q", slices.Sorted(maps.Keys(back)), back.Get("scope"))
+	// The issuer that answered, which OpenAI names (RFC 9207): an answer of
+	// another's, as one a mixed-up sign-in brings, is not exchanged.
+	if iss := back.Get("iss"); iss != "" && iss != chatgptIssuer {
+		return nil, unverified("ChatGPT's sign-in came back from another issuer: " + iss)
 	}
 	issued := back.Get("client_id")
 	if issued == "" {
@@ -209,6 +259,14 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		"grant_type": {"authorization_code"}, "client_id": {issued}, "code": {back.Get("code")},
 		"code_verifier": {lb.Verifier}, "redirect_uri": {lb.Redirect}, "resource": {chatgptResource},
 	})
+	if t != nil && t.Error == "invalid_grant" {
+		// OpenAI turns down the code its own sign-in just gave, with no
+		// reason, for an account on no ChatGPT plan Leaflet may use: after
+		// its browser step showed that plan and granted its scope, and not
+		// as a sign-in without the scope, as its documents have it. Its
+		// documents' way on for any other cause is another sign-in.
+		return nil, errors.New(locales.AgentChatgptCodeRefused())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +280,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	email, _ := claims["email"].(string)
 	sub, _ := claims["sub"].(string)
 	g := &ChatGPT{
-		acct:    ChatGPTAccount{ClientID: issued, Email: email, Subject: sub, RefreshToken: t.RefreshToken},
+		acct:    ChatGPTAccount{ClientID: issued, Email: email, Subject: sub, RefreshToken: t.RefreshToken, IDToken: t.IDToken},
 		access:  t.AccessToken,
 		expires: time.Now().Add(time.Duration(t.ExpiresIn) * time.Second),
 	}
@@ -232,7 +290,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, nonce string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return nil, errors.New("ChatGPT sent no identity token")
+		return nil, unverified("ChatGPT sent no identity token")
 	}
 	var header struct {
 		Alg string `json:"alg"`
@@ -240,7 +298,7 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil || json.Unmarshal(raw, &header) != nil || header.Alg != "RS256" {
-		return nil, errors.New("ChatGPT's identity token is not one Leaflet can check")
+		return nil, unverified("ChatGPT's identity token is not one Leaflet can check")
 	}
 	var jwks struct {
 		Keys []struct {
@@ -266,23 +324,20 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 		}
 	}
 	if key == nil {
-		return nil, errors.New("ChatGPT's identity token is signed with an unknown key")
+		return nil, unverified("ChatGPT's identity token is signed with an unknown key")
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, err
+		return nil, unverified("ChatGPT's identity token has no signature Leaflet can read")
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], sig); err != nil {
-		return nil, errors.New("ChatGPT's identity token did not verify")
+		return nil, unverified("ChatGPT's identity token did not verify")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, err
-	}
 	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, err
+	if err != nil || json.Unmarshal(payload, &claims) != nil {
+		return nil, unverified("ChatGPT's identity token holds no claims Leaflet can read")
 	}
 	audOK := false
 	switch aud := claims["aud"].(type) {
@@ -296,13 +351,13 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 	exp, _ := claims["exp"].(float64)
 	switch {
 	case claims["iss"] != chatgptIssuer:
-		return nil, errors.New("ChatGPT's identity token is from another issuer")
+		return nil, unverified("ChatGPT's identity token is from another issuer")
 	case !audOK:
-		return nil, errors.New("ChatGPT's identity token is for another app")
+		return nil, unverified("ChatGPT's identity token is for another app")
 	case time.Unix(int64(exp), 0).Before(time.Now().Add(-time.Minute)):
-		return nil, errors.New("ChatGPT's identity token has expired")
+		return nil, unverified("ChatGPT's identity token has expired")
 	case claims["nonce"] != nonce:
-		return nil, errors.New("ChatGPT's identity token is for another sign-in")
+		return nil, unverified("ChatGPT's identity token is for another sign-in")
 	}
 	return claims, nil
 }

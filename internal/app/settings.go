@@ -996,8 +996,11 @@ func (a *App) chatgptRow(c *ui.Context) {
 				who = locales.SettingsSignedInAs(a.form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if button(c, "again", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
-				a.chatgptSignIn()
+			if button(c, "again", "", locales.SettingsSignInAgain()).Disabled(a.form.signingIn).Clicked() {
+				a.chatgptSignIn(a.form.chatgpt)
+			}
+			if button(c, "switch", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
+				a.chatgptSignIn(nil)
 			}
 		})
 		return
@@ -1008,16 +1011,18 @@ func (a *App) chatgptRow(c *ui.Context) {
 	}
 	ui.Column(c).Gap(8).Children(func() {
 		if primary(c, "signin", "user", label).Height(36).Disabled(a.form.signingIn).Clicked() {
-			a.chatgptSignIn()
+			a.chatgptSignIn(nil)
 		}
 		ui.Text(c, locales.SettingsChatGPTNote()).
 			FontSize(12).TextColor(pal.TextMuted)
 	})
 }
 
-func (a *App) chatgptSignIn() {
+// chatgptSignIn signs in with ChatGPT in the browser: as again's account,
+// when again is given, or as whichever account the person picks there.
+func (a *App) chatgptSignIn(again *agents.ChatGPT) {
 	a.form.signingIn, a.form.result = true, ""
-	hub, had, gen := a.hub, a.form.chatgpt, a.form.gen
+	hub, had, gen := a.hub, again, a.form.gen
 	ctx, cancel := context.WithCancel(context.Background())
 	a.form.cancelSignIn()
 	a.form.stopSignIn = cancel

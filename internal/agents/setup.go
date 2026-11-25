@@ -161,23 +161,28 @@ func (h *Hub) RemoveProvider(id string) error {
 	return nil
 }
 
+// chatgptClientKey held one registration of Leaflet for the whole device,
+// which every sign-in reused, whichever account it was for. OpenAI binds a
+// registration to the account it was made for, so an account kept its own
+// in its sign-in instead, and the device's is forgotten.
 const chatgptClientKey = "chatgpt.client"
 
-func (h *Hub) SignInWithChatGPT(ctx context.Context, had *ChatGPT, open func(url string)) (*ChatGPT, error) {
+// SignInWithChatGPT signs in with ChatGPT: as again's account, when again
+// is given, under its own registration, or as any account the person
+// picks, registering Leaflet for it.
+func (h *Hub) SignInWithChatGPT(ctx context.Context, again *ChatGPT, open func(url string)) (*ChatGPT, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	clientID := ""
-	if had != nil {
-		clientID = had.Account().ClientID
+	var as *ChatGPTAccount
+	if again != nil {
+		acct := again.Account()
+		as = &acct
 	}
-	if clientID == "" {
-		clientID, _ = h.st.Value(chatgptClientKey)
-	}
-	g, err := SignInChatGPT(ctx, h.HostID(), clientID, open)
+	g, err := SignInChatGPT(ctx, h.HostID(), as, open)
 	if err != nil {
 		return nil, err
 	}
-	if err := h.st.SetValue(chatgptClientKey, g.Account().ClientID); err != nil {
+	if err := h.st.DeleteValue(chatgptClientKey); err != nil {
 		log.Printf("ChatGPT client: %v", err)
 	}
 	return g, nil

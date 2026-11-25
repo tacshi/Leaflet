@@ -351,13 +351,14 @@ struct ProviderForm: View {
                             : L.settingsSignedInAs(email: draft.provider.email ?? "")
                     )
                     .foregroundStyle(palette.okText)
-                    Spacer()
-                    Button(L.settingsSwitchAccount) { signIn() }
-                        .disabled(signingIn)
                 }
+                Button(L.settingsSignInAgain) { signIn(again: true) }
+                    .disabled(signingIn)
+                Button(L.settingsSwitchAccount) { signIn(again: false) }
+                    .disabled(signingIn)
             } else {
                 Button {
-                    signIn()
+                    signIn(again: false)
                 } label: {
                     if signingIn {
                         HStack(spacing: 10) {
@@ -375,7 +376,9 @@ struct ProviderForm: View {
         }
     }
 
-    private func signIn() {
+    /// Signs in with ChatGPT: with `again`, as the account this provider is
+    /// signed in as; without, as whichever account the person picks.
+    private func signIn(again: Bool) {
         guard let client = app.client else { return }
         signingIn = true
         failure = nil
@@ -384,7 +387,7 @@ struct ProviderForm: View {
         Task {
             defer { signingIn = false }
             do {
-                let begun = try await client.beginChatGPTSignIn(draft.provider.id)
+                let begun = try await client.beginChatGPTSignIn(draft.provider.id, again: again)
                 attempt = begun.attempt
                 let session = ChatGPTWebSession()
                 webSession = session

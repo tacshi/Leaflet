@@ -29,11 +29,14 @@ type chatgptAccount struct {
 	Models []string `json:"models"`
 }
 
-func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
+// BeginChatGPTSignIn starts a sign-in with ChatGPT: with again, as the
+// account providerID is signed in as, under that account's own
+// registration; without, as whichever account the person picks.
+func (c *Core) BeginChatGPTSignIn(providerID string, again bool) (_ string, err error) {
 	defer catch(&err)
 	c.forgetChatGPTSignIn()
 	var had *agents.ChatGPT
-	if providerID != "" {
+	if again && providerID != "" {
 		c.q.do(func() { had, _ = c.core.Hub.ChatGPT(providerID) })
 	}
 	ctx, cancel := context.WithCancel(context.Background())

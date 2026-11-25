@@ -2580,6 +2580,24 @@
   "@agentChatgptSignInEnded": {
     "description": "An agent run or Settings › Agent providers: ChatGPT no longer accepts the sign-in kept on this device."
   },
+  "agentChatgptCodeRefused": "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one that is, or connect OpenAI with an API key. If this account is on Plus or Pro, sign in again.",
+  "@agentChatgptCodeRefused": {
+    "description": "Settings › Agent providers: after the browser step of signing in with ChatGPT went through, OpenAI refused to finish the sign-in (its invalid_grant) with no reason given. It does this for an account without ChatGPT Plus or Pro, even after the browser step offered the plan."
+  },
+  "agentChatgptSignInFailed": "ChatGPT sign-in failed: {error}",
+  "@agentChatgptSignInFailed": {
+    "description": "Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's sign-in refused, or its answer could not be read; error is why, often OpenAI's own words, in English.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "invalid_request"
+      }
+    }
+  },
+  "agentChatgptUnverified": "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again.",
+  "@agentChatgptUnverified": {
+    "description": "Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's answer did not pass Leaflet's checks: its identity token, or where its sign-in is."
+  },
   "agentKeyUnread": "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key again in Settings › Agent providers.",
   "@agentKeyUnread": {
     "description": "Why an agent can't run: the API key kept on this device for its provider could not be read, as the user turned the system's prompt down.",
@@ -5432,7 +5450,11 @@
   },
   "settingsSwitchAccount": "Switch account",
   "@settingsSwitchAccount": {
-    "description": "The provider dialog for ChatGPT: signs in again."
+    "description": "The provider dialog for ChatGPT: signs in with another ChatGPT account, picked in the browser."
+  },
+  "settingsSignInAgain": "Sign in again",
+  "@settingsSignInAgain": {
+    "description": "The provider dialog for ChatGPT: signs the same ChatGPT account in again, as after its sign-in ended."
   },
   "settingsChatGPTSignIn": "Sign in with ChatGPT",
   "@settingsChatGPTSignIn": {

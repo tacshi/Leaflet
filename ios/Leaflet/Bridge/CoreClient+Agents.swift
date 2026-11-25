@@ -312,11 +312,13 @@ extension CoreClient {
         try await call(waiting: true) { try $0.removeProvider(id) }
     }
 
-    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws
+    /// Starts a ChatGPT sign-in: with `again`, as the account the provider is
+    /// signed in as; without, as whichever account the person picks.
+    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String, again: Bool) async throws
         -> ChatGPTSignIn
     {
         try await call(ChatGPTSignIn.self, waiting: true) { core in
-            try Self.answer { e in core.beginChatGPTSign(in: providerID, error: e) }
+            try Self.answer { e in core.beginChatGPTSign(in: providerID, again: again, error: e) }
         }
     }
 

@@ -287,6 +287,21 @@ func TestRunSaidInTheAppsLanguage(t *testing.T) {
 	if got := Describe(&Run{Stopped: true}); got != "変更を加える前に停止しました。" {
 		t.Errorf("reply %q", got)
 	}
+	for err, want := range map[error]string{
+		errIdle:                                  "モデルの応答が止まりました。もう一度お試しください。",
+		errTooLong:                               "応答が長すぎて読み取れません。",
+		errRedirect:                              "サーバーが別のアドレスへのリダイレクトを返しましたが、Leaflet はリダイレクトをたどりません。",
+		signInError{errors.New("invalid_grant")}: "ChatGPT のサインインに失敗しました：invalid_grant",
+		signInError{errTooLong}:                  "ChatGPT のサインインに失敗しました：応答が長すぎて読み取れません。",
+		unverified("ChatGPT's identity token has expired"): "Leaflet は ChatGPT のサインインを確認できなかったため、使用しませんでした。もう一度お試しください。",
+	} {
+		if got := err.Error(); got != want {
+			t.Errorf("error %q, want %q", got, want)
+		}
+	}
+	if !errors.Is(signInError{errTooLong}, errTooLong) {
+		t.Error("a sign-in's error is not its cause")
+	}
 }
 
 func TestTableCellsAreNotBlocks(t *testing.T) {

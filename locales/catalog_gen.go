@@ -7503,6 +7503,64 @@ func (msgs Messages) AgentChatgptSignInEnded() string {
 	return Catalog.Format(msgs.locale, "agentChatgptSignInEnded", nil)
 }
 
+// AgentChatgptCodeRefused says "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one t…"
+// in the language the app shows.
+//
+// Settings › Agent providers: after the browser step of signing in with
+// ChatGPT went through, OpenAI refused to finish the sign-in (its
+// invalid_grant) with no reason given. It does this for an account without
+// ChatGPT Plus or Pro, even after the browser step offered the plan.
+func AgentChatgptCodeRefused() string { return In(i18n.Locale()).AgentChatgptCodeRefused() }
+
+// AgentChatgptCodeRefused says "ChatGPT didn't finish this sign-in. It does this for an account that isn't on ChatGPT Plus or Pro: sign in with one t…"
+// in the language of msgs.
+//
+// Settings › Agent providers: after the browser step of signing in with
+// ChatGPT went through, OpenAI refused to finish the sign-in (its
+// invalid_grant) with no reason given. It does this for an account without
+// ChatGPT Plus or Pro, even after the browser step offered the plan.
+func (msgs Messages) AgentChatgptCodeRefused() string {
+	return Catalog.Format(msgs.locale, "agentChatgptCodeRefused", nil)
+}
+
+// AgentChatgptSignInFailed says "ChatGPT sign-in failed: {error}"
+// in the language the app shows.
+//
+// Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's
+// sign-in refused, or its answer could not be read; error is why, often
+// OpenAI's own words, in English.
+func AgentChatgptSignInFailed(error string) string {
+	return In(i18n.Locale()).AgentChatgptSignInFailed(error)
+}
+
+// AgentChatgptSignInFailed says "ChatGPT sign-in failed: {error}"
+// in the language of msgs.
+//
+// Settings › Agent providers, or an agent run on a ChatGPT plan: OpenAI's
+// sign-in refused, or its answer could not be read; error is why, often
+// OpenAI's own words, in English.
+func (msgs Messages) AgentChatgptSignInFailed(error string) string {
+	return Catalog.Format(msgs.locale, "agentChatgptSignInFailed", map[string]any{"error": error})
+}
+
+// AgentChatgptUnverified says "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's
+// answer did not pass Leaflet's checks: its identity token, or where its
+// sign-in is.
+func AgentChatgptUnverified() string { return In(i18n.Locale()).AgentChatgptUnverified() }
+
+// AgentChatgptUnverified says "Leaflet couldn't check ChatGPT's sign-in, so it didn't use it. Try again."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI's
+// answer did not pass Leaflet's checks: its identity token, or where its
+// sign-in is.
+func (msgs Messages) AgentChatgptUnverified() string {
+	return Catalog.Format(msgs.locale, "agentChatgptUnverified", nil)
+}
+
 // AgentKeyUnread says "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key ag…"
 // in the language the app shows.
 //
@@ -15514,15 +15572,33 @@ func (msgs Messages) SettingsSignedInAccount() string {
 // SettingsSwitchAccount says "Switch account"
 // in the language the app shows.
 //
-// The provider dialog for ChatGPT: signs in again.
+// The provider dialog for ChatGPT: signs in with another ChatGPT account,
+// picked in the browser.
 func SettingsSwitchAccount() string { return In(i18n.Locale()).SettingsSwitchAccount() }
 
 // SettingsSwitchAccount says "Switch account"
 // in the language of msgs.
 //
-// The provider dialog for ChatGPT: signs in again.
+// The provider dialog for ChatGPT: signs in with another ChatGPT account,
+// picked in the browser.
 func (msgs Messages) SettingsSwitchAccount() string {
 	return Catalog.Format(msgs.locale, "settingsSwitchAccount", nil)
+}
+
+// SettingsSignInAgain says "Sign in again"
+// in the language the app shows.
+//
+// The provider dialog for ChatGPT: signs the same ChatGPT account in again,
+// as after its sign-in ended.
+func SettingsSignInAgain() string { return In(i18n.Locale()).SettingsSignInAgain() }
+
+// SettingsSignInAgain says "Sign in again"
+// in the language of msgs.
+//
+// The provider dialog for ChatGPT: signs the same ChatGPT account in again,
+// as after its sign-in ended.
+func (msgs Messages) SettingsSignInAgain() string {
+	return Catalog.Format(msgs.locale, "settingsSignInAgain", nil)
 }
 
 // SettingsChatGPTSignIn says "Sign in with ChatGPT"

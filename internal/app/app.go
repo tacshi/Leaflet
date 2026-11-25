@@ -68,7 +68,7 @@ type App struct {
 
 	pages         []store.Page
 	templates     []store.Page
-	templateHints map[string]string
+	templateHints map[string]templateHint // by template ID
 	goneStarters  map[string]bool
 	todos         []store.PageTodo
 	todosStale    bool
@@ -87,8 +87,7 @@ type App struct {
 	fileIndexFrom listsFrom
 	present       map[string]presence
 	mentions      mentionMenu
-	editableMu    sync.Mutex
-	editable      map[string]bool
+	editable      map[string]bool // whether each page can be edited, as last read; main thread only
 	recs          map[string]recView
 	recOpen       map[string]bool
 	pending       int
@@ -136,8 +135,9 @@ type App struct {
 	dialogs                  dialogs
 	bin                      binState
 	md                       markdown.Options // agents' answers, their tables drawn with simple lines
-	commentMD                markdown.Options // comments, as agents' answers
-	cellMD                   markdown.Options // a cell of a table of md or commentMD
+	inlineMD                 markdown.Options // agents' answers in the inline prompt, as md
+	commentMD                markdown.Options // comments, as agents' answers, but cards without pictures
+	cellMD                   markdown.Options // a cell of a table of md, inlineMD or commentMD
 	mapViews                 mapViews
 	pageMD                   markdown.Options // a page as Markdown, as its history and the Trash show it
 	images                   *imageCache
@@ -384,16 +384,18 @@ func (a *App) start() error {
 			_ = mygo.Shell.OpenExternal(url)
 		}
 	}
-	for _, o := range []*markdown.Options{&a.commentMD, &a.cellMD, &a.pageMD} {
+	for _, o := range []*markdown.Options{&a.inlineMD, &a.commentMD, &a.cellMD, &a.pageMD} {
 		o.OnLink = a.md.OnLink
 	}
-	for _, o := range []*markdown.Options{&a.md, &a.commentMD, &a.cellMD, &a.pageMD} {
+	for _, o := range []*markdown.Options{&a.md, &a.inlineMD, &a.commentMD, &a.cellMD, &a.pageMD} {
 		o.CodeLink = a.codeLink
 	}
 	linesTables(&a.md, &a.cellMD)
+	linesTables(&a.inlineMD, &a.cellMD)
 	linesTables(&a.commentMD, &a.cellMD)
-	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard, "map": a.chatMap}
-	a.commentMD.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard, "map": a.chatMap}
+	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard(a.panelWidth, true), "map": a.chatMap}
+	a.inlineMD.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard(a.inlineWidth, true), "map": a.chatMap}
+	a.commentMD.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard(nil, false), "map": a.chatMap}
 	a.hub.PublicLink = a.publiclyLinked
 	go func() {
 		defer guard.Recover()
@@ -714,9 +716,7 @@ func (a *App) reload(ch store.Change) {
 	all := ch.Table == "*"
 	switch ch.Table {
 	case "*", "pages", "page_members", "session":
-		a.editableMu.Lock()
 		a.editable = nil
-		a.editableMu.Unlock()
 	}
 	if all || ch.Table == "recordings" {
 		a.recs = nil
@@ -724,6 +724,7 @@ func (a *App) reload(ch store.Change) {
 	if all || ch.Table == "pages" || ch.Table == "page_contents" {
 		reread(&a.pages, a.st.Pages)
 		reread(&a.templates, a.st.Templates)
+		a.dropTemplateHints()
 		maps.DeleteFunc(a.drafts, func(id string, _ *pageDrafts) bool { return id != agents.WorkspaceID && a.pageByID(id) == nil })
 		a.todosStale = true
 		if a.page != nil {
@@ -1171,20 +1172,15 @@ func (a *App) pageEditable() {
 }
 
 func (a *App) canEdit(id string) bool {
-	a.editableMu.Lock()
-	v, ok := a.editable[id]
-	a.editableMu.Unlock()
-	if ok {
+	if v, ok := a.editable[id]; ok {
 		return v
 	}
 	p := a.pageByID(id)
-	v = p != nil && a.st.CanEdit(*p)
-	a.editableMu.Lock()
+	v := p != nil && a.st.CanEdit(*p)
 	if a.editable == nil {
 		a.editable = map[string]bool{}
 	}
 	a.editable[id] = v
-	a.editableMu.Unlock()
 	return v
 }
 

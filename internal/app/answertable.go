@@ -2,11 +2,11 @@ package app
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
+	"golang.org/x/text/width"
 
 	"leaflet/internal/theme"
 )
@@ -125,8 +125,9 @@ func textWidth(d *parser.Document, cell int, md string) float32 {
 	return w
 }
 
-// wide reports a character East Asian text draws an em wide.
+// wide reports a character East Asian text draws an em wide: wide or
+// fullwidth, as Unicode's East Asian Width has them, not halfwidth forms.
 func wide(r rune) bool {
-	return unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) ||
-		unicode.Is(unicode.Hangul, r) || r >= 0x3000 && r <= 0x303f || r >= 0xff00 && r <= 0xffef
+	k := width.LookupRune(r).Kind()
+	return k == width.EastAsianWide || k == width.EastAsianFullwidth
 }

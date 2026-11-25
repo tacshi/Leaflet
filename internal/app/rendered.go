@@ -174,7 +174,7 @@ func (a *App) sourceDialog(c *ui.Context) {
 				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.sourceOpen = false
 				}
-				if primary(c, "save", "", locales.CommonSave()).Clicked() && a.page != nil {
+				if primary(c, "save", "", locales.CommonSave()).Clicked() && a.page != nil && a.canSaveIn(a.page.editor) {
 					id, text := d.sourceID, d.sourceText
 					a.page.editor.Edit(func(content *doc.Content) {
 						if n := content.Find(id); n != nil {

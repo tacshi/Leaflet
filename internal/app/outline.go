@@ -79,39 +79,46 @@ func (a *App) goToBlock(id string, focus bool) {
 		ps.editor.Focus()
 	}
 	ps.scrollTo, ps.scrollWait, ps.held = id, 0, ""
-	if a.win != nil {
-		a.win.Invalidate()
-	}
-	if ps.tinted[id] {
-		return
-	}
-	if ps.lit == nil {
-		ps.lit = map[string]time.Time{}
-	}
-	ps.tinted[id], ps.lit[id] = true, time.Time{}
+	a.lightBlocks([]string{id})
 }
 
 const blockLit = 1500 * time.Millisecond
 
-func (a *App) dimLit(c *ui.Context) {
-	ps := a.page
-	now := c.Now()
+// light tints block id of a view for a moment, which dim puts out, from when
+// it is first drawn; one lit already is lit anew. A block tinted otherwise,
+// as an agent's run tints those it changed while its bar shows, stays so.
+func light(tinted map[string]bool, lit map[string]time.Time, id string) {
+	if _, lighting := lit[id]; tinted[id] && !lighting {
+		return
+	}
+	tinted[id], lit[id] = true, time.Time{}
+}
+
+// dim puts out the blocks lit d ago or longer, counting from when each was
+// first drawn, now if not yet, and returns how soon the next goes out, or
+// zero for none.
+func dim(tinted map[string]bool, lit map[string]time.Time, now time.Time, d time.Duration) time.Duration {
 	var next time.Duration
-	for id, at := range ps.lit {
+	for id, at := range lit {
 		if at.IsZero() {
-			ps.lit[id], at = now, now
+			lit[id], at = now, now
 		}
-		left := blockLit - now.Sub(at)
+		left := d - now.Sub(at)
 		if left <= 0 {
-			delete(ps.lit, id)
-			delete(ps.tinted, id)
+			delete(lit, id)
+			delete(tinted, id)
 			continue
 		}
 		if next == 0 || left < next {
 			next = left
 		}
 	}
-	if next > 0 {
+	return next
+}
+
+func (a *App) dimLit(c *ui.Context) {
+	ps := a.page
+	if next := dim(ps.tinted, ps.lit, c.Now(), blockLit); next > 0 {
 		c.After(next)
 	}
 }

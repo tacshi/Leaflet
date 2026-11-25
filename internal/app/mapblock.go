@@ -478,6 +478,8 @@ func (a *App) saveMap() {
 		case err != nil:
 			d.mapError = mapError(err)
 			return
+		case !a.canSaveIn(ed):
+			return
 		}
 		data := made.Data()
 		if id == "" {

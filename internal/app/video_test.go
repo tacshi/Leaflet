@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
 
@@ -621,7 +622,7 @@ func TestAudioCard(t *testing.T) {
 	show := "f1"
 	tt := ui.NewTester(func(c *ui.Context) { a.fileBlock(c, ed.Content.Find(show), 600) }, 700, 400)
 	tt.Frame()
-	for _, want := range []string{"call.m4a", fileDetail("call.m4a", f.SizeBytes), "Speaker 1", "Hello"} {
+	for _, want := range []string{"call.m4a", webpage.FileDetail("call.m4a", f.SizeBytes), "Speaker 1", "Hello"} {
 		if !tt.HasText(want) {
 			t.Errorf("no %q in %q", want, tt.Texts())
 		}

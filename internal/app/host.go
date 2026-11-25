@@ -62,9 +62,7 @@ func (a *App) Tint(pageID string, ids []string) {
 	if a.page == nil || a.page.id != pageID {
 		return
 	}
-	for k := range a.page.tinted {
-		delete(a.page.tinted, k)
-	}
+	clear(a.page.tinted)
 	clear(a.page.lit)
 	for _, id := range ids {
 		a.page.tinted[id] = true
@@ -771,6 +769,15 @@ func (a *App) scrollByEmbeds(ps *pageState) {
 	}
 }
 
+// embedTitle is an embed's title as it shows: the one an embed gets without
+// one, as an agent's, in the app's language.
+func embedTitle(n *doc.Node) string {
+	if title := n.Str("title"); !doc.IsDefaultEmbedTitle(title) {
+		return title
+	}
+	return locales.DialogEmbedTitle()
+}
+
 func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	switch n.Type {
 	case "math_equation", "diagram":
@@ -784,7 +791,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	hovered := box.Hovered()
 	box.Children(func() {
 		ui.Row(c).Height(24).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, n.Str("title")).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
+			ui.Text(c, embedTitle(n)).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
 			if a.page != nil && !a.page.editor.ReadOnly {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
 					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).IgnoreInput(!hovered).AlignItems(ui.Center).Label(locales.HostEditEmbed())

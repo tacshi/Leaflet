@@ -44,10 +44,6 @@ func primary(c *ui.Context, key, icon, label string) ui.Element {
 	return withIcon(c, ui.PrimaryButton(c.Key(key), ""), icon, label)
 }
 
-func ghost(c *ui.Context, key, icon, label string) ui.Element {
-	return button(c, key, icon, label)
-}
-
 func danger(c *ui.Context, key, label string) ui.Element {
 	pal := theme.Of(c)
 	return ui.Button(c.Key(key), label).TextColor(pal.DangerText)

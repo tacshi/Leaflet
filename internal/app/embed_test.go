@@ -224,3 +224,26 @@ func TestEmbedViewsTakeWebRTCFromEveryFrame(t *testing.T) {
 		t.Errorf("options %+v", o)
 	}
 }
+
+// An embed made without a title, as by an agent or by the dialog in
+// another language, shows its title in the app's language, in the page and
+// in the corner window.
+func TestDefaultEmbedTitleShowsInTheAppsLanguage(t *testing.T) {
+	embed := func(title string) *doc.Node {
+		return &doc.Node{ID: "e", Type: "embed", Data: map[string]any{"title": title, "html": "<p>hi</p>"}}
+	}
+	for _, title := range []string{doc.DefaultEmbedTitle, locales.In("zh-Hans").DialogEmbedTitle(), locales.In("ja").DialogEmbedTitle()} {
+		if got := embedTitle(embed(title)); got != locales.DialogEmbedTitle() {
+			t.Errorf("%q shows as %q", title, got)
+		}
+	}
+	if got := embedTitle(embed("Fares")); got != "Fares" {
+		t.Errorf("a title of its own shows as %q", got)
+	}
+	n := embed(locales.In("ja").DialogEmbedTitle())
+	tt := ui.NewTester(func(c *ui.Context) { watchHost{&App{}}.Embed(c, n, 300) }, 400, 200)
+	tt.Frame()
+	if !tt.HasText(locales.DialogEmbedTitle()) || tt.HasText(n.Str("title")) {
+		t.Errorf("the corner window shows %v", tt.Texts())
+	}
+}

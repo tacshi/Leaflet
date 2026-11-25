@@ -996,7 +996,7 @@ func (a *App) chatgptRow(c *ui.Context) {
 				who = locales.SettingsSignedInAs(a.form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
+			if button(c, "again", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
 				a.chatgptSignIn()
 			}
 		})
@@ -1053,7 +1053,7 @@ func (a *App) modelPicker(c *ui.Context) {
 			return
 		}
 		options := append([]string{}, a.form.models...)
-		if a.form.model != "" && !contains(options, a.form.model) {
+		if a.form.model != "" && !slices.Contains(options, a.form.model) {
 			options = append([]string{a.form.model}, options...)
 		}
 		options = append(options, other)
@@ -1076,7 +1076,7 @@ func (a *App) modelPicker(c *ui.Context) {
 	if !a.form.custom && len(a.form.models) == 0 && !a.form.fetching {
 		return
 	}
-	if a.form.custom && len(a.form.models) > 0 && ghost(c, "list", "", locales.SettingsFromList()).Clicked() {
+	if a.form.custom && len(a.form.models) > 0 && button(c, "list", "", locales.SettingsFromList()).Clicked() {
 		a.form.custom = false
 		if len(a.form.models) > 0 {
 			a.form.model = a.form.models[0]
@@ -1141,7 +1141,7 @@ func (a *App) fetchModels() {
 			// keeps its model, which the picker shows above the list: a server
 			// can serve a model it does not list, as an Azure deployment, a
 			// model's variant or one since unloaded is.
-			if a.form.model == "" || a.form.id == "" && !a.form.custom && !contains(models, a.form.model) {
+			if a.form.model == "" || a.form.id == "" && !a.form.custom && !slices.Contains(models, a.form.model) {
 				a.form.model = models[0]
 			}
 			if a.form.result != "" && !a.form.resultOK {

@@ -3,7 +3,6 @@ package app
 import (
 	"log"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
-	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
 	"leaflet/internal/webpage"
@@ -188,7 +186,7 @@ func (a *App) audioBlock(c *ui.Context, n *doc.Node) {
 				case a.rec.TranscribingFiles[id] != "":
 					status = locales.RecTranscribing()
 				case found:
-					status = fileDetail(file.Name, file.SizeBytes)
+					status = webpage.FileDetail(file.Name, file.SizeBytes)
 					if engine := recording.EngineName(n.Str(doc.TranscribedBy)); engine != "" && strings.TrimSpace(n.Str("notes")) != "" {
 						status = locales.CardTranscribedBy(status, engine)
 					}
@@ -242,13 +240,7 @@ func (a *App) fileBlock(c *ui.Context, n *doc.Node, width float32) {
 
 func (a *App) fileHead(c *ui.Context, n *doc.Node, width float32, hovered bool) {
 	pal := theme.Of(c)
-	file, found := store.File{}, false
-	for _, f := range a.files {
-		if f.ID == n.Str("file_id") {
-			file, found = f, true
-			break
-		}
-	}
+	file, found := a.fileByID(n.Str("file_id"))
 	if !found {
 		name := n.Str("name")
 		if name == "" {
@@ -486,17 +478,9 @@ func (a *App) fileCard(c *ui.Context, b ui.Element, icon, name string, size int6
 			ui.Text(c, name).FontWeight(600).FontSize(14).TextColor(pal.Text).SingleLine()
 			detail := locales.CardNotOnDevice()
 			if size >= 0 {
-				detail = fileDetail(name, size)
+				detail = webpage.FileDetail(name, size)
 			}
 			ui.Text(c, detail).FontSize(12).TextColor(pal.TextMuted)
 		})
 	})
-}
-
-func fileDetail(name string, size int64) string {
-	kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(name), "."))
-	if kind == "" {
-		return humanSize(size)
-	}
-	return locales.CardFileDetail(kind, humanSize(size))
 }

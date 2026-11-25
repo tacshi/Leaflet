@@ -1411,13 +1411,21 @@
   "@dialogShareOwnerOnly": {
     "description": "The Share dialog of a page shared with the user: only its owner shares it through a public link."
   },
-  "dialogShareCopyLink": "Copy link",
-  "@dialogShareCopyLink": {
-    "description": "Share dialog: the button copying the page's link."
+  "dialogShareAppLink": "Link in Leaflet",
+  "@dialogShareAppLink": {
+    "description": "Share dialog: heading over the section of the page's in-app link (leaflet://page/…), which opens it in Leaflet, as against its public link on the web."
   },
-  "dialogShareLinkCopied": "Link copied",
+  "dialogShareAppLinkHint": "Opens this page in Leaflet, for people who can already see it.",
+  "@dialogShareAppLinkHint": {
+    "description": "Share dialog: under the in-app link's heading, what the link does and who it works for: those the page is shared with already, not anyone on the web."
+  },
+  "dialogShareCopyLink": "Copy Leaflet link",
+  "@dialogShareCopyLink": {
+    "description": "Share dialog: the button copying the page's in-app link (leaflet://page/…), which opens it in Leaflet, not its public link."
+  },
+  "dialogShareLinkCopied": "Leaflet link copied",
   "@dialogShareLinkCopied": {
-    "description": "A toast after the page's link is copied."
+    "description": "A toast after the page's in-app link (leaflet://page/…) is copied in the Share dialog."
   },
   "dialogChartNeedRows": "Add a header row and at least one row of values.",
   "@dialogChartNeedRows": {
@@ -1472,6 +1480,10 @@
   "dialogFieldTitle": "Title",
   "@dialogFieldTitle": {
     "description": "Chart and embed dialogs: the title field's placeholder."
+  },
+  "dialogPageReadOnly": "This page can no longer be changed, so this was not saved.",
+  "@dialogPageReadOnly": {
+    "description": "Toast when Save is clicked in a dialog that edits a block (a chart, a fact card, a map, an embed, a formula or diagram, a link, notes) after the page became read-only while it was open, as when its owner took away the right to edit it; the dialog stays open."
   },
   "dialogChartBar": "Bar",
   "@dialogChartBar": {
@@ -1536,6 +1548,126 @@
   "dialogCardNoIcon": "No icon",
   "@dialogCardNoIcon": {
     "description": "The fact card dialog's icon menu: the choice of no icon before the title."
+  },
+  "cardIconBus": "Bus",
+  "@cardIconBus": {
+    "description": "The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the name of an icon a card's title can carry, a bus."
+  },
+  "cardIconTrainFront": "Train",
+  "@cardIconTrainFront": {
+    "description": "The fact card icon menu and picker: an icon of a train seen from the front."
+  },
+  "cardIconTramFront": "Tram",
+  "@cardIconTramFront": {
+    "description": "The fact card icon menu and picker: an icon of a tram seen from the front."
+  },
+  "cardIconCar": "Car",
+  "@cardIconCar": {
+    "description": "The fact card icon menu and picker: an icon of a car."
+  },
+  "cardIconBike": "Bicycle",
+  "@cardIconBike": {
+    "description": "The fact card icon menu and picker: an icon of a bicycle."
+  },
+  "cardIconFootprints": "Footprints",
+  "@cardIconFootprints": {
+    "description": "The fact card icon menu and picker: an icon of footprints, for walking."
+  },
+  "cardIconPlane": "Plane",
+  "@cardIconPlane": {
+    "description": "The fact card icon menu and picker: an icon of an airplane."
+  },
+  "cardIconShip": "Ship",
+  "@cardIconShip": {
+    "description": "The fact card icon menu and picker: an icon of a ship."
+  },
+  "cardIconMapPin": "Map pin",
+  "@cardIconMapPin": {
+    "description": "The fact card icon menu and picker: an icon of a pin that marks a place on a map."
+  },
+  "cardIconClock": "Clock",
+  "@cardIconClock": {
+    "description": "The fact card icon menu and picker: an icon of a clock."
+  },
+  "cardIconCalendar": "Calendar",
+  "@cardIconCalendar": {
+    "description": "The fact card icon menu and picker: an icon of a calendar."
+  },
+  "cardIconTicket": "Ticket",
+  "@cardIconTicket": {
+    "description": "The fact card icon menu and picker: an icon of a ticket."
+  },
+  "cardIconBanknote": "Banknote",
+  "@cardIconBanknote": {
+    "description": "The fact card icon menu and picker: an icon of a banknote, for money."
+  },
+  "cardIconWallet": "Wallet",
+  "@cardIconWallet": {
+    "description": "The fact card icon menu and picker: an icon of a wallet."
+  },
+  "cardIconPhone": "Phone",
+  "@cardIconPhone": {
+    "description": "The fact card icon menu and picker: an icon of a telephone handset."
+  },
+  "cardIconHospital": "Hospital",
+  "@cardIconHospital": {
+    "description": "The fact card icon menu and picker: an icon of a hospital."
+  },
+  "cardIconUtensils": "Fork and knife",
+  "@cardIconUtensils": {
+    "description": "The fact card icon menu and picker: an icon of a fork and a knife, for food and restaurants."
+  },
+  "cardIconBedDouble": "Bed",
+  "@cardIconBedDouble": {
+    "description": "The fact card icon menu and picker: an icon of a double bed, for hotels and lodging."
+  },
+  "cardIconBuilding2": "Building",
+  "@cardIconBuilding2": {
+    "description": "The fact card icon menu and picker: an icon of an office building."
+  },
+  "cardIconGraduationCap": "Graduation cap",
+  "@cardIconGraduationCap": {
+    "description": "The fact card icon menu and picker: an icon of a graduation cap, for schools and studies."
+  },
+  "cardIconShoppingBag": "Shopping bag",
+  "@cardIconShoppingBag": {
+    "description": "The fact card icon menu and picker: an icon of a shopping bag."
+  },
+  "cardIconInfo": "Information",
+  "@cardIconInfo": {
+    "description": "The fact card icon menu and picker: an icon of a letter i in a circle, for information."
+  },
+  "cardIconStar": "Star",
+  "@cardIconStar": {
+    "description": "The fact card icon menu and picker: an icon of a star."
+  },
+  "cardIconSun": "Sun",
+  "@cardIconSun": {
+    "description": "The fact card icon menu and picker: an icon of the sun, for sunny weather."
+  },
+  "cardIconCloudRain": "Rain cloud",
+  "@cardIconCloudRain": {
+    "description": "The fact card icon menu and picker: an icon of a cloud with rain, for rainy weather."
+  },
+  "cardIconThermometer": "Thermometer",
+  "@cardIconThermometer": {
+    "description": "The fact card icon menu and picker: an icon of a thermometer, for temperatures."
+  },
+  "cardIconGlobe": "Globe",
+  "@cardIconGlobe": {
+    "description": "The fact card icon menu and picker: an icon of a globe, for the world and the web."
+  },
+  "cardIconUser": "Person",
+  "@cardIconUser": {
+    "description": "The fact card icon menu and picker: an icon of a person."
+  },
+  "cardIconPackage": "Package",
+  "@cardIconPackage": {
+    "description": "The fact card icon menu and picker: an icon of a parcel box."
+  },
+  "cardIconTrendingUp": "Rising trend",
+  "@cardIconTrendingUp": {
+    "description": "The fact card icon menu and picker: an icon of a line going up, for growth and rising numbers."
   },
   "dialogCardPicture": "Picture link (optional, beside details)",
   "@dialogCardPicture": {
@@ -1790,6 +1922,20 @@
   "@cardSources": {
     "description": "A fact card: what its source chip's menu and tooltip are called, the web pages its facts come from."
   },
+  "cardSourcesLabel": "Sources: {names}",
+  "@cardSourcesLabel": {
+    "description": "A fact card: what screen readers say for its source chip, the names of the web pages its facts come from.",
+    "placeholders": {
+      "names": {
+        "type": "String",
+        "example": "Wikipedia, BBC"
+      }
+    }
+  },
+  "cardSourcesSeparator": ", ",
+  "@cardSourcesSeparator": {
+    "description": "A fact card: what goes between two source names in what screen readers say for its source chip, as in \"Wikipedia, BBC\"."
+  },
   "cardLayout": "Layout",
   "@cardLayout": {
     "description": "The fact card editor (iPhone and iPad): the label of the layout picker, figures or details."
@@ -1982,6 +2128,10 @@
   "@pubTitle": {
     "description": "Share dialog: heading over the temporary public link section."
   },
+  "pubLinkCopied": "Public link copied",
+  "@pubLinkCopied": {
+    "description": "A toast after the page's public link on the web is copied in the Share dialog."
+  },
   "pubChecking": "Looking for cloudflared…",
   "@pubChecking": {
     "description": "Share dialog: shown while the app looks for Cloudflare's cloudflared tool."
@@ -2147,7 +2297,7 @@
   },
   "pubNameTaken": "Someone on this page goes by that name. Choose another.",
   "@pubNameTaken": {
-    "description": "Public page (seen by visitors): the comment form, when the name typed is that of the page's owner, of an agent or of someone else who comments on the page, which a visitor can't take."
+    "description": "Public page (seen by visitors): the comment form, when the name typed is that of the page's owner, of an agent or of someone else whose comments the public page shows, which a visitor can't take."
   },
   "pubPageOwner": "Page owner",
   "@pubPageOwner": {

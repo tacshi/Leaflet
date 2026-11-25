@@ -3973,30 +3973,70 @@ func (msgs Messages) DialogShareOwnerOnly() string {
 	return Catalog.Format(msgs.locale, "dialogShareOwnerOnly", nil)
 }
 
-// DialogShareCopyLink says "Copy link"
+// DialogShareAppLink says "Link in Leaflet"
 // in the language the app shows.
 //
-// Share dialog: the button copying the page's link.
-func DialogShareCopyLink() string { return In(i18n.Locale()).DialogShareCopyLink() }
+// Share dialog: heading over the section of the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, as against its public
+// link on the web.
+func DialogShareAppLink() string { return In(i18n.Locale()).DialogShareAppLink() }
 
-// DialogShareCopyLink says "Copy link"
+// DialogShareAppLink says "Link in Leaflet"
 // in the language of msgs.
 //
-// Share dialog: the button copying the page's link.
+// Share dialog: heading over the section of the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, as against its public
+// link on the web.
+func (msgs Messages) DialogShareAppLink() string {
+	return Catalog.Format(msgs.locale, "dialogShareAppLink", nil)
+}
+
+// DialogShareAppLinkHint says "Opens this page in Leaflet, for people who can already see it."
+// in the language the app shows.
+//
+// Share dialog: under the in-app link's heading, what the link does and who
+// it works for: those the page is shared with already, not anyone on the
+// web.
+func DialogShareAppLinkHint() string { return In(i18n.Locale()).DialogShareAppLinkHint() }
+
+// DialogShareAppLinkHint says "Opens this page in Leaflet, for people who can already see it."
+// in the language of msgs.
+//
+// Share dialog: under the in-app link's heading, what the link does and who
+// it works for: those the page is shared with already, not anyone on the
+// web.
+func (msgs Messages) DialogShareAppLinkHint() string {
+	return Catalog.Format(msgs.locale, "dialogShareAppLinkHint", nil)
+}
+
+// DialogShareCopyLink says "Copy Leaflet link"
+// in the language the app shows.
+//
+// Share dialog: the button copying the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, not its public link.
+func DialogShareCopyLink() string { return In(i18n.Locale()).DialogShareCopyLink() }
+
+// DialogShareCopyLink says "Copy Leaflet link"
+// in the language of msgs.
+//
+// Share dialog: the button copying the page's in-app link
+// (leaflet://page/…), which opens it in Leaflet, not its public link.
 func (msgs Messages) DialogShareCopyLink() string {
 	return Catalog.Format(msgs.locale, "dialogShareCopyLink", nil)
 }
 
-// DialogShareLinkCopied says "Link copied"
+// DialogShareLinkCopied says "Leaflet link copied"
 // in the language the app shows.
 //
-// A toast after the page's link is copied.
+// A toast after the page's in-app link (leaflet://page/…) is copied in
+// the Share dialog.
 func DialogShareLinkCopied() string { return In(i18n.Locale()).DialogShareLinkCopied() }
 
-// DialogShareLinkCopied says "Link copied"
+// DialogShareLinkCopied says "Leaflet link copied"
 // in the language of msgs.
 //
-// A toast after the page's link is copied.
+// A toast after the page's in-app link (leaflet://page/…) is copied in
+// the Share dialog.
 func (msgs Messages) DialogShareLinkCopied() string {
 	return Catalog.Format(msgs.locale, "dialogShareLinkCopied", nil)
 }
@@ -4135,6 +4175,26 @@ func DialogFieldTitle() string { return In(i18n.Locale()).DialogFieldTitle() }
 // Chart and embed dialogs: the title field's placeholder.
 func (msgs Messages) DialogFieldTitle() string {
 	return Catalog.Format(msgs.locale, "dialogFieldTitle", nil)
+}
+
+// DialogPageReadOnly says "This page can no longer be changed, so this was not saved."
+// in the language the app shows.
+//
+// Toast when Save is clicked in a dialog that edits a block (a chart, a
+// fact card, a map, an embed, a formula or diagram, a link, notes) after
+// the page became read-only while it was open, as when its owner took away
+// the right to edit it; the dialog stays open.
+func DialogPageReadOnly() string { return In(i18n.Locale()).DialogPageReadOnly() }
+
+// DialogPageReadOnly says "This page can no longer be changed, so this was not saved."
+// in the language of msgs.
+//
+// Toast when Save is clicked in a dialog that edits a block (a chart, a
+// fact card, a map, an embed, a formula or diagram, a link, notes) after
+// the page became read-only while it was open, as when its owner took away
+// the right to edit it; the dialog stays open.
+func (msgs Messages) DialogPageReadOnly() string {
+	return Catalog.Format(msgs.locale, "dialogPageReadOnly", nil)
 }
 
 // DialogChartBar says "Bar"
@@ -4371,6 +4431,452 @@ func DialogCardNoIcon() string { return In(i18n.Locale()).DialogCardNoIcon() }
 // The fact card dialog's icon menu: the choice of no icon before the title.
 func (msgs Messages) DialogCardNoIcon() string {
 	return Catalog.Format(msgs.locale, "dialogCardNoIcon", nil)
+}
+
+// CardIconBus says "Bus"
+// in the language the app shows.
+//
+// The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the
+// name of an icon a card's title can carry, a bus.
+func CardIconBus() string { return In(i18n.Locale()).CardIconBus() }
+
+// CardIconBus says "Bus"
+// in the language of msgs.
+//
+// The fact card icon menu (Mac and PC) and picker (iPhone and iPad): the
+// name of an icon a card's title can carry, a bus.
+func (msgs Messages) CardIconBus() string {
+	return Catalog.Format(msgs.locale, "cardIconBus", nil)
+}
+
+// CardIconTrainFront says "Train"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a train seen from the
+// front.
+func CardIconTrainFront() string { return In(i18n.Locale()).CardIconTrainFront() }
+
+// CardIconTrainFront says "Train"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a train seen from the
+// front.
+func (msgs Messages) CardIconTrainFront() string {
+	return Catalog.Format(msgs.locale, "cardIconTrainFront", nil)
+}
+
+// CardIconTramFront says "Tram"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a tram seen from the
+// front.
+func CardIconTramFront() string { return In(i18n.Locale()).CardIconTramFront() }
+
+// CardIconTramFront says "Tram"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a tram seen from the
+// front.
+func (msgs Messages) CardIconTramFront() string {
+	return Catalog.Format(msgs.locale, "cardIconTramFront", nil)
+}
+
+// CardIconCar says "Car"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a car.
+func CardIconCar() string { return In(i18n.Locale()).CardIconCar() }
+
+// CardIconCar says "Car"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a car.
+func (msgs Messages) CardIconCar() string {
+	return Catalog.Format(msgs.locale, "cardIconCar", nil)
+}
+
+// CardIconBike says "Bicycle"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a bicycle.
+func CardIconBike() string { return In(i18n.Locale()).CardIconBike() }
+
+// CardIconBike says "Bicycle"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a bicycle.
+func (msgs Messages) CardIconBike() string {
+	return Catalog.Format(msgs.locale, "cardIconBike", nil)
+}
+
+// CardIconFootprints says "Footprints"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of footprints, for walking.
+func CardIconFootprints() string { return In(i18n.Locale()).CardIconFootprints() }
+
+// CardIconFootprints says "Footprints"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of footprints, for walking.
+func (msgs Messages) CardIconFootprints() string {
+	return Catalog.Format(msgs.locale, "cardIconFootprints", nil)
+}
+
+// CardIconPlane says "Plane"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of an airplane.
+func CardIconPlane() string { return In(i18n.Locale()).CardIconPlane() }
+
+// CardIconPlane says "Plane"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of an airplane.
+func (msgs Messages) CardIconPlane() string {
+	return Catalog.Format(msgs.locale, "cardIconPlane", nil)
+}
+
+// CardIconShip says "Ship"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a ship.
+func CardIconShip() string { return In(i18n.Locale()).CardIconShip() }
+
+// CardIconShip says "Ship"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a ship.
+func (msgs Messages) CardIconShip() string {
+	return Catalog.Format(msgs.locale, "cardIconShip", nil)
+}
+
+// CardIconMapPin says "Map pin"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a pin that marks a place
+// on a map.
+func CardIconMapPin() string { return In(i18n.Locale()).CardIconMapPin() }
+
+// CardIconMapPin says "Map pin"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a pin that marks a place
+// on a map.
+func (msgs Messages) CardIconMapPin() string {
+	return Catalog.Format(msgs.locale, "cardIconMapPin", nil)
+}
+
+// CardIconClock says "Clock"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a clock.
+func CardIconClock() string { return In(i18n.Locale()).CardIconClock() }
+
+// CardIconClock says "Clock"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a clock.
+func (msgs Messages) CardIconClock() string {
+	return Catalog.Format(msgs.locale, "cardIconClock", nil)
+}
+
+// CardIconCalendar says "Calendar"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a calendar.
+func CardIconCalendar() string { return In(i18n.Locale()).CardIconCalendar() }
+
+// CardIconCalendar says "Calendar"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a calendar.
+func (msgs Messages) CardIconCalendar() string {
+	return Catalog.Format(msgs.locale, "cardIconCalendar", nil)
+}
+
+// CardIconTicket says "Ticket"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a ticket.
+func CardIconTicket() string { return In(i18n.Locale()).CardIconTicket() }
+
+// CardIconTicket says "Ticket"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a ticket.
+func (msgs Messages) CardIconTicket() string {
+	return Catalog.Format(msgs.locale, "cardIconTicket", nil)
+}
+
+// CardIconBanknote says "Banknote"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a banknote, for money.
+func CardIconBanknote() string { return In(i18n.Locale()).CardIconBanknote() }
+
+// CardIconBanknote says "Banknote"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a banknote, for money.
+func (msgs Messages) CardIconBanknote() string {
+	return Catalog.Format(msgs.locale, "cardIconBanknote", nil)
+}
+
+// CardIconWallet says "Wallet"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a wallet.
+func CardIconWallet() string { return In(i18n.Locale()).CardIconWallet() }
+
+// CardIconWallet says "Wallet"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a wallet.
+func (msgs Messages) CardIconWallet() string {
+	return Catalog.Format(msgs.locale, "cardIconWallet", nil)
+}
+
+// CardIconPhone says "Phone"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a telephone handset.
+func CardIconPhone() string { return In(i18n.Locale()).CardIconPhone() }
+
+// CardIconPhone says "Phone"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a telephone handset.
+func (msgs Messages) CardIconPhone() string {
+	return Catalog.Format(msgs.locale, "cardIconPhone", nil)
+}
+
+// CardIconHospital says "Hospital"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a hospital.
+func CardIconHospital() string { return In(i18n.Locale()).CardIconHospital() }
+
+// CardIconHospital says "Hospital"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a hospital.
+func (msgs Messages) CardIconHospital() string {
+	return Catalog.Format(msgs.locale, "cardIconHospital", nil)
+}
+
+// CardIconUtensils says "Fork and knife"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a fork and a knife, for
+// food and restaurants.
+func CardIconUtensils() string { return In(i18n.Locale()).CardIconUtensils() }
+
+// CardIconUtensils says "Fork and knife"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a fork and a knife, for
+// food and restaurants.
+func (msgs Messages) CardIconUtensils() string {
+	return Catalog.Format(msgs.locale, "cardIconUtensils", nil)
+}
+
+// CardIconBedDouble says "Bed"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a double bed, for hotels
+// and lodging.
+func CardIconBedDouble() string { return In(i18n.Locale()).CardIconBedDouble() }
+
+// CardIconBedDouble says "Bed"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a double bed, for hotels
+// and lodging.
+func (msgs Messages) CardIconBedDouble() string {
+	return Catalog.Format(msgs.locale, "cardIconBedDouble", nil)
+}
+
+// CardIconBuilding2 says "Building"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of an office building.
+func CardIconBuilding2() string { return In(i18n.Locale()).CardIconBuilding2() }
+
+// CardIconBuilding2 says "Building"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of an office building.
+func (msgs Messages) CardIconBuilding2() string {
+	return Catalog.Format(msgs.locale, "cardIconBuilding2", nil)
+}
+
+// CardIconGraduationCap says "Graduation cap"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a graduation cap, for
+// schools and studies.
+func CardIconGraduationCap() string { return In(i18n.Locale()).CardIconGraduationCap() }
+
+// CardIconGraduationCap says "Graduation cap"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a graduation cap, for
+// schools and studies.
+func (msgs Messages) CardIconGraduationCap() string {
+	return Catalog.Format(msgs.locale, "cardIconGraduationCap", nil)
+}
+
+// CardIconShoppingBag says "Shopping bag"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a shopping bag.
+func CardIconShoppingBag() string { return In(i18n.Locale()).CardIconShoppingBag() }
+
+// CardIconShoppingBag says "Shopping bag"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a shopping bag.
+func (msgs Messages) CardIconShoppingBag() string {
+	return Catalog.Format(msgs.locale, "cardIconShoppingBag", nil)
+}
+
+// CardIconInfo says "Information"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a letter i in a circle,
+// for information.
+func CardIconInfo() string { return In(i18n.Locale()).CardIconInfo() }
+
+// CardIconInfo says "Information"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a letter i in a circle,
+// for information.
+func (msgs Messages) CardIconInfo() string {
+	return Catalog.Format(msgs.locale, "cardIconInfo", nil)
+}
+
+// CardIconStar says "Star"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a star.
+func CardIconStar() string { return In(i18n.Locale()).CardIconStar() }
+
+// CardIconStar says "Star"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a star.
+func (msgs Messages) CardIconStar() string {
+	return Catalog.Format(msgs.locale, "cardIconStar", nil)
+}
+
+// CardIconSun says "Sun"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of the sun, for sunny
+// weather.
+func CardIconSun() string { return In(i18n.Locale()).CardIconSun() }
+
+// CardIconSun says "Sun"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of the sun, for sunny
+// weather.
+func (msgs Messages) CardIconSun() string {
+	return Catalog.Format(msgs.locale, "cardIconSun", nil)
+}
+
+// CardIconCloudRain says "Rain cloud"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a cloud with rain, for
+// rainy weather.
+func CardIconCloudRain() string { return In(i18n.Locale()).CardIconCloudRain() }
+
+// CardIconCloudRain says "Rain cloud"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a cloud with rain, for
+// rainy weather.
+func (msgs Messages) CardIconCloudRain() string {
+	return Catalog.Format(msgs.locale, "cardIconCloudRain", nil)
+}
+
+// CardIconThermometer says "Thermometer"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a thermometer, for
+// temperatures.
+func CardIconThermometer() string { return In(i18n.Locale()).CardIconThermometer() }
+
+// CardIconThermometer says "Thermometer"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a thermometer, for
+// temperatures.
+func (msgs Messages) CardIconThermometer() string {
+	return Catalog.Format(msgs.locale, "cardIconThermometer", nil)
+}
+
+// CardIconGlobe says "Globe"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a globe, for the world and
+// the web.
+func CardIconGlobe() string { return In(i18n.Locale()).CardIconGlobe() }
+
+// CardIconGlobe says "Globe"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a globe, for the world and
+// the web.
+func (msgs Messages) CardIconGlobe() string {
+	return Catalog.Format(msgs.locale, "cardIconGlobe", nil)
+}
+
+// CardIconUser says "Person"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a person.
+func CardIconUser() string { return In(i18n.Locale()).CardIconUser() }
+
+// CardIconUser says "Person"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a person.
+func (msgs Messages) CardIconUser() string {
+	return Catalog.Format(msgs.locale, "cardIconUser", nil)
+}
+
+// CardIconPackage says "Package"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a parcel box.
+func CardIconPackage() string { return In(i18n.Locale()).CardIconPackage() }
+
+// CardIconPackage says "Package"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a parcel box.
+func (msgs Messages) CardIconPackage() string {
+	return Catalog.Format(msgs.locale, "cardIconPackage", nil)
+}
+
+// CardIconTrendingUp says "Rising trend"
+// in the language the app shows.
+//
+// The fact card icon menu and picker: an icon of a line going up, for
+// growth and rising numbers.
+func CardIconTrendingUp() string { return In(i18n.Locale()).CardIconTrendingUp() }
+
+// CardIconTrendingUp says "Rising trend"
+// in the language of msgs.
+//
+// The fact card icon menu and picker: an icon of a line going up, for
+// growth and rising numbers.
+func (msgs Messages) CardIconTrendingUp() string {
+	return Catalog.Format(msgs.locale, "cardIconTrendingUp", nil)
 }
 
 // DialogCardPicture says "Picture link (optional, beside details)"
@@ -5133,6 +5639,38 @@ func (msgs Messages) CardSources() string {
 	return Catalog.Format(msgs.locale, "cardSources", nil)
 }
 
+// CardSourcesLabel says "Sources: {names}"
+// in the language the app shows.
+//
+// A fact card: what screen readers say for its source chip, the names of
+// the web pages its facts come from.
+func CardSourcesLabel(names string) string { return In(i18n.Locale()).CardSourcesLabel(names) }
+
+// CardSourcesLabel says "Sources: {names}"
+// in the language of msgs.
+//
+// A fact card: what screen readers say for its source chip, the names of
+// the web pages its facts come from.
+func (msgs Messages) CardSourcesLabel(names string) string {
+	return Catalog.Format(msgs.locale, "cardSourcesLabel", map[string]any{"names": names})
+}
+
+// CardSourcesSeparator says ", "
+// in the language the app shows.
+//
+// A fact card: what goes between two source names in what screen readers
+// say for its source chip, as in "Wikipedia, BBC".
+func CardSourcesSeparator() string { return In(i18n.Locale()).CardSourcesSeparator() }
+
+// CardSourcesSeparator says ", "
+// in the language of msgs.
+//
+// A fact card: what goes between two source names in what screen readers
+// say for its source chip, as in "Wikipedia, BBC".
+func (msgs Messages) CardSourcesSeparator() string {
+	return Catalog.Format(msgs.locale, "cardSourcesSeparator", nil)
+}
+
 // CardLayout says "Layout"
 // in the language the app shows.
 //
@@ -5743,6 +6281,22 @@ func (msgs Messages) PubTitle() string {
 	return Catalog.Format(msgs.locale, "pubTitle", nil)
 }
 
+// PubLinkCopied says "Public link copied"
+// in the language the app shows.
+//
+// A toast after the page's public link on the web is copied in the Share
+// dialog.
+func PubLinkCopied() string { return In(i18n.Locale()).PubLinkCopied() }
+
+// PubLinkCopied says "Public link copied"
+// in the language of msgs.
+//
+// A toast after the page's public link on the web is copied in the Share
+// dialog.
+func (msgs Messages) PubLinkCopied() string {
+	return Catalog.Format(msgs.locale, "pubLinkCopied", nil)
+}
+
 // PubChecking says "Looking for cloudflared…"
 // in the language the app shows.
 //
@@ -6239,16 +6793,16 @@ func (msgs Messages) PubBusy() string {
 // in the language the app shows.
 //
 // Public page (seen by visitors): the comment form, when the name typed is
-// that of the page's owner, of an agent or of someone else who comments on
-// the page, which a visitor can't take.
+// that of the page's owner, of an agent or of someone else whose comments
+// the public page shows, which a visitor can't take.
 func PubNameTaken() string { return In(i18n.Locale()).PubNameTaken() }
 
 // PubNameTaken says "Someone on this page goes by that name. Choose another."
 // in the language of msgs.
 //
 // Public page (seen by visitors): the comment form, when the name typed is
-// that of the page's owner, of an agent or of someone else who comments on
-// the page, which a visitor can't take.
+// that of the page's owner, of an agent or of someone else whose comments
+// the public page shows, which a visitor can't take.
 func (msgs Messages) PubNameTaken() string {
 	return Catalog.Format(msgs.locale, "pubNameTaken", nil)
 }

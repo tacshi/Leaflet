@@ -552,13 +552,14 @@ func (p *pubLink) render(job pubJob) {
 	c.Walk(func(n, _ *doc.Node) { blocks[n.ID] = squash(n.Delta().Plain()) })
 	embeds, mapPages := map[string]string{}, map[string]string{}
 	threads := map[string][]store.Thread{}
-	var all []store.Thread
+	var all, shown []store.Thread
 	if len(job.threads) > 0 || job.comments {
 		all, _ = job.st.Threads(job.page)
 	}
 	for _, t := range all {
 		if job.threads[t.Root.ID] && !t.Root.Resolved {
 			threads[t.Root.BlockID] = append(threads[t.Root.BlockID], t)
+			shown = append(shown, t)
 		}
 	}
 	prefix := "/" + job.token + "/"
@@ -613,13 +614,17 @@ func (p *pubLink) render(job pubJob) {
 		return
 	}
 	p.shown = job.seq
-	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, maps: mapPages, blocks: blocks, taken: job.taken(all)}
+	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, maps: mapPages, blocks: blocks, taken: job.taken(shown)}
 }
 
-// taken is what a visitor can't go by, as nameKey reads names: the names
-// of the page's owner, of the agents and of the others whose comments are
-// on the page, and the words the page or the app shows in place of the
-// owner's name.
+// taken is what a visitor can't go by, as nameKey reads names, so as not to
+// pass for someone else on the page: the names of the page's owner, of the
+// agents and of the others whose comments are in threads, the threads the
+// public page shows, and the words the page or the app shows in place of
+// the owner's name. The names of those who commented only in threads it
+// doesn't show are not taken, so that what a visitor may go by tells
+// nothing of them; a visitor's comment shows in the app as one through the
+// public link whatever its name.
 func (j pubJob) taken(threads []store.Thread) map[string]bool {
 	taken := map[string]bool{}
 	add := func(name string) {

@@ -132,14 +132,14 @@ extension CoreClient {
     }
 
     nonisolated(nonsending) func plainCopy(_ nodes: [DocNode]) async throws -> String {
-        let json = String(decoding: try JSONEncoder().encode(nodes), as: UTF8.self)
+        let json = try jsonString(nodes)
         return try await call { core in
             try Self.answer { e in core.plainCopy(json, error: e) }
         }
     }
 
     nonisolated(nonsending) func copyText(_ nodes: [DocNode]) async throws -> String {
-        let json = String(decoding: try JSONEncoder().encode(nodes), as: UTF8.self)
+        let json = try jsonString(nodes)
         return try await call { core in
             try Self.answer { e in core.copyText(json, error: e) }
         }
@@ -152,7 +152,7 @@ extension CoreClient {
     }
 
     nonisolated(nonsending) func appendBlock(_ pageID: String, _ node: DocNode) async throws {
-        let json = String(decoding: try JSONEncoder().encode(node), as: UTF8.self)
+        let json = try jsonString(node)
         try await call { try $0.appendBlock(pageID, node: json) }
     }
 

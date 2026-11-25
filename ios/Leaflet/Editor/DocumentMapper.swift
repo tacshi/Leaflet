@@ -107,12 +107,6 @@ enum DocumentMapper {
         var range: NSRange
     }
 
-    static func paragraphs(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [Paragraph] {
-        blocks(s, trailing: trailing).map {
-            Paragraph(info: $0.info, text: s.attributedSubstring(from: $0.range), range: $0.range)
-        }
-    }
-
     static func blocks(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [(
         info: BlockInfo, range: NSRange
     )] {

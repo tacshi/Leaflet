@@ -171,6 +171,7 @@
   "cardSkipBack": "后退 15 秒",
   "cardSkipForward": "前进 15 秒",
   "cardSpeed": "播放速度",
+  "cardPlaybackPosition": "播放位置",
   "exportRecording": "录音",
   "exportTemplatesFolder": "模板",
   "exportEmbed": "交互式嵌入",

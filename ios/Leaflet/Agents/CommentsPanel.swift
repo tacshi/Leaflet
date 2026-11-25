@@ -7,11 +7,13 @@ struct NewComment: Equatable {
 
 struct CommentsPanel: View {
     let model: PageModel
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
     @State private var showResolved = false
     @State private var sending = false
+    @FocusState private var focused: String?
 
     private var open: [CommentThread] { model.threads.filter { !$0.root.resolved } }
     private var resolved: [CommentThread] { model.threads.filter { $0.root.resolved } }
@@ -27,7 +29,7 @@ struct CommentsPanel: View {
                         L.panelCommentsEmpty, systemImage: "text.bubble",
                         description: Text(L.panelCommentsEmptyHint))
                 }
-                ForEach(open) { ThreadCard(thread: $0, model: model) }
+                ForEach(open) { ThreadCard(thread: $0, model: model, focused: $focused) }
                 if !resolved.isEmpty {
                     Button(
                         showResolved
@@ -37,12 +39,26 @@ struct CommentsPanel: View {
                     }
                     .font(.footnote)
                     if showResolved {
-                        ForEach(resolved) { ThreadCard(thread: $0, model: model).opacity(0.7) }
+                        ForEach(resolved) {
+                            ThreadCard(thread: $0, model: model, focused: $focused).opacity(0.7)
+                        }
                     }
                 }
             }
             .padding(14)
         }
+        .environment(
+            \.openURL, MessageView.links(scene: scene, app: app, pageID: model.id, isSheet: isSheet)
+        )
+    }
+
+    /// The new comment's card, whose field is focused by this name.
+    static let newCard = "new"
+
+    /// The ⌘↩ of the card whose field is focused, which sends its comment or
+    /// reply: only that card's button has it, so that it is the one to go.
+    static func send(_ card: String, focused: String?) -> KeyboardShortcut? {
+        card == focused ? KeyboardShortcut(.return, modifiers: .command) : nil
     }
 
     private func newCard(_ new: NewComment) -> some View {
@@ -56,6 +72,7 @@ struct CommentsPanel: View {
                 L.panelCommentPlaceholder, text: Bindable(model).commentDraft, axis: .vertical
             )
             .lineLimit(2...8)
+            .focused($focused, equals: Self.newCard)
             HStack {
                 Spacer()
                 Button(L.commonCancel) {
@@ -85,7 +102,7 @@ struct CommentsPanel: View {
                 }
                 .disabled(sending)
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: .command)
+                .keyboardShortcut(Self.send(Self.newCard, focused: focused))
             }
         }
         .padding(12)
@@ -96,6 +113,7 @@ struct CommentsPanel: View {
 struct ThreadCard: View {
     let thread: CommentThread
     let model: PageModel
+    var focused: FocusState<String?>.Binding
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -133,10 +151,12 @@ struct ThreadCard: View {
                         text: Binding(get: { reply }, set: { reply = $0 }), axis: .vertical
                     )
                     .lineLimit(1...6)
+                    .focused(focused, equals: thread.root.id)
                     .onSubmit(send)
                     Button(L.panelReply, action: send)
                         .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .keyboardShortcut(.return, modifiers: .command)
+                        .keyboardShortcut(
+                            CommentsPanel.send(thread.root.id, focused: focused.wrappedValue))
                 }
                 .font(.subheadline)
             }
@@ -194,6 +214,10 @@ struct CommentRow: View {
             HStack(spacing: 6) {
                 Image(systemName: comment.authorKind == "agent" ? "sparkles" : "person.crop.circle")
                     .foregroundStyle(palette.accent)
+                    // An agent's says the comment is an agent's; a person's
+                    // is left out, as the name beside it says who wrote it.
+                    .accessibilityLabel(L.commonAgent)
+                    .accessibilityHidden(comment.authorKind != "agent")
                 Text(comment.authorName.isEmpty ? L.pageBylineSomeone : comment.authorName)
                     .font(.footnote.weight(.semibold))
                 if let note = Self.note(comment) {
@@ -207,9 +231,10 @@ struct CommentRow: View {
             if comment.deleted == true {
                 Text(L.panelCommentDeleted).font(.subheadline).foregroundStyle(palette.textMuted)
             } else {
-                Text(Self.text(comment.body))
-                    .font(.subheadline)
-                    .textSelection(.enabled)
+                // As the desktop draws comments: in full Markdown, with their
+                // cards' pictures never fetched, as anyone with the page's
+                // public link may write one.
+                MarkdownPreview(markdown: comment.body, cardPictures: false)
             }
         }
         .contextMenu {
@@ -221,18 +246,6 @@ struct CommentRow: View {
 
     static func note(_ comment: CommentThread.Comment) -> String? {
         comment.authorKind == "guest" ? L.panelViaPublicLink : comment.askedBy
-    }
-
-    static func text(_ body: String) -> AttributedString {
-        var out =
-            (try? AttributedString(
-                markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(body)
-        let links = out.runs[\.link].compactMap { link, range in link.map { ($0, range) } }
-        for (link, range) in links {
-            out[range].link = EditorStyle.linkTarget([.leafletHref: link.absoluteString])
-        }
-        return out
     }
 
     private var deleteButton: some View {

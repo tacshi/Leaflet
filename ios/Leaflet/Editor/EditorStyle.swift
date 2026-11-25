@@ -189,7 +189,10 @@ struct EditorStyle {
             if a[.leafletHref] != nil || a[.leafletMention] != nil {
                 color = UIColor(palette.accentText)
             }
-            if let hex = a[.leafletColor] as? String, let c = UIColor(hex: hex) { color = c }
+            if let hex = a[.leafletColor] as? String, let c = Self.textColor(hex, palette: palette)
+            {
+                color = c
+            }
             var update: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             // Code whose colors are being worked out keeps those it has, which
             // move along with what is typed in the meantime.
@@ -243,6 +246,26 @@ struct EditorStyle {
                 range: NSRange(location: para.location + range.location, length: range.length))
         }
     }
+
+    /// The color text in hex shows in, as the desktop draws it: on a dark
+    /// page, a color of the text color menu is its lighter shade, which
+    /// reads there, with the same opacity.
+    static func textColor(_ hex: String, palette: Palette) -> UIColor? {
+        guard let color = UIColor(hex: hex) else { return nil }
+        let rgb = String(hex.lowercased().drop { $0 == "#" }.prefix(6))
+        guard palette.isDark, let dark = darkShades[rgb], let shade = UIColor(hex: dark) else {
+            return color
+        }
+        return shade.withAlphaComponent(color.cgColor.alpha)
+    }
+
+    /// The lighter shades of the text color menu's colors, by their hex, as
+    /// the desktop's color menu has them.
+    private static let darkShades = [
+        "ef4444": "#f87171", "f97316": "#fb923c", "eab308": "#facc15", "22c55e": "#4ade80",
+        "14b8a6": "#2dd4bf", "3b82f6": "#60a5fa", "6366f1": "#818cf8", "a855f7": "#c084fc",
+        "ec4899": "#f472b6", "92400e": "#b98a5e", "71717a": "#a1a1aa",
+    ]
 
     static func linkTarget(_ a: [NSAttributedString.Key: Any]) -> URL? {
         if let m = a[.leafletMention] as? Mention {

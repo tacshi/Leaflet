@@ -36,7 +36,7 @@ final class Recorder {
     @ObservationIgnored private let finishing = BackgroundTask()
     @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
         self?.changes += 1
-        self?.letAudioGo()
+        AudioSession.letGo()
     }
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
 
@@ -398,7 +398,7 @@ final class Recorder {
         player?.stop()
         player = nil
         playing = nil
-        if was != nil { letAudioGo() }
+        if was != nil { AudioSession.letGo() }
     }
 
     /// Whether the recording playing, if one is, is `editor`'s to show and steer: it was played
@@ -414,10 +414,30 @@ final class Recorder {
         }
         stopPlaying()
     }
+}
 
-    private func letAudioGo() {
+/// The app's shared audio session, which a recording, an audio or video
+/// file and the microphone all play or record through: it is turned off,
+/// for other apps' audio, as a podcast, to play on, only once none of them
+/// still runs, never while one does, as one stopping would cut off another.
+@MainActor
+enum AudioSession {
+    static func letGo() {
+        let recorder = Recorder.shared
+        guard
+            idle(
+                recording: recorder.player?.isPlaying == true,
+                file: FilePlayback.shared.running,
+                microphone: recorder.state.recording || recorder.state.testing)
+        else { return }
         try? AVAudioSession.sharedInstance().setActive(
             false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Whether the session is free to turn off: no recording plays, no file
+    /// plays nor is on its way to, and the microphone is off.
+    nonisolated static func idle(recording: Bool, file: Bool, microphone: Bool) -> Bool {
+        !recording && !file && !microphone
     }
 }
 

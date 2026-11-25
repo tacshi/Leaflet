@@ -236,7 +236,7 @@ struct MessageView: View {
                     StatusLine(text: message.text)
                 }
             } else {
-                MarkdownPreview(markdown: message.text)
+                MarkdownPreview(markdown: message.text, streaming: message.pending)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
@@ -247,22 +247,31 @@ struct MessageView: View {
                     .textSelection(.enabled)
                     .environment(
                         \.openURL,
-                        OpenURLAction { [scene, app, pageID, isSheet] url in
-                            guard url.scheme == "leaflet" else { return .systemAction }
-                            let id = url.pathComponents.dropFirst().first ?? ""
-                            guard url.host() == "page", app.opens(id) else { return .handled }
-                            let href = url.absoluteString
-                            scene.openFromChat(
-                                id, at: MobileLinkedBlock(href), moment: MobileLinkedMoment(href),
-                                workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
-                            return .handled
-                        })
+                        Self.links(scene: scene, app: app, pageID: pageID, isSheet: isSheet))
             }
             if let run, !run.edits.isEmpty {
                 RunCard(run: run, pageID: pageID, isSheet: isSheet)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
+    }
+
+    /// How links open in what is written in a page's panel, as agents'
+    /// answers and comments: a page's, or a block's of one, in the app, if
+    /// it is one the app opens, and the rest as the system opens them.
+    static func links(scene: SceneModel, app: AppModel, pageID: String, isSheet: Bool)
+        -> OpenURLAction
+    {
+        OpenURLAction { url in
+            guard url.scheme == "leaflet" else { return .systemAction }
+            let id = url.pathComponents.dropFirst().first ?? ""
+            guard url.host() == "page", app.opens(id) else { return .handled }
+            let href = url.absoluteString
+            scene.openFromChat(
+                id, at: MobileLinkedBlock(href), moment: MobileLinkedMoment(href),
+                workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
+            return .handled
+        }
     }
 }
 

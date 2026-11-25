@@ -2481,6 +2481,22 @@ func (msgs Messages) CardSpeed() string {
 	return Catalog.Format(msgs.locale, "cardSpeed", nil)
 }
 
+// CardPlaybackPosition says "Playback position"
+// in the language the app shows.
+//
+// Name, for VoiceOver, of the slider of an audio or video player that shows
+// where in it it plays, and moves there.
+func CardPlaybackPosition() string { return In(i18n.Locale()).CardPlaybackPosition() }
+
+// CardPlaybackPosition says "Playback position"
+// in the language of msgs.
+//
+// Name, for VoiceOver, of the slider of an audio or video player that shows
+// where in it it plays, and moves there.
+func (msgs Messages) CardPlaybackPosition() string {
+	return Catalog.Format(msgs.locale, "cardPlaybackPosition", nil)
+}
+
 // ExportRecording says "Recording"
 // in the language the app shows.
 //

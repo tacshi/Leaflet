@@ -10,11 +10,13 @@ struct ProvidersSection: View {
     @State private var presets: [ProviderPreset] = []
     @Environment(SettingsPrompt.self) private var prompt
     @State private var failure: String?
+    @State private var unread: String?
+    @State private var read = false
 
     var body: some View {
         @Bindable var app = app
         Section {
-            if providers.isEmpty {
+            if providers.isEmpty, read {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L.settingsNoProviders)
                     Text(L.settingsNoProvidersDesc).font(.caption).foregroundStyle(.secondary)
@@ -45,7 +47,7 @@ struct ProvidersSection: View {
                     }
                 }
         } footer: {
-            if let failure {
+            if let failure = failure ?? unread {
                 Text(failure).foregroundStyle(palette.dangerText)
             } else {
                 Text(L.settingsProvidersDesc)
@@ -123,10 +125,18 @@ struct ProvidersSection: View {
         return seen
     }
 
+    /// Reads the providers again: one that cannot be read keeps what shows,
+    /// and says why under it until a read goes.
     private func load() async {
         guard let client = app.client else { return }
-        providers = (try? await client.providers()) ?? []
-        if presets.isEmpty { presets = (try? await client.presets()) ?? [] }
+        do {
+            providers = try await client.providers()
+            if presets.isEmpty { presets = try await client.presets() }
+            unread = nil
+            read = true
+        } catch {
+            unread = error.localizedDescription
+        }
     }
 
     private func askRemove(_ p: AgentProvider) {

@@ -88,17 +88,10 @@ struct MapSheet: View {
         .onDisappear { search?.cancel() }
     }
 
-    private static func json(_ value: some Encodable) -> String {
-        (try? JSONEncoder().encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? ""
-    }
-
     private func load() {
-        if let data = editing?.data {
-            var error: NSError?
-            let raw = MobileMapFields(Self.json(data), &error)
-            if let f = try? JSONDecoder().decode(Fields.self, from: Data(raw.utf8)) {
-                (title, places, mode) = (f.title, f.places, f.mode)
-            }
+        if let data = editing?.data, let f = try? coreValue(data, as: Fields.self, MobileMapFields)
+        {
+            (title, places, mode) = (f.title, f.places, f.mode)
         }
         original = fields
     }
@@ -109,8 +102,8 @@ struct MapSheet: View {
         guard let client = app.client else { return }
         busy = true
         failure = nil
-        let input = Self.json(Fields(title: title, places: places, mode: mode))
-        let was = editing?.data.map { Self.json($0) } ?? ""
+        let input = (try? jsonString(Fields(title: title, places: places, mode: mode))) ?? ""
+        let was = editing?.data.flatMap { try? jsonString($0) } ?? ""
         let raw: String
         do {
             raw = try await client.buildMap(input, was: was, language: L.language)

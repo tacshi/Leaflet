@@ -24,25 +24,15 @@ struct CardLook: Decodable, Equatable, Sendable {
     let note: [JSONValue]
     let sources: [Source]
 
-    @MainActor private static var read: [String: (DocNode, CardLook)] = [:]
+    @MainActor private static var read = NodeCache<CardLook>(most: 256)
 
     @MainActor static func of(_ node: DocNode) -> CardLook? {
-        if let (kept, look) = read[node.id], kept == node { return look }
-        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
-        var error: NSError?
-        let json = MobileCardView(raw ?? "{}", &error)
-        guard error == nil,
-            let look = try? JSONDecoder().decode(CardLook.self, from: Data(json.utf8))
-        else { return nil }
-        if read.count >= 256 { read.removeAll(keepingCapacity: true) }
-        read[node.id] = (node, look)
-        return look
+        read.value(of: node) { try? coreValue($0, as: CardLook.self, MobileCardView) }
     }
 
     /// The text of a delta, with its marks, as a page shows it.
-    @MainActor static func text(_ delta: [JSONValue]) -> AttributedString {
-        MarkdownPreview.text(
-            DocNode(id: "", type: "paragraph", data: ["delta": .array(delta)], children: nil))
+    @MainActor static func text(_ delta: [JSONValue], palette: Palette) -> AttributedString {
+        MarkdownPreview.text(delta, palette: palette)
     }
 
     static func plain(_ delta: [JSONValue]) -> String {
@@ -56,17 +46,18 @@ struct CardLook: Decodable, Equatable, Sendable {
 struct FactCardView: View {
     let node: DocNode
     var onHeight: (@MainActor (CGSize) -> Void)?
+    /// Whether the card fetches and shows its picture: never for one that
+    /// anyone may have written, as in a comment, whose picture's link could
+    /// tell its writer who reads it.
+    var showsPicture = true
     @Environment(\.palette) private var palette
+    @Environment(\.displayScale) private var scale
     @State private var picture: UIImage?
     @ScaledMetric(relativeTo: .body) private var figureSize: CGFloat = 26
 
-    /// The pictures fetched, by their links: a card made again, as an edit
-    /// to the page does, shows its picture at once.
-    @MainActor private static let pictures = NSCache<NSString, UIImage>()
-
     var body: some View {
         let look = CardLook.of(node)
-        let image = look?.layout == "details" ? look?.image ?? "" : ""
+        let image = showsPicture && look?.layout == "details" ? look?.image ?? "" : ""
         VStack(alignment: .leading, spacing: 10) {
             if let look {
                 if !look.title.isEmpty || !look.icon.isEmpty {
@@ -103,7 +94,9 @@ struct FactCardView: View {
         // Its title, each fact, its note and its sources' chip, which opens
         // them, each its own to VoiceOver.
         .accessibilityElement(children: .contain)
-        .task(id: image) { await load(image) }
+        .task(id: image) {
+            await CardPictures.load(image, scale: scale) { picture = $0 }
+        }
     }
 
     private func figures(_ look: CardLook) -> some View {
@@ -113,7 +106,7 @@ struct FactCardView: View {
                     if !f.label.isEmpty {
                         Text(f.label).font(.footnote).foregroundStyle(palette.textMuted)
                     }
-                    Text(CardLook.text(f.value))
+                    Text(CardLook.text(f.value, palette: palette))
                         .font(.system(size: figureSize, weight: .bold))
                         .foregroundStyle(palette.text)
                         .minimumScaleFactor(0.6)
@@ -134,10 +127,13 @@ struct FactCardView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(look.facts.enumerated()), id: \.offset) { _, f in
-                    Text(AttributedString(f.label + f.separator) + CardLook.text(f.value))
-                        .font(.subheadline)
-                        .foregroundStyle(palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(
+                        AttributedString(f.label + f.separator)
+                            + CardLook.text(f.value, palette: palette)
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 note(look)
             }
@@ -148,7 +144,7 @@ struct FactCardView: View {
         if !look.note.isEmpty || !look.sources.isEmpty {
             SpreadRows(spacing: 6, rowSpacing: 4, spread: false) {
                 if !look.note.isEmpty {
-                    Text(CardLook.text(look.note))
+                    Text(CardLook.text(look.note, palette: palette))
                         .font(.caption)
                         .foregroundStyle(palette.textMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -158,26 +154,6 @@ struct FactCardView: View {
                 }
             }
         }
-    }
-
-    /// Shows the picture at image, or none: never another link's while it
-    /// loads or once it fails, nor one asked for before the link changed.
-    private func load(_ image: String) async {
-        guard !image.isEmpty else {
-            picture = nil
-            return
-        }
-        if let kept = Self.pictures.object(forKey: image as NSString) {
-            picture = kept
-            return
-        }
-        picture = nil
-        guard let data = try? await ImageBlock.client?.picture(image), !data.isEmpty,
-            let made = await Task.detached(operation: { Pictures.bitmap(data) }).value,
-            !Task.isCancelled
-        else { return }
-        Self.pictures.setObject(made, forKey: image as NSString)
-        picture = made
     }
 }
 

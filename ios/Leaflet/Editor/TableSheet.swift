@@ -189,10 +189,7 @@ struct TableSheet: View {
     }
 
     private func load() {
-        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
-        var error: NSError?
-        let json = MobileTableRows(raw ?? "{}", &error)
-        rows = (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? [[""]]
+        rows = (try? coreValue(node, as: [[String]].self, MobileTableRows)) ?? [[""]]
         if rows.isEmpty || cols == 0 { rows = [[""]] }
         original = rows
         look = TableLook(node)
@@ -202,8 +199,8 @@ struct TableSheet: View {
     private func apply() {
         guard dirty, let original else { return dismiss() }
         do {
-            let was = String(decoding: try JSONEncoder().encode(original), as: UTF8.self)
-            let cells = String(decoding: try JSONEncoder().encode(rows), as: UTF8.self)
+            let was = try jsonString(original)
+            let cells = try jsonString(rows)
             let changedLook = look != originalLook ? look : nil
             try save { now in try Self.change(now, from: was, to: cells, look: changedLook) }
             dismiss()
@@ -219,12 +216,12 @@ struct TableSheet: View {
     static func change(
         _ table: DocNode, from was: String, to rows: String, look: TableLook? = nil
     ) throws -> DocNode {
-        let now = String(decoding: try JSONEncoder().encode(table), as: UTF8.self)
+        let now = try jsonString(table)
         var error: NSError?
         var raw = MobileChangeTableRows(now, was, rows, &error)
         if let error { throw error }
         if let look {
-            let aligns = String(decoding: try JSONEncoder().encode(look.aligns), as: UTF8.self)
+            let aligns = try jsonString(look.aligns)
             raw = MobileSetTableLook(raw, look.lines ? "lines" : "", aligns, &error)
             if let error { throw error }
         }

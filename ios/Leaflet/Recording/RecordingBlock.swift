@@ -194,6 +194,7 @@ struct RecordingBlock: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(palette.icon)
+        .accessibilityLabel(playing ? L.commonPause : L.recPlay)
         .disabled(recorder.loading != nil || recorder.state.recording)
     }
 
@@ -210,6 +211,7 @@ struct RecordingBlock: View {
                 .contentShape(.rect)
         }
         .foregroundStyle(palette.icon)
+        .accessibilityLabel(L.cardActions)
     }
 
     private func transcript(_ row: RecordingRow) -> some View {
@@ -286,11 +288,12 @@ private struct RecordingLine: View {
     let disabled: Bool
     let follow: (CGFloat) -> Void
     let play: () -> Void
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
     var body: some View {
         let palette = BlockLook.palette
         let current = clock.line == index
-        TimedRow(time: RecordControl.time(TimeInterval(line.startMs) / 1000), widest: widest) {
+        TimedRow(time: MobileClock(line.startMs / 1000), widest: widest) {
             play()
         } content: {
             VStack(alignment: .leading, spacing: 2) {
@@ -300,7 +303,7 @@ private struct RecordingLine: View {
                         .foregroundStyle(palette.textMuted)
                 }
                 Text(line.text)
-                    .font(.system(size: BlockLook.textSize - 2))
+                    .font(TimeStyle.lineFont(scale))
                     .foregroundStyle(palette.text)
                     .multilineTextAlignment(.leading)
             }
@@ -353,7 +356,7 @@ private struct Scrubber: View {
                     Recorder.shared.skip(id, by: -PlaySpeed.skip)
                 }
                 SkipButton(seconds: PlaySpeed.skip) { Recorder.shared.skip(id, by: PlaySpeed.skip) }
-                Text(RecordControl.time(player.currentTime))
+                Text(verbatim: MobileClock(Int(player.currentTime)))
                 Slider(
                     value: Binding(
                         get: { player.currentTime },
@@ -361,7 +364,9 @@ private struct Scrubber: View {
                     in: 0...max(player.duration, 0.1)
                 )
                 .tint(palette.accent)
-                Text(RecordControl.time(player.duration))
+                .accessibilityLabel(L.cardPlaybackPosition)
+                .accessibilityValue(MobileClock(Int(player.currentTime)))
+                Text(verbatim: MobileClock(Int(player.duration)))
                 SpeedMenu()
             }
             .font(.caption.monospacedDigit())

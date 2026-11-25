@@ -673,7 +673,7 @@ struct PagePreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(page.displayTitle).font(.title2.weight(.semibold))
-            Text(page.updated, format: .relative(presentation: .named))
+            Text(Byline.humanTime(page.updated))
                 .font(.footnote).foregroundStyle(.secondary)
             if !page.tags.isEmpty {
                 Text(page.tags.map { "#" + $0 }.joined(separator: " "))

@@ -29,8 +29,11 @@ struct SourceSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    CodeTextEditor(text: $text, focused: true)
-                        .frame(minHeight: 220)
+                    CodeTextEditor(
+                        text: $text, label: diagram ? L.renderedDiagram : L.renderedMath,
+                        focused: true
+                    )
+                    .frame(minHeight: 220)
                 } footer: {
                     if let failure {
                         Text(failure).foregroundStyle(palette.dangerText)
@@ -91,6 +94,8 @@ struct CancelButton: View {
 
 struct CodeTextEditor: UIViewRepresentable {
     @Binding var text: String
+    /// What the field holds, as VoiceOver says it: its sheet's title.
+    let label: String
     var focused = false
 
     func makeUIView(context: Context) -> UITextView {
@@ -106,6 +111,7 @@ struct CodeTextEditor: UIViewRepresentable {
         view.smartQuotesType = .no
         view.smartInsertDeleteType = .no
         view.delegate = context.coordinator
+        view.accessibilityLabel = label
         view.text = text
         if focused { DispatchQueue.main.async { view.becomeFirstResponder() } }
         return view
@@ -113,6 +119,7 @@ struct CodeTextEditor: UIViewRepresentable {
 
     func updateUIView(_ view: UITextView, context: Context) {
         if view.text != text { view.text = text }
+        view.accessibilityLabel = label
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }

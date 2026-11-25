@@ -307,6 +307,14 @@ struct MarkdownPreview: View {
     /// Whether tables draw with simple lines whatever they say, as agents'
     /// answers show them, or as their own look says, as a page's do.
     var simpleTables = true
+    /// Whether the markdown is still coming in, as an answer streams: a card
+    /// or a map it ends with is still being written, and shows as one to
+    /// come until it is whole.
+    var streaming = false
+    /// Whether cards fetch and show their pictures: never in what anyone
+    /// may have written, as a comment, whose picture's link could tell its
+    /// writer who reads it.
+    var cardPictures = true
     @Environment(\.palette) private var palette
     @State private var last: Read?
 
@@ -316,9 +324,10 @@ struct MarkdownPreview: View {
     }
 
     var body: some View {
+        let rows = shown
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, row in
-                view(row)
+            ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                view(row, last: i == rows.count - 1)
             }
         }
         .textSelection(.enabled)
@@ -367,7 +376,7 @@ struct MarkdownPreview: View {
         let node: DocNode
         let depth: Int
         let number: Int
-        var cells: [[String]] = []
+        var cells: TableGrid.Cells = []
     }
 
     nonisolated static func blocks(_ markdown: String) -> [DocNode] {
@@ -390,32 +399,61 @@ struct MarkdownPreview: View {
         return out
     }
 
-    static func text(_ node: DocNode) -> AttributedString {
+    static func text(_ node: DocNode, palette: Palette) -> AttributedString {
+        text(node.data?["delta"]?.array ?? [], palette: palette)
+    }
+
+    /// The text of a delta with its marks, as the page's editor draws them:
+    /// bold, italics, strikethrough and underline, code and formulas in
+    /// code's font on code's background, text color and highlight, and the
+    /// links that open.
+    static func text(_ delta: [JSONValue], palette: Palette) -> AttributedString {
         var out = AttributedString()
-        for op in node.data?["delta"]?.array ?? [] {
+        for op in delta {
             guard let insert = op["insert"]?.string else { continue }
             let a = DocumentMapper.inline(op["attributes"])
             var run = AttributedString(insert)
             var intent: InlinePresentationIntent = []
+            let code = a[.leafletCode] != nil || a[.leafletMath] != nil
             if a[.leafletBold] != nil { intent.insert(.stronglyEmphasized) }
             if a[.leafletItalic] != nil { intent.insert(.emphasized) }
-            if a[.leafletCode] != nil { intent.insert(.code) }
+            if code { intent.insert(.code) }
             if a[.leafletStrike] != nil { intent.insert(.strikethrough) }
             if !intent.isEmpty { run.inlinePresentationIntent = intent }
             if a[.leafletUnderline] != nil { run.underlineStyle = .single }
+            if let hex = a[.leafletColor] as? String,
+                let color = EditorStyle.textColor(hex, palette: palette)
+            {
+                run.foregroundColor = Color(uiColor: color)
+            }
+            if let hex = a[.leafletBackground] as? String, let color = UIColor(hex: hex) {
+                run.backgroundColor = Color(uiColor: color)
+            } else if code {
+                run.backgroundColor = palette.code
+            }
             if let url = EditorStyle.linkTarget(a) { run.link = url }
             out += run
         }
         return out
     }
 
+    /// Whether a block shows as a card or a map still to come rather than
+    /// as itself: a code block of either, last in an answer still coming
+    /// in, is its fence being written. One that stays such a code block
+    /// once the answer is whole is one the core could not read, and shows
+    /// its code.
+    static func toCome(_ node: DocNode, last: Bool, streaming: Bool) -> Bool {
+        streaming && last && node.type == "code"
+            && ["card", "map"].contains(node.data?["language"]?.string ?? "")
+    }
+
     private func font(_ scale: Double = 1, style: Font.TextStyle = .body) -> Font {
         size.map { Fonts.pageText(size: $0 * scale) } ?? .system(style)
     }
 
-    @ViewBuilder private func view(_ row: Row) -> some View {
+    @ViewBuilder private func view(_ row: Row, last: Bool) -> some View {
         let n = row.node
-        let text = Text(Self.text(n))
+        let text = Text(Self.text(n, palette: palette))
         let indent = CGFloat(row.depth) * (size == nil ? 14 : EditorStyle.indent)
         switch n.type {
         case "heading":
@@ -440,8 +478,7 @@ struct MarkdownPreview: View {
                     Capsule().fill(palette.accentSoftBorder).frame(width: 3)
                 }
                 .padding(.leading, indent)
-        case "code" where ["card", "map"].contains(n.data?["language"]?.string ?? ""):
-            // A card or a map still being written, as an answer streams in.
+        case "code" where Self.toCome(n, last: last, streaming: streaming):
             Label(
                 n.data?["language"]?.string == "map" ? L.hostSlashMap : L.hostSlashCard,
                 systemImage: n.data?["language"]?.string == "map" ? "map" : "list.bullet.rectangle"
@@ -457,7 +494,7 @@ struct MarkdownPreview: View {
                 .background(palette.code, in: .rect(cornerRadius: 8))
                 .padding(.leading, indent)
         case "card":
-            FactCardView(node: n)
+            FactCardView(node: n, showsPicture: cardPictures)
                 .padding(.leading, indent)
         case "map":
             MapBlockView(node: n)
@@ -492,37 +529,19 @@ struct MarkdownPreview: View {
         }
     }
 
-    private func table(_ rows: [[String]], look: TableLook) -> some View {
+    private func table(_ rows: TableGrid.Cells, look: TableLook) -> some View {
         let columns = rows.map(\.count).max() ?? 0
         return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             ForEach(rows.indices, id: \.self) { r in
                 GridRow {
                     ForEach(rows[r].indices, id: \.self) { c in
-                        Text(rows[r][c])
+                        Text(Self.text(rows[r][c], palette: palette))
                             .font(font(0.88, style: .subheadline))
-                            .fontWeight(r == 0 ? .semibold : .regular)
-                            .multilineTextAlignment(look.textAlignment(c))
-                            .padding(.vertical, 8)
-                            .padding(.leading, look.lines && c == 0 ? 0 : 10)
-                            .padding(.trailing, look.lines && c == columns - 1 ? 0 : 10)
-                            // As tall as its row, so that its lines are the row's.
-                            .frame(
-                                maxWidth: .infinity, maxHeight: .infinity,
-                                alignment: look.alignment(c, vertical: .center)
-                            )
-                            .background(r == 0 && !look.lines ? palette.panel : .clear)
-                            .border(look.lines ? .clear : palette.divider, width: 0.5)
-                            .overlay(alignment: .top) {
-                                if look.lines && r > 0 {
-                                    Rectangle().fill(palette.divider).frame(height: 0.5)
-                                }
-                            }
+                            .tableCell(look, row: r, column: c, of: columns, palette: palette)
                     }
                 }
             }
         }
-        .clipShape(.rect(cornerRadius: look.lines ? 0 : 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8).stroke(look.lines ? .clear : palette.border))
+        .tableOutline(look, palette: palette)
     }
 }

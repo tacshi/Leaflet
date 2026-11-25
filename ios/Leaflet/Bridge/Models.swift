@@ -302,7 +302,6 @@ struct CoreStatus: Codable, Sendable {
     var signedIn: Bool
     var pending: Int
     var iCloudOn: Bool
-    var canSync: Bool
 
     enum CodingKeys: String, CodingKey {
         case email, pending
@@ -311,7 +310,6 @@ struct CoreStatus: Codable, Sendable {
         case spaceID = "space_id"
         case signedIn = "signed_in"
         case iCloudOn = "icloud_on"
-        case canSync = "can_sync"
     }
 }
 

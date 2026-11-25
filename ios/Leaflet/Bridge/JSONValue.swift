@@ -79,3 +79,41 @@ enum JSONValue: Codable, Hashable, Sendable {
 
     subscript(key: String) -> JSONValue? { object?[key] }
 }
+
+/// A value as JSON text, as the Go core takes it.
+func jsonString(_ value: some Encodable) throws -> String {
+    String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+}
+
+/// What a function of the Go core makes of a value: the value goes in as
+/// JSON, and the JSON the function answers comes back read as T. It throws
+/// the function's error, or why either JSON would not do.
+func coreValue<T: Decodable>(
+    _ value: some Encodable, as type: T.Type = T.self,
+    _ call: (String?, NSErrorPointer) -> String
+) throws -> T {
+    var error: NSError?
+    let raw = call(try jsonString(value), &error)
+    if let error { throw error }
+    return try JSONDecoder().decode(type, from: Data(raw.utf8))
+}
+
+/// What is made of blocks, kept by each block's id until the block changes
+/// or what else it was made with does (`with`, as a language): past `most`
+/// blocks, all are let go at once.
+struct NodeCache<Value> {
+    private var kept: [String: (node: DocNode, with: String, value: Value)] = [:]
+    private let most: Int
+
+    init(most: Int) { self.most = most }
+
+    mutating func value(
+        of node: DocNode, with: String = "", make: (DocNode) -> Value?
+    ) -> Value? {
+        if let k = kept[node.id], k.node == node, k.with == with { return k.value }
+        guard let value = make(node) else { return nil }
+        if kept.count >= most { kept.removeAll(keepingCapacity: true) }
+        kept[node.id] = (node, with, value)
+        return value
+    }
+}

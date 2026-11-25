@@ -38,6 +38,7 @@ struct SpeechSettingsView: View {
     @State private var testing = false
     @State private var saving = false
     @State private var result: (ok: Bool, text: String)?
+    @State private var unread = false
     @State private var onDevice: Set<String>?
     @State private var adding: String?
 
@@ -46,6 +47,10 @@ struct SpeechSettingsView: View {
             if let loaded, let stt = Binding($stt) {
                 engine(loaded, stt)
                 recording(loaded, stt)
+            } else if let result, !result.ok {
+                Section {
+                    Text(result.text).foregroundStyle(palette.dangerText)
+                }
             }
         }
         .themedForm(palette)
@@ -58,22 +63,28 @@ struct SpeechSettingsView: View {
             if DeviceTranscriber.isAvailable { onDevice = await DeviceTranscriber.languages() }
         }
         .task {
-            await load()
+            // Back from a provider's page, this one appears again: what was
+            // changed there is kept, not read over with what is saved.
+            if loaded == nil { await load() } else { await refresh() }
             for await _ in app.changes(of: SpeechSection.tables) {
                 await refresh()
             }
         }
-        .onDisappear {
-            saveKey()
-            if let stt, loaded != nil, stt != loaded?.stt {
-                Task { await save(stt) }
-            }
-        }
+        .onDisappear(perform: leave)
         .task(id: stt) {
             guard let stt, loaded != nil, stt != loaded?.stt else { return }
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             await save(stt)
+        }
+    }
+
+    /// Saves what is changed and not saved yet, as this page or a provider's
+    /// goes: the wait before a change saves is cut short with the page.
+    private func leave() {
+        saveKey()
+        if let stt, loaded != nil, stt != loaded?.stt {
+            Task { await save(stt) }
         }
     }
 
@@ -87,8 +98,26 @@ struct SpeechSettingsView: View {
         await refresh()
     }
 
+    /// The settings as saved, or nil, with why they could not be read shown
+    /// in the result until they are read again: what the page has stays.
+    private func read(_ client: CoreClient) async -> SpeechSettings? {
+        do {
+            let s = try await client.speechSettings()
+            if unread {
+                unread = false
+                result = nil
+            }
+            return s
+        } catch {
+            unread = true
+            result = (false, error.localizedDescription)
+            return nil
+        }
+    }
+
     private func load() async {
-        guard let client = app.client, let s = try? await client.speechSettings() else { return }
+        guard let client = app.client else { return }
+        guard let s = await read(client) else { return }
         loaded = s
         stt = s.stt
         endpointKey = s.endpointKey
@@ -97,7 +126,8 @@ struct SpeechSettingsView: View {
     }
 
     private func refresh() async {
-        guard let s = try? await app.client?.speechSettings() else { return }
+        guard loaded != nil else { return await load() }
+        guard let client = app.client, let s = await read(client) else { return }
         loaded?.stt = s.stt
         loaded?.status = s.status
         loaded?.sonioxSaved = s.sonioxSaved
@@ -164,7 +194,9 @@ struct SpeechSettingsView: View {
     }
 
     private func providerPage(_ id: String, _ stt: Binding<SttSettings>) -> some View {
-        ProviderPage { dismiss in
+        // This page's own wait to save went as the provider's page came over
+        // it, so the provider's page saves what it changed as it goes.
+        ProviderPage(leave: leave) { dismiss in
             Form {
                 Section {
                     if let s = loaded {
@@ -448,10 +480,13 @@ struct SpeechSettingsView: View {
 }
 
 private struct ProviderPage<Content: View>: View {
+    let leave: () -> Void
     @Environment(\.dismiss) private var dismiss
     @ViewBuilder let content: (DismissAction) -> Content
 
-    var body: some View { content(dismiss) }
+    var body: some View {
+        content(dismiss).onDisappear(perform: leave)
+    }
 }
 
 private struct VoiceNotesFolderPicker: View {

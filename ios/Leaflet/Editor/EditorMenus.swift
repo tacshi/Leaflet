@@ -147,28 +147,13 @@ final class EditorMenus {
     }
 
     private func blockMenu() -> UIMenu {
-        func item(
-            _ title: String, _ symbol: String, _ type: String, _ data: [String: JSONValue] = [:]
-        ) -> UIAction {
-            UIAction(title: title, image: UIImage(systemName: symbol)) { [weak self] _ in
-                self?.editor.commands.setType(type, data)
-            }
-        }
-        return UIMenu(
+        UIMenu(
             title: LI.turnInto,
-            children: [
-                item(L.hostSlashText, "text.alignleft", "paragraph"),
-                item(L.hostSlashHeading1, "textformat.size.larger", "heading", ["level": .int(1)]),
-                item(L.hostSlashHeading2, "textformat.size", "heading", ["level": .int(2)]),
-                item(L.hostSlashHeading3, "textformat.size.smaller", "heading", ["level": .int(3)]),
-                item(L.hostSlashBulleted, "list.bullet", "bulleted_list"),
-                item(L.hostSlashNumbered, "list.number", "numbered_list"),
-                item(L.hostSlashTodo, "checklist", "todo_list", ["checked": .bool(false)]),
-                item(L.hostSlashToggle, "chevron.right.square", "toggle_list"),
-                item(L.hostSlashQuote, "text.quote", "quote"),
-                item(L.hostSlashCallout, "info.circle", "callout", ["tone": .string("info")]),
-                item(L.hostSlashCode, "chevron.left.forwardslash.chevron.right", "code"),
-            ])
+            children: TurnInto.all.map { t in
+                UIAction(title: t.title, image: UIImage(systemName: t.symbol)) { [weak self] _ in
+                    self?.editor.commands.setType(t.type, t.data)
+                }
+            })
     }
 
     func installKeyboardBar() {
@@ -313,5 +298,53 @@ final class KeyboardBar: UIView {
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
         invalidateIntrinsicContentSize()
+    }
+}
+
+/// A block type the text at the caret can turn into, with its keyboard
+/// shortcut if it has one: the one list the Format menu, the keyboard bar's
+/// Turn Into menu and the iPhone's hardware keyboard all offer.
+struct TurnInto {
+    let title: String
+    let symbol: String
+    let type: String
+    var data: [String: JSONValue] = [:]
+    var key: String?
+    var modifiers: UIKeyModifierFlags = []
+
+    static var all: [TurnInto] {
+        let option: UIKeyModifierFlags = [.command, .alternate]
+        let shift: UIKeyModifierFlags = [.command, .shift]
+        return [
+            TurnInto(
+                title: L.hostSlashText, symbol: "text.alignleft", type: "paragraph", key: "0",
+                modifiers: option),
+            TurnInto(
+                title: L.hostSlashHeading1, symbol: "textformat.size.larger", type: "heading",
+                data: ["level": .int(1)], key: "1", modifiers: option),
+            TurnInto(
+                title: L.hostSlashHeading2, symbol: "textformat.size", type: "heading",
+                data: ["level": .int(2)], key: "2", modifiers: option),
+            TurnInto(
+                title: L.hostSlashHeading3, symbol: "textformat.size.smaller", type: "heading",
+                data: ["level": .int(3)], key: "3", modifiers: option),
+            TurnInto(
+                title: L.hostSlashBulleted, symbol: "list.bullet", type: "bulleted_list",
+                key: "8", modifiers: shift),
+            TurnInto(
+                title: L.hostSlashNumbered, symbol: "list.number", type: "numbered_list",
+                key: "7", modifiers: shift),
+            TurnInto(
+                title: L.hostSlashTodo, symbol: "checklist", type: "todo_list",
+                data: ["checked": .bool(false)], key: "l", modifiers: shift),
+            TurnInto(title: L.hostSlashToggle, symbol: "chevron.right.square", type: "toggle_list"),
+            TurnInto(title: L.hostSlashQuote, symbol: "text.quote", type: "quote"),
+            TurnInto(
+                title: L.hostSlashCallout, symbol: "info.circle", type: "callout",
+                data: ["tone": .string("info")]),
+            TurnInto(
+                title: L.hostSlashCode, symbol: "chevron.left.forwardslash.chevron.right",
+                type: "code"),
+        ]
     }
 }

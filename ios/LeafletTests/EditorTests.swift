@@ -351,7 +351,7 @@ struct EditorTests {
         c.onEdit = { sent = $0 }
         c.send()
         let t = sent?.blocks.first { $0.id == "t" }
-        #expect(t.map(TableGrid.rows) == [["A", "B"], ["1", "2"]])
+        #expect(t.map(plainCells) == [["A", "B"], ["1", "2"]])
     }
 
     @Test func aTableSheetSavesIntoTheTableAsItIsNow() throws {
@@ -374,7 +374,7 @@ struct EditorTests {
             tinted: [])
         try c.changeBlock("t", type: "table") { try TableSheet.change($0, from: was, to: edited) }
         let t = blocks(c).first { $0.id == "t" }
-        #expect(t.map(TableGrid.rows) == [["A", "Bee"], ["1", "2"], ["3", "4"]])
+        #expect(t.map(plainCells) == [["A", "Bee"], ["1", "2"], ["3", "4"]])
 
         c.update(content([block("a", "paragraph", "Plan")]), tinted: [])
         #expect(throws: BlockGone.self) {
@@ -536,19 +536,70 @@ struct EditorTests {
         #expect(rows[0].node.data?["level"]?.int == 2)
         #expect(MarkdownPreview.marker(rows[1]) == "☐")
         #expect(MarkdownPreview.marker(rows[2]) == "1.")
-        #expect(TableGrid.rows(rows[3].node) == [["", "A"], ["x", "1"]])
-        #expect(rows[3].cells == [["", "A"], ["x", "1"]])
+        #expect(plainCells(rows[3].node) == [["", "A"], ["x", "1"]])
+        #expect(rows[3].cells == TableGrid.rows(rows[3].node))
+    }
+
+    private static let light = Palette.palettes["Indigo"]!["light"]!
+
+    private func plainCells(_ node: DocNode) -> [[String]] {
+        TableGrid.rows(node).map { $0.map(CardLook.plain) }
     }
 
     @Test func aCommentLinksOnlyWhatThePageOpens() {
-        let text = CommentRow.text(
-            "[a](https://example.com) [b](shortcuts://run-shortcut?name=X) [c](file:///etc/hosts) "
-                + "[d](leaflet://page/p1) [e](mailto:me@example.com)")
+        let rows = MarkdownPreview.rows(
+            MarkdownPreview.blocks(
+                "[a](https://example.com) [b](shortcuts://run-shortcut?name=X) "
+                    + "[c](file:///etc/hosts) [d](leaflet://page/p1) [e](mailto:me@example.com)"))
+        let text = MarkdownPreview.text(rows[0].node, palette: Self.light)
         #expect(String(text.characters) == "a b c d e")
         #expect(
             text.runs.compactMap { $0.link?.absoluteString } == [
                 "https://example.com", "leaflet://page/p1", "mailto:me@example.com",
             ])
+    }
+
+    @Test func aCommentReadsAsBlocks() {
+        let md = "Look:\n\n- one\n- two\n\n| A | B |\n| --- | --- |\n| **x** | 1 |"
+        let rows = MarkdownPreview.rows(MarkdownPreview.blocks(md))
+        #expect(rows.map(\.node.type) == ["paragraph", "bulleted_list", "bulleted_list", "table"])
+        #expect(plainCells(rows[3].node) == [["A", "B"], ["x", "1"]])
+    }
+
+    @Test func aCellKeepsItsMarks() throws {
+        let md =
+            "| A | B |\n| --- | --- |\n"
+            + "| **x** <span style=\"color:#ef4444\">red</span> | [go](https://go.dev) $y$ |"
+        let table = try #require(MarkdownPreview.rows(MarkdownPreview.blocks(md)).first)
+        let cells = TableGrid.rows(table.node)
+        let red = MarkdownPreview.text(cells[1][0], palette: Self.light)
+        let bold = red.runs.first { String(red[$0.range].characters) == "x" }
+        #expect(bold?.inlinePresentationIntent == .stronglyEmphasized)
+        let colored = red.runs.first { String(red[$0.range].characters) == "red" }
+        let ink = colored?[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self]
+        #expect(ink == Color(uiColor: UIColor(hex: "#ef4444")!))
+        let linked = MarkdownPreview.text(cells[1][1], palette: Self.light)
+        #expect(linked.runs.first { $0.link != nil }?.link == URL(string: "https://go.dev"))
+        let math = linked.runs.first { String(linked[$0.range].characters) == "y" }
+        #expect(math?.inlinePresentationIntent == .code)
+    }
+
+    @Test func coloredTextLightensOnADarkPage() throws {
+        let dark = try #require(Palette.palettes["Indigo"]?["dark"])
+        #expect(EditorStyle.textColor("#ef4444ff", palette: dark) == UIColor(hex: "#f87171"))
+        #expect(EditorStyle.textColor("#ef444480", palette: dark) == UIColor(hex: "#f8717180"))
+        #expect(EditorStyle.textColor("#ef4444ff", palette: Self.light) == UIColor(hex: "#ef4444"))
+        #expect(EditorStyle.textColor("#123456", palette: dark) == UIColor(hex: "#123456"))
+    }
+
+    @Test func onlyACardStillComingShowsAsOne() {
+        let card = DocNode(
+            id: "c", type: "code", data: ["language": .string("card")], children: nil)
+        #expect(MarkdownPreview.toCome(card, last: true, streaming: true))
+        #expect(!MarkdownPreview.toCome(card, last: true, streaming: false))
+        #expect(!MarkdownPreview.toCome(card, last: false, streaming: true))
+        let code = DocNode(id: "g", type: "code", data: ["language": .string("go")], children: nil)
+        #expect(!MarkdownPreview.toCome(code, last: true, streaming: true))
     }
 
     @Test func answersReadAsBlocks() {
@@ -562,11 +613,43 @@ struct EditorTests {
         #expect(MarkdownPreview.source(rows[1].node) == "# not a heading\nls")
         #expect(MarkdownPreview.marker(rows[3]) == "2.")
         #expect(MarkdownPreview.source(rows[4].node) == "func f() {")
-        let text = MarkdownPreview.text(rows[0].node)
+        let text = MarkdownPreview.text(rows[0].node, palette: Self.light)
         let bold = text.runs.first { String(text[$0.range].characters) == "this" }
         #expect(bold?.inlinePresentationIntent == .stronglyEmphasized)
-        let link = MarkdownPreview.text(rows[2].node).runs.first { $0.link != nil }?.link
+        let link = MarkdownPreview.text(rows[2].node, palette: Self.light).runs
+            .first { $0.link != nil }?.link
         #expect(link == URL(string: "https://go.dev"))
+    }
+
+    @Test func everyTurnIntoShortcutIsOfferedEverywhere() {
+        let keyed = TurnInto.all.compactMap { t in t.key.map { "\($0) \(t.type)" } }
+        #expect(
+            keyed == [
+                "0 paragraph", "1 heading", "2 heading", "3 heading", "8 bulleted_list",
+                "7 numbered_list", "l todo_list",
+            ])
+        let numbered = TurnInto.all.first { $0.type == "numbered_list" }
+        #expect(numbered?.shortcut == KeyboardShortcut("7", modifiers: [.command, .shift]))
+        #expect(TurnInto.all.first { $0.type == "quote" }?.shortcut == nil)
+    }
+
+    @Test func everyCardIconHasAName() throws {
+        var error: NSError?
+        let icons = try JSONDecoder().decode(
+            [String].self, from: Data(MobileCardIcons(&error).utf8))
+        #expect(!icons.isEmpty)
+        for icon in icons { #expect(CardSheet.iconName(icon) != icon, "\(icon)") }
+    }
+
+    @Test func anUnnamedSeriesIsNumbered() {
+        #expect(ChartBlock.seriesName("", at: 1) == L.chartSeriesNumbered(n: 2))
+        #expect(ChartBlock.seriesName("  ", at: 0) == L.chartSeriesNumbered(n: 1))
+        #expect(ChartBlock.seriesName("Sales", at: 0) == "Sales")
+    }
+
+    @Test func plainCodeIsNamedInTheAppsLanguage() {
+        #expect(CodeLanguage.name("") == L.editorCodePlainText)
+        #expect(CodeLanguage.all.first { $0.id.isEmpty }?.name == L.editorCodePlainText)
     }
 
     @Test func tagsTakeTheDesktopsColors() {
@@ -1289,6 +1372,21 @@ struct EditorTests {
         #expect(run?["attributes"]?.object?["bold"] == .bool(true))
     }
 
+    @Test func aCopyInsideABlockGoesOutWithLineEnds() async throws {
+        let c = editor([block("a", "code", "let a = 1\nlet b = 2"), block("p", "paragraph", "")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        c.textView.selectedRange = NSRange(location: 0, length: 19)
+        c.textView.copy(nil)
+        #expect(UIPasteboard.general.string == "let a = 1\nlet b = 2")
+        c.textView.selectedRange = NSRange(location: 20, length: 0)
+        c.paste(UIPasteboard.general.string ?? "")
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["code", "paragraph"])
+        #expect(b[1].text == "let a = 1\nlet b = 2")
+    }
+
     @Test func aPasteTheSystemPaddedIsStillTheCopy() {
         let pad = EditorClipboard.padding
         #expect(pad("Type bold", "Type bold")! == ("", ""))
@@ -1389,7 +1487,7 @@ struct EditorTests {
         c.textView.selectedRange = NSRange(location: 4, length: 0)
         try await undoesAndRedoes(c, typing: "s") { c.replaceBlock(table([["A", "B"]])) }
         let t = blocks(c).first { $0.id == "t" }
-        #expect(t.map(TableGrid.rows) == [["A", "B"]])
+        #expect(t.map(plainCells) == [["A", "B"]])
     }
 
     @Test func aMenuItemTappedKeepsTheStepsBefore() async throws {
@@ -2058,10 +2156,21 @@ struct EditorTests {
         let huge = try png(5000, limit / 5000 + 1)
         #expect(huge.count < 1 << 20)
         #expect(!Pictures.fit(huge))
-        #expect(Pictures.bitmap(huge) == nil)
+        #expect(Pictures.bitmap(huge, pixels: 1000) == nil)
         #expect(Pictures.fit(try png(5000, limit / 5000)))
-        #expect(Pictures.bitmap(try png(20, 10)) != nil)
+        #expect(Pictures.bitmap(try png(20, 10), pixels: 1000) != nil)
         #expect(Pictures.fit(Data("<svg xmlns=\"http://www.w3.org/2000/svg\"/>".utf8)))
+    }
+
+    @Test func aPictureIsDecodedNoBiggerThanItShows() throws {
+        let photo = try #require(Pictures.bitmap(try png(4000, 3000), pixels: 900))
+        #expect(photo.cgImage?.width == 900)
+        #expect(photo.cgImage?.height == 675)
+        let small = try #require(Pictures.bitmap(try png(200, 100), pixels: 900))
+        #expect(small.cgImage?.width == 200)
+        #expect(Pictures.pixels(300) == 512)
+        #expect(Pictures.pixels(512) == 512)
+        #expect(Pictures.pixels(0) == 0)
     }
 
     @Test func onlyTheDataFoldersFilesAreRead() throws {

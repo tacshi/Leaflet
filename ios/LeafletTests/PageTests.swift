@@ -119,6 +119,23 @@ struct PageTests {
         await model.close()
     }
 
+    @Test func anotherSignInReadsTheCommentsAndMembersAgain() async throws {
+        for table in PageModel.sharingChanges.sorted() {
+            let host = try Host()
+            let model = try await opened(host)
+            model.edit(page(model, "Plan"))
+            await model.flush()
+            try await host.core.client.addComment(model.id, blockID: "a", body: "Look")
+            #expect(model.threads.isEmpty)
+            model.handle(.changed(table: table, pageID: ""))
+            for _ in 0..<100 where model.threads.isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(model.threads.count == 1, "after a change of \(table)")
+            await model.close()
+        }
+    }
+
     @Test func aPageOpensWithItsAgentsRead() async throws {
         let host = try Host()
         let page = try await host.core.client.createPage(NewPage(title: "Notes"))
@@ -151,7 +168,7 @@ struct PageTests {
         -> AgentState.Run
     {
         AgentState.Run(
-            id: "r", surface: "inline", agentName: "Agent", instruction: "", status: status,
+            id: "r", agentName: "Agent", status: status,
             undone: false, error: error, edits: edits, blockIDs: nil, summary: "", stoppable: true,
             answer: nil)
     }

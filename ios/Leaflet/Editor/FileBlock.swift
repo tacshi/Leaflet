@@ -32,7 +32,7 @@ struct FileBlock: View {
 
     private static func names(_ block: DocNode) -> String {
         let list = block.data?["speaker_names"]?.array?.compactMap(\.string) ?? []
-        return (try? JSONEncoder().encode(list)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
+        return (try? jsonString(list)) ?? "[]"
     }
 
     private struct Reading: Equatable {
@@ -197,7 +197,7 @@ struct FileBlock: View {
     private var status: String {
         if Recorder.shared.state.transcribingFiles.contains(node.id) { return L.recTranscribing }
         guard let size = node.data?["size"]?.int, size > 0 else { return "" }
-        let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        let bytes = MobileFileSize(L.language, Int64(size))
         let type = (name as NSString).pathExtension.uppercased()
         let detail = type.isEmpty ? bytes : L.cardFileDetail(kind: type, size: bytes)
         let engine = MobileEngineName(node.data?["transcribed_by"]?.string ?? "")
@@ -232,11 +232,8 @@ struct FileBlock: View {
                         )
                         .lineLimit(1)
                         if let size = node.data?["size"]?.int, size > 0 {
-                            Text(
-                                ByteCountFormatter.string(
-                                    fromByteCount: Int64(size), countStyle: .file)
-                            )
-                            .font(.caption).foregroundStyle(palette.textMuted)
+                            Text(MobileFileSize(L.language, Int64(size)))
+                                .font(.caption).foregroundStyle(palette.textMuted)
                         }
                     }
                     Spacer(minLength: 0)

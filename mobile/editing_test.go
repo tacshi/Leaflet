@@ -121,17 +121,36 @@ func TestATypedLinkOpens(t *testing.T) {
 	}
 }
 
-func TestTableText(t *testing.T) {
-	table, _ := doc.TableNode([][]string{{"**A**", "B"}, {"", ""}}, "")
+func TestTableCellsKeepTheirMarks(t *testing.T) {
+	table, _ := doc.TableNode([][]string{
+		{"**A**", `<span style="color:#ef4444">B</span>`},
+		{"[go](https://go.dev) $x^2$", ""},
+	}, "")
 	raw, _ := json.Marshal(table)
-	text, err := TableText(string(raw))
+	text, err := TableCells(string(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rows [][]string
-	_ = json.Unmarshal([]byte(text), &rows)
-	if !reflect.DeepEqual(rows, [][]string{{"A", "B"}, {"", ""}}) {
-		t.Errorf("TableText = %v", rows)
+	var cells [][][]map[string]any
+	if err := json.Unmarshal([]byte(text), &cells); err != nil {
+		t.Fatal(err)
+	}
+	want := [][][]map[string]any{
+		{
+			{{"insert": "A", "attributes": map[string]any{"bold": true}}},
+			{{"insert": "B", "attributes": map[string]any{"color": "#ef4444"}}},
+		},
+		{
+			{
+				{"insert": "go", "attributes": map[string]any{"href": "https://go.dev"}},
+				{"insert": " "},
+				{"insert": "x^2", "attributes": map[string]any{"math": true}},
+			},
+			{},
+		},
+	}
+	if !reflect.DeepEqual(cells, want) {
+		t.Errorf("TableCells = %v", cells)
 	}
 }
 

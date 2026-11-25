@@ -36,8 +36,7 @@ final class WorkspaceAgentModel: AgentChat {
     var chatDraft = ""
     @ObservationIgnored private weak var host: (any PageHost)?
     @ObservationIgnored private var token: UUID?
-    @ObservationIgnored private var reading: Task<Void, Never>?
-    @ObservationIgnored private var queued: Task<Void, Never>?
+    @ObservationIgnored private let reads = AgentReads()
     @ObservationIgnored private var account: String?
 
     var emptyText: String { L.workspaceEmpty }
@@ -65,22 +64,12 @@ final class WorkspaceAgentModel: AgentChat {
     }
 
     func refreshAgents() async {
-        if let queued {
-            await queued.value
-            return
-        }
-        let before = reading
-        let read = Task { [weak self] in
-            await before?.value
+        await reads.run { [weak self] in
             guard let self else { return }
-            self.queued = nil
             let client = await self.host?.opened()
             if let s = try? await client?.agentState(self.id) { self.agents = s }
             if !self.agentsLoaded { self.agentsLoaded = true }
         }
-        queued = read
-        reading = read
-        await read.value
     }
 
     private func keepAccount() async {
@@ -96,17 +85,48 @@ final class WorkspaceAgentModel: AgentChat {
     }
 
     private func handle(_ event: CoreEvent) {
-        switch event {
-        case .agentsChanged(let pageID) where pageID.isEmpty || pageID == id:
-            Task { await refreshAgents() }
-        case .changed(let table, _)
-        where ["model_providers", "key_values", "session", "*"].contains(table):
-            Task {
-                await refreshAgents()
-                if table == "session" || table == "*" { await keepAccount() }
+        guard AgentReads.changes(event, of: id) else { return }
+        Task {
+            await refreshAgents()
+            if case .changed(let table, _) = event, PageModel.sharingChanges.contains(table) {
+                await keepAccount()
             }
-        default:
-            break
+        }
+    }
+}
+
+/// Reads of a chat's agent state, one at a time: a read asked for while
+/// one runs starts once it is done, and those asked for while it waits to
+/// start share it, so each caller sees one begun after it asked.
+@MainActor
+final class AgentReads {
+    private var reading: Task<Void, Never>?
+    private var queued: Task<Void, Never>?
+
+    func run(_ read: @escaping @MainActor () async -> Void) async {
+        if let queued {
+            await queued.value
+            return
+        }
+        let before = reading
+        let task = Task { [weak self] in
+            await before?.value
+            self?.queued = nil
+            await read()
+        }
+        queued = task
+        reading = task
+        await task.value
+    }
+
+    /// Whether an event changes what the agent state of the chat with id
+    /// reads: its agents' work, the providers, the settings, or the sign-in.
+    static func changes(_ event: CoreEvent, of id: String) -> Bool {
+        switch event {
+        case .agentsChanged(let pageID): pageID.isEmpty || pageID == id
+        case .changed(let table, _):
+            ["model_providers", "key_values", "session", "*"].contains(table)
+        default: false
         }
     }
 }

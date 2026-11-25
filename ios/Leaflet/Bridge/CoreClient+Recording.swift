@@ -113,7 +113,6 @@ struct SpeechSettings: Codable, Sendable {
     var endpointKey: String
     var sonioxSaved: Bool
     var mossSaved: Bool
-    var onDevice: Bool
     var status: String
     var providers: [SpeechProvider]
     var addable: [SpeechProvider]
@@ -131,7 +130,6 @@ struct SpeechSettings: Codable, Sendable {
         case endpointKey = "endpoint_key"
         case sonioxSaved = "soniox_saved"
         case mossSaved = "moss_saved"
-        case onDevice = "on_device"
     }
 }
 
@@ -253,7 +251,7 @@ extension CoreClient {
     }
 
     nonisolated(nonsending) func saveSpeechSettings(_ stt: SttSettings) async throws {
-        let json = String(decoding: try JSONEncoder().encode(stt), as: UTF8.self)
+        let json = try jsonString(stt)
         try await call { try $0.saveSpeechSettings(json) }
     }
 

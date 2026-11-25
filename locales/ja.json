@@ -171,6 +171,7 @@
   "cardSkipBack": "15 秒戻る",
   "cardSkipForward": "15 秒進む",
   "cardSpeed": "再生速度",
+  "cardPlaybackPosition": "再生位置",
   "exportRecording": "録音",
   "exportTemplatesFolder": "テンプレート",
   "exportEmbed": "インタラクティブ埋め込み",

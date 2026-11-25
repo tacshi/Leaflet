@@ -141,7 +141,7 @@ struct EmbedSheet: View {
                 }
                 .listRowBackground(palette.surface)
                 Section {
-                    CodeTextEditor(text: $html, focused: true)
+                    CodeTextEditor(text: $html, label: L.dialogEmbedTitle, focused: true)
                         .frame(minHeight: 240)
                 } footer: {
                     if let failure {

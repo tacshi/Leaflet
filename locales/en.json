@@ -880,6 +880,10 @@
   "@cardSpeed": {
     "description": "Name of the button of an audio player that shows its speed, as 1.5×, and changes it."
   },
+  "cardPlaybackPosition": "Playback position",
+  "@cardPlaybackPosition": {
+    "description": "Name, for VoiceOver, of the slider of an audio or video player that shows where in it it plays, and moves there."
+  },
   "exportRecording": "Recording",
   "@exportRecording": {
     "description": "The name of an exported recording's audio file, for a recording with no title."

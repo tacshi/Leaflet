@@ -387,6 +387,8 @@ func (a *App) start() error {
 	}
 	linesTables(&a.md, &a.cellMD)
 	linesTables(&a.commentMD, &a.cellMD)
+	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard}
+	a.commentMD.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard}
 	a.hub.PublicLink = a.publiclyLinked
 	go func() {
 		defer guard.Recover()
@@ -1146,6 +1148,7 @@ func (a *App) discardPage() {
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil
 	d.chartOpen, d.chartEditor = false, nil
+	d.cardOpen, d.cardEditor = false, nil
 	d.embedOpen, d.linkOpen, d.sourceOpen = false, false, false
 	d.recOpen, d.notesOpen, d.speakerOpen = false, false, false
 	a.fileToTranscribe = ""

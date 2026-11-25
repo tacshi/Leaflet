@@ -622,6 +622,10 @@ func (h watchHost) Card(c *ui.Context, n *doc.Node) {
 	h.a.linkPreviewBlockFor(c, n, h.a.watch.act.PageID, h.a.redrawWatch)
 }
 
+func (h watchHost) FactCard(c *ui.Context, n *doc.Node, width float32) {
+	h.a.factCard(c, doc.CardOf(n), width)
+}
+
 func (h watchHost) File(c *ui.Context, n *doc.Node, _ float32) {
 	blockCard(c, n, "file", cmp.Or(n.Str("name"), locales.HostSlashFile()), "")
 }

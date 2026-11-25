@@ -247,6 +247,16 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         return textView.firstRect(for: range)
     }
 
+    /// What a block's Edit item says: Edit data for a chart, Edit card for a
+    /// fact card, and Edit for the rest.
+    static func editTitle(_ type: String) -> String {
+        switch type {
+        case "chart": L.editorEditData
+        case "card": L.editorEditCard
+        default: L.commonEdit
+        }
+    }
+
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
@@ -256,7 +266,7 @@ final class EditorTaps: NSObject, UIGestureRecognizerDelegate,
         }
         return UIContextMenuConfiguration(identifier: node.id as NSString, previewProvider: nil) {
             [weak self] _ in
-            let title = node.type == "chart" ? L.editorEditData : L.commonEdit
+            let title = Self.editTitle(node.type)
             return UIMenu(children: [
                 UIAction(title: title, image: UIImage(systemName: "pencil")) { _ in
                     self?.editor.onEditBlock?(node)

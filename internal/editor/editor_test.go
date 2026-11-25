@@ -33,14 +33,15 @@ func (h *fakeHost) OpenPage(id string)         { h.opened = append(h.opened, id)
 func (h *fakeHost) Image(_ *ui.Context, n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	return nil, nil, h.imageFailed
 }
-func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
-func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
-func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
-func (h *fakeHost) File(c *ui.Context, n *doc.Node, w float32)  {}
-func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)        {}
-func (h *fakeHost) CommentCount(string) int                     { return 0 }
-func (h *fakeHost) OpenComments(string)                         {}
-func (h *fakeHost) CommentPreview(*ui.Context, string)          {}
+func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32)    {}
+func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32)    {}
+func (h *fakeHost) Card(c *ui.Context, n *doc.Node)                {}
+func (h *fakeHost) FactCard(c *ui.Context, n *doc.Node, w float32) {}
+func (h *fakeHost) File(c *ui.Context, n *doc.Node, w float32)     {}
+func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)           {}
+func (h *fakeHost) CommentCount(string) int                        { return 0 }
+func (h *fakeHost) OpenComments(string)                            {}
+func (h *fakeHost) CommentPreview(*ui.Context, string)             {}
 func (h *fakeHost) SlashItems(q string) []MenuItem {
 	if h.slash != nil {
 		return h.slash

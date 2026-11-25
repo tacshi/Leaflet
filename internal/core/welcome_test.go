@@ -46,12 +46,12 @@ func TestWelcomePage(t *testing.T) {
 		}
 	}
 	for typ, want := range map[string]int{"embed": 1, "chart": 1, "table": 2, "image": 1, "subpage": 1, "code": 1, "video": 1,
-		"callout": 1, "toggle_list": 1, "math_equation": 1, "diagram": 1} {
+		"callout": 1, "toggle_list": 1, "math_equation": 1, "diagram": 1, "card": 1} {
 		if kinds[typ] != want {
 			t.Errorf("%d %s blocks, want %d", kinds[typ], typ, want)
 		}
 	}
-	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Media, charts and embeds, To-dos and recordings, Agents, Organizing pages, Sharing, comments and sync, Shortcuts" {
+	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Media, charts and embeds, Fact cards, To-dos and recordings, Agents, Organizing pages, Sharing, comments and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
 	kept, err := st.File(image.Str("file_id"))
@@ -99,8 +99,13 @@ func TestWelcomePage(t *testing.T) {
 			highlit = highlit || r.Attrs.Background != ""
 		}
 		notes = notes || n.Type == "video" && strings.HasPrefix(n.Str("notes"), "0:00 ")
-		if n.Type == "table" {
+		switch n.Type {
+		case "table":
 			tables = append(tables, n)
+		case "card":
+			if card := doc.CardOf(n); card.Layout != doc.CardFigures || len(card.Facts) != 3 || len(card.Sources) != 1 {
+				t.Errorf("the card %+v", card)
+			}
 		}
 	}
 	if !formula || !root || !colored || !highlit || !notes {

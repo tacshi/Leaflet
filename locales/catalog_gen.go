@@ -4119,6 +4119,440 @@ func (msgs Messages) DialogChartSave() string {
 	return Catalog.Format(msgs.locale, "dialogChartSave", nil)
 }
 
+// HostSlashCard says "Fact card"
+// in the language the app shows.
+//
+// The / menu: a card block, facts at a glance under a title with an icon
+// (as a trip's time and fare, or a place's address and phone numbers). Not
+// a link card.
+func HostSlashCard() string { return In(i18n.Locale()).HostSlashCard() }
+
+// HostSlashCard says "Fact card"
+// in the language of msgs.
+//
+// The / menu: a card block, facts at a glance under a title with an icon
+// (as a trip's time and fare, or a place's address and phone numbers). Not
+// a link card.
+func (msgs Messages) HostSlashCard() string {
+	return Catalog.Format(msgs.locale, "hostSlashCard", nil)
+}
+
+// HostSlashCardHint says "Key facts at a glance, with a title and an icon"
+// in the language the app shows.
+//
+// The / menu: what a fact card is, under its name.
+func HostSlashCardHint() string { return In(i18n.Locale()).HostSlashCardHint() }
+
+// HostSlashCardHint says "Key facts at a glance, with a title and an icon"
+// in the language of msgs.
+//
+// The / menu: what a fact card is, under its name.
+func (msgs Messages) HostSlashCardHint() string {
+	return Catalog.Format(msgs.locale, "hostSlashCardHint", nil)
+}
+
+// HostCardTitle says "New card"
+// in the language the app shows.
+//
+// The title a fact card made from the / menu starts with, before its dialog
+// fills it in.
+func HostCardTitle() string { return In(i18n.Locale()).HostCardTitle() }
+
+// HostCardTitle says "New card"
+// in the language of msgs.
+//
+// The title a fact card made from the / menu starts with, before its dialog
+// fills it in.
+func (msgs Messages) HostCardTitle() string {
+	return Catalog.Format(msgs.locale, "hostCardTitle", nil)
+}
+
+// HostCardLabel says "Label"
+// in the language the app shows.
+//
+// The label of the fact a fact card made from the / menu starts with.
+func HostCardLabel() string { return In(i18n.Locale()).HostCardLabel() }
+
+// HostCardLabel says "Label"
+// in the language of msgs.
+//
+// The label of the fact a fact card made from the / menu starts with.
+func (msgs Messages) HostCardLabel() string {
+	return Catalog.Format(msgs.locale, "hostCardLabel", nil)
+}
+
+// HostCardValue says "Value"
+// in the language the app shows.
+//
+// The value of the fact a fact card made from the / menu starts with.
+func HostCardValue() string { return In(i18n.Locale()).HostCardValue() }
+
+// HostCardValue says "Value"
+// in the language of msgs.
+//
+// The value of the fact a fact card made from the / menu starts with.
+func (msgs Messages) HostCardValue() string {
+	return Catalog.Format(msgs.locale, "hostCardValue", nil)
+}
+
+// DialogCardTitle says "Fact card"
+// in the language the app shows.
+//
+// The fact card dialog's title, where a card's title, facts, note and
+// sources are written.
+func DialogCardTitle() string { return In(i18n.Locale()).DialogCardTitle() }
+
+// DialogCardTitle says "Fact card"
+// in the language of msgs.
+//
+// The fact card dialog's title, where a card's title, facts, note and
+// sources are written.
+func (msgs Messages) DialogCardTitle() string {
+	return Catalog.Format(msgs.locale, "dialogCardTitle", nil)
+}
+
+// DialogCardSubtitle says "Figures show a few values large, side by side; details list them a line each, beside a picture."
+// in the language the app shows.
+//
+// The fact card dialog: under its title, what its two layouts do.
+func DialogCardSubtitle() string { return In(i18n.Locale()).DialogCardSubtitle() }
+
+// DialogCardSubtitle says "Figures show a few values large, side by side; details list them a line each, beside a picture."
+// in the language of msgs.
+//
+// The fact card dialog: under its title, what its two layouts do.
+func (msgs Messages) DialogCardSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogCardSubtitle", nil)
+}
+
+// DialogCardFigures says "Figures"
+// in the language the app shows.
+//
+// The fact card dialog's layout switch: values large, side by side.
+func DialogCardFigures() string { return In(i18n.Locale()).DialogCardFigures() }
+
+// DialogCardFigures says "Figures"
+// in the language of msgs.
+//
+// The fact card dialog's layout switch: values large, side by side.
+func (msgs Messages) DialogCardFigures() string {
+	return Catalog.Format(msgs.locale, "dialogCardFigures", nil)
+}
+
+// DialogCardDetails says "Details"
+// in the language the app shows.
+//
+// The fact card dialog's layout switch: label and value lines, beside a
+// picture.
+func DialogCardDetails() string { return In(i18n.Locale()).DialogCardDetails() }
+
+// DialogCardDetails says "Details"
+// in the language of msgs.
+//
+// The fact card dialog's layout switch: label and value lines, beside a
+// picture.
+func (msgs Messages) DialogCardDetails() string {
+	return Catalog.Format(msgs.locale, "dialogCardDetails", nil)
+}
+
+// DialogCardIcon says "Icon"
+// in the language the app shows.
+//
+// The fact card dialog: the button that picks the icon before the card's
+// title, and on iPhone and iPad the picker's label.
+func DialogCardIcon() string { return In(i18n.Locale()).DialogCardIcon() }
+
+// DialogCardIcon says "Icon"
+// in the language of msgs.
+//
+// The fact card dialog: the button that picks the icon before the card's
+// title, and on iPhone and iPad the picker's label.
+func (msgs Messages) DialogCardIcon() string {
+	return Catalog.Format(msgs.locale, "dialogCardIcon", nil)
+}
+
+// DialogCardNoIcon says "No icon"
+// in the language the app shows.
+//
+// The fact card dialog's icon menu: the choice of no icon before the title.
+func DialogCardNoIcon() string { return In(i18n.Locale()).DialogCardNoIcon() }
+
+// DialogCardNoIcon says "No icon"
+// in the language of msgs.
+//
+// The fact card dialog's icon menu: the choice of no icon before the title.
+func (msgs Messages) DialogCardNoIcon() string {
+	return Catalog.Format(msgs.locale, "dialogCardNoIcon", nil)
+}
+
+// DialogCardPicture says "Picture link (optional, beside details)"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the field for a picture's web link,
+// shown beside the facts in the details layout.
+func DialogCardPicture() string { return In(i18n.Locale()).DialogCardPicture() }
+
+// DialogCardPicture says "Picture link (optional, beside details)"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the field for a picture's web link,
+// shown beside the facts in the details layout.
+func (msgs Messages) DialogCardPicture() string {
+	return Catalog.Format(msgs.locale, "dialogCardPicture", nil)
+}
+
+// DialogCardFacts says "One fact a line, as Label: Value"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the box where facts are written, a
+// line each, a label, a colon and a value.
+func DialogCardFacts() string { return In(i18n.Locale()).DialogCardFacts() }
+
+// DialogCardFacts says "One fact a line, as Label: Value"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the box where facts are written, a
+// line each, a label, a colon and a value.
+func (msgs Messages) DialogCardFacts() string {
+	return Catalog.Format(msgs.locale, "dialogCardFacts", nil)
+}
+
+// DialogCardNote says "Note (optional)"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the field for the short line under
+// the facts.
+func DialogCardNote() string { return In(i18n.Locale()).DialogCardNote() }
+
+// DialogCardNote says "Note (optional)"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the field for the short line under
+// the facts.
+func (msgs Messages) DialogCardNote() string {
+	return Catalog.Format(msgs.locale, "dialogCardNote", nil)
+}
+
+// DialogCardSources says "Sources (optional), one a line: a link, or Title | link"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the box for the web pages the facts
+// come from, a line each.
+func DialogCardSources() string { return In(i18n.Locale()).DialogCardSources() }
+
+// DialogCardSources says "Sources (optional), one a line: a link, or Title | link"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the box for the web pages the facts
+// come from, a line each.
+func (msgs Messages) DialogCardSources() string {
+	return Catalog.Format(msgs.locale, "dialogCardSources", nil)
+}
+
+// DialogCardSave says "Save card"
+// in the language the app shows.
+//
+// The fact card dialog's button that saves the card.
+func DialogCardSave() string { return In(i18n.Locale()).DialogCardSave() }
+
+// DialogCardSave says "Save card"
+// in the language of msgs.
+//
+// The fact card dialog's button that saves the card.
+func (msgs Messages) DialogCardSave() string {
+	return Catalog.Format(msgs.locale, "dialogCardSave", nil)
+}
+
+// DialogCardEmpty says "Give the card a title or a fact."
+// in the language the app shows.
+//
+// The fact card dialog's error when both the title and the facts are empty.
+func DialogCardEmpty() string { return In(i18n.Locale()).DialogCardEmpty() }
+
+// DialogCardEmpty says "Give the card a title or a fact."
+// in the language of msgs.
+//
+// The fact card dialog's error when both the title and the facts are empty.
+func (msgs Messages) DialogCardEmpty() string {
+	return Catalog.Format(msgs.locale, "dialogCardEmpty", nil)
+}
+
+// DialogCardBadPicture says "The picture link must be a web address, starting with http:// or https://."
+// in the language the app shows.
+//
+// The fact card dialog's error for a picture link that is not a web
+// address.
+func DialogCardBadPicture() string { return In(i18n.Locale()).DialogCardBadPicture() }
+
+// DialogCardBadPicture says "The picture link must be a web address, starting with http:// or https://."
+// in the language of msgs.
+//
+// The fact card dialog's error for a picture link that is not a web
+// address.
+func (msgs Messages) DialogCardBadPicture() string {
+	return Catalog.Format(msgs.locale, "dialogCardBadPicture", nil)
+}
+
+// DialogCardBadSource says "Source {line} is not a web link."
+// in the language the app shows.
+//
+// The fact card editor's error for a source whose link is not a web
+// address, counting the sources from 1.
+func DialogCardBadSource(line int) string { return In(i18n.Locale()).DialogCardBadSource(line) }
+
+// DialogCardBadSource says "Source {line} is not a web link."
+// in the language of msgs.
+//
+// The fact card editor's error for a source whose link is not a web
+// address, counting the sources from 1.
+func (msgs Messages) DialogCardBadSource(line int) string {
+	return Catalog.Format(msgs.locale, "dialogCardBadSource", map[string]any{"line": line})
+}
+
+// DialogCardTooManyFacts says "A card holds at most {count} facts."
+// in the language the app shows.
+//
+// The fact card dialog's error when more facts are written than a card
+// holds.
+func DialogCardTooManyFacts(count int) string { return In(i18n.Locale()).DialogCardTooManyFacts(count) }
+
+// DialogCardTooManyFacts says "A card holds at most {count} facts."
+// in the language of msgs.
+//
+// The fact card dialog's error when more facts are written than a card
+// holds.
+func (msgs Messages) DialogCardTooManyFacts(count int) string {
+	return Catalog.Format(msgs.locale, "dialogCardTooManyFacts", map[string]any{"count": count})
+}
+
+// EditorEditCard says "Edit card"
+// in the language the app shows.
+//
+// A fact card's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the fact card
+// dialog.
+func EditorEditCard() string { return In(i18n.Locale()).EditorEditCard() }
+
+// EditorEditCard says "Edit card"
+// in the language of msgs.
+//
+// A fact card's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the fact card
+// dialog.
+func (msgs Messages) EditorEditCard() string {
+	return Catalog.Format(msgs.locale, "editorEditCard", nil)
+}
+
+// CardSources says "Sources"
+// in the language the app shows.
+//
+// A fact card: what its source chip's menu and tooltip are called, the web
+// pages its facts come from.
+func CardSources() string { return In(i18n.Locale()).CardSources() }
+
+// CardSources says "Sources"
+// in the language of msgs.
+//
+// A fact card: what its source chip's menu and tooltip are called, the web
+// pages its facts come from.
+func (msgs Messages) CardSources() string {
+	return Catalog.Format(msgs.locale, "cardSources", nil)
+}
+
+// CardLayout says "Layout"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the label of the layout picker,
+// figures or details.
+func CardLayout() string { return In(i18n.Locale()).CardLayout() }
+
+// CardLayout says "Layout"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the label of the layout picker,
+// figures or details.
+func (msgs Messages) CardLayout() string {
+	return Catalog.Format(msgs.locale, "cardLayout", nil)
+}
+
+// CardFacts says "Facts"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the heading of the list of facts,
+// each a label and a value.
+func CardFacts() string { return In(i18n.Locale()).CardFacts() }
+
+// CardFacts says "Facts"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the heading of the list of facts,
+// each a label and a value.
+func (msgs Messages) CardFacts() string {
+	return Catalog.Format(msgs.locale, "cardFacts", nil)
+}
+
+// CardAddFact says "Add fact"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the button that adds a fact.
+func CardAddFact() string { return In(i18n.Locale()).CardAddFact() }
+
+// CardAddFact says "Add fact"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the button that adds a fact.
+func (msgs Messages) CardAddFact() string {
+	return Catalog.Format(msgs.locale, "cardAddFact", nil)
+}
+
+// CardAddSource says "Add source"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the button that adds a source, a
+// web page the facts come from.
+func CardAddSource() string { return In(i18n.Locale()).CardAddSource() }
+
+// CardAddSource says "Add source"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the button that adds a source, a
+// web page the facts come from.
+func (msgs Messages) CardAddSource() string {
+	return Catalog.Format(msgs.locale, "cardAddSource", nil)
+}
+
+// CardSourceLink says "Link"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's web
+// address field.
+func CardSourceLink() string { return In(i18n.Locale()).CardSourceLink() }
+
+// CardSourceLink says "Link"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's web
+// address field.
+func (msgs Messages) CardSourceLink() string {
+	return Catalog.Format(msgs.locale, "cardSourceLink", nil)
+}
+
+// CardSourceTitle says "Title (optional)"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's
+// title field.
+func CardSourceTitle() string { return In(i18n.Locale()).CardSourceTitle() }
+
+// CardSourceTitle says "Title (optional)"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's
+// title field.
+func (msgs Messages) CardSourceTitle() string {
+	return Catalog.Format(msgs.locale, "cardSourceTitle", nil)
+}
+
 // DialogEmbedTitle says "Interactive embed"
 // in the language the app shows.
 //
@@ -6851,6 +7285,24 @@ func AgentEditLinkCard() string { return In(i18n.Locale()).AgentEditLinkCard() }
 // agentEditWrote and agentEditRewrote.
 func (msgs Messages) AgentEditLinkCard() string {
 	return Catalog.Format(msgs.locale, "agentEditLinkCard", nil)
+}
+
+// AgentEditCard says "a card"
+// in the language the app shows.
+//
+// A card block (facts at a glance: a title, figures or label and value
+// lines, a note and its sources), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditCard() string { return In(i18n.Locale()).AgentEditCard() }
+
+// AgentEditCard says "a card"
+// in the language of msgs.
+//
+// A card block (facts at a glance: a title, figures or label and value
+// lines, a note and its sources), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditCard() string {
+	return Catalog.Format(msgs.locale, "agentEditCard", nil)
 }
 
 // AgentEditSubpageLink says "a subpage link"
@@ -16655,6 +17107,128 @@ func WelcomeTableHours() string { return In(i18n.Locale()).WelcomeTableHours() }
 // each milestone takes, aligned right.
 func (msgs Messages) WelcomeTableHours() string {
 	return Catalog.Format(msgs.locale, "welcomeTableHours", nil)
+}
+
+// WelcomeCardsHeading says "Fact cards"
+// in the language the app shows.
+//
+// The welcome guide: the heading of the section on fact cards.
+func WelcomeCardsHeading() string { return In(i18n.Locale()).WelcomeCardsHeading() }
+
+// WelcomeCardsHeading says "Fact cards"
+// in the language of msgs.
+//
+// The welcome guide: the heading of the section on fact cards.
+func (msgs Messages) WelcomeCardsHeading() string {
+	return Catalog.Format(msgs.locale, "welcomeCardsHeading", nil)
+}
+
+// WelcomeCardsIntro says "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a pict…"
+// in the language the app shows.
+//
+// The welcome guide: what a fact card is, before the example card.
+func WelcomeCardsIntro() string { return In(i18n.Locale()).WelcomeCardsIntro() }
+
+// WelcomeCardsIntro says "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a pict…"
+// in the language of msgs.
+//
+// The welcome guide: what a fact card is, before the example card.
+func (msgs Messages) WelcomeCardsIntro() string {
+	return Catalog.Format(msgs.locale, "welcomeCardsIntro", nil)
+}
+
+// WelcomeCardTitle says "Release at a glance"
+// in the language the app shows.
+//
+// The welcome guide: the example fact card's title.
+func WelcomeCardTitle() string { return In(i18n.Locale()).WelcomeCardTitle() }
+
+// WelcomeCardTitle says "Release at a glance"
+// in the language of msgs.
+//
+// The welcome guide: the example fact card's title.
+func (msgs Messages) WelcomeCardTitle() string {
+	return Catalog.Format(msgs.locale, "welcomeCardTitle", nil)
+}
+
+// WelcomeCardIssues says "Open issues"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the number of open
+// issues.
+func WelcomeCardIssues() string { return In(i18n.Locale()).WelcomeCardIssues() }
+
+// WelcomeCardIssues says "Open issues"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the number of open
+// issues.
+func (msgs Messages) WelcomeCardIssues() string {
+	return Catalog.Format(msgs.locale, "welcomeCardIssues", nil)
+}
+
+// WelcomeCardDays says "Days to ship"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the days left before
+// the release.
+func WelcomeCardDays() string { return In(i18n.Locale()).WelcomeCardDays() }
+
+// WelcomeCardDays says "Days to ship"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the days left before
+// the release.
+func (msgs Messages) WelcomeCardDays() string {
+	return Catalog.Format(msgs.locale, "welcomeCardDays", nil)
+}
+
+// WelcomeCardReviews says "Reviews"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the number of
+// reviews.
+func WelcomeCardReviews() string { return In(i18n.Locale()).WelcomeCardReviews() }
+
+// WelcomeCardReviews says "Reviews"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the number of
+// reviews.
+func (msgs Messages) WelcomeCardReviews() string {
+	return Catalog.Format(msgs.locale, "welcomeCardReviews", nil)
+}
+
+// WelcomeCardNote says "Example figures; the chip opens the page they come from."
+// in the language the app shows.
+//
+// The welcome guide's example fact card: its note, before the chip of its
+// source.
+func WelcomeCardNote() string { return In(i18n.Locale()).WelcomeCardNote() }
+
+// WelcomeCardNote says "Example figures; the chip opens the page they come from."
+// in the language of msgs.
+//
+// The welcome guide's example fact card: its note, before the chip of its
+// source.
+func (msgs Messages) WelcomeCardNote() string {
+	return Catalog.Format(msgs.locale, "welcomeCardNote", nil)
+}
+
+// WelcomeCardSource says "Leaflet on GitHub"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the name of its source, Leaflet's
+// GitHub repository.
+func WelcomeCardSource() string { return In(i18n.Locale()).WelcomeCardSource() }
+
+// WelcomeCardSource says "Leaflet on GitHub"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the name of its source, Leaflet's
+// GitHub repository.
+func (msgs Messages) WelcomeCardSource() string {
+	return Catalog.Format(msgs.locale, "welcomeCardSource", nil)
 }
 
 // WelcomeTableTask says "Task"

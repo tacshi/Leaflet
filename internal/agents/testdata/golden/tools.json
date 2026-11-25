@@ -78,6 +78,97 @@
                 },
                 "type": "array"
               },
+              "card": {
+                "properties": {
+                  "facts": {
+                    "items": {
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "icon": {
+                    "enum": [
+                      "banknote",
+                      "bed-double",
+                      "bike",
+                      "building-2",
+                      "bus",
+                      "calendar",
+                      "car",
+                      "clock",
+                      "cloud-rain",
+                      "footprints",
+                      "globe",
+                      "graduation-cap",
+                      "hospital",
+                      "info",
+                      "map-pin",
+                      "package",
+                      "phone",
+                      "plane",
+                      "ship",
+                      "shopping-bag",
+                      "star",
+                      "sun",
+                      "thermometer",
+                      "ticket",
+                      "train-front",
+                      "tram-front",
+                      "trending-up",
+                      "user",
+                      "utensils",
+                      "wallet"
+                    ],
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "layout": {
+                    "enum": [
+                      "details",
+                      "figures"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -242,6 +333,7 @@
                 "enum": [
                   "bulleted_list",
                   "callout",
+                  "card",
                   "chart",
                   "code",
                   "diagram",
@@ -331,6 +423,97 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "card": {
+              "properties": {
+                "facts": {
+                  "items": {
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "icon": {
+                  "enum": [
+                    "banknote",
+                    "bed-double",
+                    "bike",
+                    "building-2",
+                    "bus",
+                    "calendar",
+                    "car",
+                    "clock",
+                    "cloud-rain",
+                    "footprints",
+                    "globe",
+                    "graduation-cap",
+                    "hospital",
+                    "info",
+                    "map-pin",
+                    "package",
+                    "phone",
+                    "plane",
+                    "ship",
+                    "shopping-bag",
+                    "star",
+                    "sun",
+                    "thermometer",
+                    "ticket",
+                    "train-front",
+                    "tram-front",
+                    "trending-up",
+                    "user",
+                    "utensils",
+                    "wallet"
+                  ],
+                  "type": "string"
+                },
+                "image": {
+                  "type": "string"
+                },
+                "layout": {
+                  "enum": [
+                    "details",
+                    "figures"
+                  ],
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "sources": {
+                  "items": {
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
             },
             "chart": {
               "properties": {
@@ -496,6 +679,7 @@
               "enum": [
                 "bulleted_list",
                 "callout",
+                "card",
                 "chart",
                 "code",
                 "diagram",
@@ -614,6 +798,97 @@
                 },
                 "type": "array"
               },
+              "card": {
+                "properties": {
+                  "facts": {
+                    "items": {
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "icon": {
+                    "enum": [
+                      "banknote",
+                      "bed-double",
+                      "bike",
+                      "building-2",
+                      "bus",
+                      "calendar",
+                      "car",
+                      "clock",
+                      "cloud-rain",
+                      "footprints",
+                      "globe",
+                      "graduation-cap",
+                      "hospital",
+                      "info",
+                      "map-pin",
+                      "package",
+                      "phone",
+                      "plane",
+                      "ship",
+                      "shopping-bag",
+                      "star",
+                      "sun",
+                      "thermometer",
+                      "ticket",
+                      "train-front",
+                      "tram-front",
+                      "trending-up",
+                      "user",
+                      "utensils",
+                      "wallet"
+                    ],
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "layout": {
+                    "enum": [
+                      "details",
+                      "figures"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -778,6 +1053,7 @@
                 "enum": [
                   "bulleted_list",
                   "callout",
+                  "card",
                   "chart",
                   "code",
                   "diagram",
@@ -852,6 +1128,97 @@
                 },
                 "type": "array"
               },
+              "card": {
+                "properties": {
+                  "facts": {
+                    "items": {
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "icon": {
+                    "enum": [
+                      "banknote",
+                      "bed-double",
+                      "bike",
+                      "building-2",
+                      "bus",
+                      "calendar",
+                      "car",
+                      "clock",
+                      "cloud-rain",
+                      "footprints",
+                      "globe",
+                      "graduation-cap",
+                      "hospital",
+                      "info",
+                      "map-pin",
+                      "package",
+                      "phone",
+                      "plane",
+                      "ship",
+                      "shopping-bag",
+                      "star",
+                      "sun",
+                      "thermometer",
+                      "ticket",
+                      "train-front",
+                      "tram-front",
+                      "trending-up",
+                      "user",
+                      "utensils",
+                      "wallet"
+                    ],
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "layout": {
+                    "enum": [
+                      "details",
+                      "figures"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -1016,6 +1383,7 @@
                 "enum": [
                   "bulleted_list",
                   "callout",
+                  "card",
                   "chart",
                   "code",
                   "diagram",
@@ -1188,6 +1556,97 @@
                 },
                 "type": "array"
               },
+              "card": {
+                "properties": {
+                  "facts": {
+                    "items": {
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "icon": {
+                    "enum": [
+                      "banknote",
+                      "bed-double",
+                      "bike",
+                      "building-2",
+                      "bus",
+                      "calendar",
+                      "car",
+                      "clock",
+                      "cloud-rain",
+                      "footprints",
+                      "globe",
+                      "graduation-cap",
+                      "hospital",
+                      "info",
+                      "map-pin",
+                      "package",
+                      "phone",
+                      "plane",
+                      "ship",
+                      "shopping-bag",
+                      "star",
+                      "sun",
+                      "thermometer",
+                      "ticket",
+                      "train-front",
+                      "tram-front",
+                      "trending-up",
+                      "user",
+                      "utensils",
+                      "wallet"
+                    ],
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "layout": {
+                    "enum": [
+                      "details",
+                      "figures"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "chart": {
                 "properties": {
                   "caption": {
@@ -1352,6 +1811,7 @@
                 "enum": [
                   "bulleted_list",
                   "callout",
+                  "card",
                   "chart",
                   "code",
                   "diagram",

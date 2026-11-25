@@ -49,6 +49,7 @@ func Slash(templates []Item) []Item {
 		{"image", locales.HostSlashImage(), locales.HostSlashImageHint(), "image", blocks, "image picture photo"},
 		{"video", locales.HostSlashVideo(), locales.HostSlashVideoHint(), "play", blocks, "video youtube vimeo bilibili dailymotion niconico movie film mp4"},
 		{"link_preview", locales.HostSlashLinkCard(), locales.HostSlashLinkCardHint(), "globe", blocks, "link card bookmark preview url web"},
+		{"card", locales.HostSlashCard(), locales.HostSlashCardHint(), "id-card", blocks, "card fact facts figures details info summary key"},
 		{"file", locales.HostSlashFile(), locales.HostSlashFileHint(), "paperclip", blocks, "file attach attachment upload document pdf"},
 		{"recording", locales.CommonRecording(), locales.HostSlashRecordingHint(), "audio-lines", blocks, "record audio voice transcript"},
 	}
@@ -247,6 +248,12 @@ func Block(key, author string) (n *doc.Node, ok bool) {
 		})
 		data["author"] = author
 		return &doc.Node{ID: doc.NewBlockID(), Type: "chart", Data: data}, true
+	case "card":
+		data, _ := doc.CardData(map[string]any{
+			"title": locales.HostCardTitle(), "facts": []any{map[string]any{"label": locales.HostCardLabel(), "value": locales.HostCardValue()}},
+		})
+		data["author"] = author
+		return &doc.Node{ID: doc.NewBlockID(), Type: "card", Data: data}, true
 	case "math_equation":
 		return doc.MathNode(""), true
 	case "diagram":

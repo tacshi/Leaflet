@@ -70,7 +70,7 @@ enum EditorAccessibility {
             if editable, editor.onEditBlock != nil,
                 BlockViews.editable.contains(node.type) || node.type == "table"
             {
-                offer(node.type == "chart" ? L.editorEditData : L.commonEdit) {
+                offer(EditorTaps.editTitle(node.type)) {
                     $0.onEditBlock?(node)
                 }
             }

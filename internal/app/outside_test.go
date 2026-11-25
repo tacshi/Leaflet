@@ -499,6 +499,7 @@ func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	a.dialogs.inline = &inlinePrompt{blockID: "b1"}
 	a.dialogs.embedOpen, a.dialogs.linkOpen, a.dialogs.sourceOpen, a.dialogs.chartOpen = true, true, true, true
 	a.dialogs.chartEditor = a.page.editor
+	a.dialogs.openCard("", a.page.editor)
 	a.openPage(second.ID)
 	if a.page == nil || a.page.id != second.ID {
 		t.Fatal("the second page did not open")
@@ -509,6 +510,9 @@ func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
 	}
 	if d.embedOpen || d.linkOpen || d.sourceOpen || d.chartOpen || d.chartEditor != nil {
 		t.Error("a dialog changing the first page's blocks stayed open")
+	}
+	if d.cardOpen || d.cardEditor != nil {
+		t.Error("the card dialog of the first page stayed open")
 	}
 }
 

@@ -118,6 +118,18 @@ type dialogs struct {
 	chartCap    string
 	chartError  string
 
+	cardOpen    bool
+	cardID      string
+	cardEditor  *editor.Editor
+	cardLayout  int
+	cardIcon    string
+	cardTitle   string
+	cardImage   string
+	cardFacts   string
+	cardNote    string
+	cardSources string
+	cardError   string
+
 	embedOpen   bool
 	embedID     string
 	embedTitle  string
@@ -178,6 +190,9 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.chartOpen {
 		a.chartDialog(c)
+	}
+	if d.cardOpen {
+		a.cardDialog(c)
 	}
 	if d.embedOpen {
 		a.embedDialog(c)

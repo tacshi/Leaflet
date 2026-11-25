@@ -158,6 +158,19 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	text("paragraph", m.WelcomeEmbedsIntro())
 	embed(m.WelcomePianoTitle(), pianoEmbed(m), 220)
 
+	heading(m.WelcomeCardsHeading())
+	text("paragraph", m.WelcomeCardsIntro())
+	add(map[string]any{"type": "card", "card": map[string]any{
+		"layout": "figures", "icon": "package", "title": m.WelcomeCardTitle(),
+		"facts": []any{
+			map[string]any{"label": m.WelcomeCardIssues(), "value": "12"},
+			map[string]any{"label": m.WelcomeCardDays(), "value": "4"},
+			map[string]any{"label": m.WelcomeCardReviews(), "value": "3"},
+		},
+		"note":    m.WelcomeCardNote(),
+		"sources": []any{map[string]any{"url": "https://github.com/tacshi/Leaflet", "title": m.WelcomeCardSource()}},
+	}})
+
 	heading(m.WelcomeTodosHeading())
 	text("todo_list", m.WelcomeDateTodo())
 	text("paragraph", m.WelcomeTodosDue())

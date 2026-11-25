@@ -36,6 +36,7 @@ type Host interface {
 	Embed(c *ui.Context, n *doc.Node, width float32)
 	Video(c *ui.Context, n *doc.Node, width float32)
 	Card(c *ui.Context, n *doc.Node)
+	FactCard(c *ui.Context, n *doc.Node, width float32)
 	File(c *ui.Context, n *doc.Node, width float32)
 	Recording(c *ui.Context, n *doc.Node)
 	CommentCount(blockID string) int

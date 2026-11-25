@@ -381,6 +381,8 @@ struct PageScreen: View {
             ChartSheet(node: node, save: save)
         } else if node.type == "table" {
             TableSheet(node: node, save: save)
+        } else if node.type == "card" {
+            CardSheet(node: node, save: save)
         } else if node.type == "embed" {
             EmbedSheet(author: app.status?.displayName ?? "", editing: node) { embed, changed in
                 try save { $0.setting(changed, from: embed.data ?? [:]) }

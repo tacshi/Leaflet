@@ -124,6 +124,7 @@ func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
 func (h *host) VideoMenu(m *ui.Menu, n *doc.Node)               { h.a.videoMenu(m, n) }
 func (h *host) Card(c *ui.Context, n *doc.Node)                 { h.a.linkPreviewBlock(c, n) }
+func (h *host) FactCard(c *ui.Context, n *doc.Node, w float32)  { h.a.factCardBlock(c, n, w) }
 func (h *host) File(c *ui.Context, n *doc.Node, width float32)  { h.a.fileBlock(c, n, width) }
 func (h *host) FileMenu(c *ui.Context, m *ui.Menu, n *doc.Node) { h.a.fileMenu(c, m, n) }
 func (h *host) Recording(c *ui.Context, n *doc.Node)            { h.a.recordingBlock(c, n) }
@@ -261,6 +262,8 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		switch n.Type {
 		case "chart":
 			a.dialogs.openChart(n.ID, ed)
+		case "card":
+			a.dialogs.openCard(n.ID, ed)
 		case "math_equation", "diagram":
 			a.dialogs.openSource(n)
 		}
@@ -305,6 +308,8 @@ func (h *host) EditBlock(blockID string) {
 	case n == nil:
 	case n.Type == "chart":
 		h.a.dialogs.openChart(blockID, ps.editor)
+	case n.Type == "card":
+		h.a.dialogs.openCard(blockID, ps.editor)
 	case n.Type == "math_equation" || n.Type == "diagram":
 		h.a.dialogs.openSource(n)
 	case n.Type == "image" && n.Str("file_id") != "":

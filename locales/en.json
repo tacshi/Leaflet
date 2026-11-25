@@ -1442,6 +1442,128 @@
   "@dialogChartSave": {
     "description": "Chart dialog: the button saving the chart."
   },
+  "hostSlashCard": "Fact card",
+  "@hostSlashCard": {
+    "description": "The / menu: a card block, facts at a glance under a title with an icon (as a trip's time and fare, or a place's address and phone numbers). Not a link card."
+  },
+  "hostSlashCardHint": "Key facts at a glance, with a title and an icon",
+  "@hostSlashCardHint": {
+    "description": "The / menu: what a fact card is, under its name."
+  },
+  "hostCardTitle": "New card",
+  "@hostCardTitle": {
+    "description": "The title a fact card made from the / menu starts with, before its dialog fills it in."
+  },
+  "hostCardLabel": "Label",
+  "@hostCardLabel": {
+    "description": "The label of the fact a fact card made from the / menu starts with."
+  },
+  "hostCardValue": "Value",
+  "@hostCardValue": {
+    "description": "The value of the fact a fact card made from the / menu starts with."
+  },
+  "dialogCardTitle": "Fact card",
+  "@dialogCardTitle": {
+    "description": "The fact card dialog's title, where a card's title, facts, note and sources are written."
+  },
+  "dialogCardSubtitle": "Figures show a few values large, side by side; details list them a line each, beside a picture.",
+  "@dialogCardSubtitle": {
+    "description": "The fact card dialog: under its title, what its two layouts do."
+  },
+  "dialogCardFigures": "Figures",
+  "@dialogCardFigures": {
+    "description": "The fact card dialog's layout switch: values large, side by side."
+  },
+  "dialogCardDetails": "Details",
+  "@dialogCardDetails": {
+    "description": "The fact card dialog's layout switch: label and value lines, beside a picture."
+  },
+  "dialogCardIcon": "Icon",
+  "@dialogCardIcon": {
+    "description": "The fact card dialog: the button that picks the icon before the card's title, and on iPhone and iPad the picker's label."
+  },
+  "dialogCardNoIcon": "No icon",
+  "@dialogCardNoIcon": {
+    "description": "The fact card dialog's icon menu: the choice of no icon before the title."
+  },
+  "dialogCardPicture": "Picture link (optional, beside details)",
+  "@dialogCardPicture": {
+    "description": "The fact card dialog: placeholder of the field for a picture's web link, shown beside the facts in the details layout."
+  },
+  "dialogCardFacts": "One fact a line, as Label: Value",
+  "@dialogCardFacts": {
+    "description": "The fact card dialog: placeholder of the box where facts are written, a line each, a label, a colon and a value."
+  },
+  "dialogCardNote": "Note (optional)",
+  "@dialogCardNote": {
+    "description": "The fact card dialog: placeholder of the field for the short line under the facts."
+  },
+  "dialogCardSources": "Sources (optional), one a line: a link, or Title | link",
+  "@dialogCardSources": {
+    "description": "The fact card dialog: placeholder of the box for the web pages the facts come from, a line each."
+  },
+  "dialogCardSave": "Save card",
+  "@dialogCardSave": {
+    "description": "The fact card dialog's button that saves the card."
+  },
+  "dialogCardEmpty": "Give the card a title or a fact.",
+  "@dialogCardEmpty": {
+    "description": "The fact card dialog's error when both the title and the facts are empty."
+  },
+  "dialogCardBadPicture": "The picture link must be a web address, starting with http:// or https://.",
+  "@dialogCardBadPicture": {
+    "description": "The fact card dialog's error for a picture link that is not a web address."
+  },
+  "dialogCardBadSource": "Source {line} is not a web link.",
+  "@dialogCardBadSource": {
+    "description": "The fact card editor's error for a source whose link is not a web address, counting the sources from 1.",
+    "placeholders": {
+      "line": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogCardTooManyFacts": "A card holds at most {count} facts.",
+  "@dialogCardTooManyFacts": {
+    "description": "The fact card dialog's error when more facts are written than a card holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "editorEditCard": "Edit card",
+  "@editorEditCard": {
+    "description": "A fact card's right-click menu item and hover button (Mac and PC), and its long-press menu item (iPhone and iPad), that open the fact card dialog."
+  },
+  "cardSources": "Sources",
+  "@cardSources": {
+    "description": "A fact card: what its source chip's menu and tooltip are called, the web pages its facts come from."
+  },
+  "cardLayout": "Layout",
+  "@cardLayout": {
+    "description": "The fact card editor (iPhone and iPad): the label of the layout picker, figures or details."
+  },
+  "cardFacts": "Facts",
+  "@cardFacts": {
+    "description": "The fact card editor (iPhone and iPad): the heading of the list of facts, each a label and a value."
+  },
+  "cardAddFact": "Add fact",
+  "@cardAddFact": {
+    "description": "The fact card editor (iPhone and iPad): the button that adds a fact."
+  },
+  "cardAddSource": "Add source",
+  "@cardAddSource": {
+    "description": "The fact card editor (iPhone and iPad): the button that adds a source, a web page the facts come from."
+  },
+  "cardSourceLink": "Link",
+  "@cardSourceLink": {
+    "description": "The fact card editor (iPhone and iPad): the placeholder of a source's web address field."
+  },
+  "cardSourceTitle": "Title (optional)",
+  "@cardSourceTitle": {
+    "description": "The fact card editor (iPhone and iPad): the placeholder of a source's title field."
+  },
   "dialogEmbedTitle": "Interactive embed",
   "@dialogEmbedTitle": {
     "description": "Embed dialog: the title, and the default title of a new embed."
@@ -2472,6 +2594,10 @@
   "agentEditLinkCard": "a link card",
   "@agentEditLinkCard": {
     "description": "A link card block (a web page's title and picture), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditCard": "a card",
+  "@agentEditCard": {
+    "description": "A card block (facts at a glance: a title, figures or label and value lines, a note and its sources), in agentEditInserted, agentEditWrote and agentEditRewrote."
   },
   "agentEditSubpageLink": "a subpage link",
   "@agentEditSubpageLink": {
@@ -5874,6 +6000,38 @@
   "welcomeTableHours": "Hours",
   "@welcomeTableHours": {
     "description": "The welcome guide: the header of the milestones table's column of hours each milestone takes, aligned right."
+  },
+  "welcomeCardsHeading": "Fact cards",
+  "@welcomeCardsHeading": {
+    "description": "The welcome guide: the heading of the section on fact cards."
+  },
+  "welcomeCardsIntro": "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a picture, with a note and a chip for the pages they come from. **Edit card** in its right-click menu changes it.",
+  "@welcomeCardsIntro": {
+    "description": "The welcome guide: what a fact card is, before the example card."
+  },
+  "welcomeCardTitle": "Release at a glance",
+  "@welcomeCardTitle": {
+    "description": "The welcome guide: the example fact card's title."
+  },
+  "welcomeCardIssues": "Open issues",
+  "@welcomeCardIssues": {
+    "description": "The welcome guide's example fact card: the label of the number of open issues."
+  },
+  "welcomeCardDays": "Days to ship",
+  "@welcomeCardDays": {
+    "description": "The welcome guide's example fact card: the label of the days left before the release."
+  },
+  "welcomeCardReviews": "Reviews",
+  "@welcomeCardReviews": {
+    "description": "The welcome guide's example fact card: the label of the number of reviews."
+  },
+  "welcomeCardNote": "Example figures; the chip opens the page they come from.",
+  "@welcomeCardNote": {
+    "description": "The welcome guide's example fact card: its note, before the chip of its source."
+  },
+  "welcomeCardSource": "Leaflet on GitHub",
+  "@welcomeCardSource": {
+    "description": "The welcome guide's example fact card: the name of its source, Leaflet's GitHub repository."
   },
   "welcomeTableTask": "Task",
   "@welcomeTableTask": {

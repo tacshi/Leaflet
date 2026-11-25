@@ -26,3 +26,26 @@ func cardTitle(n *Node) string {
 	}
 	return ""
 }
+
+// SiteName is the name of the site a web address is on: its host without
+// "www.", or the address as it is when it has none.
+func SiteName(link string) string {
+	u, err := url.Parse(strings.TrimSpace(link))
+	if err != nil || u.Hostname() == "" {
+		return link
+	}
+	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+}
+
+// LoadedURL is the web address a block has the app load by itself, as a
+// picture's, a video's, a link card's or a card's picture, or "" when it
+// has none.
+func LoadedURL(n *Node) string {
+	switch n.Type {
+	case "image", "link_preview", "video":
+		return n.Str("url")
+	case "card":
+		return n.Str("image")
+	}
+	return ""
+}

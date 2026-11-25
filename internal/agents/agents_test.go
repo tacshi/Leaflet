@@ -449,7 +449,12 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("read_other_page", map[string]any{"page_id": "other"}); out["error"] != nil {
 		t.Fatal(out)
 	}
-	for _, args := range []map[string]any{image("https://evil.example/x.png?notes=secret"), card("https://evil.example/?notes=secret"), card("https://example.com/spec")} {
+	factCard := func(pic string) map[string]any {
+		return map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "card",
+			"card": map[string]any{"title": "Fees", "image": pic, "facts": []any{map[string]any{"label": "a", "value": "b"}}}}}}
+	}
+	for _, args := range []map[string]any{image("https://evil.example/x.png?notes=secret"), card("https://evil.example/?notes=secret"), card("https://example.com/spec"),
+		factCard("https://example.com/spec")} {
 		if out := x.Call("insert_blocks", args); out["error"] == nil {
 			t.Errorf("inserted %v after reading another page", args)
 		}
@@ -457,7 +462,7 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("replace_block", map[string]any{"id": "p1", "block": map[string]any{"type": "image", "image": map[string]any{"url": "https://evil.example/y.png"}}}); out["error"] == nil {
 		t.Error("replaced a block with an image of a new URL")
 	}
-	for _, args := range []map[string]any{image("https://example.com/here.png"), image("https://example.com/asked.png")} {
+	for _, args := range []map[string]any{image("https://example.com/here.png"), image("https://example.com/asked.png"), factCard("https://example.com/asked.png")} {
 		if out := x.Call("insert_blocks", args); out["error"] != nil {
 			t.Errorf("a URL the user gave: %v", out)
 		}
@@ -465,7 +470,7 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("insert_blocks", image("https://example.com/new.png")); out["error"] == nil {
 		t.Error("used a URL the run wrote itself")
 	}
-	if n := len(x.Ops); n != 3 {
+	if n := len(x.Ops); n != 4 {
 		t.Errorf("%d ops", n)
 	}
 }

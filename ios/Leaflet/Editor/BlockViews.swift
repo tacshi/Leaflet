@@ -117,6 +117,7 @@ struct BlockCard: View {
             max(BlockHeights.of(node.id, width: width) ?? min(max(width * 0.3, 160), 320), 44)
         case "video": BlockHeights.of(node.id, width: width) ?? min(width * 9 / 16, 420) + 44
         case "chart": scaled(300)
+        case "card": BlockHeights.of(node.id, width: width) ?? scaled(160)
         case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         case "recording", "file": BlockHeights.of(node.id, width: width) ?? scaled(64)
         case "embed":
@@ -127,7 +128,14 @@ struct BlockCard: View {
         }
     }
 
+    /// The block in the page's colors: a block's view hosted on its own
+    /// reads them from the environment, which a hosting view does not
+    /// pass on from the page.
     var body: some View {
+        block.environment(\.palette, BlockLook.palette)
+    }
+
+    @ViewBuilder private var block: some View {
         switch node.type {
         case "divider":
             Divider().frame(maxHeight: .infinity)
@@ -147,6 +155,8 @@ struct BlockCard: View {
             RecordingBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         case "link_preview":
             LinkCardBlock(node: node)
+        case "card":
+            FactCardView(node: node, onHeight: onHeight)
         case "file":
             FileBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         default:
@@ -772,6 +782,7 @@ struct CardBlock: View {
         case "video": L.hostSlashVideo
         case "table": L.hostSlashTable
         case "chart": L.hostSlashChart
+        case "card": L.hostSlashCard
         case "math_equation": L.hostSlashMath
         case "diagram": L.hostSlashDiagram
         case "divider": L.hostSlashDivider

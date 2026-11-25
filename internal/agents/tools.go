@@ -75,6 +75,20 @@ var blockSchema = map[string]any{
 			}, "required": []string{"name", "values"}}},
 			"caption": map[string]any{"type": "string"},
 		}, "required": []string{"chart_type", "labels", "series"}},
+		"card": map[string]any{"type": "object", "description": "Facts at a glance under a title with an icon. Layout figures shows two to four short values large, side by side, as a trip's time and fare; details shows label: value lines beside a picture, as a place's address, transport and phone numbers. A note and the pages the facts come from go under them. It needs a title or facts.",
+			"properties": map[string]any{
+				"layout": map[string]any{"type": "string", "enum": []string{"figures", "details"}},
+				"icon":   map[string]any{"type": "string", "enum": doc.CardIcons, "description": "An icon before the title, for what the card is about."},
+				"title":  map[string]any{"type": "string"},
+				"image":  map[string]any{"type": "string", "description": "For details: a picture's web link, shown beside the facts."},
+				"facts": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"label": map[string]any{"type": "string"},
+					"value": map[string]any{"type": "string", "description": "Inline markdown, as **3946 6888** for a number to stand out."},
+				}, "required": []string{"label", "value"}}},
+				"note": map[string]any{"type": "string", "description": "A short line under the facts, in inline markdown: what they leave out or assume."},
+				"sources": map[string]any{"type": "array", "description": "The pages the facts come from, shown as chips: links a search found or of a page you read.",
+					"items": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}}, "required": []string{"url"}}},
+			}},
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer", "minimum": 120, "maximum": 1200}},
 			"required":   []string{"html"}},
@@ -562,9 +576,7 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	for _, n := range nodes {
 		walk(n, func(k *doc.Node) {
 			see(urls, k.Data)
-			if loads[k.Type] {
-				see(loaded, k.Data["url"])
-			}
+			see(loaded, doc.LoadedURL(k))
 		})
 	}
 	first := func(set map[string]bool, may func(string) bool) string {
@@ -588,14 +600,12 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	switch {
 	case bad == "":
 	case x.armed:
-		return terr("After reading another page, a picture, a video or a link card may only hold a URL that one of this page held before you began, or that is in the user's request, which %s is not: among the URLs this page only names, the one picked could carry what you read, as the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading another page, a picture, a video, a link card or a card's picture may only hold a URL that one of this page held before you began, or that is in the user's request, which %s is not: among the URLs this page only names, the one picked could carry what you read, as the app loads it by itself. Link to it in text instead.", bad)
 	default:
-		return terr("After reading the web, a picture, a video or a link card may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading the web, a picture, a video, a link card or a card's picture may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
 	}
 	return nil
 }
-
-var loads = map[string]bool{"image": true, "link_preview": true, "video": true}
 
 func (x *Executor) given(u string) bool {
 	u = canonURL(u)
@@ -876,9 +886,7 @@ func (x *Executor) begin() {
 		see(x.allowed, views)
 		see(x.allowed, c.Request)
 		c.Content.Walk(func(n, _ *doc.Node) {
-			if loads[n.Type] {
-				see(x.loaded, n.Data["url"])
-			}
+			see(x.loaded, doc.LoadedURL(n))
 		})
 		see(x.loaded, c.Request)
 	}
@@ -1388,7 +1396,7 @@ var kinds = map[string]func() string{
 	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
 	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
 	"toggle_list": locales.AgentEditToggle, "link_preview": locales.AgentEditLinkCard, "math_equation": locales.AgentEditFormula, "diagram": locales.AgentEditDiagram,
-	"subpage": locales.AgentEditSubpageLink,
+	"subpage": locales.AgentEditSubpageLink, "card": locales.AgentEditCard,
 }
 
 func summaryFor(verb func(what string) string, nodes []*doc.Node) string {

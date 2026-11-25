@@ -81,11 +81,25 @@ func TestRecoverInterruptedKeepsAudioAlone(t *testing.T) {
 	if err := r.Start("p", store.SttSettings{Provider: "soniox", Language: "auto"}, false, func(n *doc.Node) { block = n }); err != nil {
 		t.Fatal(err)
 	}
+	closeWriter := func() error {
+		r.mu.Lock()
+		wav := r.wav
+		r.wav = nil
+		r.mu.Unlock()
+		if wav != nil {
+			return wav.Close()
+		}
+		return nil
+	}
+	t.Cleanup(func() { _ = closeWriter() })
 	if r.withText {
 		t.Fatal("transcribes without a key")
 	}
 	id, _ := block.Data["recording_id"].(string)
 	// The app ends while it records, and the next start finds the row.
+	if err := closeWriter(); err != nil {
+		t.Fatal(err)
+	}
 	NewController(st, nil).RecoverInterrupted()
 	if rec, err := st.Recording(id); err != nil || rec.Status != "ready" || rec.Error != "" || rec.SttProvider != "" || rec.SttModel != "" {
 		t.Errorf("audio alone came back %s, %q, by %q %q (%v)", rec.Status, rec.Error, rec.SttProvider, rec.SttModel, err)

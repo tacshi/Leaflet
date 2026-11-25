@@ -147,6 +147,43 @@ func TestFindRoutesByCar(t *testing.T) {
 	}
 }
 
+func TestARouteWaitingItsTurnEndsWithItsContext(t *testing.T) {
+	local(t)
+	srv, got := serve(t, "osrm-polyline5.json", nil)
+	was := OSRMURL
+	OSRMURL = srv.URL
+	osrmEvery.Lock()
+	last := osrmEvery.last
+	// The last turn given is a while off, as when others wait.
+	osrmEvery.last = time.Now().Add(3 * time.Second)
+	osrmEvery.Unlock()
+	first, cancel := context.WithCancel(context.Background())
+	waited := make(chan struct{})
+	go func() {
+		defer close(waited)
+		_, _ = FindRoutes(first, doc.LatLng{Lat: 1}, doc.LatLng{Lat: 2}, doc.RouteDrive, time.Time{})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-waited
+		OSRMURL = was
+		osrmEvery.Lock()
+		osrmEvery.last = last
+		osrmEvery.Unlock()
+	})
+	time.Sleep(50 * time.Millisecond)
+	ctx, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer stop()
+	start := time.Now()
+	_, err := FindRoutes(ctx, doc.LatLng{Lat: 1}, doc.LatLng{Lat: 2}, doc.RouteDrive, time.Time{})
+	if took := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || took > time.Second {
+		t.Errorf("a route given up after %v: %v", took, err)
+	}
+	if len(*got) != 0 {
+		t.Errorf("asked %d times before its turn", len(*got))
+	}
+}
+
 func TestNoRoute(t *testing.T) {
 	local(t)
 	srv, _ := serve(t, "transitous.json", func(v map[string]any) { v["itineraries"] = []any{} })

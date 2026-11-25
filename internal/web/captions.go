@@ -322,7 +322,7 @@ func VimeoTrack(config []byte) (Track, error) {
 		if strings.HasPrefix(link, "/") {
 			link = "https://player.vimeo.com" + link
 		}
-		if !WebLink(link) {
+		if !doc.WebURL(link) {
 			continue
 		}
 		lang, auto := strings.CutSuffix(text(at(t, "lang")), "-x-autogen")
@@ -357,11 +357,6 @@ func text(v any) string {
 func items(v any) []any {
 	l, _ := v.([]any)
 	return l
-}
-
-func WebLink(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 func VTTLines(vtt string) []Caption {

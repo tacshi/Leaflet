@@ -290,19 +290,6 @@ func (s *stream) Close() {
 	}
 }
 
-func (s *stream) Lost() error {
-	select {
-	case <-s.done:
-	default:
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ended {
-		return nil
-	}
-	if s.err != nil {
-		return s.err
-	}
-	return errors.New(locales.RecErrOnDeviceStopped())
-}
+// Lost is nil: a helper that stops early, or falls far behind, tells it
+// through Finish's error, and the recording is transcribed from its file.
+func (s *stream) Lost() error { return nil }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"leaflet/internal/recording"
+	"leaflet/locales"
 )
 
 const fake = `#!/bin/sh
@@ -84,9 +85,6 @@ func TestStreamSendsAllTheAudio(t *testing.T) {
 	defer mu.Unlock()
 	if len(heard) != 1 || heard[0] != "so far" {
 		t.Fatalf("words so far %q", heard)
-	}
-	if err := s.Lost(); err != nil {
-		t.Fatalf("lost after Finish: %v", err)
 	}
 }
 
@@ -231,8 +229,11 @@ func TestSendToAnEndedHelperKeepsNothing(t *testing.T) {
 	s.mu.Lock()
 	queued := len(s.queue)
 	s.mu.Unlock()
-	if queued != 0 || s.Lost() == nil {
-		t.Errorf("%d chunks queued, lost %v", queued, s.Lost())
+	if queued != 0 {
+		t.Errorf("%d chunks queued", queued)
+	}
+	if _, err := s.Finish(); err == nil {
+		t.Error("a helper that ended at once finished")
 	}
 }
 
@@ -288,8 +289,8 @@ func TestAHelperFarBehindIsEnded(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("a helper far behind was left running")
 	}
-	if s.Lost() == nil {
-		t.Error("a helper far behind reads as fine")
+	if _, err := s.Finish(); err == nil || err.Error() != locales.RecErrOnDeviceStopped() {
+		t.Errorf("a helper far behind finished with %v", err)
 	}
 }
 
@@ -309,7 +310,7 @@ func TestAHelperThatKeepsTalkingAfterItsLastAnswerIsEnded(t *testing.T) {
 		_ = s.cmd.Process.Kill()
 		t.Fatal("waits on a helper that answered for the last time")
 	}
-	if s.Lost() == nil {
-		t.Error("a helper that failed reads as fine")
+	if _, err := s.Finish(); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("a helper that failed finished with %v", err)
 	}
 }

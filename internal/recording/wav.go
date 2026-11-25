@@ -11,9 +11,9 @@ import (
 const SampleRate = 16000
 
 type WavWriter struct {
-	Path         string
-	f            wavFile
-	bytes, heard int64
+	Path  string
+	f     wavFile
+	bytes int64
 }
 
 type wavFile interface {
@@ -49,10 +49,11 @@ func (w *WavWriter) Write(pcm []byte) error {
 	if w.bytes+int64(len(pcm)) > maxWavData {
 		return errWavFull
 	}
-	w.heard += int64(len(pcm))
 	n, err := w.f.Write(pcm)
 	w.bytes += int64(n)
-	if err != nil && (w.heard-w.bytes)%2 != 0 && w.bytes > 0 {
+	// Chunks are whole samples, so a short write that ends inside one
+	// steps back to its start, keeping the data on a sample boundary.
+	if err != nil && w.bytes%2 != 0 {
 		if _, serr := w.f.Seek(-1, io.SeekCurrent); serr == nil {
 			w.bytes--
 		}
@@ -87,6 +88,42 @@ func repairWav(path string) int {
 		return 0
 	}
 	return int(data * 1000 / 2 / SampleRate)
+}
+
+// cutWav writes the audio of the recording's WAV at path from the fromMs
+// ms on to a WAV of its own, and returns its path and how many bytes of
+// audio it holds.
+func cutWav(path string, fromMs int) (string, int64, error) {
+	in, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = in.Close() }()
+	fi, err := in.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	data := max(fi.Size()-44, 0) &^ 1
+	from := min(AudioSize(fromMs)&^1, data)
+	if _, err := in.Seek(44+from, io.SeekStart); err != nil {
+		return "", 0, err
+	}
+	out, err := os.CreateTemp("", "leaflet-*.wav")
+	if err != nil {
+		return "", 0, err
+	}
+	_, err = out.Write(wavHeader(data - from))
+	if err == nil {
+		_, err = io.CopyN(out, in, data-from)
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(out.Name())
+		return "", 0, err
+	}
+	return out.Name(), data - from, nil
 }
 
 func wavHeader(dataBytes int64) []byte {

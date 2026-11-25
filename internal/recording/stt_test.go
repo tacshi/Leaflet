@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -188,6 +189,40 @@ func TestTranscribeSonioxFails(t *testing.T) {
 	}
 	if len(removed) != 2 {
 		t.Errorf("removed %v", removed)
+	}
+}
+
+func TestTranscribeSonioxNamesNoFileOrJob(t *testing.T) {
+	for _, c := range []struct{ file, job, asked string }{
+		{`{}`, `{"id":"t1"}`, "POST /files"},
+		{`{"id":"f1"}`, `{}`, "POST /files, POST /transcriptions, DELETE /files/f1"},
+	} {
+		var mu sync.Mutex
+		var asked []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			asked = append(asked, r.Method+" "+r.URL.Path)
+			mu.Unlock()
+			switch {
+			case r.Method == "POST" && r.URL.Path == "/files":
+				_, _ = io.WriteString(w, c.file)
+			case r.Method == "POST" && r.URL.Path == "/transcriptions":
+				_, _ = io.WriteString(w, c.job)
+			}
+		}))
+		api := sonioxAPI
+		sonioxAPI = srv.URL
+		_, err := TranscribeSoniox(context.Background(), "k", "", strings.NewReader("x"), 1, "a.wav", nil, false, Leftovers{})
+		sonioxAPI = api
+		srv.Close()
+		if err == nil || err.Error() != locales.RecErrSonioxFailed("") {
+			t.Errorf("answered %s then %s: %v", c.file, c.job, err)
+		}
+		mu.Lock()
+		if got := strings.Join(asked, ", "); got != c.asked {
+			t.Errorf("answered %s then %s, asked %s", c.file, c.job, got)
+		}
+		mu.Unlock()
 	}
 }
 

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -123,7 +125,6 @@ func (a *App) recView() *mygo.WebView {
 }
 
 type player struct {
-	sound   *audio.Sound
 	p       *audio.Player
 	loading bool
 	from    time.Duration
@@ -191,22 +192,28 @@ func (a *App) play(rec store.Recording) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), recording.DownloadWait(recording.AudioSize(rec.DurationMs)))
 		defer cancel()
-		data, err := a.rec.Audio(ctx, rec)
-		var snd *audio.Sound
+		// The player decodes the audio from its file as it plays, rather
+		// than holding hours of it in memory, and closes the file with it.
+		var p *audio.Player
+		f, err := a.playable(ctx, rec)
 		if err == nil {
-			snd, err = audio.DecodeSound(data)
+			if p, err = audio.OpenStream(f); err != nil {
+				_ = f.Close()
+			}
 		}
 		a.update(func() {
 			pl.loading = false
 			if a.players[rec.ID] != pl {
+				if p != nil {
+					p.Close()
+				}
 				return
 			}
 			if err != nil {
 				a.toast(locales.RecCouldNotPlay(err.Error()))
 				return
 			}
-			pl.sound = snd
-			pl.p = snd.NewPlayer().SetSpeed(a.speed()).SetPreservesPitch(true)
+			pl.p = p.SetSpeed(a.speed()).SetPreservesPitch(true)
 			if pl.from > 0 {
 				pl.p.Seek(pl.from)
 			}
@@ -214,6 +221,43 @@ func (a *App) play(rec store.Recording) {
 			pl.p.Play()
 		})
 	}()
+}
+
+// playable opens a recording's audio for a player to read as it plays: its
+// file on this device, or else a copy downloaded for the player, deleted
+// once closed.
+func (a *App) playable(ctx context.Context, rec store.Recording) (io.ReadSeekCloser, error) {
+	from, err := a.rec.OpenAudio(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	if f, ok := from.(io.ReadSeekCloser); ok {
+		return f, nil
+	}
+	defer func() { _ = from.Close() }()
+	f, err := os.CreateTemp("", "leaflet-play-*.wav")
+	if err != nil {
+		return nil, err
+	}
+	copied := downloaded{f}
+	if _, err = io.Copy(f, from); err == nil {
+		_, err = f.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		_ = copied.Close()
+		return nil, err
+	}
+	return copied, nil
+}
+
+// downloaded is a recording's audio fetched for a player, deleted once the
+// player closes it.
+type downloaded struct{ *os.File }
+
+func (d downloaded) Close() error {
+	err := d.File.Close()
+	_ = os.Remove(d.Name())
+	return err
 }
 
 type recView struct {
@@ -469,10 +513,6 @@ func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) strin
 	if a.page != nil {
 		page = a.page.title
 	}
-	return recordingName(n, rec, found, page)
-}
-
-func recordingName(n *doc.Node, rec store.Recording, found bool, page string) string {
 	return recording.BlockTitle(n.Str("title"), rec.CreatedAt, found, page)
 }
 

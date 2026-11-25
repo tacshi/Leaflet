@@ -110,7 +110,8 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
         guard let trailing = text.trailing, range.length > 1, NSMaxRange(range) == storage.length,
             (storage.string as NSString).character(at: NSMaxRange(range) - 1) == 0x0A
         else { return nil }
-        let s = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: range))
+        let s = NSMutableAttributedString(
+            attributedString: storage.attributedSubstring(from: range))
         s.addAttributes(
             [
                 .font: editor.style.baseFont(trailing),

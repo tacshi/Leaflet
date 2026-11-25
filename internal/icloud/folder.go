@@ -237,6 +237,58 @@ func (f Folder) Batches(device string) (seqs []int64, copies bool, err error) {
 	return seqs, copies, nil
 }
 
+// BatchCopy is a file in a device's log that is no batch of its own name: a copy iCloud made of batch Seq beside it,
+// as two devices wrote it at once ("0000000000000007 2.json"), or, with Seq 0, a file of no such name.
+type BatchCopy struct {
+	Path string
+	Seq  int64
+}
+
+var copyPattern = regexp.MustCompile(`^([0-9]{16}) [0-9]+\.json$`)
+
+// BatchCopies is the files in the device's log that Batches passes over as copies.
+func (f Folder) BatchCopies(device string) ([]BatchCopy, error) {
+	if err := checkID(device); err != nil {
+		return nil, err
+	}
+	dir := devicePath(device) + "/log"
+	names, err := f.names(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []BatchCopy
+	for _, n := range names {
+		if seqPattern.MatchString(n) {
+			continue
+		}
+		c := BatchCopy{Path: dir + "/" + n}
+		if m := copyPattern.FindStringSubmatch(n); m != nil {
+			c.Seq, _ = strconv.ParseInt(m[1], 10, 64)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// Pages is the ids of the pages the device has a version of in the folder.
+func (f Folder) Pages(device string) ([]string, error) {
+	if err := checkID(device); err != nil {
+		return nil, err
+	}
+	names, err := f.names(devicePath(device) + "/pages")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, n := range names {
+		if id, ok := strings.CutSuffix(n, ".json"); ok && ValidID(id) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (f Folder) Exists(rel string) bool { return f.exists(f.blob(rel)) }
 
 type Stamp struct {

@@ -499,7 +499,7 @@ func (a *App) deleteAccount() {
 			return
 		}
 		s.deleteOpen = false
-		a.leave(a.st.Wipe, false)
+		a.leave(a.st.ForgetAll, false)
 		a.toast(locales.SettingsAccountDeleted())
 	})
 }

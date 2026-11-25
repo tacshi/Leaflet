@@ -684,3 +684,25 @@ func TestWriteCutShort(t *testing.T) {
 		t.Errorf("after a cut write: %q, %d entries", data, len(entries))
 	}
 }
+
+func TestExportZipReadsEachPageOnce(t *testing.T) {
+	pages := []store.Page{{ID: "a", Title: "A"}, {ID: "b", Title: "B"}, {ID: "gone", Title: "Gone"}}
+	read := map[string]int{}
+	content := func(id string) *doc.Content {
+		read[id]++
+		if id == "gone" {
+			return nil
+		}
+		return doc.FromBlocks([]*doc.Node{{ID: "p", Type: "paragraph"}})
+	}
+	var buf bytes.Buffer
+	if err := Zip(&buf, pages, nil, content, func(string) string { return "" },
+		func(string) (io.ReadCloser, error) { return nil, os.ErrNotExist }); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pages {
+		if read[p.ID] != 1 {
+			t.Errorf("%s read %d times", p.ID, read[p.ID])
+		}
+	}
+}

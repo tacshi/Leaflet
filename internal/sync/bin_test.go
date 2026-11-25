@@ -3,9 +3,11 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -529,5 +531,464 @@ func TestAPurgeRemovesARecordingSomeoneElseMadeByItsListedPath(t *testing.T) {
 	}
 	if strings.Join(removed, ",") != theirs {
 		t.Errorf("removed %v, want %s", removed, theirs)
+	}
+}
+
+// sentFile is a file added here that went up, its row as the server has it pulled back at the time.
+func sentFile(t *testing.T, st *store.Store, at time.Time) store.File {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Queued()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := store.FileToRemote(f)
+	row["updated_at"] = at.UTC().Format(time.RFC3339Nano)
+	if err := st.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func binRefs(t *testing.T, st *store.Store) []store.BinRef {
+	t.Helper()
+	items, err := st.Bin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []store.BinRef
+	for _, it := range items {
+		refs = append(refs, it.BinRef)
+	}
+	return refs
+}
+
+// TestAFilePurgeGoesUpWithWhatItSaw deletes a file of the bin for good: the deletion goes up with the deletion this
+// device saw, and with the server's time of the row as the server took the file's trashing, for the server to refuse
+// it if the file changed there since. Its copy here goes once the server has the deletion.
+func TestAFilePurgeGoesUpWithWhatItSaw(t *testing.T) {
+	st := openStore(t)
+	f := sentFile(t, st, time.Now().Add(-time.Hour))
+	if err := st.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	trashed := time.Now().Add(-time.Minute).UTC().Truncate(time.Millisecond)
+	var mu gosync.Mutex
+	var patches []map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/rest/v1/files" && r.Method == http.MethodPatch {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			patches = append(patches, body)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": f.ID, "updated_at": trashed.Format(time.RFC3339Nano)}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Purge(store.WipeOnceTaken, binRefs(t, st)...); err != nil {
+		t.Fatal(err)
+	}
+	deleted, _ := st.File(f.ID)
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		t.Fatalf("the copy went before the deletion went up: %v", err)
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(patches) != 2 {
+		t.Fatalf("sent %v", patches)
+	}
+	purge := patches[1]
+	if purge["purged_at"] == nil || store.TimeOrZero(purge["deleted_at"]).UnixMilli() != deleted.DeletedAt.UnixMilli() ||
+		!store.TimeOrZero(purge[seenKey]).Equal(trashed) || purge["name"] != "" {
+		t.Errorf("the deletion for good went up as %v", purge)
+	}
+	if _, err := os.Stat(f.LocalPath); !os.IsNotExist(err) {
+		t.Errorf("the copy stayed once the server took the deletion: %v", err)
+	}
+}
+
+// TestARefusedFilePurgeKeepsItsStoredObject has the server refuse a file's deletion for good, as another device put it
+// in the bin again since: this device takes the server's row, the file in the bin with its contents, and removes
+// nothing of it where it is stored.
+func TestARefusedFilePurgeKeepsItsStoredObject(t *testing.T) {
+	st := openStore(t)
+	f := sentFile(t, st, time.Now().Add(-time.Hour))
+	if err := st.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Purge(store.WipeOnceTaken, binRefs(t, st)...); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	there := store.FileToRemote(f)
+	there["deleted_at"], there["kept"], there["updated_at"] = later, true, later
+	var mu gosync.Mutex
+	var removed []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/v1/files" && r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"42501","message":"file_restored"}`)
+			return
+		case r.URL.Path == "/rest/v1/files" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{there})
+			return
+		case strings.HasPrefix(r.URL.Path, "/storage/v1/object/") && r.Method == http.MethodDelete:
+			body, _ := io.ReadAll(r.Body)
+			removed = append(removed, string(body))
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.File(f.ID)
+	if err != nil || !got.PurgedAt.IsZero() || !got.Kept || got.Name != "notes.txt" {
+		t.Fatalf("the file is %+v, %v", got, err)
+	}
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		t.Errorf("the file back in the bin lost its copy: %v", err)
+	}
+	if len(removed) > 0 {
+		t.Errorf("removed the object of a file the server keeps in the bin: %v", removed)
+	}
+	if n := st.PendingCount(); n != 0 {
+		t.Errorf("%d waiting", n)
+	}
+}
+
+// TestAPagePurgeGoesUpWithTheServersTimeOfThePage deletes a page, whose deletion the server takes, and then deletes it
+// for good before pulling it back: the deletion for good goes with the server's time of the page as it took the
+// deletion, not as this device last pulled it.
+func TestAPagePurgeGoesUpWithTheServersTimeOfThePage(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Queued()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	row := store.PageToRemote(p)
+	row["updated_at"] = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := st.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	took := time.Now().Add(-time.Minute).UTC().Truncate(time.Millisecond)
+	var mu gosync.Mutex
+	var patches []map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodPatch {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			patches = append(patches, body)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": p.ID, "updated_at": took.Format(time.RFC3339Nano)}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(patches) != 2 || patches[1]["purged_at"] == nil || !store.TimeOrZero(patches[1][seenKey]).Equal(took) {
+		t.Errorf("sent %v", patches)
+	}
+}
+
+// TestWhatCameWhileAPurgeWaitedComesWithThePageBack pulls, while a deletion for good waits to go up, a comment and a
+// file another device put on the page, which this device passes by; the server refuses the deletion, of a page
+// restored since: the page comes back with them, and its content is read again.
+func TestWhatCameWhileAPurgeWaitedComesWithThePageBack(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	comment := map[string]any{"id": "c1", "page_id": p.ID, "block_id": "b1", "author_id": "u2", "author_kind": "user",
+		"body": "a note", "created_at": at, "updated_at": at}
+	fileID := doc.NewRowID()
+	file := map[string]any{"id": fileID, "space_id": p.SpaceID, "page_id": p.ID, "name": "notes.txt",
+		"storage_path": p.SpaceID + "/" + fileID + "/notes.txt", "created_at": at, "updated_at": at}
+	restored := store.PageToRemote(p)
+	restored["updated_at"] = at
+	var mu gosync.Mutex
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		q := r.URL.Query()
+		var rows []map[string]any
+		switch {
+		case r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"42501","message":"page_restored"}`)
+			return
+		case r.URL.Path == "/rest/v1/pages" && q.Get("id") == "eq."+p.ID:
+			rows = []map[string]any{restored}
+		case r.URL.Path == "/rest/v1/comments" && r.Method == http.MethodGet:
+			rows = []map[string]any{comment}
+		case r.URL.Path == "/rest/v1/files" && strings.HasPrefix(q.Get("page_id"), "in."):
+			rows = []map[string]any{file}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	if err := svc.pullComments(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Comment("c1"); err == nil {
+		t.Fatal("a comment on a page deleted for good here was kept")
+	}
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st.IsPurged(p.ID) {
+		t.Fatal("the page did not come back")
+	}
+	if _, err := st.Comment("c1"); err != nil {
+		t.Errorf("the comment put on the page meanwhile did not come: %v", err)
+	}
+	if _, err := st.File(fileID); err != nil {
+		t.Errorf("the file put on the page meanwhile did not come: %v", err)
+	}
+	if waiting, _ := svc.waiting(); !waiting[p.ID] {
+		t.Errorf("the page's content is not read again: %v", waiting)
+	}
+	if trees, _ := svc.ids(treesKey); len(trees) != 0 {
+		t.Errorf("trees still to pull: %v", trees)
+	}
+}
+
+// TestAPurgeReadsEveryObjectTheServerLists lists more objects of a page deleted for good than a read returns: each
+// read goes on after the last, and every one is removed.
+func TestAPurgeReadsEveryObjectTheServerLists(t *testing.T) {
+	was := treeRows
+	treeRows = 2
+	t.Cleanup(func() { treeRows = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EmptyBin(store.WipeOnceTaken); err != nil {
+		t.Fatal(err)
+	}
+	var listed []map[string]any
+	for i := range 5 {
+		listed = append(listed, map[string]any{"bucket_id": "files", "name": fmt.Sprintf("space/f%d/photo.png", i)})
+	}
+	var mu gosync.Mutex
+	var asked []url.Values
+	var removed []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/v1/pages" && r.Method == http.MethodPatch:
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": p.ID}})
+			return
+		case r.URL.Path == "/rest/v1/purged_objects":
+			from := len(asked) * treeRows
+			asked = append(asked, r.URL.Query())
+			_ = json.NewEncoder(w).Encode(listed[min(from, len(listed)):min(from+treeRows, len(listed))])
+			return
+		case strings.HasPrefix(r.URL.Path, "/storage/v1/object/") && r.Method == http.MethodDelete:
+			var body struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			removed = append(removed, body.Prefixes...)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(asked) != 3 || asked[0].Get("order") != "bucket_id,name" || !strings.Contains(asked[2].Get("or"), "space/f3/photo.png") {
+		t.Errorf("asked %v", asked)
+	}
+	slices.Sort(removed)
+	if len(removed) != 5 || removed[0] != "space/f0/photo.png" || removed[4] != "space/f4/photo.png" {
+		t.Errorf("removed %v", removed)
+	}
+}
+
+// TestAnEntryOfNoKindThisLeafletKnowsIsDropped has nothing go up for an entry of the outbox of a kind nothing here
+// queues, as a Leaflet from later might have.
+func TestAnEntryOfNoKindThisLeafletKnowsIsDropped(t *testing.T) {
+	st := openStore(t)
+	entries, _ := st.Queued()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.Queue("widgets", "w1", map[string]any{"id": "w1"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, r.Method+" "+r.URL.Path)
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 0 || st.PendingCount() != 0 {
+		t.Errorf("asked %v, %d waiting", asked, st.PendingCount())
+	}
+}
+
+// TestARemovalWaitsForTheListToBeRead removes the audio of a recording whose path never came here, which the server
+// lists by its id: while the list cannot be read, nothing is removed, and the removal waits.
+func TestARemovalWaitsForTheListToBeRead(t *testing.T) {
+	st := openStore(t)
+	entries, _ := st.Queued()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	const rec = "44444444-4444-4444-8444-444444444444"
+	if err := st.Queue("storage_delete", "recordings/"+rec, map[string]any{"bucket": "recordings", "path": "", "recording_id": rec}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	down := true
+	var removed []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/v1/purged_objects" && down:
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		case r.URL.Path == "/rest/v1/purged_objects":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "u2/" + rec + ".wav"}})
+			return
+		case strings.HasPrefix(r.URL.Path, "/storage/v1/object/") && r.Method == http.MethodDelete:
+			var body struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			removed = append(removed, body.Prefixes...)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err == nil {
+		t.Fatal("a removal went on past a list it could not read")
+	}
+	if len(removed) != 0 || st.PendingCount() != 1 {
+		t.Fatalf("removed %v, %d waiting", removed, st.PendingCount())
+	}
+	mu.Lock()
+	down = false
+	mu.Unlock()
+	svc.retryAt = map[outboxKey]time.Time{}
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(removed, []string{"u2/" + rec + ".wav"}) || st.PendingCount() != 0 {
+		t.Errorf("removed %v, %d waiting", removed, st.PendingCount())
+	}
+}
+
+// TestAWholeFileRowPurgedGoesWithWhatItSaw deletes for good a file whose whole row waits to go up again: it goes as a
+// change of every column first, with what this device saw of the row, which an upsert's update would not have.
+func TestAWholeFileRowPurgedGoesWithWhatItSaw(t *testing.T) {
+	st := openStore(t)
+	at := time.UnixMilli(time.Now().Add(-time.Hour).UnixMilli()).UTC()
+	f := sentFile(t, st, at)
+	if err := st.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Queued()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.RequeueFile(f.ID, f.SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Purge(store.WipeOnceTaken, binRefs(t, st)...); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var patched map[string]any
+	var upserts int
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/v1/files" && r.Method == http.MethodPatch:
+			_ = json.NewDecoder(r.Body).Decode(&patched)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": f.ID}})
+			return
+		case r.URL.Path == "/rest/v1/files" && r.Method == http.MethodPost:
+			upserts++
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if upserts != 0 || patched["purged_at"] == nil || !store.TimeOrZero(patched[seenKey]).Equal(at) {
+		t.Errorf("went up as %v, %d upserts", patched, upserts)
 	}
 }

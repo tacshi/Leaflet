@@ -2,8 +2,9 @@
 -- them, each right after the migration it is named for: shares kept,
 -- invites moved, deleted comments emptied, history pruned and dated back,
 -- pages placed, deleted pages read by who had them, folders out of their
--- loops, the agents' keys gone from Vault, and all of it gone with its
--- owner's account.
+-- loops, the agents' keys gone from Vault, files naming only their own
+-- objects, live pages out from under those deleted for good, and all of it
+-- gone with its owner's account.
 -- scripts/check-migrations.sh runs it, as postgres, after every
 -- migration. It changes nothing: it rolls back each of its two
 -- transactions. A check that fails raises, and psql stops there.
@@ -303,6 +304,28 @@ begin
   end if;
   if not exists (select 1 from public.page_history where id = '5eed0000-0000-0000-0000-0000000000c3') then
     raise exception 'a snapshot went with the job it named';
+  end if;
+end;
+$$;
+
+-- A file names only its own object: one that named the editor's names
+-- nothing now, one that named its own still does. A live page under one
+-- deleted for good is at the top level; a deleted one stays in the bin
+-- under it.
+do $$
+begin
+  if (select storage_path from public.files where id = '5eed0000-0000-0000-0000-0000000000e1') is not null then
+    raise exception 'a file still names another space''s object';
+  end if;
+  if (select storage_path from public.files where id = '5eed0000-0000-0000-0000-0000000000e2') is null then
+    raise exception 'a file lost the path of its own object';
+  end if;
+  if (select parent_id from public.pages where id = '5eed0000-0000-0000-0000-0000000000e4') is not null then
+    raise exception 'a live page stayed under one deleted for good';
+  end if;
+  if (select parent_id from public.pages where id = '5eed0000-0000-0000-0000-0000000000e5')
+     is distinct from '5eed0000-0000-0000-0000-0000000000e3' then
+    raise exception 'a deleted page under one deleted for good was moved out of the bin';
   end if;
 end;
 $$;

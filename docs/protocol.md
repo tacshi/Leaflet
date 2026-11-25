@@ -643,7 +643,9 @@ transcription run on the device (§4).
   row that cannot be stored stops that table's pull, and the next pull starts
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
-  can carry an earlier time; rows already stored here are skipped.
+  can carry an earlier time; rows already stored here are skipped. Only a
+  pull's first page goes back so: each page after it goes on from where
+  the one before stopped.
 - Between the pulls, the pages open on a device while someone sees them,
   on screen or through a public link, take another device's edits as they
   are saved. Each save of a page's content is told on the page's private
@@ -701,38 +703,59 @@ transcription run on the device (§4).
   pull has brought every other device's changes in, so that it never
   deletes for good, from what it knew before, a page another device has
   restored since. A device with iCloud sync on syncs before it has found
-  the folder too. Deleting for good sets `purged_at`, which stays, and
+  the folder too. Each item goes as the bin listed it, by its deletion: one
+  restored since, here or by another device whose change came in, or
+  deleted again, which gave it its days in the bin anew, is left as it is.
+  Deleting for good sets `purged_at`, which stays, and
   `deleted_at` with it, the deletion the device saw, and sends them up as
   a change of those columns with a page's `title` (empty), `icon`, `tags`
-  and `default_template_id` (none): the row stays, so the deletion reaches
-  every device, with nothing of what it was. Only a page of the space is
-  deleted for good: a page of someone else's space is its owner's to.
-  The server refuses the deletion for good of a page or file restored, or
-  deleted again, since the deletion the device saw (§7), as one sent late,
-  by a device that was asleep or offline, would be; the device then takes
-  the row as the server has it. So a device that syncs through the server
-  keeps what was on the page until the server takes the deletion, and the
-  page comes back whole if it is refused. Then, or at once on a device
-  that does not sync or syncs through iCloud Drive, which has no server to
-  order a deletion with a restore (one made on another device that its
-  log has not brought yet loses to it), the device takes everything on
-  the page off itself (content, history, comments, recordings, files,
-  conflicts, what of them waits to go up, and the copies in its data
-  folder) and queues the removal of the stored copies of its files and
-  recordings, as for a file deleted for good: those it knew of, and,
-  through the server, every one the server lists for the page as it is
-  deleted for good (`purged_objects`, by `page_id`), those another device
-  of the owner's or people it was shared with put there that it had not
-  heard of too, a recording whose `audio_path` has not come to it found
-  there by its id. Until it has read that list, the deletion stays queued
-  and goes up again. Through iCloud Drive it removes every device's
+  and `default_template_id` (none), or a file's `name` (empty),
+  `mime_type`, `size_bytes` and `storage_path` (none), which the device
+  keeps none of either: the row stays, so the deletion reaches
+  every device, with nothing of what it was. With them goes
+  `seen_updated_at`, the row's `updated_at` as the device last had it from
+  the server, pulled or as the server took its last write of the row,
+  which a change made on the device since does not clear; a row the
+  device never had from the server goes without it. Only a page of the
+  space is deleted for good: a page of someone else's space is its owner's
+  to. The server refuses the deletion for good of a page or file that
+  changed there since `seen_updated_at`, as one restored, or deleted again,
+  since, by its own clock, whatever the devices' clocks say (§7); from an
+  app that sends none, of one restored or deleted again since the deletion
+  the device saw. A deletion sent late, by a device that was asleep or
+  offline, would be one; the device then takes the row as the server has
+  it. So a device that syncs through the server keeps what was on the page
+  until the server takes the deletion, and the page comes back whole if it
+  is refused, with what came for it meanwhile, which its pulls passed by
+  as of a page deleted for good: it pulls the page's tree again whole,
+  rows and content, at once, or on its next pull until it has. Then, or at
+  once on a device that does not sync or syncs through iCloud Drive, which
+  has no server to order a deletion with a restore (one made on another
+  device that its log has not brought yet loses to it), the device takes
+  everything on the page off itself (content, history, comments,
+  recordings, files, conflicts, what of them waits to go up, and the
+  copies in its data folder), puts a page of the space that is under it
+  and not deleted at the top level, as the server does (§7) and as the
+  sidebar shows it, sending nothing, and queues the removal of the stored
+  copies of its files and recordings, as for a file deleted for good:
+  those it knew of whose rows name their own object (a file's
+  `{space}/{file}/{name}`, a recording's `{recorder}/{recording}.{ext}`,
+  or `{recording}.{ext}` in iCloud Drive), and, through the server, every
+  one the server lists for the page as it is deleted for good
+  (`purged_objects`, by `page_id`, read a page of the list at a time in
+  the order of its key), those another device of the owner's or people it
+  was shared with put there that it had not heard of too, a recording
+  whose `audio_path` has not come to it found there by its id, but for one
+  of a file or recording the device has on another page. Until it has
+  read that list, the deletion stays queued and goes up again, and a
+  removal whose recording it cannot look up there waits. Through iCloud Drive it removes every device's
   version of the page (§8) once a batch has the deletion, sent or read,
   and compacts its log on its next pass, leaving out what was on the page
-  and keeping its row only as it is now; it does the same to the batches
-  of the devices not active for 30 days, which compact theirs no more,
-  keeping each batch as it was written but for those entries, on its next
-  pass and then daily for 30 days, as a device active when it heard may
-  go quiet later. Each keeps, across launches, that these are still to
+  and keeping its row only as it is now; one device of those active (§8)
+  does the same to the batches of the devices not active for 30 days,
+  which compact theirs no more, keeping each batch as it was written but
+  for those entries, on its next pass and then daily for 30 days, as a
+  device active when it heard may go quiet later. Each keeps, across launches, that these are still to
   do. A device that pulls a page deleted for good does the same, and
   queues the removal of the stored copies it knows of, as the device that
   deleted it may not have heard of them all: on a page of another space
@@ -743,14 +766,23 @@ transcription run on the device (§4).
   saved, or a snapshot taken, of such a page here is refused.
 - A file deleted for good goes with its bytes. The deleting device removes
   its own copy (only one the app made in its data folder, never the file
-  the user added) and queues the removal of the stored copy, which runs
-  once the row with `purged_at` has gone up: the object in the `files`
-  bucket through Storage's `DELETE /storage/v1/object/files` (an object
-  already gone counts as removed), or the blob in iCloud Drive once a
-  batch has the deletion. An upload still waiting is dropped. A device
-  that pulls a file deleted for good, or deleted without `kept`, removes
-  its copy in its data folder; one in the bin keeps it, to come back with
-  it.
+  the user added), at once, or, through the server, once the server has
+  taken the deletion, and queues the removal of the stored copy, which
+  runs once the row with `purged_at` has gone up: the object in the
+  `files` bucket through Storage's `DELETE /storage/v1/object/files` (an
+  object already gone counts as removed), or the blob in iCloud Drive once
+  a batch has the deletion. The removal goes by itself: the page the file
+  was on deleted for good before it ran leaves it queued, though the
+  file's row no longer says where it is stored. An upload still waiting
+  is dropped. A deletion the server refuses (`file_restored`) brings the
+  file back as the server has it, in the bin or in use, with its copy,
+  and its stored copy stays: a removal of a file that keeps its contents
+  is dropped. A device that pulls a file deleted for good, or deleted
+  without `kept`, removes its copy in its data folder, and keeps none of
+  what it was; one in the bin keeps it, to come back with it. A file
+  deleted for good is listed nowhere, though its row came with
+  `purged_at` and not `deleted_at`, as from a device that restored it as
+  it was deleted for good elsewhere.
 - A file's row goes up after its contents, to the server as to iCloud
   Drive: a device that has the row can fetch them, and never takes a file
   still uploading for one that is gone. A recording's row goes first, as
@@ -885,16 +917,29 @@ recordings, files and pending invitations go as it is set
 its deletion; the objects of every file and recording on it are listed,
 by page, for the space's owner to remove (`purged_objects`, which they
 alone read, and `purged_objects_remove`, which lets them remove too those
-others put on it under their own space or account), the list forgetting
-each once it is gone from storage, as the next page is deleted for good;
-no one reads or writes anything on it after (`can_read_page`), nor clears
-its `purged_at` or `deleted_at` (`page_purged`, or `forbidden_restore`),
-and any other change of its row leaves it as it was. Only the space's
-owner sets it (`forbidden_purge`), and only on a page still in the bin as
-the writer saw it: one whose `deleted_at` is later than the one sent, or
-which is not deleted and changed after it, as when it was restored, is
-refused (`page_restored`; `purges_its_deletion`, to the millisecond).
-A file is the same (`files_purge`, `file_restored`): set by the space's owner, kept, and
+others put on it under their own space or account): only a file's path
+that names its own object and a recording's `audio_path` that names its
+own audio, each listed for whoever it was listed for first, the list
+forgetting what of that owner's is gone from storage as the next page of
+theirs is deleted for good. A live page under it goes to the top level,
+out of the reach of the shares above it (`pages_purged`), as does a page
+made or restored under one deleted for good (`pages_purge`); a deleted
+one stays under it, in the bin. No one reads or writes anything on it
+after (`can_read_page`), nor moves a page under it (`forbidden_move`),
+nor clears its `purged_at` or `deleted_at` (`page_purged`, or
+`forbidden_restore`), and any other change of its row leaves it as it
+was. Only the space's owner sets it (`forbidden_purge`), and only on a
+page still in the bin as the writer saw it. A writer sends
+`seen_updated_at` with it, the row's `updated_at` as it last had the row
+from the server: a row that has changed on the server since, by its
+`updated_at` to the millisecond, as when it was restored or deleted again
+elsewhere, is refused (`page_restored`), whatever the devices' clocks.
+One sent without it, as by an app from before, goes by the deletion: one
+whose `deleted_at` is later than the one sent, or which is not deleted
+and changed after it, is refused (`purges_its_deletion`, to the
+millisecond). No row keeps `seen_updated_at`: it is null on every row,
+whatever a write sends.
+A file is the same (`files_purge`, `file_restored`, `seen_updated_at`): set by the space's owner, kept, and
 with it the row keeps none of what the file was (`scrub_deleted_file`),
 as it keeps none when deleted without `kept`; a file in the bin, deleted
 with `kept`, keeps its name, path and object, to be restored, and
@@ -945,7 +990,10 @@ its page. A
 `files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
-then remove its object), but not remove its row. Its `folder_id` is a folder of its space
+then remove its object), but not remove its row. Its `storage_path`
+names its own object, `{space_id}/{id}/{name}`, or nothing: any other is
+refused (`files_storage_path_own`, `23514`), so no file names someone
+else's object for a deletion for good to list. Its `folder_id` is a folder of its space
 (`folder_in_other_space` otherwise), and its `page_id`, as it is set, a
 page of its space or one its writer can edit, as an editor's upload to a
 page shared with them is (`forbidden_file_page` otherwise). A comment with
@@ -1040,8 +1088,8 @@ com~apple~CloudDocs/Leaflet` on macOS, `%USERPROFILE%\iCloudDrive\Leaflet`
 with iCloud for Windows). Every file but space.json and a blob has one
 writer, so iCloud never keeps two versions of one, but for what a page
 deleted for good takes away: any device removes every device's version of
-that page, and takes what was on it out of the batches of devices gone
-quiet (Compaction). Versions are in the files, never in their times; and
+that page, and one device takes what was on it out of the batches of
+devices gone quiet (Compaction). Versions are in the files, never in their times; and
 nothing depends on being told of changes, which a reader finds by
 listing.
 
@@ -1119,26 +1167,49 @@ Leaflet/
   rewrites it empty and sends everything again if it does not parse. A
   reader skips a batch that stays damaged only when later batches exist,
   after 20 passes and a day; a device compacting its log skips one of its
-  own the same way.
+  own the same way. A reader held up by a damaged batch, or by batches
+  missing, goes on from the snapshot the device's device.json names
+  (`log_from`), which holds all before it, once it is here, reading none
+  of the batches between; it reads them one by one for a snapshot only
+  while device.json cannot be read.
 - **Compaction.** Past 500 batches, or on the next pass once it has heard
-  of a page deleted for good, a device writes the latest entry of each
+  of a page or a file deleted for good, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true` (for a row, with
   each earlier entry that changed a column the later ones did not), leaving
   out what was on pages deleted for good and their rows but as they are
-  now, sets `log_from` to its seq, and removes the batches before it. A
-  reader that finds batches missing goes on from the first snapshot after
+  now, the rows of files deleted for good too (no name, type, size or
+  path), sets `log_from` to its seq, and removes the batches before it. A
+  reader that finds batches missing goes on from the snapshot after
   the gap, as a compaction cut short leaves batches before its snapshot.
-  A device that has heard of a page deleted for good also rewrites the
+  A device that has heard of a page or a file deleted for good also rewrites the
   batches of each device not active for 30 days, which compacts its own no
   more, leaving out the same entries and keeping each batch otherwise as it
-  was written: on its next pass, and then daily until 30 days after it
+  was written, and removes that device's versions of pages deleted for
+  good: on its next pass, and then daily until 30 days after it
   heard, by when every device that had not heard either has gone quiet or
-  has come back and compacted its own. It keeps on the device whether its
+  has come back and compacted its own. Only one device rewrites them, the
+  one with the lowest ID among those active within the last day, as its
+  device.json says, so that no two write a batch at once, which iCloud
+  would keep twice; the others look again daily, as that one may go
+  quiet too. A copy iCloud made of a quiet device's batch all the same
+  goes, as no one reads it, or is rewritten the same way when it is of
+  another batch than the one it is beside. A batch that does not parse
+  holds nothing to leave out. It keeps on the device whether its
   log is still to compact, when it last heard of such a page and when it
   last read every quiet device's batches, so that a pass cut short, or an
   app quit, leaves none of it undone.
+- **A deletion for good is final.** An entry with `purged_at` applies it
+  to a row that has none, whatever the versions of its columns: a row sent
+  again whole after a restore that crossed the deletion is later than the
+  deletion, and would otherwise keep it out on some devices but not on
+  others. A reader that has a page deleted for good removes a device's
+  version of it that a batch names, written by a device that had not
+  heard, and waits for none.
 - **A device that finds** in its own folder a batch after the last it wrote
-  (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
+  (other than the one it notes it is writing), or a copy iCloud made that
+  is not a version of the batch beside it (the same `seq` and
+  `written_at`, as two devices rewriting its log while it was quiet leave,
+  which it removes), shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
 - **Blobs** are written by any device that has the file or audio, the same

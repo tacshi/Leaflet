@@ -1952,6 +1952,256 @@ begin
 end;
 $$;
 
+-- A file's path names its own object, {space}/{file}/{name}: one that
+-- names another space's object, or another file's, or no name, is
+-- refused, as a file is made with it or changed to it.
+do $$
+declare
+  v_file constant uuid := 'fc000000-0000-0000-0000-0000000000f6';
+  v_other constant uuid := 'fc000000-0000-0000-0000-0000000000f7';
+  v_space uuid;
+  v_path text;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  foreach v_path in array array[
+    'a2000000-0000-0000-0000-000000000002/' || v_file || '/theirs.txt',
+    v_space || '/' || v_other || '/other.txt',
+    v_space || '/' || v_file || '/',
+    v_space || '/' || v_file || '/a/b.txt'
+  ] loop
+    begin
+      insert into public.files (id, space_id, name, storage_path) values (v_file, v_space, 'f.txt', v_path);
+      raise exception 'a file was made naming % as its object', v_path;
+    exception when check_violation then
+    end;
+  end loop;
+  insert into public.files (id, space_id, name, storage_path) values (v_file, v_space, 'f.txt', v_space || '/' || v_file || '/f.txt');
+  begin
+    update public.files set storage_path = v_space || '/' || v_other || '/other.txt' where id = v_file;
+    raise exception 'a file was changed to name another file''s object';
+  exception when check_violation then
+  end;
+end;
+$$;
+
+-- A recording that names someone else's audio, as one written before
+-- paths were bound could, is not listed as its page is deleted for good,
+-- and its owner does not remove that audio; one that names its own is.
+do $$
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.pages (id, space_id, title)
+  select 'fc000000-0000-0000-0000-000000000007', id, 'Planted' from public.spaces where owner_id = auth.uid();
+end;
+$$;
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+insert into public.recordings (id, page_id, created_by, audio_path) values
+  ('fc000000-0000-0000-0000-0000000000a5', 'fc000000-0000-0000-0000-000000000007', 'a1000000-0000-0000-0000-000000000001',
+   'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a5.wav'),
+  ('fc000000-0000-0000-0000-0000000000a6', 'fc000000-0000-0000-0000-000000000007', 'a1000000-0000-0000-0000-000000000001',
+   'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a9.wav'),
+  ('fc000000-0000-0000-0000-0000000000a7', 'fc000000-0000-0000-0000-000000000007', 'a1000000-0000-0000-0000-000000000001',
+   'a1000000-0000-0000-0000-000000000001/fc000000-0000-0000-0000-0000000000a7.wav');
+insert into storage.objects (bucket_id, name, owner) values
+  ('recordings', 'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a5.wav', 'a2000000-0000-0000-0000-000000000002'),
+  ('recordings', 'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a9.wav', 'a2000000-0000-0000-0000-000000000002'),
+  ('recordings', 'a1000000-0000-0000-0000-000000000001/fc000000-0000-0000-0000-0000000000a7.wav', 'a1000000-0000-0000-0000-000000000001');
+set local role authenticated;
+do $$
+declare
+  v_page constant uuid := 'fc000000-0000-0000-0000-000000000007';
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set deleted_at = now() where id = v_page;
+  update public.pages set purged_at = now() where id = v_page;
+  if pg_temp.seen(format('select 1 from public.purged_objects where page_id = %L and name like %L', v_page, 'a2000000-%')) <> 0 then
+    raise exception 'a recording''s path that named someone else''s audio was listed for the page''s owner';
+  end if;
+  if pg_temp.seen(format('select 1 from public.purged_objects where page_id = %L and name like %L', v_page, 'a1000000-%')) <> 1 then
+    raise exception 'a recording''s own audio was not listed as its page was deleted for good';
+  end if;
+  delete from storage.objects where bucket_id = 'recordings' and name in (
+    'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a5.wav',
+    'a2000000-0000-0000-0000-000000000002/fc000000-0000-0000-0000-0000000000a9.wav');
+  if found then
+    raise exception 'the page''s owner removed someone else''s audio a recording of theirs named';
+  end if;
+end;
+$$;
+
+-- A live page under one deleted for good goes to the top level, out of
+-- the reach of the shares above it: the editor the page above was shared
+-- with has it no more, reads nothing on it, and has no share of it left
+-- for its owner to take back. A deleted one stays under it, in the bin,
+-- and goes to the top level as it is restored. A page made there goes to
+-- the top level too, an editor makes none there, and no one moves one
+-- there.
+do $$
+declare
+  v_top constant uuid := 'fc000000-0000-0000-0000-000000000008';
+  v_live constant uuid := 'fc000000-0000-0000-0000-000000000009';
+  v_bin constant uuid := 'fc000000-0000-0000-0000-00000000000a';
+  v_made constant uuid := 'fc000000-0000-0000-0000-00000000000b';
+  v_moved constant uuid := 'fc000000-0000-0000-0000-00000000000c';
+  v_space uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_top, v_space, 'Shared'), (v_moved, v_space, 'Elsewhere');
+  insert into public.pages (id, space_id, parent_id, title) values
+    (v_live, v_space, v_top, 'Live under it'), (v_bin, v_space, v_top, 'In the bin under it');
+  perform public.share_page(v_top, 'editor@example.com', 'editor');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_top);
+  if public.page_role(v_live) is distinct from 'editor' then
+    raise exception 'the editor does not have the page under the one shared with them';
+  end if;
+
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set deleted_at = now() where id in (v_top, v_bin);
+  update public.pages set purged_at = now() where id = v_top;
+  if (select parent_id from public.pages where id = v_live) is not null then
+    raise exception 'a live page stayed under one deleted for good';
+  end if;
+  if (select parent_id from public.pages where id = v_bin) is distinct from v_top then
+    raise exception 'a deleted page under one deleted for good was moved out of it';
+  end if;
+  if exists (select 1 from public.page_members(v_live) m where m.user_id = 'a2000000-0000-0000-0000-000000000002') then
+    raise exception 'a page out from under one deleted for good is still shared through it';
+  end if;
+  insert into public.pages (id, space_id, parent_id, title) values (v_made, v_space, v_top, 'Made under it');
+  if (select parent_id from public.pages where id = v_made) is not null then
+    raise exception 'a page made under one deleted for good stayed there';
+  end if;
+  perform pg_temp.refused(format('update public.pages set parent_id = %L where id = %L', v_top, v_moved), 'forbidden_move');
+  update public.pages set deleted_at = null where id = v_bin;
+  if (select parent_id from public.pages where id = v_bin) is not null then
+    raise exception 'a page restored under one deleted for good stayed there';
+  end if;
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  if public.page_role(v_live) is not null or public.can_read_page(v_live) then
+    raise exception 'the editor still has a page that was under one deleted for good';
+  end if;
+  perform pg_temp.refused(format('insert into public.pages (space_id, parent_id, title) values (%L, %L, %L)',
+    v_space, v_top, 'Theirs under it'));
+end;
+$$;
+
+-- As a page is deleted for good, the list of objects to remove forgets
+-- what is gone from storage only of the page's owner: someone else's
+-- stays until a page of theirs is deleted for good.
+reset role;
+insert into public.purged_objects (bucket_id, name, owner_id)
+values ('files', 'gone/a2000000-0000-0000-0000-000000000002.txt', 'a2000000-0000-0000-0000-000000000002');
+set local role authenticated;
+do $$
+declare
+  v_mine constant uuid := 'fc000000-0000-0000-0000-00000000000d';
+  v_theirs constant uuid := 'fc000000-0000-0000-0000-00000000000e';
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.pages (id, space_id, title, deleted_at)
+  select v_mine, id, 'Mine', now() from public.spaces where owner_id = auth.uid();
+  update public.pages set purged_at = now() where id = v_mine;
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  if pg_temp.seen('select 1 from public.purged_objects where name like ''gone/%''') <> 1 then
+    raise exception 'one owner''s page deleted for good cleared another''s list';
+  end if;
+  insert into public.pages (id, space_id, title, deleted_at)
+  select v_theirs, id, 'Theirs', now() from public.spaces where owner_id = auth.uid();
+  update public.pages set purged_at = now() where id = v_theirs;
+  if pg_temp.seen('select 1 from public.purged_objects where name like ''gone/%''') <> 0 then
+    raise exception 'the list kept an object gone from storage as its owner deleted a page for good';
+  end if;
+end;
+$$;
+
+-- A deletion for good sent with seen_updated_at, the row's updated_at as
+-- the device last had it from the server, is refused once the row has
+-- changed on the server since, by whatever clock: restored, or deleted
+-- again, by a device whose clock is two days behind, which
+-- purges_its_deletion takes for older than the deletion. One of the row
+-- as it is goes, even with a deletion sent earlier than its last change by
+-- the devices' clocks. No row keeps seen_updated_at. One sent without
+-- it, as by an app from before, still goes by purges_its_deletion.
+do $$
+declare
+  v_back constant uuid := 'fc000000-0000-0000-0000-000000000011';
+  v_again constant uuid := 'fc000000-0000-0000-0000-000000000012';
+  v_kept constant uuid := 'fc000000-0000-0000-0000-000000000013';
+  v_late constant uuid := 'fc000000-0000-0000-0000-000000000014';
+  v_old constant uuid := 'fc000000-0000-0000-0000-000000000015';
+  v_file constant uuid := 'fc000000-0000-0000-0000-0000000000f8';
+  v_file_kept constant uuid := 'fc000000-0000-0000-0000-0000000000f9';
+  v_deleted timestamptz := now() - interval '1 day';
+  v_space uuid;
+  v_seen timestamptz;
+  v_file_seen timestamptz;
+  v_again_seen timestamptz;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title, deleted_at) values
+    (v_back, v_space, 'Back', v_deleted), (v_again, v_space, 'Again', v_deleted),
+    (v_kept, v_space, 'Kept', v_deleted), (v_old, v_space, 'Old', v_deleted);
+  insert into public.pages (id, space_id, title) values (v_late, v_space, 'Late');
+  insert into public.files (id, space_id, name, storage_path, deleted_at, kept) values
+    (v_file, v_space, 'f.txt', v_space || '/' || v_file || '/f.txt', v_deleted, true),
+    (v_file_kept, v_space, 'k.txt', v_space || '/' || v_file_kept || '/k.txt', v_deleted, true);
+  v_seen := (select date_trunc('milliseconds', updated_at) from public.pages where id = v_back);
+  v_again_seen := (select date_trunc('milliseconds', updated_at) from public.pages where id = v_again);
+  v_file_seen := (select date_trunc('milliseconds', updated_at) from public.files where id = v_file);
+  -- The changes below come at least a millisecond after what was seen.
+  perform pg_sleep(0.002);
+
+  update public.pages set deleted_at = null, changed_at = now() - interval '2 days' where id = v_back;
+  perform pg_temp.refused(format('update public.pages set purged_at = now(), deleted_at = %L, seen_updated_at = %L where id = %L',
+    v_deleted, v_seen, v_back), 'page_restored');
+  update public.pages set deleted_at = now() - interval '2 days' where id = v_again;
+  perform pg_temp.refused(format('update public.pages set purged_at = now(), deleted_at = %L, seen_updated_at = %L where id = %L',
+    v_deleted, v_again_seen, v_again), 'page_restored');
+  update public.files set deleted_at = null, changed_at = now() - interval '2 days' where id = v_file;
+  perform pg_temp.refused(format('update public.files set purged_at = now(), deleted_at = %L, seen_updated_at = %L where id = %L',
+    v_deleted, v_file_seen, v_file), 'file_restored');
+  if exists (select 1 from public.pages where id in (v_back, v_again) and purged_at is not null)
+     or exists (select 1 from public.files where id = v_file and purged_at is not null) then
+    raise exception 'a row changed since the deletion its device saw was deleted for good';
+  end if;
+
+  update public.pages set purged_at = now(), deleted_at = v_deleted,
+    seen_updated_at = (select date_trunc('milliseconds', updated_at) from public.pages where id = v_kept)
+  where id = v_kept;
+  update public.pages set purged_at = now(), deleted_at = v_deleted,
+    seen_updated_at = (select date_trunc('milliseconds', updated_at) from public.pages where id = v_late)
+  where id = v_late;
+  update public.files set purged_at = now(), deleted_at = v_deleted,
+    seen_updated_at = (select date_trunc('milliseconds', updated_at) from public.files where id = v_file_kept)
+  where id = v_file_kept;
+  if exists (select 1 from public.pages where id in (v_kept, v_late) and purged_at is null)
+     or exists (select 1 from public.files where id = v_file_kept and purged_at is null) then
+    raise exception 'a row as its device saw it was not deleted for good';
+  end if;
+
+  update public.pages set title = 'Back again', seen_updated_at = now() where id = v_back;
+  if exists (select 1 from public.pages where seen_updated_at is not null)
+     or exists (select 1 from public.files where seen_updated_at is not null) then
+    raise exception 'a row kept seen_updated_at';
+  end if;
+
+  update public.pages set deleted_at = now() where id = v_old;
+  perform pg_temp.refused(format('update public.pages set purged_at = now(), deleted_at = %L where id = %L', v_deleted, v_old),
+    'page_restored');
+  update public.pages set purged_at = now(), deleted_at = (select deleted_at from public.pages where id = v_old) where id = v_old;
+  if (select purged_at from public.pages where id = v_old) is null then
+    raise exception 'a deletion for good sent without seen_updated_at was not taken by the deletion it has';
+  end if;
+end;
+$$;
+
 -- What was on that page is gone, and its invitations with it, but not its
 -- shares.
 reset role;

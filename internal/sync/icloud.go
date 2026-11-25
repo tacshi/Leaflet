@@ -197,6 +197,11 @@ func (s *Service) checkDeviceID(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if copies {
+		if copies, err = s.dropOwnCopies(me); err != nil {
+			return "", err
+		}
+	}
 	seq, _, err := s.st.Lookup("icloud.seq")
 	if err != nil {
 		return "", err
@@ -229,6 +234,37 @@ func (s *Service) checkDeviceID(ctx context.Context) (string, error) {
 	}
 	space, _ := s.st.Value("icloud.space")
 	return next, s.requeueAll(ctx, space)
+}
+
+// dropOwnCopies removes the copies iCloud made of this device's batches that are versions of them, as two devices that
+// took what was on a page deleted for good out of its log while it was quiet leave, and reports whether any other is
+// left: a batch another device wrote as this one, or a file it cannot tell.
+func (s *Service) dropOwnCopies(me string) (bool, error) {
+	copies, err := s.folder().BatchCopies(me)
+	if err != nil {
+		return false, err
+	}
+	other := false
+	for _, c := range copies {
+		if c.Seq == 0 {
+			other = true
+			continue
+		}
+		var b icloud.Batch
+		switch err := s.folder().ReadJSON(c.Path, &b); {
+		case errors.Is(err, icloud.ErrDamaged):
+			other = true
+		case errors.Is(err, icloud.ErrNotReady):
+			return false, err
+		case err != nil || !s.copyOfBatch(me, c.Seq, b):
+			other = true
+		default:
+			if err := s.folder().Remove(c.Path); err != nil {
+				return false, err
+			}
+		}
+	}
+	return other, nil
 }
 
 func (s *Service) wroteBatch(me string, seq int64) (bool, error) {
@@ -339,9 +375,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			return err
 		}
 		switch {
-		case e.Entity == "storage":
-			continue
-		case e.Entity == "storage_delete":
+		case e.Entity == "storage", e.Entity == "storage_delete":
 			continue
 		case s.contentsWait(e):
 			continue
@@ -392,13 +426,21 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			if err := s.setVersion(d.e.Entity, d.e.EntityID, d.cols, d.version); err != nil {
 				return err
 			}
-			if d.e.Entity == "pages" && s.st.IsPurged(d.e.EntityID) {
+			switch {
+			case d.e.Entity == "pages" && s.st.IsPurged(d.e.EntityID):
 				// What was on it is off this device once its deletion is in the log, if it was not yet, as when this
 				// device deleted it for good while syncing through the server.
 				if err := s.st.WipePurged(d.e.EntityID, nil); err != nil {
 					return err
 				}
 				s.dropPurgedPageFile(d.e.EntityID)
+			case d.e.Entity == "files" && s.fileIsPurged(d.e.EntityID):
+				// Its copy here goes once its deletion is in the log, if it was not yet, as when this device deleted
+				// it for good while syncing through the server.
+				if err := s.st.WipePurgedFile(d.e.EntityID); err != nil {
+					return err
+				}
+				s.heardOfPurge()
 			}
 		}
 		if c := d.content; c != nil {
@@ -564,31 +606,42 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 // dropPurgedPageFile removes every device's version of a page deleted for good from the folder, once its deletion is
 // in a batch, sent or read, and has this device's log compacted and those of devices gone quiet redacted, from the
 // next pass on, until they keep nothing that was on it: nothing of what the page was stays in iCloud Drive. A device
-// that had not heard of the deletion, and writes its version again, removes it itself once it does.
+// that had not heard of the deletion, and writes its version again, removes it itself once it does, and a device that
+// reads a batch naming such a version removes that one (applyEntry).
 func (s *Service) dropPurgedPageFile(pageID string) {
-	p, err := s.st.Page(pageID)
-	if err != nil || p.PurgedAt.IsZero() {
-		return
-	}
-	if err := s.setInt(compactSoonKey, 1); err != nil {
-		log.Printf("icloud: page %s: %v", pageID, err)
-	}
-	if err := s.setInt(redactSinceKey, cloudNow().UnixMilli()); err != nil {
-		log.Printf("icloud: page %s: %v", pageID, err)
-	}
+	s.heardOfPurge()
 	devices, err := s.folder().Devices()
 	if err != nil {
 		log.Printf("icloud: page %s: %v", pageID, err)
 		return
 	}
 	for _, d := range devices {
-		rel, err := icloud.PagePath(d, pageID)
-		if err == nil {
-			err = s.folder().Remove(rel)
-		}
-		if err != nil {
-			log.Printf("icloud: page %s of %s: %v", pageID, d, err)
-		}
+		s.dropPageFile(d, pageID)
+	}
+}
+
+// dropPageFile removes the device's version of a page deleted for good, and forgets that it waits for one.
+func (s *Service) dropPageFile(device, pageID string) {
+	rel, err := icloud.PagePath(device, pageID)
+	if err == nil {
+		err = s.folder().Remove(rel)
+	}
+	if err == nil {
+		err = s.st.DeleteValue(wantKey(device, pageID))
+	}
+	if err != nil {
+		log.Printf("icloud: page %s of %s: %v", pageID, device, err)
+	}
+}
+
+// heardOfPurge has this device's log compacted, and those of devices gone quiet redacted, from the next pass on: it
+// has heard of a page or a file deleted for good, which they should keep nothing of.
+func (s *Service) heardOfPurge() {
+	if err := s.setInt(compactSoonKey, 1); err != nil {
+		log.Printf("icloud: compact: %v", err)
+	}
+	if err := s.setInt(redactSinceKey, cloudNow().UnixMilli()); err != nil {
+		log.Printf("icloud: the logs of quiet devices: %v", err)
 	}
 }
 

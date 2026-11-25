@@ -254,7 +254,7 @@ func TestWipeResetsSettings(t *testing.T) {
 	a.saveSettings()
 	posted := make(chan func(), 1)
 	a.post = func(fn func()) { posted <- fn }
-	a.leave(a.st.Wipe, false)
+	a.leave(a.st.ForgetAll, false)
 	(<-posted)()
 	if a.settings.TextSize != store.DefaultSettings().TextSize {
 		t.Errorf("text size %v after the wipe", a.settings.TextSize)

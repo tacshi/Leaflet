@@ -128,7 +128,7 @@ func TestSearchFollowsWritesThroughItsIndex(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM text_writes WHERE indexed = write_id`).Scan(&indexed); err != nil || indexed < 3 {
 		t.Errorf("%d indexed, %v", indexed, err)
 	}
-	if err := s.Wipe(); err != nil {
+	if err := s.ForgetAll(); err != nil {
 		t.Fatal(err)
 	}
 	var left int

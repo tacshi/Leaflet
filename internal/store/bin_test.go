@@ -3,9 +3,11 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,16 @@ func binFile(t *testing.T, s *Store, folderID, pageID string) File {
 		t.Fatal(err)
 	}
 	return f
+}
+
+// binnedPage is the page as the bin lists it, by its deletion.
+func binnedPage(t *testing.T, s *Store, id string) BinRef {
+	t.Helper()
+	p, err := s.Page(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return BinRef{Kind: BinPage, ID: id, DeletedAt: p.DeletedAt}
 }
 
 func queuedOf(t *testing.T, s *Store, entity, id string) (map[string]any, bool) {
@@ -431,7 +443,7 @@ func TestPurgeLeavesPagesOfOtherSpaces(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Purge(WipeNow, BinRef{Kind: BinPage, ID: theirs.ID}); err != nil {
+	if err := s.Purge(WipeNow, binnedPage(t, s, theirs.ID)); err != nil {
 		t.Fatal(err)
 	}
 	if s.IsPurged(theirs.ID) {
@@ -495,7 +507,7 @@ func TestAPurgeOnceTakenKeepsThePageUntilTheServerTakesIt(t *testing.T) {
 	if _, err := s.DeletePage(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Purge(WipeOnceTaken, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+	if err := s.Purge(WipeOnceTaken, binnedPage(t, s, p.ID)); err != nil {
 		t.Fatal(err)
 	}
 	if items, _ := s.Bin(); len(items) != 0 || !s.IsPurged(p.ID) {
@@ -546,7 +558,7 @@ func TestARefusedPurgeBringsThePageBack(t *testing.T) {
 	if _, err := s.DeletePage(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Purge(WipeOnceTaken, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+	if err := s.Purge(WipeOnceTaken, binnedPage(t, s, p.ID)); err != nil {
 		t.Fatal(err)
 	}
 	var entry OutboxEntry
@@ -578,7 +590,7 @@ func TestARefusedPurgeBringsThePageBack(t *testing.T) {
 	if _, err := s.DeletePage(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Purge(WipeNow, BinRef{Kind: BinPage, ID: p.ID}); err != nil {
+	if err := s.Purge(WipeNow, binnedPage(t, s, p.ID)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
@@ -645,5 +657,534 @@ func TestTombstoneRowKeepsWhatAPurgedPageKeeps(t *testing.T) {
 		if g, w := got[k], want[k]; !sameJSON(g, w) {
 			t.Errorf("%s is %v in the log, %v in the row", k, g, w)
 		}
+	}
+}
+
+// TestPurgeTakesOnlyTheDeletionTheBinListed lists the bin, then has a file restored, another restored and put in the
+// bin again, and a page restored, as by another device whose changes came in meanwhile: deleting for good what the bin
+// listed leaves each as it is.
+func TestPurgeTakesOnlyTheDeletionTheBinListed(t *testing.T) {
+	s := open(t)
+	restored := binFile(t, s, "", "")
+	again := binFile(t, s, "", "")
+	page, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	for _, id := range []string{restored.ID, again.ID} {
+		if err := s.TrashFile(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.DeletePage(page.ID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.Bin()
+	if err != nil || len(listed) != 3 {
+		t.Fatalf("bin %+v, %v", listed, err)
+	}
+	nextStamp()
+	for _, id := range []string{restored.ID, again.ID} {
+		if err := s.RestoreFile(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nextStamp()
+	if err := s.TrashFile(again.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestorePages([]string{page.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeNow, refs(listed)...); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.File(restored.ID); !f.PurgedAt.IsZero() || !f.DeletedAt.IsZero() || f.Name != "notes.txt" {
+		t.Errorf("a file restored since the bin was listed is %+v", f)
+	}
+	if _, err := os.Stat(restored.LocalPath); err != nil {
+		t.Errorf("a file restored since the bin was listed lost its copy: %v", err)
+	}
+	if f, _ := s.File(again.ID); !f.PurgedAt.IsZero() || f.DeletedAt.IsZero() {
+		t.Errorf("a file deleted again since the bin was listed is %+v", f)
+	}
+	if s.IsPurged(page.ID) {
+		t.Error("a page restored since the bin was listed was deleted for good")
+	}
+	if items, _ := s.Bin(); len(items) != 1 || items[0].ID != again.ID {
+		t.Fatalf("bin %+v, want the file deleted again", items)
+	}
+	if err := s.EmptyBin(WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.File(again.ID); f.PurgedAt.IsZero() {
+		t.Errorf("the bin as it lists now was not deleted for good: %+v", f)
+	}
+}
+
+// TestARefusedFilePurgeKeepsTheFileWhole deletes a file of the bin for good on a device syncing through the server: its
+// copy stays until the server takes the deletion. The server refuses it, of a file another device put in the bin again
+// since: the file is back in the bin as the server has it, with its contents, here and where they are stored.
+func TestARefusedFilePurgeKeepsTheFileWhole(t *testing.T) {
+	s := open(t)
+	f := binFile(t, s, "", "")
+	if err := s.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	listed, _ := s.Bin()
+	if err := s.Purge(WipeOnceTaken, refs(listed)...); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		t.Errorf("the copy went before the server took the deletion: %v", err)
+	}
+	if removal, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); !queued || removal["path"] != f.StoragePath {
+		t.Fatalf("its stored copy is removed as %v", removal)
+	}
+	var entry OutboxEntry
+	entries, _ := s.Queued()
+	for _, e := range entries {
+		if e.Entity == "files" && e.EntityID == f.ID {
+			entry = e
+		}
+	}
+	there := FileToRemote(f)
+	later := time.Now().Add(time.Minute)
+	there["deleted_at"], there["kept"], there["updated_at"] = iso(later), true, iso(later)
+	if err := s.TakeRemote(entry, there); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.File(f.ID)
+	if err != nil || !got.PurgedAt.IsZero() || !got.Kept || got.Name != "notes.txt" || got.LocalPath == "" {
+		t.Fatalf("the file is %+v, %v", got, err)
+	}
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		t.Errorf("the file back in the bin lost its copy: %v", err)
+	}
+	if _, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); queued {
+		t.Error("the file back in the bin is still removed where it is stored")
+	}
+	if items, _ := s.Bin(); len(items) != 1 || items[0].ID != f.ID {
+		t.Fatalf("bin %+v", items)
+	}
+	listed, _ = s.Bin()
+	if err := s.Purge(WipeOnceTaken, refs(listed)...); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WipePurgedFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stayed once the server took the deletion: %v", err)
+	}
+	if got, _ := s.File(f.ID); got.LocalPath != "" {
+		t.Errorf("the file keeps a copy at %q", got.LocalPath)
+	}
+}
+
+// TestAPagePurgeKeepsTheRemovalOfAFileDeletedForGoodOnIt deletes a file for good, then its page, before the removal of
+// the file's stored copy went: the removal stays, though the page's purge lists the file no more.
+func TestAPagePurgeKeepsTheRemovalOfAFileDeletedForGoodOnIt(t *testing.T) {
+	for _, wipe := range []Wipe{WipeNow, WipeOnceTaken} {
+		s := open(t)
+		p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+		f := binFile(t, s, "", p.ID)
+		if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteFile(f); err != nil {
+			t.Fatal(err)
+		}
+		if removal, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); !queued || removal["page_id"] != nil {
+			t.Fatalf("the file's stored copy is removed as %v", removal)
+		}
+		if _, err := s.DeletePage(p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Purge(wipe, binnedPage(t, s, p.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if wipe == WipeOnceTaken {
+			if err := s.WipePurged(p.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if removal, queued := queuedOf(t, s, "storage_delete", "files/"+f.ID); !queued || removal["path"] != f.StoragePath {
+			t.Errorf("wipe %d: the removal of the file deleted for good went with its page: %v", wipe, removal)
+		}
+	}
+}
+
+// TestAFileRestoredAcrossItsPurgeIsNoFileToList takes the row of a file deleted for good on one device while another
+// restored it, which says it was deleted for good and not that it was deleted: it is not listed, and keeps nothing.
+func TestAFileRestoredAcrossItsPurgeIsNoFileToList(t *testing.T) {
+	s := open(t)
+	f := binFile(t, s, "", "")
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	row := FileToRemote(f)
+	now := time.Now()
+	row["deleted_at"], row["purged_at"], row["updated_at"] = nil, iso(now), iso(now)
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	if files, _ := s.Files(); len(files) != 0 {
+		t.Errorf("a file deleted for good is listed: %+v", files)
+	}
+	got, err := s.File(f.ID)
+	if err != nil || got.DeletedAt.UnixMilli() != now.UnixMilli() || got.Name != "" || got.StoragePath != "" {
+		t.Errorf("the file deleted for good is %+v, %v", got, err)
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a file deleted for good kept its copy: %v", err)
+	}
+}
+
+// TestAFileDeletedForGoodKeepsNothingOfWhatItWas deletes a file of the bin for good: its row keeps no name, type, size
+// or path, here or as it goes up with its deletion, and only the removal of its stored copy says where that was.
+func TestAFileDeletedForGoodKeepsNothingOfWhatItWas(t *testing.T) {
+	s := open(t)
+	f := binFile(t, s, "", "")
+	if err := s.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EmptyBin(WipeNow); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.File(f.ID)
+	if got.Name != "" || got.MimeType != "" || got.SizeBytes != 0 || got.StoragePath != "" || got.PurgedAt.IsZero() {
+		t.Errorf("a file deleted for good keeps %+v", got)
+	}
+	row, queued := queuedOf(t, s, "files", f.ID)
+	cols, _ := row[ChangedKey].([]any)
+	if !queued || row["name"] != "" || row["storage_path"] != nil || !slices.Contains(cols, any("deleted_at")) ||
+		!slices.Contains(cols, any("purged_at")) || !slices.Contains(cols, any("name")) {
+		t.Errorf("goes up as %v", row)
+	}
+	if removal, _ := queuedOf(t, s, "storage_delete", "files/"+f.ID); removal["path"] != f.StoragePath {
+		t.Errorf("its stored copy is removed as %v", removal)
+	}
+	other := binFile(t, s, "", "")
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	pulled := FileToRemote(other)
+	now := iso(time.Now())
+	pulled["deleted_at"], pulled["purged_at"], pulled["updated_at"] = now, now, now
+	if err := s.PutRemoteFile(pulled); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.File(other.ID); got.Name != "" || got.StoragePath != "" || got.SizeBytes != 0 {
+		t.Errorf("a file deleted for good elsewhere keeps %+v here", got)
+	}
+}
+
+func TestFileTombstoneRowKeepsWhatAPurgedFileKeeps(t *testing.T) {
+	f := File{ID: "f1", SpaceID: "s1", Name: "secret.txt", StoragePath: "s1/f1/secret.txt", MimeType: "text/plain",
+		SizeBytes: 9, DeletedAt: time.Now(), Kept: true, PurgedAt: time.Now()}
+	want := FileToRemote(fileTombstone(f))
+	got := FileTombstoneRow(FileToRemote(f))
+	for k := range purgedFileBlank {
+		if g, w := got[k], want[k]; !sameJSON(g, w) {
+			t.Errorf("%s is %v in the log, %v in the row", k, g, w)
+		}
+	}
+}
+
+// TestAPurgeRemovesOnlyWhatItsRowsStore has on a page deleted for good a file row naming another file's object and a
+// recording naming another's audio, as a page's writer could put there, and the server listing objects this device has
+// on another page: none of those is removed.
+func TestAPurgeRemovesOnlyWhatItsRowsStore(t *testing.T) {
+	s := open(t)
+	sess := s.Session()
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	other, _ := s.CreatePage(NewPageOptions{Title: "Other"})
+	own := binFile(t, s, "", p.ID)
+	elsewhere := binFile(t, s, "", other.ID)
+	now := time.Now()
+	planted := File{ID: doc.NewRowID(), SpaceID: sess.SpaceID, PageID: p.ID, Name: "x.txt", StoragePath: elsewhere.StoragePath,
+		CreatedAt: now, UpdatedAt: now}
+	if err := s.PutFile(planted); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []Recording{
+		{ID: "mine", PageID: p.ID, BlockID: "b1", AudioPath: sess.UserID + "/mine.wav", Status: "ready"},
+		{ID: "planted", PageID: p.ID, BlockID: "b2", AudioPath: "someone/theirs.wav", Status: "ready"},
+		{ID: "theirs", PageID: other.ID, BlockID: "b3", AudioPath: "someone/theirs.wav", Status: "ready"},
+	} {
+		if err := s.PutRecording(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeOnceTaken, binnedPage(t, s, p.ID)); err != nil {
+		t.Fatal(err)
+	}
+	listed := []StoredObject{{"files", elsewhere.StoragePath}, {"recordings", "someone/theirs.wav"}, {"files", "space/gone/photo.png"}}
+	if err := s.WipePurged(p.ID, listed); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	entries, _ := s.Queued()
+	for _, e := range entries {
+		if e.Entity == "storage_delete" {
+			keys = append(keys, e.EntityID)
+		}
+	}
+	slices.Sort(keys)
+	if want := []string{"files/" + own.ID, "files/space/gone/photo.png", "recordings/mine"}; !slices.Equal(keys, want) {
+		t.Errorf("removes %v, want %v", keys, want)
+	}
+}
+
+// TestLivePagesUnderAPageDeletedForGoodGoToTheTop deletes for good pages with a live page under each, as a device that
+// had not heard of their deletion made: the live pages go to the top level of the space, as the server puts them and
+// the sidebar shows them, here as the deletion is made, heard of, or taken by the server. A page shared with this
+// account stays where the server says.
+func TestLivePagesUnderAPageDeletedForGoodGoToTheTop(t *testing.T) {
+	s := open(t)
+	space := s.Session().SpaceID
+	under := func(parent Page) Page {
+		t.Helper()
+		kid := Page{ID: doc.NewRowID(), SpaceID: parent.SpaceID, ParentID: parent.ID, Title: "Kid", SortKey: "V",
+			CreatedAt: time.Now(), ChangedAt: time.Now()}
+		row := PageToRemote(kid)
+		row["updated_at"] = iso(time.Now())
+		if err := s.PutRemotePage(row); err != nil {
+			t.Fatal(err)
+		}
+		return kid
+	}
+	purgedRow := func(p Page) map[string]any {
+		row := PageToRemote(p)
+		now := iso(time.Now())
+		row["updated_at"], row["deleted_at"], row["purged_at"], row["title"] = now, now, now, ""
+		return row
+	}
+	here, _ := s.CreatePage(NewPageOptions{Title: "Here"})
+	if _, err := s.DeletePage(here.ID); err != nil {
+		t.Fatal(err)
+	}
+	hereKid := under(here)
+	if err := s.Purge(WipeNow, binnedPage(t, s, here.ID)); err != nil {
+		t.Fatal(err)
+	}
+	heard, _ := s.CreatePage(NewPageOptions{Title: "Heard"})
+	heardKid := under(heard)
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemotePage(purgedRow(heard)); err != nil {
+		t.Fatal(err)
+	}
+	taken, _ := s.CreatePage(NewPageOptions{Title: "Taken"})
+	if _, err := s.DeletePage(taken.ID); err != nil {
+		t.Fatal(err)
+	}
+	takenKid := under(taken)
+	if err := s.Purge(WipeOnceTaken, binnedPage(t, s, taken.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(takenKid.ID); got.ParentID != taken.ID {
+		t.Errorf("a page moved out before the server took the deletion, to %q", got.ParentID)
+	}
+	if err := s.WipePurged(taken.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, kid := range []Page{hereKid, heardKid, takenKid} {
+		if got, err := s.Page(kid.ID); err != nil || got.ParentID != "" || !got.DeletedAt.IsZero() || got.SpaceID != space {
+			t.Errorf("a live page under one deleted for good is %+v, %v", got, err)
+		}
+		if _, queued := queuedOf(t, s, "pages", kid.ID); queued {
+			t.Errorf("the move of %s goes up", kid.ID)
+		}
+	}
+	theirs, _ := s.CreatePage(NewPageOptions{Title: "Theirs", SpaceID: "space-other"})
+	theirKid := under(theirs)
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemotePage(purgedRow(theirs)); err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsPurged(theirs.ID) {
+		t.Fatal("the shared page was not deleted for good")
+	}
+	if got, _ := s.Page(theirKid.ID); got.ParentID != theirs.ID {
+		t.Errorf("a page shared with this account moved to %q", got.ParentID)
+	}
+}
+
+// TestTheServersTimeOfARowOutlastsChangesMadeHere keeps the server's updated_at of a page and a file as they came, or
+// as the server took their writes, past changes made here since, which pulled_at does not outlast: a deletion for good
+// sends it.
+func TestTheServersTimeOfARowOutlastsChangesMadeHere(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	f := binFile(t, s, "", "")
+	if _, err := s.db.Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.SeenAt("pages", p.ID); ok {
+		t.Error("a page made here has the server's time")
+	}
+	at := time.UnixMilli(time.Now().Add(-time.Hour).UnixMilli())
+	row := PageToRemote(p)
+	row["updated_at"] = iso(at)
+	if err := s.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	fileRow := FileToRemote(f)
+	fileRow["updated_at"] = iso(at)
+	if err := s.PutRemoteFile(fileRow); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPageTags(p.ID, []string{"work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TrashFile(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"pages", "files"} {
+		id := map[string]string{"pages": p.ID, "files": f.ID}[table]
+		if got, ok := s.SeenAt(table, id); !ok || !got.Equal(at) {
+			t.Errorf("%s: the server's time is %v, %v, want %v", table, got, ok, at)
+		}
+		if _, pulled := s.RowPulledAt(table, id); pulled {
+			t.Errorf("%s: changed here, and still pulled", table)
+		}
+	}
+	if err := s.NoteSeen("pages", p.ID, at.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.NoteSeen("pages", p.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SeenAt("pages", p.ID); !got.Equal(at.Add(time.Second)) {
+		t.Errorf("the server's time went back to %v", got)
+	}
+	peer, _ := s.CreatePage(NewPageOptions{Title: "From a peer"})
+	row = PageToRemote(peer)
+	row["updated_at"], row[PeerKey] = iso(at), true
+	if err := s.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.SeenAt("pages", peer.ID); ok {
+		t.Error("a row from another device through iCloud Drive has the server's time")
+	}
+}
+
+// TestWipingAPageForgetsWhatThisDeviceKeptOfIt deletes a page for good: the chats, an agent's last edit and the
+// reminders given of it go with it, and the reminders of every page with the account.
+func TestWipingAPageForgetsWhatThisDeviceKeptOfIt(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plans"})
+	other, _ := s.CreatePage(NewPageOptions{Title: "Other"})
+	keys := []string{"chat." + p.ID, "mcp_edited:" + p.ID, "reminded:" + p.ID + "#b1", "reminded:" + p.ID + "#b2"}
+	for _, k := range append(keys, "reminded:"+other.ID+"#b1") {
+		if err := s.SetValue(k, "1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.DeletePage(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeNow, binnedPage(t, s, p.ID)); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		if _, ok := s.Value(k); ok {
+			t.Errorf("%s stayed", k)
+		}
+	}
+	if _, ok := s.Value("reminded:" + other.ID + "#b1"); !ok {
+		t.Error("another page's reminder went")
+	}
+	if err := s.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Value("reminded:" + other.ID + "#b1"); ok {
+		t.Error("a reminder stayed past the account")
+	}
+}
+
+func TestDropUnsentRemovesTheCopiesOfItsFiles(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{})
+	f := binFile(t, s, "", p.ID)
+	if dropped, err := s.DropUnsent(p.ID); err != nil || !dropped {
+		t.Fatalf("not dropped: %v %v", dropped, err)
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy of a file on the page dropped stayed: %v", err)
+	}
+}
+
+// TestADatabaseKeepsTheServersTimesAndScrubsFilesDeletedForGood opens a database from before server_at: a row pulled
+// keeps the server's time it came with, a file deleted for good keeps nothing of what it was, and a removal of where a
+// file is stored no longer goes with a page.
+func TestADatabaseKeepsTheServersTimesAndScrubsFilesDeletedForGood(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.ReplaceAll(strings.ReplaceAll(schema, ",\n  server_at INTEGER", ""), ", server_at INTEGER", "")
+	if strings.Contains(before, "server_at") {
+		t.Fatal("the schema keeps server_at")
+	}
+	writeDB(t, path, before,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at, pulled_at) VALUES ('p1', 's1', 'Plan', 'a', 1, 9000, 5000)`,
+		`INSERT INTO files (id, space_id, name, storage_path, mime_type, size_bytes, created_at, updated_at, purged_at)
+			VALUES ('f1', 's1', 'secret.txt', 's1/f1/secret.txt', 'text/plain', 9, 1, 9000, 8000)`,
+		`INSERT INTO outbox (entity, entity_id, op, payload, page_id, created_at)
+			VALUES ('storage_delete', 'files/f1', 'upsert', '{}', 'p1', 1)`,
+		fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations)-1))
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if at, ok := s.SeenAt("pages", "p1"); !ok || at.UnixMilli() != 5000 {
+		t.Errorf("the page has the server's time %v, %v", at, ok)
+	}
+	f, err := s.File("f1")
+	if err != nil || f.Name != "" || f.StoragePath != "" || f.SizeBytes != 0 || f.DeletedAt.UnixMilli() != 8000 {
+		t.Errorf("the file deleted for good is %+v, %v", f, err)
+	}
+	if _, err := s.DeletePage("p1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(WipeNow, binnedPage(t, s, "p1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, queued := queuedOf(t, s, "storage_delete", "files/f1"); !queued {
+		t.Error("the removal went with the page")
+	}
+}
+
+func TestForgetAllKeepsWhenTheDeviceFirstHadTheBin(t *testing.T) {
+	s := open(t)
+	since, ok := s.Value(binSinceKey)
+	if !ok {
+		t.Fatal("the device never had the bin")
+	}
+	if err := s.SetValue("theme", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetAll(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Value(binSinceKey); got != since {
+		t.Errorf("the device had the bin since %q, now %q", since, got)
+	}
+	if _, ok := s.Value("theme"); ok {
+		t.Error("a setting stayed")
 	}
 }

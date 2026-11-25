@@ -275,6 +275,10 @@ func TestFolderFiles(t *testing.T) {
 	if err := c.TrashFile(id); err != nil {
 		t.Fatal(err)
 	}
+	// The bin shows it again, deleted anew, before it is deleted for good.
+	if got := bin(); len(got) != 1 || got[0].ID != id {
+		t.Fatalf("bin %+v", got)
+	}
 	if err := c.BinPurge("file", id); err != nil {
 		t.Fatal(err)
 	}

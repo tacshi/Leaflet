@@ -67,7 +67,9 @@ func adopting(row map[string]any, at time.Time) map[string]any {
 	return row
 }
 
-func queueChange(q querier, entity, id string, old, row map[string]any, label, pageID string) error {
+// queueChange queues what row changed from old, with what was queued of it before, or the whole row when it has no
+// old one or the whole row was queued; the always columns go with the change whatever they were.
+func queueChange(q querier, entity, id string, old, row map[string]any, label, pageID string, always ...string) error {
 	if old == nil {
 		return queue(q, entity, id, row, label, pageID)
 	}
@@ -80,6 +82,11 @@ func queueChange(q querier, entity, id string, old, row map[string]any, label, p
 			return err
 		}
 		return queue(q, entity, id, row, label, pageID)
+	}
+	for _, c := range always {
+		if !slices.Contains(cols, c) {
+			cols = append(cols, c)
+		}
 	}
 	if cols = withChanged(cols, old, row); len(cols) == 0 {
 		return nil

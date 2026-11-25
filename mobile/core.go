@@ -25,6 +25,7 @@ type Core struct {
 	pages      map[string]*openPage
 	editors    int64
 	cards      map[string]doc.Position
+	binListed  map[string]store.BinRef
 	locale     atomic.Pointer[string]
 	chatgpt    chatgptSignIn
 	choosing   projectChoice

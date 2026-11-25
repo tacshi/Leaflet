@@ -477,11 +477,14 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 	files := map[string]string{}
 	videos := map[string]map[string]doc.Video{}
 	media := map[string]map[string]string{}
+	// Each page's content, read once: the pages are written once every file of theirs is in.
+	contents := map[string]*doc.Content{}
 	for _, p := range pages {
 		c := content(p.ID)
 		if c == nil {
 			continue
 		}
+		contents[p.ID] = c
 		videos[p.ID], media[p.ID] = map[string]doc.Video{}, map[string]string{}
 		var fail error
 		c.Walk(func(n, _ *doc.Node) {
@@ -520,7 +523,7 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 		}
 	}
 	for _, p := range pages {
-		c := content(p.ID)
+		c := contents[p.ID]
 		if c == nil {
 			continue
 		}

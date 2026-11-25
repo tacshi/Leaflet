@@ -160,7 +160,12 @@ func TestInterruptCutsAPageCheckAndAsksNothingMeanwhile(t *testing.T) {
 	}
 	interrupting.Store(true)
 	ran := make(chan bool, 1)
-	go svc.Interrupt(func() { ran <- svc.CanSync() })
+	go func() {
+		can := true
+		svc.Interrupt(func() { can = svc.CanSync() })
+		// Told once Interrupt has returned, and sync may start again.
+		ran <- can
+	}()
 	select {
 	case can := <-ran:
 		if can {

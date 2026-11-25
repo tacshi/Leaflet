@@ -55,7 +55,7 @@ func fail(t *testing.T, s *Store, when, table string) {
 	}
 }
 
-func TestWipeIsAllOrNothing(t *testing.T) {
+func TestForgetAllIsAllOrNothing(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "kept"})
 	if err != nil {
@@ -65,8 +65,8 @@ func TestWipeIsAllOrNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	fail(t, s, "DELETE", "key_values")
-	if err := s.Wipe(); err == nil {
-		t.Fatal("wiped past a refused delete")
+	if err := s.ForgetAll(); err == nil {
+		t.Fatal("forgot past a refused delete")
 	}
 	if got, err := s.Page(p.ID); err != nil || got.Title != "kept" {
 		t.Errorf("page %+v, %v", got, err)

@@ -1287,7 +1287,7 @@ const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;
   document.querySelectorAll("figure.embed iframe").forEach(function (f) {
-    if (f.contentWindow === e.source) f.style.height = Math.max(+f.dataset.height, Math.min(z[0], 1200)) + "px";
+    if (f.contentWindow === e.source) f.style.height = Math.max(120, Math.min(z[0], 1200)) + "px";
   });
 });`
 

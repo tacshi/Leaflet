@@ -247,3 +247,16 @@ func TestDefaultEmbedTitleShowsInTheAppsLanguage(t *testing.T) {
 		t.Errorf("the corner window shows %v", tt.Texts())
 	}
 }
+
+// An embed's frame fits its content, shorter than its stored height too,
+// so no space is left under what it holds, between 120 and 1200 tall.
+func TestEmbedFrameFitsItsContent(t *testing.T) {
+	for content, want := range map[float32]float32{700: 700, 40: 120, 5000: 1200} {
+		if got := embedFrame(content); got != want {
+			t.Errorf("content %v: frame %v, want %v", content, got, want)
+		}
+	}
+	if strings.Contains(embedScript, "dataset.height") {
+		t.Error("a public page's embed keeps its stored height as the least it shows")
+	}
+}

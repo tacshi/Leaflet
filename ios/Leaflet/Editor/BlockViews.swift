@@ -121,10 +121,11 @@ struct BlockCard: View {
         case "map": BlockHeights.of(node.id, width: width) ?? MapBlockView.mapHeight + scaled(80)
         case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         case "recording", "file": BlockHeights.of(node.id, width: width) ?? scaled(64)
+        // An embed's frame fits its content, from 120 to 1200 points; its
+        // stored height sizes it only until the content says how tall it is.
         case "embed":
-            max(
-                CGFloat(min(max(node.data?["height"]?.int ?? 320, 120), 1200)),
-                min(BlockHeights.of(node.id, width: width) ?? 0, 1200))
+            BlockHeights.of(node.id, width: width).map { min(max($0, 120), 1200) }
+                ?? CGFloat(min(max(node.data?["height"]?.int ?? 320, 120), 1200))
         default: scaled(64)
         }
     }

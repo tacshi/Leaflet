@@ -812,11 +812,15 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 			})
 		})
 		html := n.Str("html")
-		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
-			return max(height, min(content, 1200))
-		}, height)
+		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, embedFrame, height)
 	})
 }
+
+// embedFrame is the height of an embed's frame for its content's: the
+// content's own, from 120 to 1200, so that the frame neither scrolls nor
+// leaves space under what it holds. The block's stored height sizes the
+// frame only until its content says how tall it is.
+func embedFrame(content float32) float32 { return min(max(content, 120), 1200) }
 
 type embedInput struct {
 	src, kind string

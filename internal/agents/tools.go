@@ -11,9 +11,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"leaflet/internal/doc"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/store"
 	"leaflet/internal/web"
 	"leaflet/locales"
@@ -75,6 +77,28 @@ var blockSchema = map[string]any{
 			}, "required": []string{"name", "values"}}},
 			"caption": map[string]any{"type": "string"},
 		}, "required": []string{"chart_type", "labels", "series"}},
+		"card": map[string]any{"type": "object", "description": "Facts at a glance under a title with an icon. Layout figures shows two to four short values large, side by side, as a trip's time and fare; details shows label: value lines beside a picture, as a place's address, transport and phone numbers. A note and the pages the facts come from go under them. It needs a title or facts.",
+			"properties": map[string]any{
+				"layout": map[string]any{"type": "string", "enum": []string{"figures", "details"}},
+				"icon":   map[string]any{"type": "string", "enum": doc.CardIcons, "description": "An icon before the title, for what the card is about."},
+				"title":  map[string]any{"type": "string"},
+				"image":  map[string]any{"type": "string", "description": "For details: a picture's web link, shown beside the facts."},
+				"facts": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"label": map[string]any{"type": "string"},
+					"value": map[string]any{"type": "string", "description": "Inline markdown, as **3946 6888** for a number to stand out."},
+				}, "required": []string{"label", "value"}}},
+				"note": map[string]any{"type": "string", "description": "A short line under the facts, in inline markdown: what they leave out or assume."},
+				"sources": map[string]any{"type": "array", "description": "The pages the facts come from, shown as chips: links a search found or of a page you read.",
+					"items": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}}, "required": []string{"url"}}},
+			}},
+		"map": map[string]any{"type": "object", "description": "A map of places, and of a route between them that find_route found. With a route and no places, it marks the route's ends.",
+			"properties": map[string]any{
+				"title": map[string]any{"type": "string"},
+				"places": map[string]any{"type": "array", "description": "Places as find_place gave them.", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"name": map[string]any{"type": "string"}, "lat": map[string]any{"type": "number"}, "lng": map[string]any{"type": "number"},
+				}, "required": []string{"lat", "lng"}}},
+				"route": map[string]any{"type": "string", "description": "The id find_route gave the route, as \"r1\". In replace_block, none takes the map's route off; a title, places or route not given stay as they were."},
+			}},
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer", "minimum": 120, "maximum": 1200}},
 			"required":   []string{"html"}},
@@ -210,6 +234,8 @@ type ToolContext struct {
 	Request       string
 	SearchWeb     func(query string) (Search, error)
 	ReadWeb       func(link string) (web.Page, error)
+	FindPlaces    func(query string, near *doc.LatLng) ([]mapsvc.Place, error)
+	FindRoutes    func(from, to doc.LatLng, mode string, depart time.Time) ([]doc.MapRoute, error)
 	Workspace     *Workspace
 }
 
@@ -487,6 +513,7 @@ type Executor struct {
 	found, sources   map[string]bool
 	followed         int
 	written          int
+	book             *RouteBook
 	Refused          string
 }
 
@@ -562,9 +589,7 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	for _, n := range nodes {
 		walk(n, func(k *doc.Node) {
 			see(urls, k.Data)
-			if loads[k.Type] {
-				see(loaded, k.Data["url"])
-			}
+			see(loaded, doc.LoadedURL(k))
 		})
 	}
 	first := func(set map[string]bool, may func(string) bool) string {
@@ -588,14 +613,12 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	switch {
 	case bad == "":
 	case x.armed:
-		return terr("After reading another page, a picture, a video or a link card may only hold a URL that one of this page held before you began, or that is in the user's request, which %s is not: among the URLs this page only names, the one picked could carry what you read, as the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading another page, a picture, a video, a link card or a card's picture may only hold a URL that one of this page held before you began, or that is in the user's request, which %s is not: among the URLs this page only names, the one picked could carry what you read, as the app loads it by itself. Link to it in text instead.", bad)
 	default:
-		return terr("After reading the web, a picture, a video or a link card may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading the web, a picture, a video, a link card or a card's picture may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
 	}
 	return nil
 }
-
-var loads = map[string]bool{"image": true, "link_preview": true, "video": true}
 
 func (x *Executor) given(u string) bool {
 	u = canonURL(u)
@@ -867,25 +890,39 @@ func reason(err error) string {
 
 func (x *Executor) begin() {
 	c := x.Ctx
-	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
-		x.allowed, x.loaded = map[string]bool{}, map[string]bool{}
+	guards := x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil ||
+		c.ReadWeb != nil || c.SearchWeb != nil || c.FindPlaces != nil || c.FindRoutes != nil || c.Captions != nil || c.Workspace != nil
+	if x.allowed != nil || !guards {
+		return
+	}
+	x.allowed, x.loaded = map[string]bool{}, map[string]bool{}
+	// An executor that only finds places, as leaflet mcp's, has no page.
+	if c.Content != nil {
 		views := doc.BlockViews(c.Content)
 		for _, v := range views {
 			withoutSiteInfo(v)
 		}
 		see(x.allowed, views)
-		see(x.allowed, c.Request)
 		c.Content.Walk(func(n, _ *doc.Node) {
-			if loads[n.Type] {
-				see(x.loaded, n.Data["url"])
-			}
+			see(x.loaded, doc.LoadedURL(n))
 		})
-		see(x.loaded, c.Request)
 	}
+	see(x.allowed, c.Request)
+	see(x.loaded, c.Request)
 }
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
 	x.begin()
+	switch name {
+	case "find_place":
+		return x.findPlace(args)
+	case "find_route":
+		return x.findRoute(args)
+	}
+	args, err := x.withRoutes(name, args)
+	if err != nil {
+		return nil, err
+	}
 	if x.Ctx.Workspace != nil {
 		return x.workspace(name, args)
 	}
@@ -1191,6 +1228,7 @@ func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, 
 			return n, nil
 		}
 	}
+	spec = doc.KeptMapSpec(prev, spec)
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -1388,7 +1426,7 @@ var kinds = map[string]func() string{
 	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
 	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
 	"toggle_list": locales.AgentEditToggle, "link_preview": locales.AgentEditLinkCard, "math_equation": locales.AgentEditFormula, "diagram": locales.AgentEditDiagram,
-	"subpage": locales.AgentEditSubpageLink,
+	"subpage": locales.AgentEditSubpageLink, "card": locales.AgentEditCard, "map": locales.AgentEditMap,
 }
 
 func summaryFor(verb func(what string) string, nodes []*doc.Node) string {

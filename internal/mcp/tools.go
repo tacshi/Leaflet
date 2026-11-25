@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/store"
 )
 
@@ -39,6 +41,8 @@ var hints = map[string]struct {
 	"rename_folder":  {"Rename Folder", false, true},
 	"move_folder":    {"Move Folder", false, true},
 	"upload_files":   {"Upload Files", false, false},
+	"find_place":     {"Find Place", true, false},
+	"find_route":     {"Find Route", true, false},
 }
 
 func toolList() []map[string]any {
@@ -123,6 +127,16 @@ func toolList() []map[string]any {
 	add("rename_folder", "Change a folder's name.", object(map[string]any{"folder_id": folderID, "name": map[string]any{"type": "string"}}, "folder_id", "name"))
 	add("move_folder", "Move a folder, with what is in it, last into another folder, or with no parent_folder_id to the top level.",
 		object(map[string]any{"folder_id": folderID, "parent_folder_id": parentFolderID}, "folder_id"))
+	for _, d := range agents.MapToolDefinitions() {
+		fn := d["function"].(map[string]any)
+		add(fn["name"].(string), fn["description"].(string), fn["parameters"].(map[string]any))
+	}
+	// Finding places and routes asks services on the web: no page changes, but the world is open.
+	for _, t := range out {
+		if n := t["name"]; n == "find_place" || n == "find_route" {
+			t["annotations"].(map[string]any)["openWorldHint"] = true
+		}
+	}
 	return out
 }
 
@@ -134,6 +148,13 @@ type pageTools struct {
 	edited map[string]int64
 	read   map[string]sight
 	order  []string
+	// routes are the routes find_route found this session, for the maps
+	// its calls write to name by their ids.
+	routes agents.RouteBook
+	// findPlaces and findRoutes ask the map services, which tests answer
+	// in their place.
+	findPlaces func(q string, near *doc.LatLng) ([]mapsvc.Place, error)
+	findRoutes func(from, to doc.LatLng, mode string, depart time.Time) ([]doc.MapRoute, error)
 }
 
 const keptReads = 16
@@ -149,6 +170,10 @@ func (t *pageTools) keep(id string, c sight) {
 
 func (t *pageTools) call(name string, args map[string]any) map[string]any {
 	clean, _ := cleanArg(args).(map[string]any)
+	clean, err := agents.ResolveRoutes(&t.routes, name, clean)
+	if err != nil {
+		return agents.ToolAnswer(nil, err)
+	}
 	out := agents.ToolAnswer(t.dispatch(name, clean))
 	if out["error"] == doc.NeedsImageURL {
 		out["error"] = doc.NeedsImageURL + " For a picture on this computer, use upload_files with its path."
@@ -183,6 +208,25 @@ var errUnreadable = toolErr("The page's content could not be read, so it was lef
 func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	switch name {
+	case "find_place", "find_route":
+		tc := agents.ToolContext{FindPlaces: t.findPlaces, FindRoutes: t.findRoutes}
+		if tc.FindPlaces == nil {
+			tc.FindPlaces = func(q string, near *doc.LatLng) ([]mapsvc.Place, error) {
+				return mapsvc.FindPlaces(context.Background(), q, near, 5)
+			}
+		}
+		if tc.FindRoutes == nil {
+			tc.FindRoutes = func(from, to doc.LatLng, mode string, depart time.Time) ([]doc.MapRoute, error) {
+				return mapsvc.FindRoutes(context.Background(), from, to, mode, depart)
+			}
+		}
+		x := &agents.Executor{Ctx: tc}
+		x.UseRoutes(&t.routes)
+		out := x.Call(name, args)
+		if e, ok := out["error"].(string); ok {
+			return nil, toolErr(e)
+		}
+		return out, nil
 	case "list_pages":
 		return t.listPages()
 	case "search_pages":
@@ -485,6 +529,7 @@ func (t *pageTools) onPage(name string, args map[string]any, run func(x *agents.
 		}
 		before := content.Copy()
 		x := &agents.Executor{Ctx: tc}
+		x.UseRoutes(&t.routes)
 		if run != nil {
 			out = run(x)
 		} else {

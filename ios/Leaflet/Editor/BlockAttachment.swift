@@ -211,7 +211,7 @@ final class BlockViews {
         }
     }
 
-    static let editable: Set = ["chart", "math_equation", "diagram", "embed"]
+    static let editable: Set = ["chart", "card", "map", "math_equation", "diagram", "embed"]
 
     func menuHit(_ point: CGPoint) -> (node: DocNode, view: UIView)? {
         guard editable, edit != nil else { return nil }

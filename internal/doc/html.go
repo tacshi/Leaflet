@@ -231,7 +231,7 @@ func (w htmlWriter) blocks(nodes []*Node) {
 	}
 }
 
-var whole = map[string]bool{"code": true, "quote": true, "callout": true, "image": true, "chart": true, "video": true, "link_preview": true,
+var whole = map[string]bool{"code": true, "quote": true, "callout": true, "image": true, "chart": true, "video": true, "link_preview": true, "card": true, "map": true,
 	"file": true, "subpage": true, "embed": true, "math_equation": true, "diagram": true}
 
 func (w htmlWriter) item(n *Node) {
@@ -429,6 +429,10 @@ func (w htmlWriter) block(n *Node) {
 		w.write("</figure>\n")
 	case "link_preview":
 		w.card(n)
+	case "card":
+		w.factCard(n)
+	case "map":
+		w.mapFigure(n)
 	case "file":
 		w.file(n)
 	case "recording":
@@ -759,9 +763,9 @@ func SafeHref(s string) string {
 	return ""
 }
 
-const pageCSS = pageVarsCSS + pageDarkCSS + pageRulesCSS + peleDarkCSS
+const pageCSS = pageVarsCSS + pageDarkCSS + pageRulesCSS + cardCSS + mapCSS + peleDarkCSS
 
-const printCSS = pageVarsCSS + pageRulesCSS + `:root{color-scheme:light}
+const printCSS = pageVarsCSS + pageRulesCSS + cardCSS + mapCSS + `:root{color-scheme:light}
 body{font-size:15px}
 main{max-width:none;padding:0}
 pre{white-space:pre-wrap}

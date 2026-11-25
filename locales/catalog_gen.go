@@ -4119,6 +4119,960 @@ func (msgs Messages) DialogChartSave() string {
 	return Catalog.Format(msgs.locale, "dialogChartSave", nil)
 }
 
+// HostSlashCard says "Fact card"
+// in the language the app shows.
+//
+// The / menu: a card block, facts at a glance under a title with an icon
+// (as a trip's time and fare, or a place's address and phone numbers). Not
+// a link card.
+func HostSlashCard() string { return In(i18n.Locale()).HostSlashCard() }
+
+// HostSlashCard says "Fact card"
+// in the language of msgs.
+//
+// The / menu: a card block, facts at a glance under a title with an icon
+// (as a trip's time and fare, or a place's address and phone numbers). Not
+// a link card.
+func (msgs Messages) HostSlashCard() string {
+	return Catalog.Format(msgs.locale, "hostSlashCard", nil)
+}
+
+// HostSlashCardHint says "Key facts at a glance, with a title and an icon"
+// in the language the app shows.
+//
+// The / menu: what a fact card is, under its name.
+func HostSlashCardHint() string { return In(i18n.Locale()).HostSlashCardHint() }
+
+// HostSlashCardHint says "Key facts at a glance, with a title and an icon"
+// in the language of msgs.
+//
+// The / menu: what a fact card is, under its name.
+func (msgs Messages) HostSlashCardHint() string {
+	return Catalog.Format(msgs.locale, "hostSlashCardHint", nil)
+}
+
+// HostCardTitle says "New card"
+// in the language the app shows.
+//
+// The title a fact card made from the / menu starts with, before its dialog
+// fills it in.
+func HostCardTitle() string { return In(i18n.Locale()).HostCardTitle() }
+
+// HostCardTitle says "New card"
+// in the language of msgs.
+//
+// The title a fact card made from the / menu starts with, before its dialog
+// fills it in.
+func (msgs Messages) HostCardTitle() string {
+	return Catalog.Format(msgs.locale, "hostCardTitle", nil)
+}
+
+// HostCardLabel says "Label"
+// in the language the app shows.
+//
+// The label of the fact a fact card made from the / menu starts with.
+func HostCardLabel() string { return In(i18n.Locale()).HostCardLabel() }
+
+// HostCardLabel says "Label"
+// in the language of msgs.
+//
+// The label of the fact a fact card made from the / menu starts with.
+func (msgs Messages) HostCardLabel() string {
+	return Catalog.Format(msgs.locale, "hostCardLabel", nil)
+}
+
+// HostCardValue says "Value"
+// in the language the app shows.
+//
+// The value of the fact a fact card made from the / menu starts with.
+func HostCardValue() string { return In(i18n.Locale()).HostCardValue() }
+
+// HostCardValue says "Value"
+// in the language of msgs.
+//
+// The value of the fact a fact card made from the / menu starts with.
+func (msgs Messages) HostCardValue() string {
+	return Catalog.Format(msgs.locale, "hostCardValue", nil)
+}
+
+// DialogCardTitle says "Fact card"
+// in the language the app shows.
+//
+// The fact card dialog's title, where a card's title, facts, note and
+// sources are written.
+func DialogCardTitle() string { return In(i18n.Locale()).DialogCardTitle() }
+
+// DialogCardTitle says "Fact card"
+// in the language of msgs.
+//
+// The fact card dialog's title, where a card's title, facts, note and
+// sources are written.
+func (msgs Messages) DialogCardTitle() string {
+	return Catalog.Format(msgs.locale, "dialogCardTitle", nil)
+}
+
+// DialogCardSubtitle says "Figures show a few values large, side by side; details list them a line each, beside a picture."
+// in the language the app shows.
+//
+// The fact card dialog: under its title, what its two layouts do.
+func DialogCardSubtitle() string { return In(i18n.Locale()).DialogCardSubtitle() }
+
+// DialogCardSubtitle says "Figures show a few values large, side by side; details list them a line each, beside a picture."
+// in the language of msgs.
+//
+// The fact card dialog: under its title, what its two layouts do.
+func (msgs Messages) DialogCardSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogCardSubtitle", nil)
+}
+
+// DialogCardFigures says "Figures"
+// in the language the app shows.
+//
+// The fact card dialog's layout switch: values large, side by side.
+func DialogCardFigures() string { return In(i18n.Locale()).DialogCardFigures() }
+
+// DialogCardFigures says "Figures"
+// in the language of msgs.
+//
+// The fact card dialog's layout switch: values large, side by side.
+func (msgs Messages) DialogCardFigures() string {
+	return Catalog.Format(msgs.locale, "dialogCardFigures", nil)
+}
+
+// DialogCardDetails says "Details"
+// in the language the app shows.
+//
+// The fact card dialog's layout switch: label and value lines, beside a
+// picture.
+func DialogCardDetails() string { return In(i18n.Locale()).DialogCardDetails() }
+
+// DialogCardDetails says "Details"
+// in the language of msgs.
+//
+// The fact card dialog's layout switch: label and value lines, beside a
+// picture.
+func (msgs Messages) DialogCardDetails() string {
+	return Catalog.Format(msgs.locale, "dialogCardDetails", nil)
+}
+
+// DialogCardIcon says "Icon"
+// in the language the app shows.
+//
+// The fact card dialog: the button that picks the icon before the card's
+// title, and on iPhone and iPad the picker's label.
+func DialogCardIcon() string { return In(i18n.Locale()).DialogCardIcon() }
+
+// DialogCardIcon says "Icon"
+// in the language of msgs.
+//
+// The fact card dialog: the button that picks the icon before the card's
+// title, and on iPhone and iPad the picker's label.
+func (msgs Messages) DialogCardIcon() string {
+	return Catalog.Format(msgs.locale, "dialogCardIcon", nil)
+}
+
+// DialogCardNoIcon says "No icon"
+// in the language the app shows.
+//
+// The fact card dialog's icon menu: the choice of no icon before the title.
+func DialogCardNoIcon() string { return In(i18n.Locale()).DialogCardNoIcon() }
+
+// DialogCardNoIcon says "No icon"
+// in the language of msgs.
+//
+// The fact card dialog's icon menu: the choice of no icon before the title.
+func (msgs Messages) DialogCardNoIcon() string {
+	return Catalog.Format(msgs.locale, "dialogCardNoIcon", nil)
+}
+
+// DialogCardPicture says "Picture link (optional, beside details)"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the field for a picture's web link,
+// shown beside the facts in the details layout.
+func DialogCardPicture() string { return In(i18n.Locale()).DialogCardPicture() }
+
+// DialogCardPicture says "Picture link (optional, beside details)"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the field for a picture's web link,
+// shown beside the facts in the details layout.
+func (msgs Messages) DialogCardPicture() string {
+	return Catalog.Format(msgs.locale, "dialogCardPicture", nil)
+}
+
+// DialogCardFacts says "One fact a line, as Label: Value"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the box where facts are written, a
+// line each, a label, a colon and a value.
+func DialogCardFacts() string { return In(i18n.Locale()).DialogCardFacts() }
+
+// DialogCardFacts says "One fact a line, as Label: Value"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the box where facts are written, a
+// line each, a label, a colon and a value.
+func (msgs Messages) DialogCardFacts() string {
+	return Catalog.Format(msgs.locale, "dialogCardFacts", nil)
+}
+
+// DialogCardNote says "Note (optional)"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the field for the short line under
+// the facts.
+func DialogCardNote() string { return In(i18n.Locale()).DialogCardNote() }
+
+// DialogCardNote says "Note (optional)"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the field for the short line under
+// the facts.
+func (msgs Messages) DialogCardNote() string {
+	return Catalog.Format(msgs.locale, "dialogCardNote", nil)
+}
+
+// DialogCardSources says "Sources (optional), one a line: a link, or Title | link"
+// in the language the app shows.
+//
+// The fact card dialog: placeholder of the box for the web pages the facts
+// come from, a line each.
+func DialogCardSources() string { return In(i18n.Locale()).DialogCardSources() }
+
+// DialogCardSources says "Sources (optional), one a line: a link, or Title | link"
+// in the language of msgs.
+//
+// The fact card dialog: placeholder of the box for the web pages the facts
+// come from, a line each.
+func (msgs Messages) DialogCardSources() string {
+	return Catalog.Format(msgs.locale, "dialogCardSources", nil)
+}
+
+// DialogCardSave says "Save card"
+// in the language the app shows.
+//
+// The fact card dialog's button that saves the card.
+func DialogCardSave() string { return In(i18n.Locale()).DialogCardSave() }
+
+// DialogCardSave says "Save card"
+// in the language of msgs.
+//
+// The fact card dialog's button that saves the card.
+func (msgs Messages) DialogCardSave() string {
+	return Catalog.Format(msgs.locale, "dialogCardSave", nil)
+}
+
+// MapModeWalk says "Walking"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line, as "Walking
+// · 25 min · 2 km".
+func MapModeWalk() string { return In(i18n.Locale()).MapModeWalk() }
+
+// MapModeWalk says "Walking"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line, as "Walking
+// · 25 min · 2 km".
+func (msgs Messages) MapModeWalk() string {
+	return Catalog.Format(msgs.locale, "mapModeWalk", nil)
+}
+
+// MapModeCycle says "Cycling"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line.
+func MapModeCycle() string { return In(i18n.Locale()).MapModeCycle() }
+
+// MapModeCycle says "Cycling"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line.
+func (msgs Messages) MapModeCycle() string {
+	return Catalog.Format(msgs.locale, "mapModeCycle", nil)
+}
+
+// MapModeDrive says "Driving"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line.
+func MapModeDrive() string { return In(i18n.Locale()).MapModeDrive() }
+
+// MapModeDrive says "Driving"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line.
+func (msgs Messages) MapModeDrive() string {
+	return Catalog.Format(msgs.locale, "mapModeDrive", nil)
+}
+
+// MapModeTransit says "Public transport"
+// in the language the app shows.
+//
+// A map block's route: how it goes, first in its summary line, as "Public
+// transport · 43 min · 27 km".
+func MapModeTransit() string { return In(i18n.Locale()).MapModeTransit() }
+
+// MapModeTransit says "Public transport"
+// in the language of msgs.
+//
+// A map block's route: how it goes, first in its summary line, as "Public
+// transport · 43 min · 27 km".
+func (msgs Messages) MapModeTransit() string {
+	return Catalog.Format(msgs.locale, "mapModeTransit", nil)
+}
+
+// MapMinutes says "{n} min"
+// in the language the app shows.
+//
+// A map block's route: a time in minutes, of the route or of one of its
+// legs.
+func MapMinutes(n int) string { return In(i18n.Locale()).MapMinutes(n) }
+
+// MapMinutes says "{n} min"
+// in the language of msgs.
+//
+// A map block's route: a time in minutes, of the route or of one of its
+// legs.
+func (msgs Messages) MapMinutes(n int) string {
+	return Catalog.Format(msgs.locale, "mapMinutes", map[string]any{"n": n})
+}
+
+// MapHoursMinutes says "{h} h {m} min"
+// in the language the app shows.
+//
+// A map block's route: a time of an hour or more.
+func MapHoursMinutes(h int, m int) string { return In(i18n.Locale()).MapHoursMinutes(h, m) }
+
+// MapHoursMinutes says "{h} h {m} min"
+// in the language of msgs.
+//
+// A map block's route: a time of an hour or more.
+func (msgs Messages) MapHoursMinutes(h int, m int) string {
+	return Catalog.Format(msgs.locale, "mapHoursMinutes", map[string]any{"h": h, "m": m})
+}
+
+// MapKilometers says "{km} km"
+// in the language the app shows.
+//
+// A map block's route: its length in kilometers, as 27 or 2.4.
+func MapKilometers(km string) string { return In(i18n.Locale()).MapKilometers(km) }
+
+// MapKilometers says "{km} km"
+// in the language of msgs.
+//
+// A map block's route: its length in kilometers, as 27 or 2.4.
+func (msgs Messages) MapKilometers(km string) string {
+	return Catalog.Format(msgs.locale, "mapKilometers", map[string]any{"km": km})
+}
+
+// MapLegWalk says "Walk"
+// in the language the app shows.
+//
+// A map block's route: a leg gone on foot, in the line of its legs, as
+// "Walk 4 min → Bus B8 40 min".
+func MapLegWalk() string { return In(i18n.Locale()).MapLegWalk() }
+
+// MapLegWalk says "Walk"
+// in the language of msgs.
+//
+// A map block's route: a leg gone on foot, in the line of its legs, as
+// "Walk 4 min → Bus B8 40 min".
+func (msgs Messages) MapLegWalk() string {
+	return Catalog.Format(msgs.locale, "mapLegWalk", nil)
+}
+
+// MapLegCycle says "Cycle"
+// in the language the app shows.
+//
+// A map block's route: a leg gone by bike, in the line of its legs.
+func MapLegCycle() string { return In(i18n.Locale()).MapLegCycle() }
+
+// MapLegCycle says "Cycle"
+// in the language of msgs.
+//
+// A map block's route: a leg gone by bike, in the line of its legs.
+func (msgs Messages) MapLegCycle() string {
+	return Catalog.Format(msgs.locale, "mapLegCycle", nil)
+}
+
+// MapLegDrive says "Drive"
+// in the language the app shows.
+//
+// A map block's route: a leg gone by car, in the line of its legs.
+func MapLegDrive() string { return In(i18n.Locale()).MapLegDrive() }
+
+// MapLegDrive says "Drive"
+// in the language of msgs.
+//
+// A map block's route: a leg gone by car, in the line of its legs.
+func (msgs Messages) MapLegDrive() string {
+	return Catalog.Format(msgs.locale, "mapLegDrive", nil)
+}
+
+// MapLegBus says "Bus"
+// in the language the app shows.
+//
+// A map block's route: a leg by bus, before its line's name, as "Bus B8".
+func MapLegBus() string { return In(i18n.Locale()).MapLegBus() }
+
+// MapLegBus says "Bus"
+// in the language of msgs.
+//
+// A map block's route: a leg by bus, before its line's name, as "Bus B8".
+func (msgs Messages) MapLegBus() string {
+	return Catalog.Format(msgs.locale, "mapLegBus", nil)
+}
+
+// MapLegTram says "Tram"
+// in the language the app shows.
+//
+// A map block's route: a leg by tram, before its line's name.
+func MapLegTram() string { return In(i18n.Locale()).MapLegTram() }
+
+// MapLegTram says "Tram"
+// in the language of msgs.
+//
+// A map block's route: a leg by tram, before its line's name.
+func (msgs Messages) MapLegTram() string {
+	return Catalog.Format(msgs.locale, "mapLegTram", nil)
+}
+
+// MapLegSubway says "Metro"
+// in the language the app shows.
+//
+// A map block's route: a leg by metro or subway, before its line's name.
+func MapLegSubway() string { return In(i18n.Locale()).MapLegSubway() }
+
+// MapLegSubway says "Metro"
+// in the language of msgs.
+//
+// A map block's route: a leg by metro or subway, before its line's name.
+func (msgs Messages) MapLegSubway() string {
+	return Catalog.Format(msgs.locale, "mapLegSubway", nil)
+}
+
+// MapLegRail says "Train"
+// in the language the app shows.
+//
+// A map block's route: a leg by train, before its line's name.
+func MapLegRail() string { return In(i18n.Locale()).MapLegRail() }
+
+// MapLegRail says "Train"
+// in the language of msgs.
+//
+// A map block's route: a leg by train, before its line's name.
+func (msgs Messages) MapLegRail() string {
+	return Catalog.Format(msgs.locale, "mapLegRail", nil)
+}
+
+// MapLegFerry says "Ferry"
+// in the language the app shows.
+//
+// A map block's route: a leg by ferry, before its line's name.
+func MapLegFerry() string { return In(i18n.Locale()).MapLegFerry() }
+
+// MapLegFerry says "Ferry"
+// in the language of msgs.
+//
+// A map block's route: a leg by ferry, before its line's name.
+func (msgs Messages) MapLegFerry() string {
+	return Catalog.Format(msgs.locale, "mapLegFerry", nil)
+}
+
+// MapLegCable says "Cable car"
+// in the language the app shows.
+//
+// A map block's route: a leg by cable car or funicular, before its line's
+// name.
+func MapLegCable() string { return In(i18n.Locale()).MapLegCable() }
+
+// MapLegCable says "Cable car"
+// in the language of msgs.
+//
+// A map block's route: a leg by cable car or funicular, before its line's
+// name.
+func (msgs Messages) MapLegCable() string {
+	return Catalog.Format(msgs.locale, "mapLegCable", nil)
+}
+
+// MapLegAir says "Flight"
+// in the language the app shows.
+//
+// A map block's route: a leg by plane, before its flight's name.
+func MapLegAir() string { return In(i18n.Locale()).MapLegAir() }
+
+// MapLegAir says "Flight"
+// in the language of msgs.
+//
+// A map block's route: a leg by plane, before its flight's name.
+func (msgs Messages) MapLegAir() string {
+	return Catalog.Format(msgs.locale, "mapLegAir", nil)
+}
+
+// MapLegTransit says "Transit"
+// in the language the app shows.
+//
+// A map block's route: a leg of public transport of another kind, before
+// its line's name.
+func MapLegTransit() string { return In(i18n.Locale()).MapLegTransit() }
+
+// MapLegTransit says "Transit"
+// in the language of msgs.
+//
+// A map block's route: a leg of public transport of another kind, before
+// its line's name.
+func (msgs Messages) MapLegTransit() string {
+	return Catalog.Format(msgs.locale, "mapLegTransit", nil)
+}
+
+// DialogCardEmpty says "Give the card a title or a fact."
+// in the language the app shows.
+//
+// The fact card dialog's error when both the title and the facts are empty.
+func DialogCardEmpty() string { return In(i18n.Locale()).DialogCardEmpty() }
+
+// DialogCardEmpty says "Give the card a title or a fact."
+// in the language of msgs.
+//
+// The fact card dialog's error when both the title and the facts are empty.
+func (msgs Messages) DialogCardEmpty() string {
+	return Catalog.Format(msgs.locale, "dialogCardEmpty", nil)
+}
+
+// DialogCardBadPicture says "The picture link must be a web address, starting with http:// or https://."
+// in the language the app shows.
+//
+// The fact card dialog's error for a picture link that is not a web
+// address.
+func DialogCardBadPicture() string { return In(i18n.Locale()).DialogCardBadPicture() }
+
+// DialogCardBadPicture says "The picture link must be a web address, starting with http:// or https://."
+// in the language of msgs.
+//
+// The fact card dialog's error for a picture link that is not a web
+// address.
+func (msgs Messages) DialogCardBadPicture() string {
+	return Catalog.Format(msgs.locale, "dialogCardBadPicture", nil)
+}
+
+// DialogCardBadSource says "Source {line} is not a web link."
+// in the language the app shows.
+//
+// The fact card editor's error for a source whose link is not a web
+// address, counting the sources from 1.
+func DialogCardBadSource(line int) string { return In(i18n.Locale()).DialogCardBadSource(line) }
+
+// DialogCardBadSource says "Source {line} is not a web link."
+// in the language of msgs.
+//
+// The fact card editor's error for a source whose link is not a web
+// address, counting the sources from 1.
+func (msgs Messages) DialogCardBadSource(line int) string {
+	return Catalog.Format(msgs.locale, "dialogCardBadSource", map[string]any{"line": line})
+}
+
+// DialogCardTooManyFacts says "A card holds at most {count} facts."
+// in the language the app shows.
+//
+// The fact card dialog's error when more facts are written than a card
+// holds.
+func DialogCardTooManyFacts(count int) string { return In(i18n.Locale()).DialogCardTooManyFacts(count) }
+
+// DialogCardTooManyFacts says "A card holds at most {count} facts."
+// in the language of msgs.
+//
+// The fact card dialog's error when more facts are written than a card
+// holds.
+func (msgs Messages) DialogCardTooManyFacts(count int) string {
+	return Catalog.Format(msgs.locale, "dialogCardTooManyFacts", map[string]any{"count": count})
+}
+
+// HostSlashMap says "Map"
+// in the language the app shows.
+//
+// The / menu: a map block, places on a map and a route between them.
+func HostSlashMap() string { return In(i18n.Locale()).HostSlashMap() }
+
+// HostSlashMap says "Map"
+// in the language of msgs.
+//
+// The / menu: a map block, places on a map and a route between them.
+func (msgs Messages) HostSlashMap() string {
+	return Catalog.Format(msgs.locale, "hostSlashMap", nil)
+}
+
+// HostSlashMapHint says "Places, and a route between them"
+// in the language the app shows.
+//
+// The / menu: what a map block is, under its name.
+func HostSlashMapHint() string { return In(i18n.Locale()).HostSlashMapHint() }
+
+// HostSlashMapHint says "Places, and a route between them"
+// in the language of msgs.
+//
+// The / menu: what a map block is, under its name.
+func (msgs Messages) HostSlashMapHint() string {
+	return Catalog.Format(msgs.locale, "hostSlashMapHint", nil)
+}
+
+// DialogMapTitle says "Map"
+// in the language the app shows.
+//
+// The map dialog's title, where a map's title, places and route are
+// written.
+func DialogMapTitle() string { return In(i18n.Locale()).DialogMapTitle() }
+
+// DialogMapTitle says "Map"
+// in the language of msgs.
+//
+// The map dialog's title, where a map's title, places and route are
+// written.
+func (msgs Messages) DialogMapTitle() string {
+	return Catalog.Format(msgs.locale, "dialogMapTitle", nil)
+}
+
+// DialogMapSubtitle says "A place a line: a name or an address to find on OpenStreetMap, or Name | lat, lng. A route goes from the first place …"
+// in the language the app shows.
+//
+// The map dialog: under its title, how to write the places and where the
+// route goes.
+func DialogMapSubtitle() string { return In(i18n.Locale()).DialogMapSubtitle() }
+
+// DialogMapSubtitle says "A place a line: a name or an address to find on OpenStreetMap, or Name | lat, lng. A route goes from the first place …"
+// in the language of msgs.
+//
+// The map dialog: under its title, how to write the places and where the
+// route goes.
+func (msgs Messages) DialogMapSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogMapSubtitle", nil)
+}
+
+// DialogMapPlaces says "Places, a line each"
+// in the language the app shows.
+//
+// The map dialog: placeholder of the box of places, a line each.
+func DialogMapPlaces() string { return In(i18n.Locale()).DialogMapPlaces() }
+
+// DialogMapPlaces says "Places, a line each"
+// in the language of msgs.
+//
+// The map dialog: placeholder of the box of places, a line each.
+func (msgs Messages) DialogMapPlaces() string {
+	return Catalog.Format(msgs.locale, "dialogMapPlaces", nil)
+}
+
+// DialogMapRoute says "Route"
+// in the language the app shows.
+//
+// The map dialog and editor: the label of the choice of how the route goes.
+func DialogMapRoute() string { return In(i18n.Locale()).DialogMapRoute() }
+
+// DialogMapRoute says "Route"
+// in the language of msgs.
+//
+// The map dialog and editor: the label of the choice of how the route goes.
+func (msgs Messages) DialogMapRoute() string {
+	return Catalog.Format(msgs.locale, "dialogMapRoute", nil)
+}
+
+// DialogMapNoRoute says "No route"
+// in the language the app shows.
+//
+// The map dialog and editor: the choice of no route, places alone.
+func DialogMapNoRoute() string { return In(i18n.Locale()).DialogMapNoRoute() }
+
+// DialogMapNoRoute says "No route"
+// in the language of msgs.
+//
+// The map dialog and editor: the choice of no route, places alone.
+func (msgs Messages) DialogMapNoRoute() string {
+	return Catalog.Format(msgs.locale, "dialogMapNoRoute", nil)
+}
+
+// DialogMapSave says "Save map"
+// in the language the app shows.
+//
+// The map dialog's button that finds the places and the route and saves the
+// map.
+func DialogMapSave() string { return In(i18n.Locale()).DialogMapSave() }
+
+// DialogMapSave says "Save map"
+// in the language of msgs.
+//
+// The map dialog's button that finds the places and the route and saves the
+// map.
+func (msgs Messages) DialogMapSave() string {
+	return Catalog.Format(msgs.locale, "dialogMapSave", nil)
+}
+
+// DialogMapFinding says "Finding the places and the route…"
+// in the language the app shows.
+//
+// The map dialog, while it asks the map services for the places and the
+// route.
+func DialogMapFinding() string { return In(i18n.Locale()).DialogMapFinding() }
+
+// DialogMapFinding says "Finding the places and the route…"
+// in the language of msgs.
+//
+// The map dialog, while it asks the map services for the places and the
+// route.
+func (msgs Messages) DialogMapFinding() string {
+	return Catalog.Format(msgs.locale, "dialogMapFinding", nil)
+}
+
+// DialogMapNotFound says "No place named {name} was found."
+// in the language the app shows.
+//
+// The map dialog's error when a search finds no place by a line's name.
+func DialogMapNotFound(name string) string { return In(i18n.Locale()).DialogMapNotFound(name) }
+
+// DialogMapNotFound says "No place named {name} was found."
+// in the language of msgs.
+//
+// The map dialog's error when a search finds no place by a line's name.
+func (msgs Messages) DialogMapNotFound(name string) string {
+	return Catalog.Format(msgs.locale, "dialogMapNotFound", map[string]any{"name": name})
+}
+
+// DialogMapNoRouteFound says "No route was found that way from the first place to the last."
+// in the language the app shows.
+//
+// The map dialog's error when the router finds no route by the way chosen.
+func DialogMapNoRouteFound() string { return In(i18n.Locale()).DialogMapNoRouteFound() }
+
+// DialogMapNoRouteFound says "No route was found that way from the first place to the last."
+// in the language of msgs.
+//
+// The map dialog's error when the router finds no route by the way chosen.
+func (msgs Messages) DialogMapNoRouteFound() string {
+	return Catalog.Format(msgs.locale, "dialogMapNoRouteFound", nil)
+}
+
+// DialogMapEmpty says "Name at least one place."
+// in the language the app shows.
+//
+// The map dialog's error when the box of places is empty.
+func DialogMapEmpty() string { return In(i18n.Locale()).DialogMapEmpty() }
+
+// DialogMapEmpty says "Name at least one place."
+// in the language of msgs.
+//
+// The map dialog's error when the box of places is empty.
+func (msgs Messages) DialogMapEmpty() string {
+	return Catalog.Format(msgs.locale, "dialogMapEmpty", nil)
+}
+
+// DialogMapFailed says "The map could not be made: {error}"
+// in the language the app shows.
+//
+// The map dialog's error when a map service could not be reached or
+// answered with an error.
+func DialogMapFailed(error string) string { return In(i18n.Locale()).DialogMapFailed(error) }
+
+// DialogMapFailed says "The map could not be made: {error}"
+// in the language of msgs.
+//
+// The map dialog's error when a map service could not be reached or
+// answered with an error.
+func (msgs Messages) DialogMapFailed(error string) string {
+	return Catalog.Format(msgs.locale, "dialogMapFailed", map[string]any{"error": error})
+}
+
+// DialogMapPrivacy says "Places are found with Photon, and routes with OSRM or Transitous: they get the places written here."
+// in the language the app shows.
+//
+// The map dialog: under the places, which services get them, as they are on
+// the web.
+func DialogMapPrivacy() string { return In(i18n.Locale()).DialogMapPrivacy() }
+
+// DialogMapPrivacy says "Places are found with Photon, and routes with OSRM or Transitous: they get the places written here."
+// in the language of msgs.
+//
+// The map dialog: under the places, which services get them, as they are on
+// the web.
+func (msgs Messages) DialogMapPrivacy() string {
+	return Catalog.Format(msgs.locale, "dialogMapPrivacy", nil)
+}
+
+// EditorEditMap says "Edit map"
+// in the language the app shows.
+//
+// A map block's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the map dialog.
+func EditorEditMap() string { return In(i18n.Locale()).EditorEditMap() }
+
+// EditorEditMap says "Edit map"
+// in the language of msgs.
+//
+// A map block's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the map dialog.
+func (msgs Messages) EditorEditMap() string {
+	return Catalog.Format(msgs.locale, "editorEditMap", nil)
+}
+
+// MapOpenInMaps says "Open in Maps"
+// in the language the app shows.
+//
+// A map block's button (Mac, iPhone and iPad) that opens its route, or its
+// first place, in Apple's Maps app.
+func MapOpenInMaps() string { return In(i18n.Locale()).MapOpenInMaps() }
+
+// MapOpenInMaps says "Open in Maps"
+// in the language of msgs.
+//
+// A map block's button (Mac, iPhone and iPad) that opens its route, or its
+// first place, in Apple's Maps app.
+func (msgs Messages) MapOpenInMaps() string {
+	return Catalog.Format(msgs.locale, "mapOpenInMaps", nil)
+}
+
+// MapOpenInOSM says "Open in OpenStreetMap"
+// in the language the app shows.
+//
+// A map block's button (Windows) that opens its route, or its first place,
+// on openstreetmap.org.
+func MapOpenInOSM() string { return In(i18n.Locale()).MapOpenInOSM() }
+
+// MapOpenInOSM says "Open in OpenStreetMap"
+// in the language of msgs.
+//
+// A map block's button (Windows) that opens its route, or its first place,
+// on openstreetmap.org.
+func (msgs Messages) MapOpenInOSM() string {
+	return Catalog.Format(msgs.locale, "mapOpenInOSM", nil)
+}
+
+// EditorEditCard says "Edit card"
+// in the language the app shows.
+//
+// A fact card's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the fact card
+// dialog.
+func EditorEditCard() string { return In(i18n.Locale()).EditorEditCard() }
+
+// EditorEditCard says "Edit card"
+// in the language of msgs.
+//
+// A fact card's right-click menu item and hover button (Mac and PC), and
+// its long-press menu item (iPhone and iPad), that open the fact card
+// dialog.
+func (msgs Messages) EditorEditCard() string {
+	return Catalog.Format(msgs.locale, "editorEditCard", nil)
+}
+
+// CardSources says "Sources"
+// in the language the app shows.
+//
+// A fact card: what its source chip's menu and tooltip are called, the web
+// pages its facts come from.
+func CardSources() string { return In(i18n.Locale()).CardSources() }
+
+// CardSources says "Sources"
+// in the language of msgs.
+//
+// A fact card: what its source chip's menu and tooltip are called, the web
+// pages its facts come from.
+func (msgs Messages) CardSources() string {
+	return Catalog.Format(msgs.locale, "cardSources", nil)
+}
+
+// CardLayout says "Layout"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the label of the layout picker,
+// figures or details.
+func CardLayout() string { return In(i18n.Locale()).CardLayout() }
+
+// CardLayout says "Layout"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the label of the layout picker,
+// figures or details.
+func (msgs Messages) CardLayout() string {
+	return Catalog.Format(msgs.locale, "cardLayout", nil)
+}
+
+// CardFacts says "Facts"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the heading of the list of facts,
+// each a label and a value.
+func CardFacts() string { return In(i18n.Locale()).CardFacts() }
+
+// CardFacts says "Facts"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the heading of the list of facts,
+// each a label and a value.
+func (msgs Messages) CardFacts() string {
+	return Catalog.Format(msgs.locale, "cardFacts", nil)
+}
+
+// CardAddFact says "Add fact"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the button that adds a fact.
+func CardAddFact() string { return In(i18n.Locale()).CardAddFact() }
+
+// CardAddFact says "Add fact"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the button that adds a fact.
+func (msgs Messages) CardAddFact() string {
+	return Catalog.Format(msgs.locale, "cardAddFact", nil)
+}
+
+// CardAddSource says "Add source"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the button that adds a source, a
+// web page the facts come from.
+func CardAddSource() string { return In(i18n.Locale()).CardAddSource() }
+
+// CardAddSource says "Add source"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the button that adds a source, a
+// web page the facts come from.
+func (msgs Messages) CardAddSource() string {
+	return Catalog.Format(msgs.locale, "cardAddSource", nil)
+}
+
+// CardSourceLink says "Link"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's web
+// address field.
+func CardSourceLink() string { return In(i18n.Locale()).CardSourceLink() }
+
+// CardSourceLink says "Link"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's web
+// address field.
+func (msgs Messages) CardSourceLink() string {
+	return Catalog.Format(msgs.locale, "cardSourceLink", nil)
+}
+
+// CardSourceTitle says "Title (optional)"
+// in the language the app shows.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's
+// title field.
+func CardSourceTitle() string { return In(i18n.Locale()).CardSourceTitle() }
+
+// CardSourceTitle says "Title (optional)"
+// in the language of msgs.
+//
+// The fact card editor (iPhone and iPad): the placeholder of a source's
+// title field.
+func (msgs Messages) CardSourceTitle() string {
+	return Catalog.Format(msgs.locale, "cardSourceTitle", nil)
+}
+
 // DialogEmbedTitle says "Interactive embed"
 // in the language the app shows.
 //
@@ -6851,6 +7805,40 @@ func AgentEditLinkCard() string { return In(i18n.Locale()).AgentEditLinkCard() }
 // agentEditWrote and agentEditRewrote.
 func (msgs Messages) AgentEditLinkCard() string {
 	return Catalog.Format(msgs.locale, "agentEditLinkCard", nil)
+}
+
+// AgentEditCard says "a card"
+// in the language the app shows.
+//
+// A card block (facts at a glance: a title, figures or label and value
+// lines, a note and its sources), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditCard() string { return In(i18n.Locale()).AgentEditCard() }
+
+// AgentEditCard says "a card"
+// in the language of msgs.
+//
+// A card block (facts at a glance: a title, figures or label and value
+// lines, a note and its sources), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditCard() string {
+	return Catalog.Format(msgs.locale, "agentEditCard", nil)
+}
+
+// AgentEditMap says "a map"
+// in the language the app shows.
+//
+// A map block (places, and a route between them), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func AgentEditMap() string { return In(i18n.Locale()).AgentEditMap() }
+
+// AgentEditMap says "a map"
+// in the language of msgs.
+//
+// A map block (places, and a route between them), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditMap() string {
+	return Catalog.Format(msgs.locale, "agentEditMap", nil)
 }
 
 // AgentEditSubpageLink says "a subpage link"
@@ -16655,6 +17643,206 @@ func WelcomeTableHours() string { return In(i18n.Locale()).WelcomeTableHours() }
 // each milestone takes, aligned right.
 func (msgs Messages) WelcomeTableHours() string {
 	return Catalog.Format(msgs.locale, "welcomeTableHours", nil)
+}
+
+// WelcomeCardsHeading says "Cards and maps"
+// in the language the app shows.
+//
+// The welcome guide: the heading of the section on fact cards and map
+// blocks.
+func WelcomeCardsHeading() string { return In(i18n.Locale()).WelcomeCardsHeading() }
+
+// WelcomeCardsHeading says "Cards and maps"
+// in the language of msgs.
+//
+// The welcome guide: the heading of the section on fact cards and map
+// blocks.
+func (msgs Messages) WelcomeCardsHeading() string {
+	return Catalog.Format(msgs.locale, "welcomeCardsHeading", nil)
+}
+
+// WelcomeCardsIntro says "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a pict…"
+// in the language the app shows.
+//
+// The welcome guide: what a fact card is, before the example card.
+func WelcomeCardsIntro() string { return In(i18n.Locale()).WelcomeCardsIntro() }
+
+// WelcomeCardsIntro says "A **Fact card** sets out key facts under a title: figures side by side, as here, or details a line each beside a pict…"
+// in the language of msgs.
+//
+// The welcome guide: what a fact card is, before the example card.
+func (msgs Messages) WelcomeCardsIntro() string {
+	return Catalog.Format(msgs.locale, "welcomeCardsIntro", nil)
+}
+
+// WelcomeCardTitle says "Release at a glance"
+// in the language the app shows.
+//
+// The welcome guide: the example fact card's title.
+func WelcomeCardTitle() string { return In(i18n.Locale()).WelcomeCardTitle() }
+
+// WelcomeCardTitle says "Release at a glance"
+// in the language of msgs.
+//
+// The welcome guide: the example fact card's title.
+func (msgs Messages) WelcomeCardTitle() string {
+	return Catalog.Format(msgs.locale, "welcomeCardTitle", nil)
+}
+
+// WelcomeCardIssues says "Open issues"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the number of open
+// issues.
+func WelcomeCardIssues() string { return In(i18n.Locale()).WelcomeCardIssues() }
+
+// WelcomeCardIssues says "Open issues"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the number of open
+// issues.
+func (msgs Messages) WelcomeCardIssues() string {
+	return Catalog.Format(msgs.locale, "welcomeCardIssues", nil)
+}
+
+// WelcomeCardDays says "Days to ship"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the days left before
+// the release.
+func WelcomeCardDays() string { return In(i18n.Locale()).WelcomeCardDays() }
+
+// WelcomeCardDays says "Days to ship"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the days left before
+// the release.
+func (msgs Messages) WelcomeCardDays() string {
+	return Catalog.Format(msgs.locale, "welcomeCardDays", nil)
+}
+
+// WelcomeCardReviews says "Reviews"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the label of the number of
+// reviews.
+func WelcomeCardReviews() string { return In(i18n.Locale()).WelcomeCardReviews() }
+
+// WelcomeCardReviews says "Reviews"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the label of the number of
+// reviews.
+func (msgs Messages) WelcomeCardReviews() string {
+	return Catalog.Format(msgs.locale, "welcomeCardReviews", nil)
+}
+
+// WelcomeCardNote says "Example figures; the chip opens the page they come from."
+// in the language the app shows.
+//
+// The welcome guide's example fact card: its note, before the chip of its
+// source.
+func WelcomeCardNote() string { return In(i18n.Locale()).WelcomeCardNote() }
+
+// WelcomeCardNote says "Example figures; the chip opens the page they come from."
+// in the language of msgs.
+//
+// The welcome guide's example fact card: its note, before the chip of its
+// source.
+func (msgs Messages) WelcomeCardNote() string {
+	return Catalog.Format(msgs.locale, "welcomeCardNote", nil)
+}
+
+// WelcomeCardSource says "Leaflet on GitHub"
+// in the language the app shows.
+//
+// The welcome guide's example fact card: the name of its source, Leaflet's
+// GitHub repository.
+func WelcomeCardSource() string { return In(i18n.Locale()).WelcomeCardSource() }
+
+// WelcomeCardSource says "Leaflet on GitHub"
+// in the language of msgs.
+//
+// The welcome guide's example fact card: the name of its source, Leaflet's
+// GitHub repository.
+func (msgs Messages) WelcomeCardSource() string {
+	return Catalog.Format(msgs.locale, "welcomeCardSource", nil)
+}
+
+// WelcomeMapsIntro says "A **Map** shows places and a route between them, walking, cycling, driving or by public transport: **/** › **Map** …"
+// in the language the app shows.
+//
+// The welcome guide: what a map block is, before the example map.
+func WelcomeMapsIntro() string { return In(i18n.Locale()).WelcomeMapsIntro() }
+
+// WelcomeMapsIntro says "A **Map** shows places and a route between them, walking, cycling, driving or by public transport: **/** › **Map** …"
+// in the language of msgs.
+//
+// The welcome guide: what a map block is, before the example map.
+func (msgs Messages) WelcomeMapsIntro() string {
+	return Catalog.Format(msgs.locale, "welcomeMapsIntro", nil)
+}
+
+// WelcomeMapTitle says "A walk across the Golden Gate Bridge"
+// in the language the app shows.
+//
+// The welcome guide's example map: its title, a walk across the Golden Gate
+// Bridge in San Francisco.
+func WelcomeMapTitle() string { return In(i18n.Locale()).WelcomeMapTitle() }
+
+// WelcomeMapTitle says "A walk across the Golden Gate Bridge"
+// in the language of msgs.
+//
+// The welcome guide's example map: its title, a walk across the Golden Gate
+// Bridge in San Francisco.
+func (msgs Messages) WelcomeMapTitle() string {
+	return Catalog.Format(msgs.locale, "welcomeMapTitle", nil)
+}
+
+// WelcomeMapFrom says "Welcome Center"
+// in the language the app shows.
+//
+// The welcome guide's example map: the place the walk starts, the Golden
+// Gate Bridge Welcome Center.
+func WelcomeMapFrom() string { return In(i18n.Locale()).WelcomeMapFrom() }
+
+// WelcomeMapFrom says "Welcome Center"
+// in the language of msgs.
+//
+// The welcome guide's example map: the place the walk starts, the Golden
+// Gate Bridge Welcome Center.
+func (msgs Messages) WelcomeMapFrom() string {
+	return Catalog.Format(msgs.locale, "welcomeMapFrom", nil)
+}
+
+// WelcomeMapTo says "Vista Point"
+// in the language the app shows.
+//
+// The welcome guide's example map: the place the walk ends, Vista Point at
+// the bridge's north end.
+func WelcomeMapTo() string { return In(i18n.Locale()).WelcomeMapTo() }
+
+// WelcomeMapTo says "Vista Point"
+// in the language of msgs.
+//
+// The welcome guide's example map: the place the walk ends, Vista Point at
+// the bridge's north end.
+func (msgs Messages) WelcomeMapTo() string {
+	return Catalog.Format(msgs.locale, "welcomeMapTo", nil)
+}
+
+// WelcomeAgentsMaps says "Where agents may use the web, they find places and routes and draw them on a map, and their answers show tables, card…"
+// in the language the app shows.
+//
+// The welcome guide, in the list of what agents do: maps and rich answers.
+func WelcomeAgentsMaps() string { return In(i18n.Locale()).WelcomeAgentsMaps() }
+
+// WelcomeAgentsMaps says "Where agents may use the web, they find places and routes and draw them on a map, and their answers show tables, card…"
+// in the language of msgs.
+//
+// The welcome guide, in the list of what agents do: maps and rich answers.
+func (msgs Messages) WelcomeAgentsMaps() string {
+	return Catalog.Format(msgs.locale, "welcomeAgentsMaps", nil)
 }
 
 // WelcomeTableTask says "Task"

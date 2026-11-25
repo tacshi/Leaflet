@@ -12,6 +12,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/provision"
 	"leaflet/internal/store"
 )
@@ -45,6 +46,8 @@ type config struct {
 	ICloudRoot string `json:"icloud_root"`
 	Locale     string `json:"locale"`
 	Dev        bool   `json:"dev"`
+	// Version is the app's, which its requests to map services name.
+	Version string `json:"version"`
 }
 
 func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
@@ -59,6 +62,7 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 	if cfg.Dev {
 		provision.ProjectName = provision.DevProjectName
 	}
+	mapsvc.SetVersion(cfg.Version)
 	useDownloads(platform)
 	fixZone()
 	c := &Core{

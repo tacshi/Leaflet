@@ -88,6 +88,8 @@ metadata:
 | `table` | `colsLen`, `rowsLen`, `style?`, `aligns?`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph`; `style` `lines` draws it with simple lines (a bold header and a hairline under it and between rows, with no borders) rather than as a grid; `aligns` is how each column aligns, in order, `left`, `center`, `right` or `""` as text does, as Markdown's delimiter row (`:---`, `:---:`, `---:`) says, a list that stops at its last column aligned so |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
+| `map` | `title?`, `places?` [{`name`, `lat`, `lng`}], `route?` {`mode`, `source`, `duration_s`, `distance_m`, `legs` [{`mode`, `line?`, `agency?`, `color?`, `from?`, `to?`, `duration_s`, `distance_m?`, `path`}]}, `author` | places on a map, and a route between them: `route.mode` is `walk`, `cycle`, `drive` or `transit`, `source` the router it came from (`transitous` or `osrm`), which the map credits, and each leg's `path` its points as an encoded polyline (Google's format) of 6 decimal places; a leg goes by `walk`, `cycle`, `drive`, `bus`, `coach`, `tram`, `subway`, `rail`, `ferry`, `cable`, `air` or `transit`, its `line` a line's name, as `B8`, and `color` its line's, `#rrggbb`. A map with a route and no places marks the route's ends. The Mac and Windows draw it on OpenFreeMap's tiles with MapLibre GL JS, iPhone and iPad on Apple's map; web pages and PDFs draw its route and places without tiles |
+| `card` | `layout` (`figures`\|`details`), `icon?`, `title?`, `image?`, `facts?` [{`label`, `value`}], `note?`, `sources?` [{`url`, `title?`}], `author` | facts at a glance under a title: `figures` shows the values large, side by side, `details` a line each, `label：value`, beside the picture `image`, a web link the app loads by itself; `icon` is one of Lucide's names the card takes (`doc.CardIcons`); a value and the note are inline Markdown; the sources show as a chip after the note, the first by its title or its site's name, with how many more |
 | `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 200,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
 | `file` | `file_id`, `url`, `name`, `size`, `mime`, `notes?`, `speakers_hidden?`, `speaker_names?`, `transcribed_by?` | a file kept with the page, as a card, that the app shows or plays where it can (audio and video in the page); `url` is `file://<file_id>/<name>`, no path on a device, which other devices and people would read: `file_id` finds the file, and a Markdown export writes the file's name alone for a `file:` URL; `notes` is as a video's, a time in those of an audio or video file playing it from there, and a transcript of an audio file goes there, each line after its speaker's name when it has one, which `speakers_hidden` leaves out of what shows, not out of `notes`; `speaker_names` lists the names the user gave speakers, which a line of `notes` starts with in place of "Speaker 1"; `transcribed_by` is the speech-to-text engine that wrote the transcript into `notes`, `soniox`, `moss`, `on-device`, or `openai-compatible` for an endpoint, which the card names beside the file's size while `notes` holds text |
@@ -181,6 +183,8 @@ picture, its `alt` changed, given the `file://` url `read_page` shows.
   "align": ["", "right"],
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
   "embed": { "title": "Phase timeline", "html": "<!doctype html>…", "height": 320 },
+  "map": { "title": "To the border", "places": [{ "name": "Sha Tin", "lat": 22.3825, "lng": 114.1873 }], "route": "r1" },
+  "card": { "layout": "figures", "icon": "bus", "title": "Citybus B8", "facts": [{ "label": "Ride", "value": "40–50 min" }, { "label": "Fare", "value": "**HK$18.1**" }], "note": "Leaves out waiting.", "sources": [{ "url": "https://…", "title": "…" }] },
   "image": { "url": "https://…", "alt": "…" },
   "video": { "url": "https://www.youtube.com/watch?v=…", "title": "…", "notes": "0:00 Intro\n1:23 The first idea" },
   "link": { "url": "https://…" }
@@ -189,6 +193,21 @@ picture, its `alt` changed, given the `file://` url `read_page` shows.
 
 `replace_block` also takes `{ "type": "file", "file": { "notes": "0:05 …" } }`
 on a file block: only its notes change. No tool makes a file block.
+
+A map's `route` is the id `find_route` gave the route, as `r1`: the call
+takes the route find_route found, by that id, for the block, and the
+route's ends for its places where it names none. A route this run did
+not find is an error. `replace_block` keeps what the spec's map leaves
+out: the map's title and places where it has no such key, and its route
+where it names none (no key, or `""`); a route of `none` or a null takes
+it off.
+A `write_markdown` call, and an answer, take a map as a ```` ```map ````
+fence holding the spec's map, its route resolved as the call or the
+answer streams in, as well as once it is whole; an answer's fences are
+kept with their routes resolved, and go back to the model, in its later
+turns, told in words, without their paths. Only a fence the page reads as
+one is resolved: a ```` ```map ```` fence written inside another fence's
+code stays as it is.
 
 A table's `table_style` is `grid`, the default, or `lines`, and `align`
 lists how its columns align, in order: `left`, `center`, `right` or `""`.
@@ -232,12 +251,18 @@ says where whatever other keys the position has.
 | `list_folders` | — | `{ folders: [{id, name, parent_folder_id?}] }` (the user's own, `parent_folder_id` the folder one is in, none at the top level; only when cross-page reading is on). It spends the run's one free `read_web_page`, leaving the run as a first `read_web_page` does: from then on `read_web_page` goes only to the URLs the user gave and those found already, and the run counts as guarded. It closes no web, and is not reading the user's pages |
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
 | `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
+| `find_place` | `query`, `near?` {`lat`, `lng`} | `{ places: [{name, address?, kind?, lat, lng}] }`: at most 5, from Photon (komoot), those near `near` first (only when the web is on) |
+| `find_route` | `from`, `to` (a place's name, or {`name?`, `lat`, `lng`}), `mode` (`walk`\|`cycle`\|`drive`\|`transit`), `depart_at?` (`YYYY-MM-DDTHH:MM` in the user's own time) | `{ from, to, routes: [{id, mode, duration_min, distance_km, legs: [{mode, line?, agency?, from?, to?, duration_min}]}] }`: a few routes by public transport from Transitous, one otherwise from FOSSGIS's OSRM; each kept by its `id` for a map to name (only when the web is on) |
 
-`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, table_style?, align?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`:
+`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, table_style?, align?, chart?, card?, map?, embed?, image?, video?, link?, file?, recording?, page_id? }`:
 `text` only for text blocks and
 code (a code block's is its code, not markdown); a table's `table_style`
 only when it is `lines`, and its `align`, a value for each column, only
-when a column aligns otherwise than as text does; `chart` is
+when a column aligns otherwise than as text does; `card` is
+`{layout, icon?, title?, image?, facts, note?, sources?}`; `map`
+`{title?, places, route?}`, its route `{mode, duration_min, distance_km,
+legs: [{mode, duration_min, line?, agency?, from?, to?}]}`, without its
+paths; `chart` is
 `{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
 `image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
 `{url, title, description}`; `file` `{name, mime, size, notes?}`; `recording`
@@ -266,11 +291,11 @@ the page as it was.
 space; `list_pages` lists at most 500. Once a run has called either, what it
 writes may hold only a URL that
 was on the current page as the run began or is in the instruction, in any
-block, in text and in a subpage's title: the app loads an `image`, `video` or
-`link_preview` by itself, a URL seen only on another page, which someone else
+block, in text and in a subpage's title: the app loads an `image`, `video`,
+`link_preview` or a `card`'s picture by itself, a URL seen only on another page, which someone else
 may have put there, could carry what the run read, and one written in text
-would be on the page for a later run to load. An `image`, `video` or
-`link_preview` holds only a URL that one of those blocks of the page held
+would be on the page for a later run to load. An `image`, `video`,
+`link_preview` or `card`'s picture holds only a URL that one of those blocks of the page held
 as the run began, or that is in the instruction: among the URLs the page
 only names, as in its text, the one picked could carry what the run read.
 A link to a page (`leaflet://page/…`) goes. URLs compare with their scheme in lower case, as
@@ -345,8 +370,8 @@ the pages it reads, may hold only a
 URL in the instruction, on the page as the run began, among a search's
 results (not one its query names) or linked from a page it read, and a
 query may name no address: a page could have the run send what is on this
-page to an address of its making. An `image`, `video` or `link_preview`,
-which the app loads by itself, holds only a search's result, or a page the
+page to an address of its making. An `image`, `video`, `link_preview` or
+`card`'s picture, which the app loads by itself, holds only a search's result, or a page the
 run read that it did not pick from one it read (its first page of the web,
 one in the instruction or on the page, or a search's result): a page could
 list many addresses for the run to choose from, and reading the one chosen
@@ -354,6 +379,19 @@ makes it no better. Reading one tells its site the same, so a run reads at
 most 10 links it picked from pages it read, one that failed among them; the
 pages the instruction, this page or a search gave it are not counted. Once a
 run reads another page, the web is closed to it.
+
+`find_place` and `find_route` are offered with the web's tools, as they
+ask services on the web what a run gives them: Photon (komoot) for places,
+FOSSGIS's OSRM servers for walking, cycling and driving, and Transitous
+for public transport, each told Leaflet's name, version and site in its
+User-Agent, as they ask. Once a run reads another page, they refuse, as
+the web's tools do, and a place's query may name no web address. What
+they give is the web's writing, as a page's is (a place's name is
+anyone's to edit in OpenStreetMap, a stop's its operator's), so a call to
+either spends the run's free `read_web_page` and holds the run to the
+web's rules above, as reading the web does. `mode` and `depart_at` are
+checked before any place is looked up. `leaflet mcp` offers them too,
+keeping a session's routes by their ids for its later calls' maps.
 
 `read_video_transcript` is offered with `read_page`, with the web or
 without it: it reads only the site of a video block of the page, which the

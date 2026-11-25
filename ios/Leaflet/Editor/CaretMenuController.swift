@@ -115,7 +115,7 @@ final class CaretMenuController {
             }
         } else if let node = made?.node {
             editor.commands.insertBlock(node)
-            if ["chart", "math_equation", "diagram"].contains(node.type) {
+            if ["chart", "card", "math_equation", "diagram"].contains(node.type) {
                 editor.onEditBlock?(node)
             }
         } else if item.key == "subpage" {

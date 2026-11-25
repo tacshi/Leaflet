@@ -85,6 +85,13 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   動くインタラクティブな埋め込み。
 - 表は格子か、シンプルな罫線で：太字の見出し行と行間の細い線。列ごとに左揃え、
   中央揃え、右揃えにできます。
+- 情報カードで要点をひと目で：タイトルとアイコンの下に、旅の所要時間や運賃の
+  ような数字を大きく並べるか、詳細を画像の横に1行ずつ並べ、注記と出典の
+  チップを添えます。
+- 場所と、その間の経路の地図：徒歩、自転車、車、公共交通機関で。バスや電車の
+  路線はそれぞれの色で描きます。Mac と Windows では OpenFreeMap の地図、
+  iPhone と iPad では Apple の地図に表示します。場所は Photon で、経路は
+  FOSSGIS の OSRM か Transitous で探し、尋ねた場所はそれらに送られます。
 - Markdown のショートカット、`/` メニュー、メンバー・エージェント・ページへの
   `@` メンション、文字色を変えられる選択ツールバー、`$x^2$` と書くと行の中に
   組まれる数式、折りたためる見出し、アウトライン、ページや個々のブロックへの
@@ -131,7 +138,9 @@ Mac と Windows のアプリは Go と [MyGo](https://github.com/egoist/mygo) �
   読みます。ほかのページを読んだ実行は、それ以降ウェブを使いません。その
   チャットやコメントスレッドのあとのターンも、前の返信に読んだ内容が含まれ
   うるため、ウェブを使いません。
-- エージェントの返信は表を罫線で描きます。
+- ウェブを使えるとき、エージェントは場所と経路も探し（`find_place`、
+  `find_route`）、ページや返信に地図として示します。返信はページと同じように
+  カード、罫線の表、地図を表示します。
 - OpenAI 互換のプロバイダならどれでも使えます：OpenAI、Claude、xAI、
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
@@ -298,6 +307,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | `move_folder` | フォルダを別のフォルダの中、またはトップレベルへ移動する |
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
 | `upload_files` | このコンピュータ上の画像、音声、動画、PDF をパスで指定してページに追加する |
+| `find_place`、`find_route` | Photon、OSRM、Transitous で場所と経路を探し、地図ブロックが経路の ID で示せるようにする |
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて
 いても動作します。閲覧のみで共有されたページは読み取り専用です。エージェントが
@@ -462,12 +472,13 @@ cd supabase/functions && deno test --frozen  # account Edge Function
 | `internal/editor` | ブロックエディタ：モデル、編集、レイアウト、入力、ブロック |
 | `internal/doc` | ページのドキュメントモデル：ブロック、差分、インライン Markdown、操作、ブロック単位のマージ、Markdown 書き出し |
 | `internal/menu`、`internal/shortcut` | `/` と `@` のメニューの項目と、ページで入力した Markdown の変換（両アプリのエディタで共通） |
-| `internal/rendered` | ダイアグラム（Pele）を描画し、埋め込みを収めるページ。ネットワークのないフレームで動きます |
+| `internal/rendered` | ダイアグラム（Pele）を描画し、埋め込みを収めるページ。ネットワークのないフレームで動きます。地図（MapLibre）のページはタイルサーバーにだけつながります |
 | `internal/mathtex` | Untie で TeX から組む数式。両方のアプリが描画し、Web ページには SVG として入ります |
 | `internal/webpage` | 単独で開けるウェブページとしてのページ。公開リンクで共有し、書き出し › PDF で印刷するもので、両方のアプリで使います |
 | `internal/starters` | Leaflet に付属するテンプレート |
 | `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
 | `internal/web` | リンクカード、画像、動画の情報と字幕、エージェントが読むページを、公開アドレスからだけ読み込む |
+| `internal/maps` | 地図ブロックのための場所と経路を、Photon、FOSSGIS の OSRM、Transitous から探す |
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |
@@ -520,9 +531,15 @@ SIL Open Font License の [Figtree](https://github.com/erikdkennedy/figtree)
 [Lucide](https://lucide.dev) アイコン（`internal/theme/icons/LICENSE`）、
 ダイアグラムのための MIT ライセンスの [Pele](https://github.com/obsidianmd/pele)
 （[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）、
-数式のための Apache 2.0 ライセンスの [Untie](https://github.com/caelyreth/untie)
+地図のための BSD-3-Clause ライセンスの [MapLibre GL JS](https://maplibre.org)
+（同じフォルダ）、数式のための Apache 2.0 ライセンスの [Untie](https://github.com/caelyreth/untie)
 と GUST フォントライセンスの New Computer Modern Math フォント
 （`internal/mathtex/font/GUST-FONT-LICENSE.txt`）を同梱しています。
+地図は [OpenFreeMap](https://openfreemap.org) のタイルの上に
+[OpenStreetMap](https://www.openstreetmap.org/copyright) のデータ（© OpenStreetMap
+の貢献者）を表示します。場所は [Photon](https://photon.komoot.io) から、経路は
+[FOSSGIS](https://routing.openstreetmap.de) のサーバーの OSRM と
+[Transitous](https://transitous.org/sources/) から得ています。
 
 ## ライセンス
 

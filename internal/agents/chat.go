@@ -269,7 +269,7 @@ func chatHistory(s *Session) []Turn {
 			continue
 		}
 		if kept(m) {
-			turns = append(turns, Turn{Role: "assistant", Content: m.Text, KeptToPage: onPage(m), Guarded: guarded(m)})
+			turns = append(turns, Turn{Role: "assistant", Content: doc.CompactMapFences(m.Text), KeptToPage: onPage(m), Guarded: guarded(m)})
 		}
 	}
 	if len(turns) > 20 {

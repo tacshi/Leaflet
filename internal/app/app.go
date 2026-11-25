@@ -29,6 +29,7 @@ import (
 	"leaflet/internal/guard"
 	"leaflet/internal/library"
 	"leaflet/internal/live"
+	mapsvc "leaflet/internal/maps"
 	"leaflet/internal/mediaserver"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
@@ -137,6 +138,7 @@ type App struct {
 	md                       markdown.Options // agents' answers, their tables drawn with simple lines
 	commentMD                markdown.Options // comments, as agents' answers
 	cellMD                   markdown.Options // a cell of a table of md or commentMD
+	mapViews                 mapViews
 	pageMD                   markdown.Options // a page as Markdown, as its history and the Trash show it
 	images                   *imageCache
 	downloads                map[string][]func(bool)
@@ -262,6 +264,7 @@ type pageState struct {
 	heldUntil                time.Time
 	heldAt                   float32
 	fullDiagram              string
+	fullMap                  string
 	outline                  ui.OutlineState[string]
 	outlineRow               int
 	outlineSeen              map[string]bool
@@ -295,6 +298,8 @@ func (a *App) launch() {
 	theme.RegisterFonts()
 	registerCapture()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
+	mygo.BindAs("Maps", &mapService{a: a})
+	mapsvc.SetVersion(mygo.App.Version())
 	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
 	mygo.App.OnNotificationClick(a.notificationClicked)
 	a.keepDevState()
@@ -387,6 +392,8 @@ func (a *App) start() error {
 	}
 	linesTables(&a.md, &a.cellMD)
 	linesTables(&a.commentMD, &a.cellMD)
+	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard, "map": a.chatMap}
+	a.commentMD.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"card": a.chatCard, "map": a.chatMap}
 	a.hub.PublicLink = a.publiclyLinked
 	go func() {
 		defer guard.Recover()
@@ -1146,6 +1153,9 @@ func (a *App) discardPage() {
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil
 	d.chartOpen, d.chartEditor = false, nil
+	d.cardOpen, d.cardEditor = false, nil
+	d.mapOpen, d.mapEditor = false, nil
+	d.stopMap()
 	d.embedOpen, d.linkOpen, d.sourceOpen = false, false, false
 	d.recOpen, d.notesOpen, d.speakerOpen = false, false, false
 	a.fileToTranscribe = ""

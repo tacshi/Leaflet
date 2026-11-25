@@ -72,7 +72,7 @@ func Today() string { return time.Now().Format("2006-01-02") }
 
 func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, readOnly, web, search, ownPages bool) string {
 	focus := "The user is chatting with you beside the page. The whole page is your focus. If they ask about the page (summarize it, explain it, find gaps or open questions, suggest a structure or other ideas), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask you to write, add or change something in it, such as filling in a section, turning numbers into a chart, or applying a structure."
-	answer := "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you edited the page, say what you changed in one or two sentences without repeating it."
+	answer := "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown, | tables, and cards: " + cardFence + ", for facts at a glance; or, if you edited the page, say what you changed in one or two sentences without repeating it."
 	done := answer
 	switch surface {
 	case "inline":
@@ -116,6 +116,7 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 - Text fields take inline markdown only (**bold**, *italic*, ` + "`code`" + `, $x^2$ for a formula in the line, in TeX, [link](url), and <span style="color:#ef4444;background:#fde68a">text</span> for text color and highlight, either alone, in hex). Keep the spans you read when rewriting text. Use block types for structure: heading, bulleted_list, numbered_list, todo_list, quote, table.
 - For numbers worth seeing, insert a chart block (bar, line, or pie) with labels and series.
 - Right-align a table's columns of numbers, prices and times: |--:| in Markdown, or align in insert_blocks. A table drawn with simple lines rather than a grid, a bold header and a hairline between rows, is table_style lines.
+- For facts at a glance, as a trip's time and fare or a place's address and phone numbers, insert a card: figures for two to four short values side by side, details for label: value lines beside a picture, with an icon, a note and the pages the facts come from as its sources.
 - For anything interactive or animated (a simulation such as orbiting planets, an instrument, a game, a calculator, a visual explainer), insert an embed block: one complete HTML document with inline CSS and JS, drawing with canvas, SVG or the DOM and playing sound with the Web Audio API. It runs sandboxed with no network, so it loads nothing from outside. Give it a title and a height that fits it.
 - To show a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a video file, insert a video block with its link, rather than the link as text.
 - A video block's notes show under it, a plain-text line each, no Markdown: a time that starts a line, as 0:00 or 1:02:03, plays the video from there when clicked. Write a video's summary, chapters or key moments in its notes, with replace_block keeping its url, each line starting with the time it is about. Read what is said in a YouTube or Vimeo video with read_video_transcript. Take every time from a transcript, a recording's or a video's, never guess one.
@@ -141,11 +142,19 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 	return b.String()
 }
 
+// cardFence is how an answer shows a card, in words a model reads with
+// the tools or without them.
+const cardFence = "a ```card fence holding a card's JSON, {\"layout\": \"figures\" or \"details\", \"icon\", \"title\", \"image\", \"facts\": [{\"label\", \"value\"}], \"note\", \"sources\": [{\"url\", \"title\"}]}"
+
+// mapPrompt says how to show places and routes, with the tools that find
+// them, offered with the web's.
+const mapPrompt = "- To show where places are, or how to go from one to another, find them with find_place and find_route, then show them on a map: a map block, where you write in a page, with the places and the route's id, or in your reply a ```map fence holding {\"title\", \"places\", \"route\": id}. Say the route in words too, or in a card: its time and its legs, as find_route gave them, never guessed.\n"
+
 func webPrompt(search bool) string {
 	if search {
-		return "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links, each one a search's results or a page you read link to, not one their text only names: a call that writes any other address is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n"
+		return "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links, each one a search's results or a page you read link to, not one their text only names: a call that writes any other address is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n" + mapPrompt
 	}
-	return "- You can read a web page with read_web_page, one the user gave or that is on this page; you cannot search the web. Once you have read a page, link only to an address the user gave, one on this page, or one a page you read links to: a call that writes any other is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n"
+	return "- You can read a web page with read_web_page, one the user gave or that is on this page; you cannot search the web. Once you have read a page, link only to an address the user gave, one on this page, or one a page you read links to: a call that writes any other is refused whole. Once you have read the user's other pages in a run, the web is closed to it.\n" + mapPrompt
 }
 
 func WorkspacePrompt(agentName string, reading, supportsTools, web, search bool) string {
@@ -176,6 +185,6 @@ func WorkspacePrompt(agentName string, reading, supportsTools, web, search bool)
 			b.WriteString("- Read the web first: once you have read the user's pages in a run, the web is closed to it.\n")
 		}
 	}
-	b.WriteString("\nWhen you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you changed pages, say what you did in one or two sentences, linking the pages.")
+	b.WriteString("\nWhen you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown, | tables, and cards: " + cardFence + ", for facts at a glance; or, if you changed pages, say what you did in one or two sentences, linking the pages.")
 	return b.String()
 }

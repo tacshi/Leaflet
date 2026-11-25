@@ -440,12 +440,27 @@ struct MarkdownPreview: View {
                     Capsule().fill(palette.accentSoftBorder).frame(width: 3)
                 }
                 .padding(.leading, indent)
+        case "code" where ["card", "map"].contains(n.data?["language"]?.string ?? ""):
+            // A card or a map still being written, as an answer streams in.
+            Label(
+                n.data?["language"]?.string == "map" ? L.hostSlashMap : L.hostSlashCard,
+                systemImage: n.data?["language"]?.string == "map" ? "map" : "list.bullet.rectangle"
+            )
+            .font(.footnote)
+            .foregroundStyle(palette.textMuted)
+            .padding(.leading, indent)
         case "code", "math_equation", "diagram":
             Text(Self.source(n))
                 .font(.system(size: (size ?? 17) * 0.85, design: .monospaced))
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.code, in: .rect(cornerRadius: 8))
+                .padding(.leading, indent)
+        case "card":
+            FactCardView(node: n)
+                .padding(.leading, indent)
+        case "map":
+            MapBlockView(node: n)
                 .padding(.leading, indent)
         case "table":
             let look = TableLook(n)

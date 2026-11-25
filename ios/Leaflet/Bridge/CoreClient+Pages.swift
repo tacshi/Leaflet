@@ -178,6 +178,19 @@ extension CoreClient {
             }
         }
     }
+
+    /// A map block's data from the map editor's fields, as JSON, and the
+    /// data of the map it edits, "" for a new one: the map services find
+    /// its places and its route, until the task is cancelled.
+    nonisolated(nonsending) func buildMap(_ fields: String, was: String, language: String)
+        async throws -> String
+    {
+        try await cancellable { core, token in
+            try Self.answer { e in
+                core.buildMap(fields, was: was, locale: language, token: token, error: e)
+            }
+        }
+    }
 }
 
 actor Downloads {

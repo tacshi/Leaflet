@@ -225,3 +225,26 @@ func TestTransportOnlyThePublicWeb(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestPublicTransportGoesOnlyToTheWeb(t *testing.T) {
+	was, wasLookup := systemProxy, lookupIP
+	t.Cleanup(func() { systemProxy, lookupIP = was, wasLookup })
+	asked := 0
+	systemProxy = func(*http.Request) (*url.URL, error) {
+		asked++
+		return url.Parse("http://proxy.test:3128")
+	}
+	lookupIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		asked++
+		return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
+	}
+	client := &http.Client{Transport: PublicTransport()}
+	for _, link := range []string{"socks5://example.com/", "ftp://example.com/x", "gopher://example.com:80/"} {
+		if _, err := client.Get(link); !errors.Is(err, ErrNotWeb) {
+			t.Errorf("%s: %v", link, err)
+		}
+	}
+	if asked != 0 {
+		t.Errorf("the proxy or the resolver was asked %d times for links not of the web", asked)
+	}
+}

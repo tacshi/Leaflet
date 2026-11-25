@@ -158,6 +158,21 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	text("paragraph", m.WelcomeEmbedsIntro())
 	embed(m.WelcomePianoTitle(), pianoEmbed(m), 220)
 
+	heading(m.WelcomeCardsHeading())
+	text("paragraph", m.WelcomeCardsIntro())
+	add(map[string]any{"type": "card", "card": map[string]any{
+		"layout": "figures", "icon": "package", "title": m.WelcomeCardTitle(),
+		"facts": []any{
+			map[string]any{"label": m.WelcomeCardIssues(), "value": "12"},
+			map[string]any{"label": m.WelcomeCardDays(), "value": "4"},
+			map[string]any{"label": m.WelcomeCardReviews(), "value": "3"},
+		},
+		"note":    m.WelcomeCardNote(),
+		"sources": []any{map[string]any{"url": "https://github.com/tacshi/Leaflet", "title": m.WelcomeCardSource()}},
+	}})
+	text("paragraph", m.WelcomeMapsIntro())
+	add(map[string]any{"type": "map", "map": welcomeMap(m)})
+
 	heading(m.WelcomeTodosHeading())
 	text("todo_list", m.WelcomeDateTodo())
 	text("paragraph", m.WelcomeTodosDue())
@@ -170,6 +185,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 		m.WelcomeAgentsSelect(),
 		m.WelcomeAgentsPanel(),
 		m.WelcomeAgentsWorkspace(),
+		m.WelcomeAgentsMaps(),
 		m.WelcomeAgentsSettings(),
 		m.WelcomeAgentsExternal(),
 	} {
@@ -273,6 +289,29 @@ func welcomeMeeting(m locales.Messages) []*doc.Node {
 		}
 	}
 	return blocks
+}
+
+// goldenGateWalk is the path of a walk across the Golden Gate Bridge, from
+// its Welcome Center to Vista Point, as FOSSGIS's OSRM found it for
+// walking: an encoded polyline of doc.PathPrecision places, kept here, as
+// the guide is made offline.
+const goldenGateWalk = "idrbgAl~grhFu@x@eAPpCvEf@z@Mx@g@jBq@~Ai@nAk@nAa@p@a@p@k@|@qBdCg@l@Yd@Wt@S~@Mz@A`ADfANbAPp@vAnE`@hAMl@cNvH{@b@bCpIcApAwBdC}E`FiEbE_FbEmE`DmErC{EjC{EzBqFxByE`BeEfAaE|@qEr@oEh@mE^wNt@_dApFyvDzTC_Bs@e@u@IgA@g@LmAdACdBcoEhWurNny@CiBmAq@{@Ou@DcBbAYf@BhAuxD|Uk{@zEco@hDiHb@_Ih@sGf@iGv@yGfAiGxAgGdBaGfBgG|B{FhC{GpDuFnDkFvD}EhEcFvEaCdCkB`ByBj@uAg@kAu@SKvCyI~HuWd@aG]}IqBaGkAoAr@kBo@m@EE"
+
+// welcomeMap is the guide's example map: the walk across the Golden Gate
+// Bridge, its two ends named.
+func welcomeMap(m locales.Messages) map[string]any {
+	const seconds, meters = 2441, 3057
+	return map[string]any{
+		"title": m.WelcomeMapTitle(),
+		"places": []any{
+			map[string]any{"name": m.WelcomeMapFrom(), "lat": 37.807701, "lng": -122.474999},
+			map[string]any{"name": m.WelcomeMapTo(), "lat": 37.832403, "lng": -122.479504},
+		},
+		"route": map[string]any{
+			"mode": doc.RouteWalk, "source": doc.RouteFromOSRM, "duration_s": seconds, "distance_m": meters,
+			"legs": []any{map[string]any{"mode": doc.RouteWalk, "duration_s": seconds, "distance_m": meters, "path": goldenGateWalk}},
+		},
+	}
 }
 
 func welcomeCode(m locales.Messages) string {

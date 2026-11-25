@@ -16,6 +16,7 @@ import (
 	"unicode/utf16"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/maps"
 	"leaflet/internal/web"
 	"leaflet/locales"
 )
@@ -148,8 +149,16 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		if s, ok := client.(Searcher); ok && tc.SearchWeb == nil && s.CanSearch() {
 			tc.SearchWeb = func(q string) (Search, error) { return s.SearchWeb(ctx, req.Model, q) }
 		}
+		if tc.FindPlaces == nil {
+			tc.FindPlaces = func(q string, near *doc.LatLng) ([]maps.Place, error) { return maps.FindPlaces(ctx, q, near, 5) }
+		}
+		if tc.FindRoutes == nil {
+			tc.FindRoutes = func(from, to doc.LatLng, mode string, depart time.Time) ([]doc.MapRoute, error) {
+				return maps.FindRoutes(ctx, from, to, mode, depart)
+			}
+		}
 	} else {
-		tc.ReadWeb, tc.SearchWeb = nil, nil
+		tc.ReadWeb, tc.SearchWeb, tc.FindPlaces, tc.FindRoutes = nil, nil, nil, nil
 	}
 	if tc.Captions == nil {
 		tc.Captions = func(v doc.Video) (web.Captions, error) { return web.ReadCaptions(ctx, v) }
@@ -161,7 +170,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	exec.begin()
 	held := pagesBefore && crossPage || threadBefore
 	result := func(reply string) Result {
-		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages && !held, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
+		return Result{Reply: exec.Answer(reply), Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages && !held, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
 	}
 	if ev.Status != nil {
 		ev.Status("running")
@@ -199,9 +208,19 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		if tc.ReadWeb != nil {
 			tools = append(tools, WebToolDefinitions(tc.SearchWeb != nil)...)
 		}
+		if tc.FindRoutes != nil {
+			tools = append(tools, MapToolDefinitions()...)
+		}
 	}
 	sm, streams := client.(StreamingModel)
 	streams = streams && (ev.Text != nil || ev.Revise != nil)
+	streamed := ev.Text
+	if streamed != nil {
+		// An answer shows as it comes with its ```map fences' routes the
+		// routes they name, as it is kept, not first as their ids' code.
+		answer := exec.streamedAnswer()
+		streamed = func(text string) { ev.Text(answer(text)) }
+	}
 	answer := func() (res ChatResult, drafted map[int]madeCall, err error) {
 		drafted = map[int]madeCall{}
 		if !streams {
@@ -210,7 +229,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		}
 		current, name, args, drafting := -1, "", "", true
 		var shown time.Time
-		on := &Streamed{Text: ev.Text, Call: func(i int, n, a string) {
+		on := &Streamed{Text: streamed, Call: func(i int, n, a string) {
 			if i != current {
 				if current >= 0 {
 					out, ok := exec.FinishDraft(name, args)

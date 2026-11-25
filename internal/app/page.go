@@ -78,6 +78,13 @@ func (a *App) pageView(c *ui.Context) {
 			}
 			a.leaveFullDiagram()
 		}
+		if ps.fullMap != "" {
+			if n := ps.editor.Content.Find(ps.fullMap); n != nil && n.Type == "map" {
+				a.fullMap(c, n)
+				return
+			}
+			a.leaveFullMap()
+		}
 		a.scrollToBlock(c)
 		a.scrollByEmbeds(ps)
 		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().Bind(&ps.view)

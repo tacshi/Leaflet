@@ -26,6 +26,7 @@ struct PageScreen: View {
     @State private var linking: LinkKind?
     @State private var uploadNext = false
     @State private var embedding = false
+    @State private var mapping = false
     @State private var pageTrailing: CGFloat?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -262,6 +263,12 @@ struct PageScreen: View {
                 scene.editor?.insertBlock(embed)
             }
         }
+        .sheet(isPresented: $mapping) {
+            MapSheet(author: app.status?.displayName ?? "") { [scene] data in
+                scene.editor?.insertBlock(
+                    DocNode(id: BlockInfo.newID(), type: "map", data: data, children: nil))
+            }
+        }
         .task(id: pageID) {
             title = row?.title ?? ""
             if let row, row.canEdit, row.title.isEmpty { titleFocused = true }
@@ -327,6 +334,8 @@ struct PageScreen: View {
             linking = LinkKind(id: key)
         case "embed":
             embedding = true
+        case "map":
+            mapping = true
         default:
             Task { [app, scene, pageID] in
                 await scene.flush()
@@ -381,6 +390,12 @@ struct PageScreen: View {
             ChartSheet(node: node, save: save)
         } else if node.type == "table" {
             TableSheet(node: node, save: save)
+        } else if node.type == "card" {
+            CardSheet(node: node, save: save)
+        } else if node.type == "map" {
+            MapSheet(editing: node) { data in
+                try save { $0.setting(["title", "places", "route"], from: data) }
+            }
         } else if node.type == "embed" {
             EmbedSheet(author: app.status?.displayName ?? "", editing: node) { embed, changed in
                 try save { $0.setting(changed, from: embed.data ?? [:]) }

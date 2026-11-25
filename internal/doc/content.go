@@ -510,6 +510,10 @@ func blockText(n *Node) string {
 		return cardTitle(n)
 	case "link_preview":
 		return cardTitle(n)
+	case "card":
+		return CardText(CardOf(n))
+	case "map":
+		return mapSearchText(MapOf(n))
 	case "math_equation", "diagram":
 		_, s := BlockSource(n)
 		return s

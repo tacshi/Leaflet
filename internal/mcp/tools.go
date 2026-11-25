@@ -43,6 +43,7 @@ var hints = map[string]struct {
 	"upload_files":   {"Upload Files", false, false},
 	"find_place":     {"Find Place", true, false},
 	"find_route":     {"Find Route", true, false},
+	"read_skill":     {"Read Skill", true, false},
 }
 
 func toolList() []map[string]any {
@@ -72,6 +73,8 @@ func toolList() []map[string]any {
 	add("search_pages", "Find pages by title, tag or text, recordings by transcript, and comments. Words starting with # (as #work) keep to the pages with those tags; alone they list them.",
 		object(map[string]any{"query": map[string]any{"type": "string"}}, "query"))
 	add("current_page", "Find what the user has in front of them in the Leaflet app: the open page, and its selection or caret, with the selected text, its blocks and offsets, and its text color and highlight as hex. open is false when no page is open now, with the page opened last, if any, and no selection.", object(map[string]any{}))
+	skill := agents.SkillToolDefinition(true)["function"].(map[string]any)
+	add("read_skill", skill["description"].(string), skill["parameters"].(map[string]any))
 	for _, name := range pageToolNames {
 		fn := defs[name]
 		params := fn["parameters"].(map[string]any)
@@ -227,6 +230,8 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 			return nil, toolErr(e)
 		}
 		return out, nil
+	case "read_skill":
+		return agents.ReadSkill(args, true)
 	case "list_pages":
 		return t.listPages()
 	case "search_pages":

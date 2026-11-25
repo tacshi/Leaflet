@@ -163,6 +163,9 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 		if err := doc.CallNodes(nodes); err != nil {
 			return fail(err)
 		}
+		if err := doc.FenceError(nodes); err != nil {
+			return fail(err)
+		}
 	} else if nodes, err = x.specs(args["blocks"]); err != nil {
 		return fail(err)
 	}

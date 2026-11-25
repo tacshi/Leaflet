@@ -128,6 +128,9 @@ MyGo 在 GPU 上原生绘制整个界面，应用本身不使用网页视图。i
 - 可以使用网络时，智能体还能查找地点和路线（`find_place`、`find_route`），
   并把它们画成地图，放进页面或回答里；回答像页面一样显示卡片、简洁线条的
   表格和地图。
+- 智能体会在任务需要时读取 Leaflet 的技能（`read_skill`）：这些指南说明什么
+  内容最适合用哪种块来呈现（表格、图表、卡片、地图、图示、标注框、嵌入），
+  怎样使用强调、文字颜色和高亮，以及怎样制作可交互的嵌入。
 - 支持任何兼容 OpenAI 的服务商：内置 OpenAI、Claude、xAI、OpenRouter、
   DeepSeek 和 GLM 预设，支持 ChatGPT Plus 或 Pro 登录、自定义端点，以及
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
@@ -276,6 +279,13 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | 像应用内的智能体一样编辑页面 |
 | `upload_files` | 按路径把这台电脑上的图片、音频、视频和 PDF 添加到页面 |
 | `find_place`、`find_route` | 通过 Photon、OSRM 和 Transitous 查找地点和路线，供地图块按路线 ID 显示 |
+| `read_skill` | 读取技能：让页面更有表现力的指南、制作可交互嵌入的指南，以及保存对话结论的指南 |
+
+服务器的说明会要求智能体在写页面之前先读技能 `expressive-pages`，从而按内容
+选用表格、图表、卡片、地图、图示和标注框，并从应用的调色板中选颜色。它还会
+要求智能体：对话中定下的、值得在它的应用之外保留的内容（决定、计划、调查结果、
+要反复用到的步骤等），用一句简短的问题询问一次是否存进 Leaflet，得到同意才
+保存；仓库里的代码、一次性的回答和密码、密钥等机密信息不在此列。
 
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看
 权限共享给你的页面是只读的。智能体首次编辑某个页面前会保存一份历史快照，
@@ -297,8 +307,9 @@ Mac 或 PC 上的应用运行时，无论是否在前台，屏幕角落的小窗
 中打开页面并定位到改动处。关闭后，它会等到智能体停下一阵再出现；在“设置 › 外部
 智能体”中可以关掉它。
 
-智能体在文本字段中用 `<span style="color:#ef4444;background:#fde68a">文字</span>`
-读写文字颜色和高亮，颜色为十六进制。`leaflet cat` 和导出不包含颜色。行内公式
+智能体在文本字段中用 `<span style="color:#ef4444;background:#eab30840">文字</span>`
+读写文字颜色和高亮，颜色为十六进制。高亮是调色板中的颜色加上透明度 `40`，
+在深色外观下也清晰可读。`leaflet cat` 和导出不包含颜色。行内公式
 用 TeX 写作 `$x^2$`。
 
 要在开发构建上试用，把开发版应用的数据文件夹交给一个二进制文件：
@@ -326,6 +337,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet tag PAGE [TAG...]` | 设置页面的标签，或输出它们；`--clear` 清除全部标签 |
 | `leaflet folder new NAME [--in FOLDER]`、`leaflet folder rename FOLDER NAME` | 在顶层或其他文件夹中新建文件夹，以及重命名文件夹 |
 | `leaflet folder mv FOLDER --in FOLDER \| --top` | 把文件夹移入其他文件夹，或移到顶层 |
+| `leaflet skills [NAME]` | 列出给 AI 智能体的页面写作指南（技能），或以 SKILL.md 格式打印其中一个 |
 
 页面可以用标题、ID，或 `ls` 显示的 ID 开头来指定。`--json` 输出 MCP 工具返回的
 内容；`leaflet completion zsh`（或 bash、fish、powershell）会生成能补全页面标题的

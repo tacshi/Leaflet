@@ -144,6 +144,10 @@ iPad app is SwiftUI and UIKit, on the same Go core.
 - With the web, agents also find places and routes (`find_place`,
   `find_route`) and show them as maps, in a page or in their answers, which
   show cards, simple-lines tables and maps as a page does.
+- Agents read Leaflet's skills (`read_skill`), guides they load when a task
+  calls for one: which block shows which content best, as a table, a chart,
+  a card, a map, a diagram, a callout or an embed, and how to use emphasis,
+  text color and highlight; and how to build an interactive embed.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
@@ -309,6 +313,15 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 | `write_markdown`, `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 | `upload_files` | Add pictures, audio, video and PDFs on this computer to a page, by their paths |
 | `find_place`, `find_route` | Find places and routes, for a map block to show by the route's id, through Photon, OSRM and Transitous |
+| `read_skill` | Read a skill: a guide to making pages expressive, to building an interactive embed, or to saving what a chat settles |
+
+The server's instructions ask an agent to read the skill `expressive-pages`
+before it writes a page, so it reaches for tables, charts, cards, maps,
+diagrams and callouts where they fit, and color from the app's palette.
+They also ask it to offer, once and in a short question, to save in
+Leaflet what a chat settles that is worth keeping outside its app, such as
+a decision, a plan, findings or steps to repeat, and to save it only on a
+yes; never code that lives in a repository, a one-off answer, or secrets.
 
 The server opens the same database as the app, so it works with the app
 open or closed. Pages shared with you to view are read-only. Edits keep a
@@ -338,7 +351,9 @@ the change. Closed, it stays away until the agent pauses; Settings ›
 External agents turns it off.
 
 Agents read and write text color and highlight in text fields as
-`<span style="color:#ef4444;background:#fde68a">text</span>`, in hex.
+`<span style="color:#ef4444;background:#eab30840">text</span>`, in hex: a
+highlight is a color of the palette with alpha `40`, which stays readable
+in the dark look.
 `leaflet cat` and exports leave colors out. A formula in the line is
 `$x^2$`, in TeX.
 
@@ -367,6 +382,7 @@ adds to them, with the same tools as `leaflet mcp`:
 | `leaflet tag PAGE [TAG...]` | Set a page's tags, or print them; `--clear` takes them off |
 | `leaflet folder new NAME [--in FOLDER]`, `leaflet folder rename FOLDER NAME` | Make folders, at the top level or in another folder, and rename them |
 | `leaflet folder mv FOLDER --in FOLDER \| --top` | Move a folder into another folder or to the top level |
+| `leaflet skills [NAME]` | List the skills, guides for AI agents on writing pages, or print one as a SKILL.md |
 
 A page is named by its title, its ID, or the start of its ID as `ls`
 shows it. `--json` prints what the MCP tools return, and `leaflet

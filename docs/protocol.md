@@ -130,7 +130,7 @@ Every surface (inline `@`, selection, sidebar chat, comment `@`) runs the same
 loop with the same tools, on the device (§4). Tool definitions live in
 `internal/agents/tools.go`.
 `leaflet mcp` (`internal/mcp`) offers the same page tools, each with a
-`page_id`, to agents outside the app.
+`page_id`, to agents outside the app, and `read_skill` (§ Skills below).
 Its `read_page` gives each BlockView a `version`: a hash of what the view
 shows, apart from where the block sits, so a move keeps it, and apart from
 its nested blocks, which have versions of their own. `replace_block`
@@ -162,6 +162,33 @@ the last 5 minutes, they add no file, but still move pages, which only
 shows a title. `leaflet upload`, the user's own command, adds any file, as
 the app does. `replace_block` keeps an uploaded
 picture, its `alt` changed, given the `file://` url `read_page` shows.
+
+### Skills
+
+`internal/skills` holds Leaflet's skills: Markdown files in the Agent
+Skills format, front matter with `name`, `description` and, for a skill
+only agents outside the app read, `audience: external`, then the guide.
+A prompt carries only their index, a `name: description` line each, and
+an agent reads a guide whole with `read_skill` when its task calls for
+it, so the guides cost nothing until then.
+
+| Skill | For | Guides |
+| --- | --- | --- |
+| `expressive-pages` | all | Which block shows which content best (tables, charts, cards, maps, diagrams, callouts, toggles, to-dos, formulas, embeds), shaping a page, emphasis, and text color and highlight from the color picker's palette, a highlight its color with alpha `40`; the Markdown that writes each block; recipes |
+| `interactive-embeds` | all | An embed that works with no network or storage, fits the page's width, and follows `data-theme` on `<html>`, with a template |
+| `saving-to-leaflet` | external | What a chat in another app settles that is worth keeping in Leaflet, offering once to save it and saving only on a yes, and writing it to stand on its own |
+
+The in-app prompts, page and workspace, ask an agent that writes to read
+`expressive-pages` before it writes or reshapes more than a few lines,
+and list the skills. `leaflet mcp`'s instructions ask the same, and ask
+an agent to offer, once and in a short question naming where, to save in
+Leaflet what is worth keeping outside its app, and to save it only on a
+yes. `leaflet skills` lists every skill and `leaflet skills NAME` prints
+one as its file has it, a SKILL.md; with `--json` the list is
+`{ skills: [{name, description}] }` and one skill what `read_skill`
+returns. Tests keep the guide naming every block type agents write, its
+Markdown example making the blocks it shows, and its palette the color
+picker's.
 
 ### BlockSpec (what a model writes)
 
@@ -208,6 +235,18 @@ kept with their routes resolved, and go back to the model, in its later
 turns, told in words, without their paths. Only a fence the page reads as
 one is resolved: a ```` ```map ```` fence written inside another fence's
 code stays as it is.
+Markdown, as `write_markdown`, a page's `markdown` and the `leaflet`
+command's `new` and `append` read it, also takes a ```` ```card ````
+fence holding a card's spec and a ```` ```chart ```` fence holding a
+chart's, `{chart_type?, title?, labels, series: [{name, values}],
+caption?}` (`chart_type` `bar` where none is given): each becomes its
+block. A fence whose JSON is no card or chart, as a pie of two series,
+stays code where people paste or import Markdown; an agent's write, as
+`write_markdown`, a page's `markdown` or `leaflet append`, with a
+```` ```chart ````, ```` ```card ```` or ```` ```map ```` fence that is
+not its block is refused, its error saying why, and writes nothing
+(`doc.FenceError`), so a broken chart never lands on a page as JSON. A Markdown export writes a chart as its title, a table of its
+values and its caption, for people to read.
 
 A table's `table_style` is `grid`, the default, or `lines`, and `align`
 lists how its columns align, in order: `left`, `center`, `right` or `""`.
@@ -238,6 +277,7 @@ says where whatever other keys the position has.
 | name | arguments | returns |
 | --- | --- | --- |
 | `read_page` | `offset?`, `limit?` | `{ page: {id, title}, subpages: [{id, title}], more_subpages?, comments: [{block_id, resolved, thread: [{author, body}]}], more_comments?, total_blocks, next_offset?, blocks: [BlockView] }`: a long page comes in parts, the blocks from `offset` (the first when not given) that fit a result, `limit` at most; `total_blocks` is how many the page has, and `next_offset`, while there are more, the `offset` to read on from. `subpages` and `comments` come with the first part alone, as many as fit, `more_subpages` and `more_comments` how many more there are (below) |
+| `read_skill` | `name` (one of the skills, an enum) | `{ name, description, guide }`: a skill's guide, in Markdown (§ Skills above). In the app only where the agent may write, page or workspace; `leaflet mcp` offers it always, with the skills for agents outside the app too |
 | `read_video_transcript` | `id` (a video block of the page) | `{ id, language, auto_generated, transcript, title? }`: what is said in the video, from its site's captions, as `[m:ss] text` lines of a passage each (YouTube's and Vimeo's videos only) |
 | `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `######` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |

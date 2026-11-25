@@ -18,9 +18,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
 	"leaflet/internal/mcp"
+	"leaflet/internal/skills"
 	"leaflet/internal/store"
 )
 
@@ -96,7 +98,12 @@ while the app runs. Each page keeps a version from before the changes in
 its history.
 
 A page is named by its title, its ID, or the start of its ID as ls shows
-it; a folder by its name or ID.`,
+it; a folder by its name or ID.
+
+AI agents: before you write a page, read "` + name + ` skills expressive-pages",
+a guide to the blocks that make a page read well. When your work with the
+user settles something worth keeping outside your app, offer to save it
+here: "` + name + ` skills saving-to-leaflet" says what is worth it and how.`,
 		Example: strings.Join([]string{
 			"  " + name + " ls",
 			"  " + name + ` search "launch #work"`,
@@ -170,7 +177,9 @@ a # heading, names it.`,
 		Short: "Add Markdown to the end of a page: the text given, or what is piped in",
 		Long: `Add Markdown to the end of a page: the text given, or what is piped in.
 Each line is a block: a paragraph, # to ### headings, - or 1. list items,
-- [ ] to-dos, > quotes, fenced code, | tables and --- dividers. With no text
+- [ ] to-dos, > quotes, fenced code, | tables and --- dividers; "skills
+expressive-pages" shows callouts, toggles, charts, diagrams, formulas,
+cards and maps too. With no text
 what is piped in is added, as --stdin asks for by name. After the page, --json,
 --stdin and --help still count; a -- before the text makes them text too.`,
 		Args:              cobra.MinimumNArgs(1),
@@ -285,6 +294,18 @@ given. --clear takes them all off.`,
 		c.GroupID = "pages"
 		r.root.AddCommand(c)
 	}
+	r.root.AddCommand(&cobra.Command{
+		Use:   "skills [NAME]",
+		Short: "List the guides for AI agents on writing pages, or print one",
+		Long: `List the skills, guides for AI agents on writing pages that read well, or
+print one by its name, in the Agent Skills format (SKILL.md), its name and
+description first. Agents read expressive-pages before they write a page.`,
+		Example:   "  " + name + " skills\n  " + name + " skills expressive-pages",
+		GroupID:   "agents",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: skills.Names(true),
+		RunE:      func(_ *cobra.Command, args []string) error { return r.skills(args) },
+	})
 	r.root.AddCommand(&cobra.Command{
 		Use:     "mcp",
 		Short:   "Serve your pages to AI apps over MCP, on stdin and stdout",
@@ -785,7 +806,13 @@ func (r *runner) appendTo(ref string, text []string) error {
 func (r *runner) write(pageID string, parts []string) (map[string]any, error) {
 	ids := []string{}
 	for i, md := range parts {
-		out, err := r.call("write_markdown", map[string]any{"page_id": pageID, "position": map[string]any{"at": "end"}, "markdown": md})
+		at := map[string]any{"at": "end"}
+		if i == 0 {
+			if id := blankLine(r.st.Content(pageID)); id != "" {
+				at = map[string]any{"replace": id}
+			}
+		}
+		out, err := r.call("write_markdown", map[string]any{"page_id": pageID, "position": at, "markdown": md})
 		if err != nil {
 			if i > 0 {
 				err = fmt.Errorf("%d of %d parts added: %w", i, len(parts), err)
@@ -807,6 +834,9 @@ func parts(md string) ([]string, error) {
 	blocks := doc.MarkdownBlocks(md)
 	if len(blocks) == 0 {
 		return nil, nil
+	}
+	if err := doc.FenceError(blocks); err != nil {
+		return nil, err
 	}
 	err := doc.CallNodes(blocks)
 	if err == nil {
@@ -1050,4 +1080,48 @@ func (r *runner) renameFolder(args []string) error {
 	}
 	out, err := r.call("rename_folder", map[string]any{"folder_id": f.ID, "name": args[1]})
 	return r.changed(out, err)
+}
+
+func (r *runner) skills(args []string) error {
+	if len(args) == 0 {
+		all := skills.For(true)
+		if r.json {
+			list := make([]map[string]any, len(all))
+			for i, s := range all {
+				list[i] = map[string]any{"name": s.Name, "description": s.Description}
+			}
+			return r.printJSON(map[string]any{"skills": list})
+		}
+		var b strings.Builder
+		for _, s := range all {
+			b.WriteString(s.Name + "\n  " + s.Description + "\n")
+		}
+		return r.print(b.String())
+	}
+	s, ok := skills.Get(args[0])
+	if !ok {
+		return fmt.Errorf("no skill %q: %s skills lists them", args[0], r.o.Name)
+	}
+	if r.json {
+		out, err := agents.ReadSkill(map[string]any{"name": s.Name}, true)
+		if err != nil {
+			return err
+		}
+		return r.printJSON(out)
+	}
+	return r.print(s.Doc())
+}
+
+// blankLine is the ID of the empty line a page with nothing in it yet
+// holds, as a page new made without content does, for what is added to
+// take its place rather than come after it; "" for any other page.
+func blankLine(c *doc.Content) string {
+	if c == nil || len(c.Children) != 1 {
+		return ""
+	}
+	n := c.Children[0]
+	if n.Type != "paragraph" || len(n.Children) > 0 || n.Delta().Len() > 0 {
+		return ""
+	}
+	return n.ID
 }

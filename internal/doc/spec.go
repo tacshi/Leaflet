@@ -163,12 +163,9 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		}
 		n = t
 	case "chart":
-		data, err := ChartData(asMap(spec["chart"]))
+		data, err := AgentChartData(asMap(spec["chart"]))
 		if err != nil {
 			return nil, err
-		}
-		if series, _ := data["series"].([]any); data["chart_type"] == "pie" && len(series) > 1 {
-			return nil, toolErr("A pie chart takes exactly one series.")
 		}
 		data["author"] = author
 		n.Data = data

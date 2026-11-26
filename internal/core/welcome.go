@@ -121,6 +121,8 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	heading(m.WelcomeWritingHeading())
 	text("paragraph", m.WelcomeWritingMarkdown())
 	text("paragraph", m.WelcomeWritingLines())
+	text("paragraph", m.WelcomeMath())
+	add(map[string]any{"type": "math_equation", "formula": `\int_0^1 x^2\,dx = \frac{1}{3} \qquad e^{i\pi} + 1 = 0`})
 
 	heading(m.WelcomeBlocksHeading())
 	text("paragraph", m.WelcomeBlocksTable())
@@ -136,8 +138,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	add(map[string]any{"type": "toggle_list", "text": m.WelcomeToggle(), "children": []any{
 		map[string]any{"type": "paragraph", "text": m.WelcomeToggleInside()},
 	}})
-	text("paragraph", m.WelcomeMathDiagram())
-	add(map[string]any{"type": "math_equation", "formula": `\int_0^1 x^2\,dx = \frac{1}{3} \qquad e^{i\pi} + 1 = 0`})
+	text("paragraph", m.WelcomeDiagram())
 	add(map[string]any{"type": "diagram", "source": "flowchart LR\n  Idea([" + m.WelcomeDiagramIdea() + "]) --> Draft[" + m.WelcomeDiagramDraft() + "]\n  Draft --> Review{" + m.WelcomeDiagramReview() +
 		"}\n  Review -->|" + m.WelcomeDiagramChanges() + "| Draft\n  Review -->|" + m.WelcomeDiagramOk() + "| Publish([" + m.WelcomeDiagramPublish() + "])"})
 

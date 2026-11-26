@@ -683,13 +683,16 @@ func TestSidebarFooter(t *testing.T) {
 	if _, ok := tt.Find(locales.CommonSignIn()); ok {
 		t.Errorf("a Sign in button beside the account row: %v", tt.Texts())
 	}
-	if _, ok := tt.Find(locales.SidebarCheckForUpdates()); !ok {
-		t.Error("no icon to check for updates")
-	}
-	a.updateBusy = locales.SidebarCheckingForUpdates()
+	plain := tt.Texts()
+	a.updateLooking = true
 	tt.Frame()
-	if _, ok := tt.Find(locales.SidebarCheckingForUpdates()); !ok {
-		t.Error("nothing shows the check under way")
+	if got := tt.Texts(); len(got) != len(plain) {
+		t.Errorf("a check that has found nothing shows: %q, was %q", got, plain)
+	}
+	a.updateBusy = locales.SidebarDownloadingUpdate("2.0.0")
+	tt.Frame()
+	if _, ok := tt.Find(locales.SidebarDownloadingUpdate("2.0.0")); !ok {
+		t.Error("nothing shows the update downloading")
 	}
 	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); ok {
 		t.Error("an update shows before it is installed")
@@ -700,7 +703,7 @@ func TestSidebarFooter(t *testing.T) {
 	if a.route.Kind != "signin" {
 		t.Errorf("the account row went to %+v", a.route)
 	}
-	a.updateBusy, a.updateReady = "", "2.0.0"
+	a.updateLooking, a.updateBusy, a.updateReady = false, "", "2.0.0"
 	tt.Frame()
 	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); !ok {
 		t.Error("no icon for the update installed")

@@ -10223,34 +10223,6 @@ func (msgs Messages) SidebarRestartToUpdate(version string) string {
 	return Catalog.Format(msgs.locale, "sidebarRestartToUpdate", map[string]any{"version": version})
 }
 
-// SidebarCheckForUpdates says "Check for Updates"
-// in the language the app shows.
-//
-// Sidebar footer: tooltip of the button that checks for a newer version.
-func SidebarCheckForUpdates() string { return In(i18n.Locale()).SidebarCheckForUpdates() }
-
-// SidebarCheckForUpdates says "Check for Updates"
-// in the language of msgs.
-//
-// Sidebar footer: tooltip of the button that checks for a newer version.
-func (msgs Messages) SidebarCheckForUpdates() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckForUpdates", nil)
-}
-
-// SidebarCheckingForUpdates says "Checking for updates…"
-// in the language the app shows.
-//
-// Sidebar footer: tooltip of the update button while a check is under way.
-func SidebarCheckingForUpdates() string { return In(i18n.Locale()).SidebarCheckingForUpdates() }
-
-// SidebarCheckingForUpdates says "Checking for updates…"
-// in the language of msgs.
-//
-// Sidebar footer: tooltip of the update button while a check is under way.
-func (msgs Messages) SidebarCheckingForUpdates() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckingForUpdates", nil)
-}
-
 // SidebarDownloadingUpdate says "Downloading {version}…"
 // in the language the app shows.
 //
@@ -10267,34 +10239,6 @@ func SidebarDownloadingUpdate(version string) string {
 // downloads.
 func (msgs Messages) SidebarDownloadingUpdate(version string) string {
 	return Catalog.Format(msgs.locale, "sidebarDownloadingUpdate", map[string]any{"version": version})
-}
-
-// SidebarUpToDate says "Leaflet {version} is up to date"
-// in the language the app shows.
-//
-// Toast after checking for updates found no newer version.
-func SidebarUpToDate(version string) string { return In(i18n.Locale()).SidebarUpToDate(version) }
-
-// SidebarUpToDate says "Leaflet {version} is up to date"
-// in the language of msgs.
-//
-// Toast after checking for updates found no newer version.
-func (msgs Messages) SidebarUpToDate(version string) string {
-	return Catalog.Format(msgs.locale, "sidebarUpToDate", map[string]any{"version": version})
-}
-
-// SidebarCheckForUpdatesFailed says "Could not check for updates"
-// in the language the app shows.
-//
-// Toast after checking for updates failed.
-func SidebarCheckForUpdatesFailed() string { return In(i18n.Locale()).SidebarCheckForUpdatesFailed() }
-
-// SidebarCheckForUpdatesFailed says "Could not check for updates"
-// in the language of msgs.
-//
-// Toast after checking for updates failed.
-func (msgs Messages) SidebarCheckForUpdatesFailed() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckForUpdatesFailed", nil)
 }
 
 // SidebarInstallUpdateFailed says "Could not install Leaflet {version}"
@@ -18455,6 +18399,24 @@ func (msgs Messages) WelcomeWritingLines() string {
 	return Catalog.Format(msgs.locale, "welcomeWritingLines", nil)
 }
 
+// WelcomeMath says "A formula on a line of its own is a **Math** block, and **Edit** opens its TeX."
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the paragraph before an
+// example Math block of the / menu, a TeX formula on a line of its own
+// (Markdown).
+func WelcomeMath() string { return In(i18n.Locale()).WelcomeMath() }
+
+// WelcomeMath says "A formula on a line of its own is a **Math** block, and **Edit** opens its TeX."
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the paragraph before an
+// example Math block of the / menu, a TeX formula on a line of its own
+// (Markdown).
+func (msgs Messages) WelcomeMath() string {
+	return Catalog.Format(msgs.locale, "welcomeMath", nil)
+}
+
 // WelcomeBlocksHeading says "Blocks"
 // in the language the app shows.
 //
@@ -18965,20 +18927,20 @@ func (msgs Messages) WelcomeToggleInside() string {
 	return Catalog.Format(msgs.locale, "welcomeToggleInside", nil)
 }
 
-// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
+// WelcomeDiagram says "A **Diagram** draws Mermaid, and **Edit** opens its source."
 // in the language the app shows.
 //
-// The welcome guide page, made once on first run: a paragraph naming blocks
-// of the / menu (Markdown).
-func WelcomeMathDiagram() string { return In(i18n.Locale()).WelcomeMathDiagram() }
+// The welcome guide page, made once on first run: the paragraph before an
+// example Diagram block of the / menu, a Mermaid chart (Markdown).
+func WelcomeDiagram() string { return In(i18n.Locale()).WelcomeDiagram() }
 
-// WelcomeMathDiagram says "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. …"
+// WelcomeDiagram says "A **Diagram** draws Mermaid, and **Edit** opens its source."
 // in the language of msgs.
 //
-// The welcome guide page, made once on first run: a paragraph naming blocks
-// of the / menu (Markdown).
-func (msgs Messages) WelcomeMathDiagram() string {
-	return Catalog.Format(msgs.locale, "welcomeMathDiagram", nil)
+// The welcome guide page, made once on first run: the paragraph before an
+// example Diagram block of the / menu, a Mermaid chart (Markdown).
+func (msgs Messages) WelcomeDiagram() string {
+	return Catalog.Format(msgs.locale, "welcomeDiagram", nil)
 }
 
 // WelcomeDiagramIdea says "Idea"

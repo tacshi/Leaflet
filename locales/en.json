@@ -3571,14 +3571,6 @@
       }
     }
   },
-  "sidebarCheckForUpdates": "Check for Updates",
-  "@sidebarCheckForUpdates": {
-    "description": "Sidebar footer: tooltip of the button that checks for a newer version."
-  },
-  "sidebarCheckingForUpdates": "Checking for updates…",
-  "@sidebarCheckingForUpdates": {
-    "description": "Sidebar footer: tooltip of the update button while a check is under way."
-  },
   "sidebarDownloadingUpdate": "Downloading {version}…",
   "@sidebarDownloadingUpdate": {
     "description": "Sidebar footer: tooltip of the update button while a newer version downloads.",
@@ -3588,20 +3580,6 @@
         "example": "1.2.0"
       }
     }
-  },
-  "sidebarUpToDate": "Leaflet {version} is up to date",
-  "@sidebarUpToDate": {
-    "description": "Toast after checking for updates found no newer version.",
-    "placeholders": {
-      "version": {
-        "type": "String",
-        "example": "1.2.0"
-      }
-    }
-  },
-  "sidebarCheckForUpdatesFailed": "Could not check for updates",
-  "@sidebarCheckForUpdatesFailed": {
-    "description": "Toast after checking for updates failed."
   },
   "sidebarInstallUpdateFailed": "Could not install Leaflet {version}",
   "@sidebarInstallUpdateFailed": {
@@ -6431,6 +6409,10 @@
   "@welcomeWritingLines": {
     "description": "The welcome guide: what typed at the start of a line makes a block, how lists nest, and that pasted Markdown keeps its structure. Inline Markdown."
   },
+  "welcomeMath": "A formula on a line of its own is a **Math** block, and **Edit** opens its TeX.",
+  "@welcomeMath": {
+    "description": "The welcome guide page, made once on first run: the paragraph before an example Math block of the / menu, a TeX formula on a line of its own (Markdown)."
+  },
   "welcomeBlocksHeading": "Blocks",
   "@welcomeBlocksHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
@@ -6563,9 +6545,9 @@
   "@welcomeToggleInside": {
     "description": "The welcome guide page, made once on first run: the paragraph inside the example toggle (Markdown)."
   },
-  "welcomeMathDiagram": "A formula goes in a line between dollar signs, as $\\sqrt'{a^2 + b^2}'$, or on a line of its own as a **Math** block. A **Diagram** is Mermaid: **Edit** opens their source.",
-  "@welcomeMathDiagram": {
-    "description": "The welcome guide page, made once on first run: a paragraph naming blocks of the / menu (Markdown)."
+  "welcomeDiagram": "A **Diagram** draws Mermaid, and **Edit** opens its source.",
+  "@welcomeDiagram": {
+    "description": "The welcome guide page, made once on first run: the paragraph before an example Diagram block of the / menu, a Mermaid chart (Markdown)."
   },
   "welcomeDiagramIdea": "Idea",
   "@welcomeDiagramIdea": {

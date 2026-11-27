@@ -113,8 +113,6 @@
   "hostErrorExport": "无法导出：{error}",
   "hostExported": "已导出“{name}”",
   "hostEditEmbed": "编辑嵌入",
-  "hostSandboxTooltip": "与你的数据隔离运行，无网络连接",
-  "hostSandboxed": "沙盒",
   "hostEmbedError": "无法在此显示：{error}",
   "settingsLanguage": "语言",
   "settingsLanguageSystem": "跟随系统",

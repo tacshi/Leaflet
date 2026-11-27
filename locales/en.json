@@ -581,14 +581,6 @@
   "@hostEditEmbed": {
     "description": "Accessibility name of the button editing an interactive embed."
   },
-  "hostSandboxTooltip": "Runs apart from your data, with no network",
-  "@hostSandboxTooltip": {
-    "description": "Tooltip of the Sandboxed badge of an interactive embed."
-  },
-  "hostSandboxed": "Sandboxed",
-  "@hostSandboxed": {
-    "description": "Badge of an interactive embed."
-  },
   "hostEmbedError": "This cannot show here: {error}",
   "@hostEmbedError": {
     "description": "Shown in place of an embed whose web view could not be made.",

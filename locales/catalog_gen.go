@@ -1655,34 +1655,6 @@ func (msgs Messages) HostEditEmbed() string {
 	return Catalog.Format(msgs.locale, "hostEditEmbed", nil)
 }
 
-// HostSandboxTooltip says "Runs apart from your data, with no network"
-// in the language the app shows.
-//
-// Tooltip of the Sandboxed badge of an interactive embed.
-func HostSandboxTooltip() string { return In(i18n.Locale()).HostSandboxTooltip() }
-
-// HostSandboxTooltip says "Runs apart from your data, with no network"
-// in the language of msgs.
-//
-// Tooltip of the Sandboxed badge of an interactive embed.
-func (msgs Messages) HostSandboxTooltip() string {
-	return Catalog.Format(msgs.locale, "hostSandboxTooltip", nil)
-}
-
-// HostSandboxed says "Sandboxed"
-// in the language the app shows.
-//
-// Badge of an interactive embed.
-func HostSandboxed() string { return In(i18n.Locale()).HostSandboxed() }
-
-// HostSandboxed says "Sandboxed"
-// in the language of msgs.
-//
-// Badge of an interactive embed.
-func (msgs Messages) HostSandboxed() string {
-	return Catalog.Format(msgs.locale, "hostSandboxed", nil)
-}
-
 // HostEmbedError says "This cannot show here: {error}"
 // in the language the app shows.
 //

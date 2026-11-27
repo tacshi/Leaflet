@@ -113,8 +113,6 @@
   "hostErrorExport": "書き出せませんでした：{error}",
   "hostExported": "「{name}」を書き出しました",
   "hostEditEmbed": "埋め込みを編集",
-  "hostSandboxTooltip": "データから隔離され、ネットワークなしで動作します",
-  "hostSandboxed": "サンドボックス",
   "hostEmbedError": "ここでは表示できません：{error}",
   "settingsLanguage": "言語",
   "settingsLanguageSystem": "システム",

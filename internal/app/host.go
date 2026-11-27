@@ -806,10 +806,6 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 					a.dialogs.editEmbed(n)
 				}
 			}
-			ui.Row(c).Gap(4).AlignItems(ui.Center).Tooltip(locales.HostSandboxTooltip()).Children(func() {
-				ui.Icon(c, theme.Icon("shield-check")).FontSize(12).TextColor(pal.TextMuted)
-				ui.Text(c, locales.HostSandboxed()).FontSize(11).TextColor(pal.TextMuted)
-			})
 		})
 		html := n.Str("html")
 		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, embedFrame, height)
